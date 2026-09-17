@@ -101,7 +101,6 @@ dialog h2 { margin-top: 0; }
 dialog fieldset { border: 1px solid var(--line); margin: 14px 0 0; padding: 10px 12px; }
 dialog legend { font: 600 14px var(--head); padding: 0 4px; }
 dialog fieldset label, label.block { display: block; margin: 6px 0; }
-#camView { width: 100%; max-height: 50vh; background: #000; display: block; margin: 10px 0 6px; }
 
 /* ---------- printable sheet (mirrors the paper list) ---------- */
 .sheet { display: none; }

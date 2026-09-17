@@ -156,8 +156,10 @@ await page.click('[data-act="tab"][data-tab="preview"]');
 await page.waitForSelector('#sheet .qr svg', { timeout: 5000 }).catch(() => {});
 check('the sheet carries a QR code', (await page.locator('#sheet .qr svg').count()) === 1);
 
+// jsQR is a test-only dependency: the app writes QR codes but never reads
+// them, so the decoder does not ship. Inject it here to check our own output.
+await page.addScriptTag({ content: await readFile('node_modules/jsqr/dist/jsQR.js', 'utf8') });
 const qrRead = await page.evaluate(async () => {
-  await QR.loadDecoder();
   const svg = document.querySelector('#sheet .qr svg');
   if (!svg) return { error: 'no qr on the sheet' };
   const markup = new XMLSerializer().serializeToString(svg);

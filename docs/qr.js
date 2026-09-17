@@ -3,8 +3,8 @@
 
    Byte mode only, versions 1-20, error correction L or M — more than enough
    for a share link, and small enough to stay readable when printed at 30mm.
-   Written here rather than pulled in so the printout has no dependency; the
-   decoder (vendor/jsQR.js) is only loaded when someone actually scans.
+   Encoding only: the sheet carries a QR so a phone can open the day plan,
+   but nothing here reads one back.
 
    Exposed as window.QR. */
 
@@ -324,59 +324,5 @@ const QR = (() => {
       + `<rect width="${dim}" height="${dim}" fill="#fff"/><path d="${path}" fill="#000"/></svg>`;
   }
 
-  /* ---------- scanning ---------- */
-  let jsQRLoading = null;
-  function loadDecoder() {
-    if (window.jsQR) return Promise.resolve(window.jsQR);
-    if (jsQRLoading) return jsQRLoading;
-    jsQRLoading = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'vendor/jsQR.js';
-      s.onload = () => resolve(window.jsQR);
-      s.onerror = () => reject(new Error('decoder failed to load'));
-      document.head.appendChild(s);
-    });
-    return jsQRLoading;
-  }
-
-  /* Chromium on Windows has a native detector; everywhere else falls back to
-     the vendored decoder. Both take the same ImageData. */
-  async function scan(imageData) {
-    try {
-      if ('BarcodeDetector' in window) {
-        const formats = await window.BarcodeDetector.getSupportedFormats();
-        if (formats.includes('qr_code')) {
-          const found = await new window.BarcodeDetector({ formats: ['qr_code'] }).detect(imageData);
-          if (found.length) return found[0].rawValue;
-        }
-      }
-    } catch { /* fall through to the vendored decoder */ }
-    const jsQR = await loadDecoder();
-    const found = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-    return found ? found.data : null;
-  }
-
-  /* A photo of a printed sheet is mostly white paper; scale it down so the
-     decoder is not hunting through megapixels, but never below the point
-     where the modules blur together. */
-  async function scanBlob(blob) {
-    const bitmap = await createImageBitmap(blob);
-    const attempts = [1600, 1000, 2400];
-    for (const target of attempts) {
-      const scale = Math.min(1, target / Math.max(bitmap.width, bitmap.height));
-      const w = Math.max(1, Math.round(bitmap.width * scale));
-      const h = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(bitmap, 0, 0, w, h);
-      const found = await scan(ctx.getImageData(0, 0, w, h));
-      if (found) { bitmap.close && bitmap.close(); return found; }
-    }
-    bitmap.close && bitmap.close();
-    return null;
-  }
-
-  return { encode, svg, scan, scanBlob, loadDecoder, MAX_VERSION, _internals: { generator, remainder, bits, codewords, dataCapacity, rawCodewords, alignmentPositions, bch } };
+  return { encode, svg, MAX_VERSION, _internals: { generator, remainder, bits, codewords, dataCapacity, rawCodewords, alignmentPositions, bch } };
 })();
