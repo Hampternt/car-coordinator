@@ -265,6 +265,8 @@ function renderData() {
       <p class="status ${p === 'granted' ? 'on' : 'off'}">${esc(persistText)}</p>
     </div>
 
+    <div class="card" id="shareCard"></div>
+
     <div class="card">
       <h3>Your own copy</h3>
       <p class="hint">A plain JSON file you can email to yourself or drop on a stick.</p>
@@ -323,7 +325,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderSheet();
+  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
   renderNotices();
 }
 
@@ -366,6 +368,101 @@ async function doPrint() {
     if (window.__TAURI__?.core) { await window.__TAURI__.core.invoke('print_page'); return; }
   } catch (err) { console.warn('native print failed, using window.print()', err); }
   window.print();
+}
+
+/* ---------- sharing ---------- */
+let shareOut = '';                                   // last generated code, shown for manual copying
+let pending = { share: null, mode: 'day', addMissing: true };
+
+function renderShare() {
+  const el = $('#shareCard');
+  if (!el) return;
+  el.innerHTML = `
+    <h3>Send this list to another PC</h3>
+    <p class="hint">Makes a code holding the finished list. Paste it into a chat or an email; the other PC pastes it back in below. Nothing is uploaded \u2014 the code <em>is</em> the list.</p>
+    <button class="btn primary-ish" data-act="share-make" data-mode="day">Copy the day plan</button>
+    <button class="btn" data-act="share-make" data-mode="all">Copy everything (cars, positions, labels)</button>
+    <button class="btn" data-act="share-link">Copy as a link</button>
+    ${shareOut ? `<p class="hint" style="margin-top:10px">Copied. If the clipboard did not work, take it from here:</p>
+      <textarea id="shareOut" class="code" readonly rows="3">${esc(shareOut)}</textarea>
+      <p class="hint">${shareOut.length} characters.${shareOut.length > 1800 ? ' That is long for a link \u2014 send the code itself rather than the link.' : ''}</p>` : ''}
+
+    <h3 style="margin-top:18px">Load a list someone sent you</h3>
+    <textarea id="shareIn" class="code" rows="3" placeholder="Paste the code (or the whole link) here"></textarea>
+    <button class="btn primary-ish" data-act="share-read">Read the list</button>`;
+}
+
+function renderShareDialog() {
+  const dlg = $('#shareDlg');
+  if (!pending.share) return;
+  const sum = Share.summarise(state, pending.share, pending.addMissing);
+  const [y, m, d] = String(sum.date || '').split('-');
+  const list = (arr) => arr.map((x) => esc(x)).join(', ');
+
+  const missing = [];
+  if (sum.unknownCars.length) missing.push(`${sum.unknownCars.length} car${sum.unknownCars.length > 1 ? 's' : ''} you do not have (${list(sum.unknownCars)})`);
+  if (sum.unknownPos.length) missing.push(`${sum.unknownPos.length} position${sum.unknownPos.length > 1 ? 's' : ''} you do not have (${list(sum.unknownPos)})`);
+
+  dlg.innerHTML = `
+    <h2>Load this list?</h2>
+    <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels` : ''}.</p>
+    ${missing.length ? `<p class="status warn-status">It mentions ${missing.join(' and ')}.</p>` : ''}
+    <p class="status warn-status"><b>This replaces the day plan on screen.</b> A backup is taken first, so you can undo it from Backups.</p>
+
+    ${sum.hasEverything ? `<fieldset>
+      <legend>What to take</legend>
+      <label><input type="radio" name="shareMode" value="day" ${pending.mode === 'day' ? 'checked' : ''}> Just the day plan (date, routes, drivers)</label>
+      <label><input type="radio" name="shareMode" value="all" ${pending.mode === 'all' ? 'checked' : ''}> Everything \u2014 also update my cars, positions and labels</label>
+    </fieldset>` : ''}
+
+    ${missing.length ? `<label class="block"><input type="checkbox" id="shareAdd" ${pending.addMissing ? 'checked' : ''}> Add the cars and positions I do not have</label>
+      <p class="hint">Leave this off and those routes come in with the car or position blank.</p>` : ''}
+
+    <div class="bar" style="margin:16px 0 0">
+      <button class="btn primary-ish" data-act="share-apply">Load it</button>
+      <button class="btn" data-act="share-cancel">Cancel</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+async function copyOut(text) {
+  shareOut = text;
+  try { await navigator.clipboard.writeText(text); } catch { /* shown in the box instead */ }
+  renderShare();
+}
+
+async function shareAction(act, b) {
+  switch (act) {
+    case 'share-make': shareOut = ''; await copyOut(await Share.encode(state, b.dataset.mode)); return;
+    case 'share-link': shareOut = ''; await copyOut(Share.linkFor(await Share.encode(state, 'day'))); return;
+    case 'share-read': {
+      const raw = $('#shareIn').value;
+      const fromLink = /#d=(.+)$/.exec(raw.trim());
+      const { share, error } = await Share.decode(fromLink ? decodeURIComponent(fromLink[1]) : raw);
+      if (error) { note('warn', error); render(); return; }
+      openShare(share);
+      return;
+    }
+    case 'share-apply': {
+      const { state: next, skipped } = Share.apply(state, pending.share, pending);
+      Store.snapshot(state, 'Loading a shared list');
+      state = next;
+      save();
+      const left = [...skipped.cars, ...skipped.positions];
+      note('info', `Loaded ${state.routes.length} routes for ${state.date}.${left.length ? ` Left blank: ${left.join(', ')}.` : ''}`);
+      $('#shareDlg').close();
+      pending.share = null;
+      render();
+      return;
+    }
+    case 'share-cancel': $('#shareDlg').close(); pending.share = null; return;
+    default: return;
+  }
+}
+
+function openShare(share) {
+  pending = { share, mode: Array.isArray(share.c) ? 'day' : 'day', addMissing: true };
+  renderShareDialog();
 }
 
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
@@ -418,6 +515,7 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const { act, kind, id } = b.dataset;
+  if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
@@ -466,6 +564,8 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', async (e) => {
+  if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
+  if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
   if (e.target.id !== 'importFile') return;
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -482,6 +582,7 @@ document.addEventListener('keydown', (e) => {
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });
 
+const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 async function start() {
@@ -495,6 +596,13 @@ async function start() {
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
   render();
+
+  const fromLink = Share.readHash();
+  if (fromLink) {
+    const { share, error } = await Share.decode(fromLink);
+    if (error) { note('warn', error); render(); }
+    else { tab = 'data'; render(); openShare(share); }
+  }
 }
 
 start();

@@ -12,6 +12,7 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 - Marked or already-used cars and positions are greyed out in the dropdowns; conflicts show a red warning.
 - "Many cars" positions (Garage) can be shared by several routes.
 - **Labels**: create custom status labels with colours.
+- **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.
 - **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
 - **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day.
 

@@ -34,6 +34,20 @@ const check = (name, ok, detail = '') => {
 // CI and this container ship Chromium at a fixed path; fall back to whatever
 // Playwright manages locally.
 const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
+// The share handlers encode/decode asynchronously; wait for the result
+// rather than reading straight after the click.
+const copyCode = async (pg, mode) => {
+  await pg.evaluate(() => { const t = document.querySelector('#shareOut'); if (t) t.value = ''; });
+  await pg.click(`[data-act="share-make"][data-mode="${mode}"]`);
+  await pg.waitForFunction(() => { const t = document.querySelector('#shareOut'); return t && t.value.startsWith('CC1'); });
+  return pg.locator('#shareOut').inputValue();
+};
+const readCode = async (pg, code) => {
+  await pg.fill('#shareIn', code);
+  await pg.click('[data-act="share-read"]');
+  await pg.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+};
+
 const browser = await chromium.launch(EXECUTABLE ? { executablePath: EXECUTABLE } : {});
 const page = await browser.newPage();
 const errors = [];
@@ -109,6 +123,98 @@ check('keeps the good fields while repairing', (await page.locator('#tab-plan tb
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
 check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+
+// --- sharing between two PCs ---
+// Seed a plan on "PC A", copy the code, and load it on a fresh profile that
+// has its own ids for everything: the payload must survive that.
+const planA = {
+  schemaVersion: 1, date: '2026-09-18',
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
+  cars: [{ id: 'a1', reg: 'AA11111', labelId: '', note: '' }, { id: 'a2', reg: 'BB22222', labelId: 'L1', note: 'back Friday' }],
+  positions: [{ id: 'q1', name: 'Spot 1/1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
+  routes: [
+    { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', highlight: true, gapBefore: false },
+    { id: 'x2', name: 'HAU 1', driver: 'Bo', carId: 'a2', positionId: 'q2', highlight: false, gapBefore: true },
+  ],
+};
+await page.evaluate((d) => localStorage.setItem('carcoord:v1', JSON.stringify(d)), planA);
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="data"]');
+const dayCode = await copyCode(page, 'day');
+check('day-plan code is tagged and compact', dayCode.startsWith('CC1.') && dayCode.length < 400, `${dayCode.length} chars`);
+
+const allCode = await copyCode(page, 'all');
+check('everything code is longer than the day plan', allCode.length > dayCode.length);
+
+// "PC B": different ids, one car in common, one it has never seen.
+const pcB = await browser.newContext();
+const b = await pcB.newPage();
+const bErrors = [];
+b.on('console', (m) => m.type() === 'error' && bErrors.push(m.text()));
+b.on('pageerror', (e) => bErrors.push(String(e)));
+await b.goto(base, { waitUntil: 'networkidle' });
+await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
+  cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
+  positions: [{ id: 'yyy', name: 'Spot 1/1', multi: false, labelId: '', note: '' }],
+})));
+await b.reload({ waitUntil: 'networkidle' });
+await b.click('[data-act="tab"][data-tab="data"]');
+await readCode(b, dayCode);
+const preview = await b.locator('#shareDlg').innerText();
+check('preview names the date and route count', preview.includes('18/09/2026') && preview.includes('2 routes'));
+check('preview flags what PC B is missing', preview.includes('BB22222') && preview.includes('Garage'));
+await b.click('[data-act="share-apply"]');
+
+await b.click('[data-act="tab"][data-tab="plan"]');
+const rowsB = b.locator('#tab-plan tbody tr');
+check('both routes arrived', (await rowsB.count()) === 2);
+check('driver came across', (await rowsB.first().locator('[data-field="driver"]').inputValue()) === 'Ana');
+const carSel = rowsB.first().locator('[data-field="carId"]');
+check('matched the car it already had, case-insensitively', (await carSel.inputValue()) === 'zzz');
+check('added the car it did not have', (await rowsB.nth(1).locator('[data-field="carId"] option:checked').innerText()).includes('BB22222'));
+await b.click('[data-act="tab"][data-tab="preview"]');
+const sheetB = await b.locator('#sheet').innerText();
+check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
+check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
+
+// "Everything" mode carries the car notes and labels too.
+await b.click('[data-act="tab"][data-tab="data"]');
+await readCode(b, allCode);
+await b.check('#shareDlg input[value="all"]');
+await b.click('[data-act="share-apply"]');
+await b.click('[data-act="tab"][data-tab="cars"]');
+const bbRow = b.locator('#tab-cars tbody tr', { has: b.locator('[data-field="reg"][value="BB22222"]') });
+check('everything mode brings the note across', (await bbRow.locator('[data-field="note"]').inputValue()) === 'back Friday');
+check('everything mode brings the label across', (await bbRow.locator('.chip.on').innerText()) === 'Workshop');
+
+// A share link does the same thing on arrival.
+const pcC = await browser.newContext();
+const c = await pcC.newPage();
+c.on('pageerror', (e) => bErrors.push(String(e)));
+await c.goto(base + '#d=' + encodeURIComponent(dayCode), { waitUntil: 'networkidle' });
+await c.waitForSelector('#shareDlg[open]');
+check('a share link opens the same dialog', (await c.locator('#shareDlg').innerText()).includes('2 routes'));
+check('the link is cleared from the address bar', !(await c.evaluate(() => location.hash)));
+await c.click('[data-act="share-apply"]');
+await c.click('[data-act="tab"][data-tab="plan"]');
+check('link import lands the plan', (await c.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Ana');
+
+// Damaged and foreign codes fail politely.
+await b.click('[data-act="tab"][data-tab="data"]');
+await readCode(b, dayCode.slice(0, -8) + 'XXXXXXXX');
+await b.waitForSelector('#notices .notice.warn');
+check('a damaged code is rejected, not swallowed', (await b.locator('#notices .notice.warn').last().innerText()).includes('damaged'));
+await readCode(b, 'just some text someone pasted');
+await b.waitForFunction(() => /CC1\./.test([...document.querySelectorAll('#notices .notice.warn')].pop()?.innerText || ''));
+check('an unrelated paste is rejected', (await b.locator('#notices .notice.warn').last().innerText()).includes('CC1.'));
+check('no console errors on PC B or C', bErrors.length === 0, bErrors.join(' | '));
+
+await pcB.close();
+await pcC.close();
 
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
