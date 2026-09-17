@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Car Coordinator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Car Coordinator</div>
+    <nav class="tabs">
+      <button data-act="tab" data-tab="plan">Day plan</button>
+      <button data-act="tab" data-tab="cars">Cars</button>
+      <button data-act="tab" data-tab="positions">Positions</button>
+      <button data-act="tab" data-tab="labels">Labels</button>
+      <button data-act="tab" data-tab="preview">Print preview</button>
+    </nav>
+    <button class="primary" data-act="print">Print / save PDF</button>
+  </header>
+
+  <main>
+    <section id="tab-plan" class="tab"></section>
+    <section id="tab-cars" class="tab"></section>
+    <section id="tab-positions" class="tab"></section>
+    <section id="tab-labels" class="tab"></section>
+    <section id="tab-preview" class="tab">
+      <p class="hint">This is exactly what gets printed. In the print dialog pick a printer, or "Microsoft Print to PDF" for a PDF file.</p>
+    </section>
+  </main>
+
+  <div id="sheet" class="sheet"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

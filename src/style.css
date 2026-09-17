@@ -1,0 +1,100 @@
+:root {
+  --concrete: #e6e7e3;
+  --panel: #f7f7f4;
+  --ink: #1a1c1e;
+  --steel: #2f4a5c;
+  --hivis: #ffd400;
+  --marker: #ff8fc2;
+  --warn: #c62828;
+  --line: #c9cbc5;
+  --head: "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
+  --body: "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
+button, input, select { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
+
+/* top bar: hi-vis strip like warehouse signage */
+.topbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 24px;
+  padding: 10px 20px; background: var(--ink); color: #fff;
+  border-bottom: 6px solid var(--hivis);
+}
+.brand { font: 700 22px var(--head); letter-spacing: .5px; }
+.tabs { display: flex; gap: 4px; flex: 1; }
+.tabs button { background: none; border: 0; padding: 8px 14px; color: #cfd3d6; cursor: pointer; font-family: var(--head); font-size: 16px; }
+.tabs button.active { color: var(--ink); background: var(--hivis); }
+button.primary { background: var(--hivis); color: var(--ink); border: 0; padding: 9px 16px; font: 700 15px var(--head); cursor: pointer; }
+
+main { padding: 20px; max-width: 1200px; }
+.tab { display: none; }
+.tab.active { display: block; }
+h2 { font: 700 20px var(--head); margin: 0 0 12px; }
+.hint { color: #555; margin: 0 0 12px; }
+
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.bar label { font-weight: 600; }
+
+table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
+.grid th { text-align: left; font: 600 14px var(--head); padding: 8px; border-bottom: 2px solid var(--ink); }
+.grid td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.grid input[type=text], .grid select { width: 100%; padding: 5px 6px; border: 1px solid var(--line); background: #fff; }
+.grid input.short { width: 80px; }
+.grid tr.hl td { background: #ffd6e8; }
+.grid tr.gap td { border-top: 14px solid var(--concrete); }
+.grid tr.warn td:first-child { box-shadow: inset 5px 0 var(--warn); }
+.warntext { color: var(--warn); font-size: 13px; }
+
+.btn { border: 1px solid var(--line); background: #fff; padding: 4px 9px; cursor: pointer; }
+.btn:hover { border-color: var(--ink); }
+.btn.on { background: var(--marker); border-color: var(--ink); }
+.btn.armed { background: var(--warn); color: #fff; }
+.btns { white-space: nowrap; }
+
+/* status label chips: colour comes from the label */
+.chip { border: 2px solid var(--c, var(--ink)); background: #fff; padding: 3px 10px; margin: 2px; cursor: pointer; font-weight: 600; }
+.chip.on { background: var(--c, var(--ink)); color: #fff; }
+.chip.ok.on { --c: #2e7d32; }
+.tag { display: inline-block; padding: 2px 8px; margin: 2px; border-left: 5px solid var(--c, #2e7d32); background: #fff; }
+
+/* car assignment badges */
+.assign { display: inline-block; padding: 2px 8px; margin: 1px 4px 1px 0; font-weight: 600; white-space: nowrap; }
+.assign.yes { background: var(--steel); color: #fff; }
+.assign.none { color: #555; border: 1px dashed #9a9d97; }
+.assign.down { color: var(--warn); border: 1px solid var(--warn); }
+.counts { margin: 0 0 12px; }
+.grid tr.assigned td:first-child { box-shadow: inset 5px 0 var(--steel); }
+
+.pool { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pool > div { background: var(--panel); padding: 10px 12px; }
+.pool h3 { font: 600 15px var(--head); margin: 0 0 6px; }
+
+/* ---------- printable sheet (mirrors the paper list) ---------- */
+.sheet { display: none; }
+body.show-sheet .sheet {
+  display: block; margin: 0 20px 40px; width: 210mm; min-height: 297mm;
+  background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+}
+.sheet { font-family: Arial, Helvetica, sans-serif; color: #000; padding: 18mm 16mm; }
+.sheet .date { text-align: right; font-size: 22pt; font-weight: 700; text-decoration: underline; margin-bottom: 6mm; }
+.sheet table { width: 100%; border-collapse: collapse; font-size: 20pt; font-weight: 700; }
+.sheet th { text-align: left; font-style: italic; padding: 0 0 3mm; }
+.sheet td { padding: .6mm 2mm; }
+.sheet td.rn { width: 18%; text-align: right; padding-right: 6mm; }
+.sheet tr.hl td { background: var(--marker); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.sheet tr.spacer td { height: 8mm; }
+.sheet .extra { margin-top: 10mm; font-size: 13pt; }
+.sheet .extra h4 { margin: 3mm 0 1mm; font-size: 14pt; }
+.sheet .extra p { margin: 0; }
+
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  body { background: #fff; }
+  .topbar, main { display: none !important; }
+  .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
