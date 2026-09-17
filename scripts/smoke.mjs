@@ -4,6 +4,7 @@
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { Buffer } from 'node:buffer';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,6 +67,51 @@ check('sheet shows the car', sheet.includes('AA11111'));
 // --- survives a reload (localStorage) ---
 await page.reload({ waitUntil: 'networkidle' });
 check('state survives a reload', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+
+// --- backups and restore ---
+await page.click('[data-act="clear-day"]');
+await page.click('[data-act="clear-day"]');           // two-click confirm
+check('clear wipes the driver', (await firstRow.locator('[data-field="driver"]').inputValue()) === '');
+await page.click('[data-act="tab"][data-tab="data"]');
+check('clearing left a backup', (await page.locator('#tab-data table tbody tr').count()) >= 1);
+const restoreBtn = page.locator('[data-act="restore"]').first();
+await restoreBtn.click();
+await restoreBtn.click();                             // two-click confirm
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('restore brings the driver back', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+
+// --- export / import round trip ---
+await page.click('[data-act="tab"][data-tab="data"]');
+const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
+const exported = await readFile(await download.path(), 'utf8');
+const parsed = JSON.parse(exported);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 1 && parsed.cars.length === 3);
+
+parsed.cars[0].reg = 'ZZ99999';
+await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
+await page.click('[data-act="tab"][data-tab="cars"]');
+check('import replaces the data', (await page.locator('#tab-cars tbody tr').first().locator('[data-field="reg"]').inputValue()) === 'ZZ99999');
+
+// --- corrupt and hostile saved data ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await page.reload({ waitUntil: 'networkidle' });
+check('survives corrupt saved data', await page.locator('#notices .notice.warn').isVisible());
+
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: 'not-a-date', labels: 'nope', cars: [{ id: 'c1', reg: 'DD44444' }],
+  positions: [{ id: 'p1', name: 'Spot 9/9' }],
+  routes: [{ id: 'r1', name: '1', carId: 'ghost', positionId: 'p1', driver: 'Kept' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('repairs a dangling car reference', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').inputValue()) === '');
+check('keeps the good fields while repairing', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Kept');
+
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
+await page.reload({ waitUntil: 'networkidle' });
+check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
 
 // --- prints to A4 ---
 const pdf = await page.pdf({ format: 'A4', printBackground: true });

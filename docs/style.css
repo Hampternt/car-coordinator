@@ -68,6 +68,25 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .counts { margin: 0 0 12px; }
 .grid tr.assigned td:first-child { box-shadow: inset 5px 0 var(--steel); }
 
+/* notices: things the app needs to tell you, dismissable */
+#notices { padding: 0 20px; }
+#notices:not(:empty) { padding-top: 14px; }
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
+.notice.warn { border-left-color: var(--warn); }
+.notice .btn { margin-left: auto; flex: none; }
+
+/* data tab */
+.card { background: var(--panel); padding: 14px 16px; margin-bottom: 16px; }
+.card h3 { font: 600 17px var(--head); margin: 0 0 8px; }
+.card .btn { margin-right: 6px; }
+.btn.primary-ish { background: var(--hivis); border-color: var(--ink); font-weight: 600; }
+.status { margin: 0 0 10px; padding-left: 24px; position: relative; }
+.status::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+.status.on::before { content: "\2713"; color: #2e7d32; }
+.status.off::before { content: "\25CB"; color: #555; }
+.status.warn-status::before { content: "\0021"; color: var(--warn); }
+.status.warn-status { color: var(--warn); }
+
 .empty { background: var(--panel); border-left: 5px solid var(--hivis); padding: 12px 14px; margin: 0 0 14px; }
 
 .pool { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

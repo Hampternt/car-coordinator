@@ -1,6 +1,5 @@
 'use strict';
 
-const KEY = 'carcoord:v1';
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
 const byId = (arr, id) => arr.find((x) => x.id === id);
@@ -20,6 +19,7 @@ function newRoute(name, gapBefore = false) {
 function defaults() {
   const pos = (name) => ({ id: uid(), name, multi: name === 'Garage', labelId: '', note: '' });
   return {
+    schemaVersion: Store.SCHEMA,
     date: today(),
     positions: ['Spot 1/1', 'Spot 1/2', 'Spot 2/1', 'Spot 2/2', 'Spot 3/1', 'Spot 3/2',
       'Spot 4/1', 'Spot 5/1', 'Garage'].map(pos),
@@ -37,14 +37,12 @@ function defaults() {
   };
 }
 
-let state;
-try { state = JSON.parse(localStorage.getItem(KEY)) || defaults(); } catch { state = defaults(); }
+let state = defaults();
 let tab = 'plan';
 let armed = null;
+let notices = [];
 
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.error('save failed', e); }
-}
+const save = () => Store.save(state);
 
 const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels })[kind];
 
@@ -206,6 +204,89 @@ function renderLabels() {
     <table class="grid"><thead><tr><th>Name</th><th>Colour</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+const when = (d) => {
+  if (!d) return '';
+  const t = new Date(d);
+  const sameDay = t.toDateString() === new Date().toDateString();
+  return sameDay ? t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : t.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+function fileStatus() {
+  const f = Store.file;
+  if (!Store.fileSupported()) {
+    return `<p class="status off">This browser cannot auto-save to a file. Use <b>Export</b> below to keep your own copy \u2014 Edge and Chrome on Windows can do it automatically.</p>`;
+  }
+  if (!f.handle) {
+    return `<p class="status off">Not saving to a file yet.</p>
+      <p class="hint">Pick a file once (OneDrive, a network drive, a memory stick) and every change writes straight to it. Nothing is uploaded anywhere \u2014 the file is written by your browser, on your PC.</p>
+      <button class="btn primary-ish" data-act="link-file">Choose save file\u2026</button>
+      <button class="btn" data-act="open-file">Open an existing file\u2026</button>`;
+  }
+  if (f.permission !== 'granted') {
+    return `<p class="status warn-status">Saving to <b>${esc(f.name)}</b> is paused \u2014 the browser needs you to allow it again. This happens after a restart.</p>
+      <button class="btn primary-ish" data-act="reconnect-file">Reconnect ${esc(f.name)}</button>
+      <button class="btn" data-act="unlink-file">Stop using this file</button>`;
+  }
+  return `<p class="status on">Saving to <b>${esc(f.name)}</b>${f.lastSaved ? ` \u2014 last written ${esc(when(f.lastSaved))}` : ''}.</p>
+    ${f.error ? `<p class="status warn-status">${esc(f.error)}</p>` : ''}
+    <button class="btn" data-act="open-file">Open a different file\u2026</button>
+    <button class="btn" data-act="unlink-file">Stop using this file</button>`;
+}
+
+function renderData() {
+  const p = Store.persistence.state;
+  const persistText = {
+    granted: 'Your browser has promised to keep this data even when disk space runs low.',
+    denied: 'Your browser may clear this data on its own if disk space runs low. Link a save file below so that cannot cost you anything.',
+    unsupported: 'This browser will not promise to keep the data. Link a save file below.',
+    unknown: 'Checking\u2026',
+  }[p] || 'Checking\u2026';
+
+  const list = Store.backups();
+  const rows = list.map((b, i) => `<tr>
+      <td>${esc(when(b.t))}</td>
+      <td>${esc(b.label)}</td>
+      <td>${JSON.parse(b.json).routes.length} routes, ${JSON.parse(b.json).cars.length} cars</td>
+      <td class="btns">${actBtn('restore', 'backup', String(i), armed === `restore:${i}` ? 'Sure?' : 'Restore', armed === `restore:${i}` ? 'armed' : '')}</td>
+    </tr>`).join('');
+
+  $('#tab-data').innerHTML = `
+    <h2>Data</h2>
+    <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
+
+    <div class="card">
+      <h3>Auto-save to a file</h3>
+      ${fileStatus()}
+    </div>
+
+    <div class="card">
+      <h3>This browser</h3>
+      <p class="status ${p === 'granted' ? 'on' : 'off'}">${esc(persistText)}</p>
+    </div>
+
+    <div class="card">
+      <h3>Your own copy</h3>
+      <p class="hint">A plain JSON file you can email to yourself or drop on a stick.</p>
+      <button class="btn" data-act="export">Export a copy\u2026</button>
+      <button class="btn" data-act="import">Import a copy\u2026</button>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
+    </div>
+
+    <div class="card">
+      <h3>Backups</h3>
+      <p class="hint">Automatic snapshots taken before anything is cleared or deleted, and once at the start of each day. Restoring replaces everything on screen \u2014 the current state is snapshotted first, so you can undo it.</p>
+      ${list.length
+        ? `<table class="grid"><thead><tr><th>When</th><th>Taken before</th><th>Contents</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<p class="empty">No backups yet.</p>'}
+    </div>`;
+}
+
+function renderNotices() {
+  $('#notices').innerHTML = notices.map((n, i) =>
+    `<div class="notice ${n.kind}">${esc(n.text)}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
+}
+
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
   const dash = (v) => esc(v) || '-';
@@ -242,7 +323,8 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderSheet();
+  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderSheet();
+  renderNotices();
 }
 
 /* ---------- events ---------- */
@@ -286,10 +368,57 @@ async function doPrint() {
   window.print();
 }
 
+/* Data-tab actions. These await pickers and disk writes, so they sit outside
+   the synchronous switch below. */
+async function dataAction(act, b) {
+  switch (act) {
+    case 'link-file': await Store.linkFile(state); break;
+    case 'reconnect-file': await Store.reconnect(state); break;
+    case 'unlink-file': await Store.unlink(); break;
+    case 'open-file': {
+      const text = await Store.openFile();
+      if (text === null) break;
+      applyImport(text, 'the file you opened');
+      break;
+    }
+    case 'export': Store.flush(); Store.download(state); break;
+    case 'import': $('#importFile').click(); return;
+    case 'restore': {
+      const i = Number(b.dataset.id);
+      if (!confirmTwice(`restore:${i}`)) return;
+      const entry = Store.backups()[i];
+      if (!entry) break;
+      Store.snapshot(state, 'Restoring a backup');
+      state = Store.restore(entry, defaults);
+      note('info', `Restored the backup from ${when(entry.t)}.`);
+      save();
+      break;
+    }
+    case 'dismiss': notices.splice(Number(b.dataset.index), 1); break;
+    default: return;
+  }
+  render();
+}
+
+const note = (kind, text) => {
+  notices = notices.filter((n) => n.text !== text);
+  notices.push({ kind, text });
+};
+
+function applyImport(text, source) {
+  const { state: incoming, error, repaired } = Store.parseImport(text, defaults);
+  if (error) { note('warn', error); render(); return; }
+  Store.snapshot(state, `Importing ${source}`);
+  state = incoming;
+  save();
+  note('info', `Loaded ${incoming.routes.length} routes and ${incoming.cars.length} cars from ${source}.${repaired && repaired.length ? ' Some entries needed repairing.' : ''}`);
+}
+
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const { act, kind, id } = b.dataset;
+  if (DATA_ACTS.has(act)) { dataAction(act, b); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
 
@@ -302,6 +431,7 @@ document.addEventListener('click', (e) => {
     case 'setLabel': list[i].labelId = b.dataset.label; break;
     case 'del':
       if (!confirmTwice(`del:${id}`)) return;
+      Store.snapshot(state, `Deleting a ${kind}`);
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
@@ -309,6 +439,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'clear-day':
       if (!confirmTwice('clear')) return;
+      Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.highlight = false; });
       state.date = today();
       break;
@@ -334,6 +465,15 @@ document.addEventListener('click', (e) => {
   render();
 });
 
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'importFile') return;
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  applyImport(await f.text(), f.name);
+  render();
+});
+
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
@@ -342,4 +482,19 @@ document.addEventListener('keydown', (e) => {
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });
 
-render();
+const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
+
+async function start() {
+  state = await Store.init(defaults, render);
+  // A browser with no data of its own but a linked file (new PC, cleared
+  // profile, different Windows user) should come back to what is in the file.
+  if (!Store.hadLocalData()) {
+    const fromFile = await Store.recoverFromFile(defaults);
+    if (fromFile) { state = fromFile; note('info', `Loaded your data from ${Store.file.name}.`); }
+  }
+  notices = notices.concat(Store.takeNotices());
+  Store.dailySnapshot(state);
+  render();
+}
+
+start();

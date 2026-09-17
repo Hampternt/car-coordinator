@@ -13,7 +13,7 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 - "Many cars" positions (Garage) can be shared by several routes.
 - **Labels**: create custom status labels with colours.
 - **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
-- Data is saved automatically on the PC (WebView local storage).
+- **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day.
 
 ## Use it
 Open the Pages URL for this repo in Edge or Chrome. Nothing to install.
@@ -23,6 +23,13 @@ Optional Windows app — grab the latest from **Releases**:
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
 
 Every push to `main` builds on GitHub Actions and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
+
+## Tests
+```
+npm install
+npm test          # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
+```
+The file picker (auto-save to a file) cannot be driven headlessly — check that one by hand in Edge or Chrome.
 
 ## Build locally (Windows)
 Needs Rust, Node 20 and Python with Pillow.
