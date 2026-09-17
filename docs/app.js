@@ -119,7 +119,12 @@ function renderPlan() {
     return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' · ' + esc(l.name) : ''}${c.note ? ' · ' + esc(c.note) : ''}</span>`;
   };
 
+  const noCars = state.cars.length
+    ? ''
+    : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
+
   $('#tab-plan').innerHTML = `
+    ${noCars}
     <div class="bar">
       <label for="date">Date</label>
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
@@ -163,7 +168,9 @@ function renderCars() {
       <input id="newCar" type="text" placeholder="Registration(s), e.g. SD12345 SE67890">
       <button class="btn" data-act="add-car">+ Add car</button>
     </div>
-    <table class="grid"><thead><tr><th>Reg.</th><th>Assigned to</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    ${state.cars.length
+      ? `<table class="grid"><thead><tr><th>Reg.</th><th>Assigned to</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<p class="empty">No cars yet. Paste the whole fleet into the box above at once \u2014 separate registrations with spaces, commas or semicolons.</p>`}`;
 }
 
 function renderPositions() {

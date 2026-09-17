@@ -68,6 +68,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .counts { margin: 0 0 12px; }
 .grid tr.assigned td:first-child { box-shadow: inset 5px 0 var(--steel); }
 
+.empty { background: var(--panel); border-left: 5px solid var(--hivis); padding: 12px 14px; margin: 0 0 14px; }
+
 .pool { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .pool > div { background: var(--panel); padding: 10px 12px; }
 .pool h3 { font: 600 15px var(--head); margin: 0 0 6px; }

@@ -1,6 +1,10 @@
 # Car Coordinator
 
-Windows desktop app (Tauri 2) for planning the daily route sheet: routes, drivers, cars and packing positions. Prints an A4 sheet in the same layout as the paper list on the pillar, or saves it as PDF.
+Tool for planning the daily route sheet: routes, drivers, cars and packing positions. Prints an A4 sheet in the same layout as the paper list on the pillar, or saves it as PDF.
+
+Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same files either way.
+
+**Your data never leaves your PC.** The page is static; there is no server and no network call at runtime.
 
 ## Features
 - **Day plan**: route name, driver, car, packing round (spot / garage / port). Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes).
@@ -11,8 +15,10 @@ Windows desktop app (Tauri 2) for planning the daily route sheet: routes, driver
 - **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
 - Data is saved automatically on the PC (WebView local storage).
 
-## Download
-Grab the latest from **Releases**:
+## Use it
+Open the Pages URL for this repo in Edge or Chrome. Nothing to install.
+
+Optional Windows app — grab the latest from **Releases**:
 - `car-coordinator.exe` (portable, no install)
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
 
@@ -29,6 +35,6 @@ npx tauri build    # release exe
 ```
 
 ## Layout
-- `src/` : UI (plain HTML/CSS/JS, no framework)
+- `docs/` : the app (plain HTML/CSS/JS, no framework). GitHub Pages serves this folder.
 - `src-tauri/` : Rust shell, exposes `print_page`
 - `scripts/make_icon.py` : generates the app icon at build time

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "no.m.carcoordinator",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../docs"
   },
   "app": {
     "withGlobalTauri": true,
