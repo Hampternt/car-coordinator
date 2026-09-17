@@ -9,7 +9,7 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 ## Features
 - **Day plan**: route name, driver, car, packing round (spot / garage / port). Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes).
 - **Cars / Positions**: add, rename, reorder, delete. One-click status buttons (OK, Out of service, Unavailable, Workshop, your own) plus a note.
-- Marked or already-used cars and positions are greyed out in the dropdowns; conflicts show a red warning.
+- **Warnings, not blocks**: a car on two routes, a spot taken twice, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it.
 - "Many cars" positions (Garage) can be shared by several routes.
 - **Labels**: create custom status labels with colours.
 - **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.

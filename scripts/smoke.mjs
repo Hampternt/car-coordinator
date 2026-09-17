@@ -58,6 +58,16 @@ await page.goto(base, { waitUntil: 'networkidle' });
 
 // --- first run ---
 check('loads with an empty car list', await page.locator('#tab-plan .empty').isVisible());
+check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// An unescaped quote in an inline data: URI silently dumps the rest of the
+// attribute into the document as text, which nothing else here would catch.
+const leaked = await page.evaluate(() => {
+  let text = '', n = document.body.firstChild;
+  while (n && n.nodeType === Node.TEXT_NODE) { text += n.textContent.trim(); n = n.nextSibling; }
+  return { text, headerIsFirst: document.body.children[0] === document.querySelector('header.topbar') };
+});
+check('no markup leaked into the page', leaked.text === '' && leaked.headerIsFirst, leaked.text);
 
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');

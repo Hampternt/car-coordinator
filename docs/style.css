@@ -6,6 +6,7 @@
   --hivis: #ffd400;
   --marker: #ff8fc2;
   --warn: #c62828;
+  --caution: #a55a00;
   --line: #c9cbc5;
   --head: "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
   --body: "Segoe UI", system-ui, sans-serif;
@@ -45,8 +46,13 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .grid input.short { width: 80px; }
 .grid tr.hl td { background: #ffd6e8; }
 .grid tr.gap td { border-top: 14px solid var(--concrete); }
-.grid tr.warn td:first-child { box-shadow: inset 5px 0 var(--warn); }
-.warntext { color: var(--warn); font-size: 13px; }
+.grid tr.warn td:first-child { box-shadow: inset 5px 0 var(--caution); }
+.warntext { color: var(--caution); font-size: 13px; }
+
+/* advisory, not a blocker: amber rather than the red used for real errors */
+.problems { background: #fff6e0; border-left: 6px solid var(--caution); padding: 10px 14px; margin: 0 0 14px; }
+.problems ul { margin: 6px 0 0; padding-left: 20px; }
+.problems li { margin: 2px 0; }
 
 .btn { border: 1px solid var(--line); background: #fff; padding: 4px 9px; cursor: pointer; }
 .btn:hover { border-color: var(--ink); }

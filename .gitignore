@@ -6,3 +6,6 @@ app-icon.png
 
 # scratch debugging scripts
 *.tmp.mjs
+
+# generated screenshots
+screens/

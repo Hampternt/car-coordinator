@@ -74,27 +74,52 @@ function usage() {
 }
 
 /* ---------- views ---------- */
+/* Every logical problem in the current plan. These are advisory: a leader
+   sometimes genuinely wants two routes on one car for half a day, so the
+   app says so rather than refusing. */
+function problems() {
+  const use = usage();
+  const out = [];
+  for (const [carId, routes] of Object.entries(use.cars)) {
+    const car = byId(state.cars, carId);
+    if (!car) continue;
+    if (routes.length > 1) out.push(`${car.reg} is on ${routes.length} routes (${routes.map((r) => r.name).join(', ')})`);
+    const lab = byId(state.labels, car.labelId);
+    if (lab) out.push(`${car.reg} is marked ${lab.name} but is on route ${routes.map((r) => r.name).join(', ')}`);
+  }
+  for (const [posId, routes] of Object.entries(use.pos)) {
+    const pos = byId(state.positions, posId);
+    if (!pos) continue;
+    if (!pos.multi && routes.length > 1) out.push(`${pos.name} is taken by ${routes.length} routes (${routes.map((r) => r.name).join(', ')})`);
+    const lab = byId(state.labels, pos.labelId);
+    if (lab) out.push(`${pos.name} is marked ${lab.name} but is on route ${routes.map((r) => r.name).join(', ')}`);
+  }
+  return out;
+}
+
 function renderPlan() {
   const use = usage();
   const rows = state.routes.map((r) => {
     const warns = [];
+    // Options stay pickable even when they clash; the note says what you are
+    // walking into and the row flags it afterwards.
     const carOpts = state.cars.map((c) => {
       const lab = byId(state.labels, c.labelId);
       const others = (use.cars[c.id] || []).filter((x) => x.id !== r.id);
-      const note = lab ? ` (${lab.name})` : others.length ? ` (route ${others.map((o) => o.name).join(', ')})` : '';
+      const bits = [lab && lab.name, others.length && `on route ${others.map((o) => o.name).join(', ')}`].filter(Boolean);
       const sel = c.id === r.carId;
       if (sel && lab) warns.push(`${c.reg} is marked ${lab.name}`);
-      if (sel && others.length) warns.push(`${c.reg} also on route ${others.map((o) => o.name).join(', ')}`);
-      return `<option value="${c.id}" ${sel ? 'selected' : ''} ${!sel && (lab || others.length) ? 'disabled' : ''}>${esc(c.reg + note)}</option>`;
+      if (sel && others.length) warns.push(`also on route ${others.map((o) => o.name).join(', ')}`);
+      return `<option value="${c.id}" ${sel ? 'selected' : ''}>${esc(c.reg + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const posOpts = state.positions.map((p) => {
       const lab = byId(state.labels, p.labelId);
       const others = p.multi ? [] : (use.pos[p.id] || []).filter((x) => x.id !== r.id);
-      const note = lab ? ` (${lab.name})` : others.length ? ` (route ${others.map((o) => o.name).join(', ')})` : '';
+      const bits = [lab && lab.name, others.length && `route ${others.map((o) => o.name).join(', ')}`, p.multi && 'many cars'].filter(Boolean);
       const sel = p.id === r.positionId;
       if (sel && lab) warns.push(`${p.name} is marked ${lab.name}`);
       if (sel && others.length) warns.push(`${p.name} also used by route ${others.map((o) => o.name).join(', ')}`);
-      return `<option value="${p.id}" ${sel ? 'selected' : ''} ${!sel && (lab || others.length) ? 'disabled' : ''}>${esc(p.name + note)}</option>`;
+      return `<option value="${p.id}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', warns.length && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}">
@@ -115,15 +140,20 @@ function renderPlan() {
   const down = state.cars.filter((c) => c.labelId);
   const tag = (c) => {
     const l = byId(state.labels, c.labelId);
-    return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' · ' + esc(l.name) : ''}${c.note ? ' · ' + esc(c.note) : ''}</span>`;
+    return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' \u00b7 ' + esc(l.name) : ''}${c.note ? ' \u00b7 ' + esc(c.note) : ''}</span>`;
   };
 
+  const found = problems();
   const noCars = state.cars.length
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
 
   $('#tab-plan').innerHTML = `
     ${noCars}
+    ${found.length ? `<div class="problems">
+      <b>${found.length} thing${found.length > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
+      <ul>${found.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+    </div>` : ''}
     <div class="bar">
       <label for="date">Date</label>
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
@@ -161,7 +191,7 @@ function renderCars() {
     <td class="btns">${moveDel('car', c.id)}</td></tr>`).join('');
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
-    <p class="hint">Click a label to mark a car. Marked cars can't be picked in the day plan and are listed on the printout.</p>
+    <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning, and they are listed on the printout.</p>
     <p class="counts"><span class="assign yes">${onRoute} on a route</span><span class="assign none">${free} free</span><span class="assign down">${down} not available</span></p>
     <div class="bar">
       <input id="newCar" type="text" placeholder="Registration(s), e.g. SD12345 SE67890">
@@ -181,7 +211,7 @@ function renderPositions() {
     <td class="btns">${moveDel('position', p.id)}</td></tr>`).join('');
   $('#tab-positions').innerHTML = `
     <h2>Positions</h2>
-    <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage).</p>
+    <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning.</p>
     <div class="bar">
       <input id="newPos" type="text" placeholder="Name, e.g. Spot 6/1 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>

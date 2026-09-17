@@ -19,7 +19,9 @@ const Store = (() => {
      crashing on the first render, coerce it into a shape the UI can draw. */
 
   function normalise(raw, defaults) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { state: defaults(), repaired: ['not an object'] };
+    // Nothing saved yet is a first run, not damage worth warning about.
+    if (raw === null || raw === undefined) return { state: defaults(), repaired: [] };
+    if (typeof raw !== 'object' || Array.isArray(raw)) return { state: defaults(), repaired: ['the saved data was not in the expected shape'] };
     const repaired = [];
     const arr = (v, what) => {
       if (Array.isArray(v)) return v;
