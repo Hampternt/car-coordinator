@@ -61,8 +61,9 @@ const Store = (() => {
 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? raw.date : defaults().date;
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
+    const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
 
-    return { state: { schemaVersion: SCHEMA, date, positions, labels, cars, routes }, repaired };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes }, repaired };
   }
 
   /* ---------- versioning ---------- */

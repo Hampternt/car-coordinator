@@ -149,6 +149,48 @@ check('day-plan code is tagged and compact', dayCode.startsWith('CC1.') && dayCo
 const allCode = await copyCode(page, 'all');
 check('everything code is longer than the day plan', allCode.length > dayCode.length);
 
+// --- the QR on the printed sheet ---
+// 30mm at 300dpi is ~354px, so decoding at that size is the question that
+// actually matters: will it scan off the paper?
+await page.click('[data-act="tab"][data-tab="preview"]');
+await page.waitForSelector('#sheet .qr svg', { timeout: 5000 }).catch(() => {});
+check('the sheet carries a QR code', (await page.locator('#sheet .qr svg').count()) === 1);
+
+const qrRead = await page.evaluate(async () => {
+  await QR.loadDecoder();
+  const svg = document.querySelector('#sheet .qr svg');
+  if (!svg) return { error: 'no qr on the sheet' };
+  const markup = new XMLSerializer().serializeToString(svg);
+  const decodeAt = (px) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = px; c.height = px;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
+      ctx.drawImage(img, 0, 0, px, px);
+      const d = ctx.getImageData(0, 0, px, px);
+      const r = window.jsQR(d.data, px, px, { inversionAttempts: 'dontInvert' });
+      resolve(r ? r.data : null);
+    };
+    img.onerror = () => resolve(null);
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(markup)));
+  });
+  return { at354: await decodeAt(354), at200: await decodeAt(200) };
+});
+check('the printed-size QR decodes (30mm at 300dpi)', typeof qrRead.at354 === 'string' && qrRead.at354.length > 0, qrRead.error || '');
+check('it still decodes at a rougher 200px scan', typeof qrRead.at200 === 'string');
+
+if (typeof qrRead.at354 === 'string') {
+  const round = await page.evaluate(async (scanned) => {
+    const m = /#d=(.+)$/.exec(scanned);
+    const { share, error } = await Share.decode(m ? decodeURIComponent(m[1]) : scanned);
+    return error ? { error } : { routes: share.r.length, date: share.d, driver: share.r[0][1] };
+  }, qrRead.at354);
+  check('the QR carries the whole day plan', round.routes === 2 && round.date === '2026-09-18' && round.driver === 'Ana', round.error || JSON.stringify(round));
+}
+await page.click('[data-act="tab"][data-tab="data"]');
+
 // "PC B": different ids, one car in common, one it has never seen.
 const pcB = await browser.newContext();
 const b = await pcB.newPage();

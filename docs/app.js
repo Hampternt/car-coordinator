@@ -21,6 +21,7 @@ function defaults() {
   return {
     schemaVersion: Store.SCHEMA,
     date: today(),
+    qrOnSheet: true,
     positions: ['Spot 1/1', 'Spot 1/2', 'Spot 2/1', 'Spot 2/2', 'Spot 3/1', 'Spot 3/2',
       'Spot 4/1', 'Spot 5/1', 'Garage'].map(pos),
     labels: [
@@ -314,6 +315,7 @@ function renderSheet() {
       <thead><tr><th style="text-align:right;padding-right:6mm">Route</th><th>Driver</th><th>Car</th><th>Packing round</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    ${qrCache.svg ? `<div class="qr">${qrCache.svg}<span>Scan to load<br>this list</span></div>` : ''}
     <div class="extra">
       ${downCars ? `<h4>Cars not available</h4>${downCars}` : ''}
       ${downPos ? `<h4>Positions not available</h4>${downPos}` : ''}
@@ -326,6 +328,7 @@ function render() {
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
   renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  queueQr();
   renderNotices();
 }
 
@@ -363,11 +366,112 @@ function addFromInput(sel, make) {
 }
 
 async function doPrint() {
+  clearTimeout(qrTimer);
+  await refreshQr();                       // never print a QR for yesterday's plan
   renderSheet();
   try {
     if (window.__TAURI__?.core) { await window.__TAURI__.core.invoke('print_page'); return; }
   } catch (err) { console.warn('native print failed, using window.print()', err); }
   window.print();
+}
+
+/* ---------- QR on the printout ---------- */
+/* The sheet is what actually travels round the warehouse, so it carries the
+   day plan as a QR: a phone opens it, another PC's webcam imports it. */
+let qrCache = { key: '', svg: '', error: '' };
+let qrTimer = null;
+
+const qrPayloadIsLink = () => location.protocol === 'https:' || location.protocol === 'http:';
+
+async function refreshQr() {
+  if (!state.qrOnSheet) {
+    if (qrCache.key) { qrCache = { key: '', svg: '', error: '' }; renderSheet(); }
+    return;
+  }
+  const code = await Share.encode(state, 'day');
+  const payload = qrPayloadIsLink() ? Share.linkFor(code) : code;
+  if (qrCache.key === payload) return;
+  try {
+    qrCache = { key: payload, svg: QR.svg(payload, { level: 'M' }), error: '' };
+  } catch {
+    // Only happens with an enormous day plan; the sheet drops the QR rather
+    // than printing something that will not scan.
+    qrCache = { key: payload, svg: '', error: 'This day plan is too big to fit in a QR code. The printed sheet will not have one.' };
+  }
+  renderSheet();
+}
+
+const queueQr = () => { clearTimeout(qrTimer); qrTimer = setTimeout(refreshQr, 400); };
+
+/* ---------- reading a QR back in ---------- */
+let camera = { stream: null, raf: 0 };
+let hasCamera = false;
+
+async function detectCamera() {
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    // Labels are hidden until permission is granted, but the device still
+    // shows up, so this tells us whether to offer the button at all.
+    hasCamera = (await navigator.mediaDevices.enumerateDevices()).some((d) => d.kind === 'videoinput');
+  } catch { hasCamera = false; }
+  renderShare();
+}
+
+async function startCamera() {
+  const dlg = $('#camDlg');
+  dlg.innerHTML = `
+    <h2>Scan a sheet</h2>
+    <p class="hint">Hold the printed sheet up to the camera. The QR is in the bottom corner.</p>
+    <video id="camView" playsinline muted></video>
+    <p id="camStatus" class="status off">Starting the camera\u2026</p>
+    <div class="bar" style="margin:12px 0 0"><button class="btn" data-act="cam-stop">Cancel</button></div>`;
+  if (!dlg.open) dlg.showModal();
+  try {
+    camera.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+  } catch {
+    $('#camStatus').className = 'status warn-status';
+    $('#camStatus').textContent = 'No camera available, or permission was refused. Use "Read from a photo" instead.';
+    return;
+  }
+  const video = $('#camView');
+  video.srcObject = camera.stream;
+  await video.play().catch(() => {});
+  $('#camStatus').textContent = 'Looking\u2026';
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  let busy = false;
+  const tick = async () => {
+    camera.raf = requestAnimationFrame(tick);
+    if (busy || !video.videoWidth) return;
+    busy = true;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    let found = null;
+    try { found = await QR.scan(ctx.getImageData(0, 0, canvas.width, canvas.height)); } catch { /* keep looking */ }
+    busy = false;
+    if (found) { stopCamera(); await readScanned(found, 'the camera'); }
+  };
+  tick();
+}
+
+function stopCamera() {
+  cancelAnimationFrame(camera.raf);
+  camera.raf = 0;
+  if (camera.stream) camera.stream.getTracks().forEach((t) => t.stop());
+  camera.stream = null;
+  const dlg = $('#camDlg');
+  if (dlg.open) dlg.close();
+}
+
+async function readScanned(text, source) {
+  const link = /#d=(.+)$/.exec(String(text).trim());
+  const { share, error } = await Share.decode(link ? decodeURIComponent(link[1]) : text);
+  if (error) { note('warn', `Scanned from ${source}, but ${error.charAt(0).toLowerCase()}${error.slice(1)}`); render(); return; }
+  tab = 'data';
+  render();
+  openShare(share);
 }
 
 /* ---------- sharing ---------- */
@@ -387,9 +491,18 @@ function renderShare() {
       <textarea id="shareOut" class="code" readonly rows="3">${esc(shareOut)}</textarea>
       <p class="hint">${shareOut.length} characters.${shareOut.length > 1800 ? ' That is long for a link \u2014 send the code itself rather than the link.' : ''}</p>` : ''}
 
+    <p class="hint" style="margin-top:14px">
+      <label><input type="checkbox" data-kind="meta" data-field="qrOnSheet" ${state.qrOnSheet ? 'checked' : ''}> Put a QR code on the printed sheet</label>
+      ${qrCache.error ? `<br><span class="status warn-status" style="padding-left:0">${esc(qrCache.error)}</span>` : ''}
+    </p>
+
     <h3 style="margin-top:18px">Load a list someone sent you</h3>
     <textarea id="shareIn" class="code" rows="3" placeholder="Paste the code (or the whole link) here"></textarea>
-    <button class="btn primary-ish" data-act="share-read">Read the list</button>`;
+    <button class="btn primary-ish" data-act="share-read">Read the list</button>
+    <button class="btn" data-act="scan-image">Read from a photo\u2026</button>
+    ${hasCamera ? `<button class="btn" data-act="cam-start">Scan a sheet with the camera\u2026</button>` : ''}
+    <p class="hint">A photo works without a camera on this PC: someone snaps the printed sheet on their phone and sends you the picture.</p>
+    <input id="scanFile" type="file" accept="image/*" hidden>`;
 }
 
 function renderShareDialog() {
@@ -456,6 +569,9 @@ async function shareAction(act, b) {
       return;
     }
     case 'share-cancel': $('#shareDlg').close(); pending.share = null; return;
+    case 'cam-start': startCamera(); return;
+    case 'cam-stop': stopCamera(); return;
+    case 'scan-image': $('#scanFile').click(); return;
     default: return;
   }
 }
@@ -566,6 +682,15 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
+  if (e.target.id === 'scanFile') {
+    const img = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!img) return;
+    const found = await QR.scanBlob(img).catch(() => null);
+    if (found) await readScanned(found, 'that picture');
+    else { note('warn', 'No QR code found in that picture. Try a straighter, closer shot of the code itself.'); render(); }
+    return;
+  }
   if (e.target.id !== 'importFile') return;
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -582,7 +707,7 @@ document.addEventListener('keydown', (e) => {
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });
 
-const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
+const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel', 'cam-start', 'cam-stop', 'scan-image']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 async function start() {
@@ -596,6 +721,7 @@ async function start() {
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
   render();
+  detectCamera();
 
   const fromLink = Share.readHash();
   if (fromLink) {
