@@ -3,3 +3,9 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/icons/
 app-icon.png
+
+# scratch debugging scripts
+*.tmp.mjs
+
+# generated screenshots
+screens/

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Car Coordinator</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%231a1c1e'/><rect y='48' width='64' height='16' fill='%23ffd400'/><path d='M8 36V20h26v16zm28-10h10l8 10H36z' fill='%23ffd400'/><circle cx='18' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/><circle cx='44' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,23 +15,32 @@
       <button data-act="tab" data-tab="cars">Cars</button>
       <button data-act="tab" data-tab="positions">Positions</button>
       <button data-act="tab" data-tab="labels">Labels</button>
+      <button data-act="tab" data-tab="data">Data</button>
       <button data-act="tab" data-tab="preview">Print preview</button>
     </nav>
     <button class="primary" data-act="print">Print / save PDF</button>
   </header>
+
+  <div id="notices"></div>
 
   <main>
     <section id="tab-plan" class="tab"></section>
     <section id="tab-cars" class="tab"></section>
     <section id="tab-positions" class="tab"></section>
     <section id="tab-labels" class="tab"></section>
+    <section id="tab-data" class="tab"></section>
     <section id="tab-preview" class="tab">
       <p class="hint">This is exactly what gets printed. In the print dialog pick a printer, or "Microsoft Print to PDF" for a PDF file.</p>
     </section>
   </main>
 
+  <dialog id="shareDlg"></dialog>
+
   <div id="sheet" class="sheet"></div>
 
+  <script src="store.js"></script>
+  <script src="share.js"></script>
+  <script src="qr.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

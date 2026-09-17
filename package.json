@@ -5,9 +5,13 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "icon": "tauri icon app-icon.png"
+    "icon": "tauri icon app-icon.png",
+    "test": "node scripts/smoke.mjs",
+    "screens": "node scripts/screens.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "jsqr": "^1.4.0",
+    "playwright": "^1.63.0"
   }
 }

@@ -6,6 +6,7 @@
   --hivis: #ffd400;
   --marker: #ff8fc2;
   --warn: #c62828;
+  --caution: #a55a00;
   --line: #c9cbc5;
   --head: "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
   --body: "Segoe UI", system-ui, sans-serif;
@@ -45,8 +46,13 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .grid input.short { width: 80px; }
 .grid tr.hl td { background: #ffd6e8; }
 .grid tr.gap td { border-top: 14px solid var(--concrete); }
-.grid tr.warn td:first-child { box-shadow: inset 5px 0 var(--warn); }
-.warntext { color: var(--warn); font-size: 13px; }
+.grid tr.warn td:first-child { box-shadow: inset 5px 0 var(--caution); }
+.warntext { color: var(--caution); font-size: 13px; }
+
+/* advisory, not a blocker: amber rather than the red used for real errors */
+.problems { background: #fff6e0; border-left: 6px solid var(--caution); padding: 10px 14px; margin: 0 0 14px; }
+.problems ul { margin: 6px 0 0; padding-left: 20px; }
+.problems li { margin: 2px 0; }
 
 .btn { border: 1px solid var(--line); background: #fff; padding: 4px 9px; cursor: pointer; }
 .btn:hover { border-color: var(--ink); }
@@ -68,9 +74,39 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .counts { margin: 0 0 12px; }
 .grid tr.assigned td:first-child { box-shadow: inset 5px 0 var(--steel); }
 
+/* notices: things the app needs to tell you, dismissable */
+#notices { padding: 0 20px; }
+#notices:not(:empty) { padding-top: 14px; }
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
+.notice.warn { border-left-color: var(--warn); }
+.notice .btn { margin-left: auto; flex: none; }
+
+/* data tab */
+.card { background: var(--panel); padding: 14px 16px; margin-bottom: 16px; }
+.card h3 { font: 600 17px var(--head); margin: 0 0 8px; }
+.card .btn { margin-right: 6px; }
+.btn.primary-ish { background: var(--hivis); border-color: var(--ink); font-weight: 600; }
+.status { margin: 0 0 10px; padding-left: 24px; position: relative; }
+.status::before { position: absolute; left: 0; top: 0; font-weight: 700; }
+.status.on::before { content: "\2713"; color: #2e7d32; }
+.status.off::before { content: "\25CB"; color: #555; }
+.status.warn-status::before { content: "\0021"; color: var(--warn); }
+.status.warn-status { color: var(--warn); }
+
+.empty { background: var(--panel); border-left: 5px solid var(--hivis); padding: 12px 14px; margin: 0 0 14px; }
+
 .pool { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .pool > div { background: var(--panel); padding: 10px 12px; }
 .pool h3 { font: 600 15px var(--head); margin: 0 0 6px; }
+
+textarea.code { width: 100%; max-width: 760px; display: block; margin: 8px 0; padding: 8px; border: 1px solid var(--line); background: #fff; font: 13px/1.35 ui-monospace, Consolas, monospace; word-break: break-all; resize: vertical; }
+
+dialog { border: 0; border-top: 8px solid var(--hivis); padding: 20px 24px; max-width: 560px; background: var(--panel); color: var(--ink); box-shadow: 0 8px 40px rgba(0,0,0,.35); }
+dialog::backdrop { background: rgba(26,28,30,.6); }
+dialog h2 { margin-top: 0; }
+dialog fieldset { border: 1px solid var(--line); margin: 14px 0 0; padding: 10px 12px; }
+dialog legend { font: 600 14px var(--head); padding: 0 4px; }
+dialog fieldset label, label.block { display: block; margin: 6px 0; }
 
 /* ---------- printable sheet (mirrors the paper list) ---------- */
 .sheet { display: none; }
@@ -86,6 +122,10 @@ body.show-sheet .sheet {
 .sheet td.rn { width: 18%; text-align: right; padding-right: 6mm; }
 .sheet tr.hl td { background: var(--marker); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .sheet tr.spacer td { height: 8mm; }
+/* QR floats beside the footer notes so the route table above is untouched */
+.sheet .qr { float: right; margin: 6mm 0 3mm 6mm; text-align: center; width: 30mm; }
+.sheet .qr svg { width: 30mm; height: 30mm; display: block; }
+.sheet .qr span { font-size: 7pt; font-weight: 400; line-height: 1.2; display: block; margin-top: 1mm; }
 .sheet .extra { margin-top: 10mm; font-size: 13pt; }
 .sheet .extra h4 { margin: 3mm 0 1mm; font-size: 14pt; }
 .sheet .extra p { margin: 0; }
