@@ -385,6 +385,59 @@ check('a spot that already has the plain name absorbs the numbered one',
 check('and its own routes are left alone, rather than being given a round out of nowhere',
   already.round === null && already.routes.filled === 1 && already.routes.kept === 0, JSON.stringify(already.routes));
 
+// --- the offer: the list, spelled out, before anything is written ---
+// Data as a leader who started before this change still has it: the round
+// baked into the spot name, two of those names meaning one spot, and a round
+// already typed onto one route by hand.
+const oldNames = {
+  schemaVersion: 3, date: '2026-09-18', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Out of service', color: '#c62828' }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }],
+  positions: [
+    { id: 'p1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'p2', name: 'Spot 1/2', multi: true, labelId: 'L1', note: 'pallet jack in it' },
+    { id: 'p3', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1', round: '', highlight: false, gapBefore: false },
+    { id: 'r2', name: '2', driver: 'Bo', carId: '', positionId: 'p2', round: '', highlight: false, gapBefore: false },
+    { id: 'r3', name: '3', driver: 'Cai', carId: '', positionId: 'p2', round: '4', highlight: false, gapBefore: false },
+    { id: 'r4', name: '4', driver: 'Dee', carId: '', positionId: 'p3', round: '', highlight: false, gapBefore: false },
+  ],
+  drivers: [], driverGroups: [],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c1', positionId: 'p2', round: '', highlight: false, gapBefore: false }] }],
+};
+const loadOldNames = async (pg) => {
+  await pg.evaluate((plan) => localStorage.setItem('carcoord:v1', JSON.stringify(plan)), oldNames);
+  await pg.reload({ waitUntil: 'networkidle' });
+};
+await loadOldNames(page);
+const offer = page.locator('#notices .notice.warn');
+check('old spot names raise the offer', (await offer.count()) === 1 && (await offer.locator('[data-act="split-rounds"]').innerText()) === 'Split the rounds out', await page.locator('#notices').innerText());
+const offerLines = await offer.locator('li').allInnerTexts();
+check('it names every spot, old name to new, with the round it carried',
+  offerLines[0] === 'Spot 1/1 → Spot 1, round 1' && offerLines[1] === 'Spot 1/2 → Spot 1, round 2 — the same Spot 1: two spots become one',
+  offerLines.slice(0, 2).join(' | '));
+check('and says nothing about the spot it is not touching', !offerLines.join(' ').includes('Garage'));
+check('the counts separate a round it fills in from a round someone typed',
+  offerLines.some((l) => l === '2 routes have their rounds filled in from the spot name.')
+  && offerLines.some((l) => l.startsWith('1 route already has a round typed in and is left exactly as it is')),
+  offerLines.join(' | '));
+check('a saved template is counted too, by name', offerLines.some((l) => l === 'The Monday template moves with the plan: 1 route filled in.'), offerLines.join(' | '));
+check('the merge conflict is named, and so is what wins',
+  offerLines.some((l) => l === 'Spot 1/1 and Spot 1/2 do not agree about "many cars", the status and the note. Spot 1 keeps what Spot 1/1 has — the lowest round wins.'),
+  offerLines.join(' | '));
+check('it tells both PCs to do this before swapping codes again', offerLines.some((l) => l.includes('before swapping share codes again')));
+
+// Dismissing is not an answer, and must cost nothing: the saved data has to
+// come back byte for byte, because the offer is raised again next time.
+const savedBefore = await page.evaluate(() => localStorage.getItem('carcoord:v1'));
+await offer.locator('[data-act="dismiss"]').click();
+check('dismissing takes the question away', (await page.locator('#notices .notice').count()) === 0);
+check('and leaves the saved data byte for byte as it was', (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === savedBefore);
+await page.reload({ waitUntil: 'networkidle' });
+check('the question comes back on the next load', (await page.locator('#notices .notice.warn [data-act="split-rounds"]').count()) === 1);
+
 // --- sharing between two PCs ---
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.

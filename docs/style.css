@@ -82,6 +82,11 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* a notice that offers something carries two buttons: the offer, then the
    dismiss beside it, not spread across the width */
 .notice .btn + .btn { margin-left: 0; }
+/* a notice that is about to rewrite saved data says every line of what it
+   would do, so it needs a list inside it rather than one long sentence */
+.notice .say { min-width: 0; }
+.notice .say ul { margin: 6px 0 0; padding-left: 20px; }
+.notice .say li { margin: 2px 0; }
 
 /* data tab */
 .card { background: var(--panel); padding: 14px 16px; margin-bottom: 16px; }

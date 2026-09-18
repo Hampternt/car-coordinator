@@ -659,8 +659,13 @@ function renderData() {
 }
 
 function renderNotices() {
+  // What it says sits in its own box, so the buttons stay a row beside it
+  // rather than joining the list. A notice that offers to change saved data
+  // states every line of what it would do; one that has nothing to list is
+  // the sentence alone, exactly as before.
   $('#notices').innerHTML = notices.map((n, i) =>
-    `<div class="notice ${n.kind}">${esc(n.text)}${n.offer
+    `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
+      ? `<ul>${n.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
       : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
 
@@ -961,9 +966,9 @@ async function dataAction(act, b) {
    question just sits there waiting. */
 let offerRaised = false;
 
-const note = (kind, text, offer = null) => {
+const note = (kind, text, offer = null, lines = []) => {
   notices = notices.filter((n) => n.text !== text);
-  notices.push({ kind, text, offer });
+  notices.push({ kind, text, offer, lines });
   if (offer) offerRaised = true;
 };
 
@@ -975,6 +980,60 @@ const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a
    notice anyway, so both ways in end at the same question and the same load. */
+/* The offer to take the round out of the spot names. It only ever asks, and
+   it asks with the list in its hand: every old name, what it becomes, what
+   merges into what, how many routes gain a round and how many keep the one
+   they were given. A leader agreeing to this is agreeing to a stated list,
+   not to a description of one — this rewrites saved names, and the only way
+   back is the backup taken when the button is pressed.
+
+   Raised beside the weekday template question rather than instead of it: the
+   two are different questions and neither answers the other. Asking about a
+   template does take this one off the screen (dropOffers), which is no loss —
+   nothing has been changed, and it is raised again on the next load. */
+const andList = (words) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+
+function spotRoundLines(plan) {
+  const lines = [];
+  for (const s of plan.spots) {
+    // One line per position, each saying where it lands. A spot that is
+    // already called "Spot 1" keeps its name and its settings; the numbered
+    // ones fold into it.
+    lines.push(s.round === null
+      ? `${s.keepName} → stays exactly as it is, and the spot${s.absorbed.length === 1 ? '' : 's'} below fold${s.absorbed.length === 1 ? 's' : ''} into it`
+      : `${s.keepName} → ${s.name}, round ${s.round}`);
+    for (const a of s.absorbed) lines.push(`${a.name} → ${s.name}, round ${a.round} — the same ${s.name}: two spots become one`);
+  }
+
+  const { filled, kept } = plan.routes;
+  if (filled) lines.push(`${filled} route${filled === 1 ? ' has its round' : 's have their rounds'} filled in from the spot name.`);
+  if (kept) lines.push(`${kept} route${kept === 1 ? '' : 's'} already ${kept === 1 ? 'has a round' : 'have rounds'} typed in and ${kept === 1 ? 'is' : 'are'} left exactly as ${kept === 1 ? 'it is' : 'they are'} — what was typed wins over the name.`);
+  for (const t of plan.templates) {
+    const say = [t.filled ? `${t.filled} route${t.filled === 1 ? '' : 's'} filled in` : '', t.kept ? `${t.kept} left as typed` : ''].filter(Boolean);
+    lines.push(`The ${t.name.trim() || 'unnamed'} template moves with the plan: ${say.join(', ')}.`);
+  }
+
+  for (const s of plan.spots) {
+    if (!s.conflicts.length) continue;
+    const names = andList([s.keepName, ...s.absorbed.map((a) => a.name)]);
+    lines.push(`${names} do not agree about ${andList(s.conflicts)}. ${s.name} keeps what ${s.keepName} has — ${s.round === null ? 'the spot that already had the plain name wins' : 'the lowest round wins'}.`);
+  }
+
+  lines.push('Do this on both PCs before swapping share codes again: a shared list finds a spot by its name, so while one side has split and the other has not, a code from one arrives on the other with the position blank on every route.');
+  lines.push('Dismissing this (✕) changes nothing at all, and the question comes back next time you open the app.');
+  return lines;
+}
+
+function offerSpotRoundSplit() {
+  const plan = spotRoundPlan(state);
+  if (!plan.spots.length) return;                      // nothing has a round in its name
+  const merging = plan.spots.reduce((n, s) => n + s.absorbed.length, 0);
+  note('warn',
+    `Your packing spots still carry the round in their names. On the pillar sheet "Spot 1/1" is spot one, round one, and the app now keeps that round on the route instead${merging ? `, so ${merging === 1 ? 'one of these spots is' : `${merging} of these spots are`} the same spot as another and would be merged` : ''}. Nothing has been changed yet — this is the whole of what the button would do, and a backup is taken first:`,
+    { act: 'split-rounds', kind: '', id: '', text: 'Split the rounds out' },
+    spotRoundLines(plan));
+}
+
 /* The calendar half of templates, and the whole of it: a template offers
    itself on its day and never applies itself. It is opt-in per template —
    nothing has a weekday until one is chosen — because the plan on screen may
@@ -1148,8 +1207,11 @@ async function start() {
   }
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
-  // An offer, never an application: this only ever adds a notice with a button
-  // in it, and that button asks the same question the shelf asks.
+  // Offers, never applications: these only ever add a notice with a button in
+  // it. The spot names come first because they are about the data itself
+  // rather than about today, and because the question scrolled into view
+  // should be the one that has to be answered before share codes work again.
+  offerSpotRoundSplit();
   offerTodaysTemplate();
   render();
 
