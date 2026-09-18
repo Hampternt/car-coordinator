@@ -1,6 +1,6 @@
 # Pack: Offer to split the round out of existing spot names
 
-**Status:** 🚧 in flight — items 1-2 done
+**Status:** 🚧 in flight — items 1-3 done
 **Date:** 2026-09-18
 **Branch:** `spot-round-migration`, cut from `main` at `9c427cf`
 
@@ -49,7 +49,7 @@ note. That is the part worth getting right.
       *Done when:* it is unit-tested against a fixture with merges, an already-filled round and a conflicting "many cars" flag, and never mutates its input.
 - [x] **2. Offer it on load, spelled out.** When the plan is non-empty, raise a notice listing every line of it plus the two-manager warning, with one button to apply and dismissal that changes nothing.
       *Done when:* the notice names each `old → new, round N` line, the counts are right, and dismissing leaves state byte-identical.
-- [ ] **3. ⚠️ Apply it.** `Store.snapshot()` first, then merge positions, re-point routes, fill blank rounds only, and report what was done.
+- [x] **3. ⚠️ Apply it.** `Store.snapshot()` first, then merge positions, re-point routes, fill blank rounds only, and report what was done.
       *Done when:* applying produces exactly the plan that was shown, an already-filled round is untouched, and restoring the backup returns the old names.
       **Risky — review individually.** It rewrites positions and routes together.
 - [ ] **4. Tests.** Including the case that motivates the pack: PC A migrates, PC B does not, and a share code between them is shown to break — then both migrate and it works.
@@ -81,6 +81,13 @@ note. That is the part worth getting right.
   as an escaped `<ul>` inside `.notice .say`). Gate: `./scripts/check.sh` OK;
   `npm test` — all checks passed (10 new checks, including the offer's exact
   lines and "dismissing leaves the saved data byte for byte").
+- **Item 3** `b971135` — `applySpotRoundSplit()` plus the `split-rounds` click,
+  `Store.snapshot('Splitting the round out of the spot names')` first. Gate:
+  `./scripts/check.sh` OK; `npm test` — all checks passed (12 new checks:
+  the merged position list, a filled round, a typed round left alone, the
+  template moved, the printed sheet unchanged, and restoring the backup).
+  **Still flagged risky — wants an individual read:** it rewrites positions,
+  routes and templates in one pass.
 - **Note (item 2):** clicking the weekday template question still clears this
   offer along with it (`dropOffers()`, one live offer at a time). Nothing is
   changed by that and the offer returns on the next load, so it was left as
