@@ -48,7 +48,7 @@ every one touches `docs/app.js`.
 - [x] **3. ⚠️ Load a template, behind a confirm.** Saved templates render as buttons beside Save. Clicking asks a confirmation that names what is being replaced (e.g. the route count), and calls `Store.snapshot()` **before** overwriting so the Data tab can undo it.
       *Done when:* loading replaces every route field the template carries, a cancel changes nothing at all, and the backup appears in the Data tab's backup list.
       **Risky — review individually.** This is the only destructive action in the app that is one click from the main screen.
-- [ ] **4. Optional weekday auto-apply, default off.** A per-template weekday setting. When set, opening the app on that weekday raises a notice offering the template with one-click apply. Never applies on its own.
+- [x] **4. Optional weekday auto-apply, default off.** A per-template weekday setting. When set, opening the app on that weekday raises a notice offering the template with one-click apply. Never applies on its own.
       *Done when:* default state raises no notice on any day; with a weekday set, the notice appears and applying it goes through the same confirm and snapshot as item 3.
 - [ ] **5. Tests + screenshots.** `scripts/smoke.mjs` covers save, load, cancel-changes-nothing, the snapshot being taken, and the default-off behaviour. `scripts/screens.mjs` captures the template row.
       *Done when:* `npm test` and `npm run screens` pass with no console errors.
@@ -151,5 +151,25 @@ both entry points end in one confirm and one load path.
   every field lands with fresh distinct ids, the table shows it, the date does
   not move, the question is cleared by answering it, the backup is in the Data
   tab, restoring it brings the replaced plan back, and the workshop car warns.
+
+- [x] **4. Weekday offer, default off** — 2c2fd1d. A `<select>` per template on
+  the shelf, reading **"Never offer it"** until a day is picked, then "On
+  Mondays"; stored as `Date.getDay()`'s `0`–`6`, so `WEEKDAYS[day]` is the only
+  place a day is spelled. `offerTodaysTemplate()` runs once in `start()` and its
+  entire job is to raise a notice with a `Use Monday` button in it — the same
+  `ask-template` the shelf uses, so the offer reaches item 3's question, item
+  3's snapshot and item 3's load, not a second path.
+  *Reading of the item text, worth a line:* "one-click apply" is built as one
+  click **to the question**, not one click to the overwrite, because the same
+  done-condition says applying "goes through the same confirm and snapshot as
+  item 3" and the pack exists because the user rejected templates that apply
+  themselves. Two templates set for one day are allowed: the offer names the
+  first and mentions the others rather than stacking questions.
+  Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` all checks passed,
+  **159 ok / 0 failed**, 9 new cases — saved with no day, nothing raised on any
+  day, the weekday sticks, another day stays quiet today, today's template
+  offers itself, nothing is loaded while it waits, the offer reaches the same
+  question, only then does it replace (with `Loading the Monday template` at the
+  top of Backups), and turning the day off again stops the offer.
 
 </details>
