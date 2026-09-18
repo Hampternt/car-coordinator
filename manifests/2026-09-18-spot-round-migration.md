@@ -101,6 +101,18 @@ note. That is the part worth getting right.
   byte-identical, so the notice's new list box changed no existing layout.
   (Plain `npm test` cannot run on this machine — no browser binary — so
   `CHROMIUM_PATH` is required, as the pack's Gates section already says.)
+- **Item 3, how its done-condition is met** `64a6545` — the button plans the
+  split again when it is pressed rather than keeping the plan the offer drew,
+  because the list on screen can be minutes old (a round typed, a spot added
+  since). "Applying produces exactly the plan that was shown" therefore holds
+  through the report: it reads the plan that actually ran back out, line for
+  line, and the backup is named in it. `b971135`'s message says the older,
+  wrong thing about this; the code comment was corrected in `64a6545`.
+- **Not proven by any gate:** no screenshot draws the offer — `screens.mjs`
+  seeds `defaults()`, which has no slashed names — so the list inside a
+  notice has never been *looked* at. The smoke test proves the `<ul>` is
+  there and readable, not that it sits well beside the buttons. First thing
+  to look at in the walkthrough, at laptop width and at ~760px.
 - **Left for you:** the browser walkthrough on data with old names, and an
   individual read of item 3 (the flagged one). Not done here, by design.
 - **Note (item 2):** clicking the weekday template question still clears this
