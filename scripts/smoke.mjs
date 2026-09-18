@@ -69,6 +69,25 @@ await firstRow.locator('[data-field="carId"]').selectOption({ index: 1 });
 await firstRow.locator('[data-field="positionId"]').selectOption({ index: 1 });
 check('assigns a driver, car and position', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
 
+// --- the packing round is a column of its own ---
+await firstRow.locator('[data-field="round"]').fill('2');
+check('position and round are separate columns', (await page.locator('#tab-plan thead th').allInnerTexts()).join('|').includes('Position|Round'));
+check('the round takes free text', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
+
+// Leaving a round redraws the plan, because the clash rule moved with it. The
+// click that ends the edit must still land: a redraw between mousedown and
+// mouseup would swallow it, and the leader would silently lose every click
+// made straight after typing a round.
+const secondRow = page.locator('#tab-plan tbody tr').nth(1);
+const thirdRow = page.locator('#tab-plan tbody tr').nth(2);
+await secondRow.locator('[data-field="round"]').click();
+await page.keyboard.type('3');
+await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();
+check('a click that ends a round edit still lands',
+  (await secondRow.locator('[data-field="round"]').inputValue()) === '3' && (await thirdRow.getAttribute('class')).includes('hl'),
+  `round=${await secondRow.locator('[data-field="round"]').inputValue()} class=${await thirdRow.getAttribute('class')}`);
+await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();   // put it back
+
 // --- the sheet reflects the plan ---
 await page.click('[data-act="tab"][data-tab="preview"]');
 const sheet = await page.locator('#sheet').innerText();
@@ -78,11 +97,13 @@ check('sheet shows the car', sheet.includes('AA11111'));
 // --- survives a reload (localStorage) ---
 await page.reload({ waitUntil: 'networkidle' });
 check('state survives a reload', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+check('the round survives a reload', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="round"]').inputValue()) === '2');
 
 // --- backups and restore ---
 await page.click('[data-act="clear-day"]');
 await page.click('[data-act="clear-day"]');           // two-click confirm
 check('clear wipes the driver', (await firstRow.locator('[data-field="driver"]').inputValue()) === '');
+check('clear wipes the round too', (await firstRow.locator('[data-field="round"]').inputValue()) === '');
 await page.click('[data-act="tab"][data-tab="data"]');
 check('clearing left a backup', (await page.locator('#tab-data table tbody tr').count()) >= 1);
 const restoreBtn = page.locator('[data-act="restore"]').first();
@@ -90,6 +111,7 @@ await restoreBtn.click();
 await restoreBtn.click();                             // two-click confirm
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('restore brings the driver back', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+check('restore brings the round back', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
 
 // --- export / import round trip ---
 await page.click('[data-act="tab"][data-tab="data"]');

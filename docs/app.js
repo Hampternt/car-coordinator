@@ -118,6 +118,14 @@ function problems() {
   return { lines, rows, use };
 }
 
+/* What the warnings currently say, as one string: cheap enough to take twice
+   per keystroke, and exact enough that a redraw only happens when something
+   really did change. */
+const problemSig = () => {
+  const { lines, rows } = problems();
+  return `${lines.join('|')}#${[...rows].sort().join(',')}`;
+};
+
 function renderPlan() {
   const { lines: found, rows: flagged, use } = problems();
   const rows = state.routes.map((r, at) => {
@@ -148,6 +156,7 @@ function renderPlan() {
       <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-"')}</td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
+      <td>${field('route', r.id, 'round', r.round, 'class="short" placeholder="-"')}</td>
       <td class="btns">
         ${actBtn('toggle', 'route', r.id, 'Mark', r.highlight ? 'on' : '', 'data-field="highlight" title="Pink highlight on the printout"')}
         ${actBtn('toggle', 'route', r.id, 'Gap', r.gapBefore ? 'on' : '', 'data-field="gapBefore" title="Blank line above this route"')}
@@ -178,10 +187,10 @@ function renderPlan() {
       <label for="date">Date</label>
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
       <button class="btn" data-act="add-route">+ Add route</button>
-      <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars and positions'}</button>
+      <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
     <table class="grid">
-      <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Packing round</th><th></th><th></th></tr></thead>
+      <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="pool">
@@ -392,6 +401,9 @@ document.addEventListener('input', (e) => {
   const { kind, id, field: name } = el.dataset;
   if (!kind || !name) return;
   const value = el.type === 'checkbox' ? el.checked : el.value;
+  // A round feeds the clash rule, so one keystroke in it can turn a warning on
+  // or off. Remember how the warnings read before the change, to spot that.
+  const warnedBefore = kind === 'route' && name === 'round' ? problemSig() : null;
   if (kind === 'meta') state[name] = value;
   else {
     const item = byId(listFor(kind) || [], id);
@@ -399,8 +411,26 @@ document.addEventListener('input', (e) => {
     item[name] = value;
   }
   save();
-  if (el.tagName === 'SELECT' || el.type === 'checkbox') render(); else renderSheet();
+  if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
+  else if (warnedBefore !== null && problemSig() !== warnedBefore) redrawKeepingCaret(el);
+  else renderSheet();
 });
+
+/* Redraw the lot without interrupting the typing that caused it: render()
+   replaces the very field being typed into, so the caret goes back afterwards.
+
+   Waiting for the field to be left instead would be simpler and is wrong: the
+   browser blurs on mousedown, so the redraw lands between mousedown and mouseup
+   and the click that ended the edit is swallowed — measured, not guessed. */
+function redrawKeepingCaret(el) {
+  const { kind, id, field: name } = el.dataset;
+  const at = el.selectionStart;
+  render();
+  const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
+  if (!again) return;
+  again.focus();
+  again.setSelectionRange(at, at);
+}
 
 function confirmTwice(key) {
   if (armed === key) { armed = null; return true; }
@@ -632,7 +662,7 @@ document.addEventListener('click', (e) => {
     case 'clear-day':
       if (!confirmTwice('clear')) return;
       Store.snapshot(state, 'Clearing the day');
-      state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.highlight = false; });
+      state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = today();
       break;
     case 'add-route': {
