@@ -260,6 +260,65 @@ await pcC.close();
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
+// --- the plan and the banner must never disagree ---
+// Duplicate route ids come from imported files; identifying rows by id made
+// the banner count clashes that no row was flagged for.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18',
+  labels: [{ id: 'L1', name: '', color: '#6a1b9a' }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: 'L1' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [
+    { id: 'dup', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
+    { id: 'dup', name: '', driver: 'Bo', carId: 'c1', positionId: 'p1' },
+  ],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+const banner = await page.locator('#tab-plan .problems').innerText();
+check('duplicate route ids still flag both rows', (await page.locator('#tab-plan tbody tr.warn').count()) === 2);
+check('the banner counts routes, not sentences', banner.includes('2 routes to look at'), banner.split('\n')[0]);
+check('a blank route name does not dangle', !/\(1, \)|route 1, $/m.test(banner), banner);
+check('a nameless status still says something', banner.includes('a status with no name'), banner);
+const carOption = await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"] option:checked').innerText();
+check('the dropdown shows the mark even with a blank label name', carOption.includes('status with no name'), carOption);
+
+// --- the car counters partition the fleet ---
+await page.click('[data-act="tab"][data-tab="cars"]');
+const counts = (await page.locator('#tab-cars .counts').innerText()).match(/\d+/g).map(Number);
+check('on a route + free + parked equals the fleet', counts[0] + counts[1] + counts[2] === 1, JSON.stringify(counts));
+
+// --- a shared position survives a day-plan-only share ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Garage', multi: true }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
+    { id: 'r2', name: '2', driver: 'Bo', carId: '', positionId: 'p1' },
+    { id: 'r3', name: '3', driver: 'Cai', carId: '', positionId: 'p1' },
+  ],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="data"]');
+const garageCode = await copyCode(page, 'day');
+
+const pcD = await browser.newContext();
+const d = await pcD.newPage();
+d.on('pageerror', (e) => bErrors.push(String(e)));
+await d.goto(base, { waitUntil: 'networkidle' });
+await d.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-01-01', labels: [], cars: [], positions: [], routes: [],
+})));
+await d.reload({ waitUntil: 'networkidle' });
+await d.click('[data-act="tab"][data-tab="data"]');
+await readCode(d, garageCode);
+await d.click('[data-act="share-apply"]');
+await d.click('[data-act="tab"][data-tab="plan"]');
+check('a shared position stays shared after a day-plan import', (await d.locator('#tab-plan .problems').count()) === 0,
+  await d.locator('#tab-plan .problems').innerText().catch(() => ''));
+await d.click('[data-act="tab"][data-tab="positions"]');
+check('and it arrives with Many cars ticked', await d.locator('#tab-positions [data-field="multi"]').first().isChecked());
+await pcD.close();
+
 // --- damaged saved data must not masquerade as a first run ---
 // A scalar in the key used to be silently swallowed: no notice, and the
 // linked save file was never consulted because the key still existed.

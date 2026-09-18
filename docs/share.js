@@ -52,6 +52,10 @@ const Share = (() => {
         nameOf(state.positions, r.positionId),
         (r.highlight ? HI : 0) | (r.gapBefore ? GAP : 0),
       ]),
+      // Names of the shared positions this plan uses. Without it the receiving
+      // PC recreates a Garage as single-occupancy and reports the plan it was
+      // just handed as a clash.
+      m: state.positions.filter((p) => p.multi && state.routes.some((r) => r.positionId === p.id)).map((p) => p.name),
     };
     if (mode === 'all') {
       out.l = state.labels.map((l) => [l.name, l.color]);
@@ -155,6 +159,7 @@ const Share = (() => {
     }
 
     // Day plan last, so it can point at anything the step above just added.
+    const shared = new Set((share.m || []).map(key));
     const findCar = (reg) => next.cars.find((c) => key(c.reg) === key(reg));
     const findPos = (name) => next.positions.find((p) => key(p.name) === key(name));
 
@@ -167,7 +172,7 @@ const Share = (() => {
       }
       let position = pos ? findPos(pos) : null;
       if (pos && !position) {
-        if (addMissing) { position = { id: uid(), name: pos, multi: false, labelId: '', note: '' }; next.positions.push(position); }
+        if (addMissing) { position = { id: uid(), name: pos, multi: shared.has(key(pos)), labelId: '', note: '' }; next.positions.push(position); }
         else if (!skipped.positions.includes(pos)) skipped.positions.push(pos);
       }
       return {
