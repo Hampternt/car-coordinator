@@ -160,6 +160,32 @@ const problemSig = () => {
   return `${lines.join('|')}#${[...rows].sort().join(',')}`;
 };
 
+/* ---------- the day plan's left rail ----------
+   The fleet as it stands, beside the plan being made: which car is out on
+   which route, which one is marked up. All of it is on the Cars tab too —
+   this is the version you can read without leaving the plan you are typing. */
+function railCars(use) {
+  const rows = state.cars.map((c) => {
+    const lab = byId(state.labels, c.labelId);
+    const on = use.cars[c.id];
+    // The same sentence the Cars tab prints in its "Assigned to" column,
+    // shortened to what fits: the route number is the bit you look for.
+    const where = on
+      ? `<span class="assign yes">Route ${routeNames(on)}</span>`
+      : `<span class="assign ${lab ? 'down' : 'none'}">${lab ? esc(labelName(lab)) : 'Free'}</span>`;
+    const full = [c.reg, lab && labelName(lab), c.note].filter(Boolean).join(' · ');
+    return `<li title="${esc(full)}"><span class="dot" style="--c:${esc(lab ? lab.color : '#2e7d32')}"></span><b>${esc(c.reg)}</b>${where}</li>`;
+  }).join('');
+  const out = state.cars.filter((c) => use.cars[c.id]).length;
+  const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
+  return `<section class="rail-panel" data-panel="cars">
+    <h3>Cars <span class="rail-count">${out} out · ${free} free</span></h3>
+    ${state.cars.length
+      ? `<ul class="rail-list">${rows}</ul>`
+      : '<p class="rail-empty">No cars yet — add them on the Cars tab.</p>'}
+  </section>`;
+}
+
 function renderPlan() {
   const { lines: found, rows: flagged, use } = problems();
   const rows = state.routes.map((r, at) => {
@@ -203,13 +229,6 @@ function renderPlan() {
     </tr>`;
   }).join('');
 
-  const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]);
-  const down = state.cars.filter((c) => c.labelId && !use.cars[c.id]);
-  const tag = (c) => {
-    const l = byId(state.labels, c.labelId);
-    return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' \u00b7 ' + esc(l.name) : ''}${c.note ? ' \u00b7 ' + esc(c.note) : ''}</span>`;
-  };
-
   const noCars = state.cars.length
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
@@ -226,13 +245,12 @@ function renderPlan() {
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
-    <table class="grid">
-      <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="pool">
-      <div><h3>Free cars (${free.length})</h3>${free.map(tag).join('') || '<em>None</em>'}</div>
-      <div><h3>Parked and marked (${down.length})</h3>${down.map(tag).join('') || '<em>None</em>'}</div>
+    <div class="plan">
+      <aside class="rail">${railCars(use)}</aside>
+      <table class="grid">
+        <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>`;
 }
 

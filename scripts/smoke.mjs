@@ -88,6 +88,14 @@ check('a click that ends a round edit still lands',
   `round=${await secondRow.locator('[data-field="round"]').inputValue()} class=${await thirdRow.getAttribute('class')}`);
 await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();   // put it back
 
+// --- the left rail carries the fleet beside the plan ---
+check('the rail lists every car', (await page.locator('#tab-plan [data-panel="cars"] li').count()) === 3);
+check('the rail says where the assigned one went',
+  (await page.locator('#tab-plan [data-panel="cars"] li').first().innerText()).replace(/\s+/g, ' ') === 'AA11111 Route 1',
+  await page.locator('#tab-plan [data-panel="cars"] li').first().innerText());
+check('the rail calls the others free', (await page.locator('#tab-plan [data-panel="cars"] .assign.none').count()) === 2);
+check('the pools below the table are gone', (await page.locator('#tab-plan .pool').count()) === 0);
+
 // --- the sheet reflects the plan ---
 await page.click('[data-act="tab"][data-tab="preview"]');
 const sheet = await page.locator('#sheet').innerText();
@@ -471,10 +479,20 @@ await page.evaluate(() => {
 await page.emulateMedia({ media: 'print' });
 const printed = await page.evaluate(() => {
   const n = document.querySelector('#notices');
-  return { display: getComputedStyle(n).display, sheetTop: document.querySelector('#sheet').getBoundingClientRect().top };
+  const rail = document.querySelector('#tab-plan .rail');
+  return {
+    display: getComputedStyle(n).display,
+    // Boxes, not computed display: the rail's own display stays `grid` while
+    // the main it sits in is hidden, so only "does it lay out" answers this.
+    railBoxes: rail ? rail.getClientRects().length : 0,
+    sheetTop: document.querySelector('#sheet').getBoundingClientRect().top,
+  };
 });
 await page.emulateMedia({ media: null });
 check('notices are hidden when printing', printed.display === 'none', `display=${printed.display}`);
+// The rail is inside main, which the print rules already hide. Nothing about
+// the sheet's own stylesheet changed, and this is the check that says so.
+check('the rail does not reach the paper', printed.railBoxes === 0, `${printed.railBoxes} boxes`);
 check('the sheet still starts at the top of the page', printed.sheetTop <= 1, `top=${printed.sheetTop}`);
 
 await page.evaluate(() => localStorage.clear());
