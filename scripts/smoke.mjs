@@ -284,12 +284,14 @@ await page.reload({ waitUntil: 'networkidle' });
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
 const planA = {
-  schemaVersion: 1, date: '2026-09-18',
+  schemaVersion: 2, date: '2026-09-18',
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
+  driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   cars: [{ id: 'a1', reg: 'AA11111', labelId: '', note: '' }, { id: 'a2', reg: 'BB22222', labelId: 'L1', note: 'back Friday' }],
   positions: [{ id: 'q1', name: 'Spot 1/1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
   routes: [
-    { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', highlight: true, gapBefore: false },
+    { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', round: '2', highlight: true, gapBefore: false },
     { id: 'x2', name: 'HAU 1', driver: 'Bo', carId: 'a2', positionId: 'q2', highlight: false, gapBefore: true },
   ],
 };
@@ -301,6 +303,40 @@ check('day-plan code is tagged and compact', dayCode.startsWith('CC1.') && dayCo
 
 const allCode = await copyCode(page, 'all');
 check('everything code is longer than the day plan', allCode.length > dayCode.length);
+
+// The round is per route, so it rides with the day plan — and it has to ride
+// where a build that predates it will not trip over it: appended after the
+// flags, with the version tag left at 1.
+const shape = await page.evaluate(async (code) => {
+  const { share, error } = await Share.decode(code);
+  return error ? { error } : { v: share.v, row: share.r[0], hasRoster: 'dr' in share };
+}, dayCode);
+check('the day-plan payload is still v1, with the round appended after the flags',
+  shape.v === 1 && shape.row.length === 6 && shape.row[4] === 1 && shape.row[5] === '2',
+  shape.error || JSON.stringify(shape.row));
+check('and it does not carry the roster', shape.hasRoster === false);
+const allShape = await page.evaluate(async (code) => {
+  const { share } = await Share.decode(code);
+  return { drivers: share.dr, groups: share.dg };
+}, allCode);
+check('"everything" carries the roster and the groups by name',
+  allShape.drivers.length === 2 && allShape.groups[0][0] === 'Monday' && allShape.groups[0][1][0] === 'Ana',
+  JSON.stringify(allShape));
+
+// A code made before rounds existed has five slots per route. It must load,
+// not throw, and leave the round blank.
+const oldCode = await page.evaluate(() => {
+  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1/1', 0]], m: [] });
+  return 'CC1U.' + btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+});
+const oldRead = await page.evaluate(async (code) => {
+  const { share, error } = await Share.decode(code);
+  if (error) return { error };
+  const { state: next } = Share.apply(state, share, { mode: 'day', addMissing: true });
+  return { routes: next.routes.length, round: next.routes[0].round, driver: next.routes[0].driver };
+}, oldCode);
+check('a code from before rounds existed still loads, with a blank round',
+  oldRead.round === '' && oldRead.driver === 'Ana' && oldRead.routes === 1, oldRead.error || JSON.stringify(oldRead));
 
 // --- the QR on the printed sheet ---
 // 30mm at 300dpi is ~354px, so decoding at that size is the question that
@@ -357,6 +393,7 @@ await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
   positions: [{ id: 'yyy', name: 'Spot 1/1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
 })));
 await b.reload({ waitUntil: 'networkidle' });
 await b.click('[data-act="tab"][data-tab="data"]');
@@ -370,6 +407,10 @@ await b.click('[data-act="tab"][data-tab="plan"]');
 const rowsB = b.locator('#tab-plan tbody tr');
 check('both routes arrived', (await rowsB.count()) === 2);
 check('driver came across', (await rowsB.first().locator('[data-field="driver"]').inputValue()) === 'Ana');
+// The round is part of the day plan, so a day-plan code carries it. Before
+// this it was dropped in silence, wiping the round on every route of any list
+// that was loaded — including one made minutes earlier on the same PC.
+check('the round came across too', (await rowsB.first().locator('[data-field="round"]').inputValue()) === '2');
 const carSel = rowsB.first().locator('[data-field="carId"]');
 check('matched the car it already had, case-insensitively', (await carSel.inputValue()) === 'zzz');
 check('added the car it did not have', (await rowsB.nth(1).locator('[data-field="carId"] option:checked').innerText()).includes('BB22222'));
@@ -377,6 +418,9 @@ await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
 check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
+check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/1 \u00b7 2'));
+await b.click('[data-act="tab"][data-tab="drivers"]');
+check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
 
 // "Everything" mode carries the car notes and labels too.
 await b.click('[data-act="tab"][data-tab="data"]');
@@ -387,6 +431,14 @@ await b.click('[data-act="tab"][data-tab="cars"]');
 const bbRow = b.locator('#tab-cars tbody tr', { has: b.locator('[data-field="reg"][value="BB22222"]') });
 check('everything mode brings the note across', (await bbRow.locator('[data-field="note"]').inputValue()) === 'back Friday');
 check('everything mode brings the label across', (await bbRow.locator('.chip.on').innerText()) === 'Workshop');
+await b.click('[data-act="tab"][data-tab="drivers"]');
+check('everything mode brings the roster across, merged with the local one',
+  (await b.locator('#tab-drivers tbody tr').count()) === 3);
+check('including who was away', (await b.locator('#tab-drivers tbody tr', { has: b.locator('[data-field="name"][value="Bo"]') }).locator('[data-act="toggle"]').innerText()) === 'Away');
+check('and the group, with its members matched back by name',
+  (await b.locator('#tab-drivers .group').count()) === 1
+  && (await b.locator('#tab-drivers .group .chip.on').allInnerTexts()).join() === 'Ana',
+  (await b.locator('#tab-drivers .group .chip.on').allInnerTexts()).join());
 
 // A share link does the same thing on arrival.
 const pcC = await browser.newContext();
