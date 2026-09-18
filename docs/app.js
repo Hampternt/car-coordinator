@@ -10,6 +10,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
    alike; share.js folds registrations the same way, for the same reason. */
 const fold = (s) => String(s || '').trim().toUpperCase();
 
+// Indexed by Date.getDay(), which is how a weekday is stored: Sunday is 0.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
 function today() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -304,6 +307,10 @@ function renderTemplates() {
   const shelf = state.templates.map((t) => `<div class="tpl">
       ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
       <span class="rail-count">${t.routes.length} route${t.routes.length === 1 ? '' : 's'}</span>
+      <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the app is opened on that day">
+        <option value="">Never offer it</option>
+        ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
+      </select>
       ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
     </div>`).join('');
   return `<section class="templates">
@@ -313,7 +320,8 @@ function renderTemplates() {
       <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
       <button class="btn" data-act="save-template">Save as template</button>
     </div>
-    ${shelf ? `<div class="shelf">${shelf}</div>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+    ${shelf ? `<div class="shelf">${shelf}</div>
+      <p class="hint" style="margin:8px 0 0">A template can offer itself when you open the app on its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
   </section>`;
 }
 
@@ -839,6 +847,22 @@ const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a
    notice anyway, so both ways in end at the same question and the same load. */
+/* The calendar half of templates, and the whole of it: a template offers
+   itself on its day and never applies itself. It is opt-in per template —
+   nothing has a weekday until one is chosen — because the plan on screen may
+   already have someone's morning in it, and the app does not know that. */
+function offerTodaysTemplate() {
+  const day = new Date().getDay();
+  const todays = state.templates.filter((t) => t.weekday === String(day));
+  if (!todays.length) return;                          // the default, and the point of it
+  const t = todays[0];
+  // More than one set for the same day is allowed: the offer names the first
+  // and mentions the rest, rather than stacking questions on top of each other.
+  const others = todays.length - 1;
+  note('info', `It is ${WEEKDAYS[day]}. Your ${t.name} template is set for ${WEEKDAYS[day]}s${others ? `, and so ${others === 1 ? 'is one other' : `are ${others} others`}` : ''}.`,
+    { act: 'ask-template', kind: 'template', id: t.id, text: `Use ${t.name}` });
+}
+
 function askTemplate(t) {
   dropOffers();
   const now = state.routes.length;
@@ -996,6 +1020,9 @@ async function start() {
   }
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
+  // An offer, never an application: this only ever adds a notice with a button
+  // in it, and that button asks the same question the shelf asks.
+  offerTodaysTemplate();
   render();
 
   const fromLink = Share.readHash();

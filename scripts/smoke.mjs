@@ -808,6 +808,47 @@ check('a template that brings back a car in the workshop warns, and still loads'
   && (await page.locator('#tab-plan tbody tr').count()) === 3,
   await page.locator('#tab-plan .problems').innerText());
 
+// --- the weekday offer: off by default, and an offer even when it is on ---
+// The rule the pack exists for. A template never applies itself: the most it
+// ever does is raise the same question the shelf raises.
+await loadPlan(withMonday);
+check('a template is set for no day when it is saved', await page.evaluate(() => state.templates[0].weekday === ''));
+check('so opening the app raises nothing, whatever day it is',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+const weekday = page.locator('#tab-plan .tpl select[data-field="weekday"]');
+const dayNow = new Date().getDay();
+await weekday.selectOption(String((dayNow + 1) % 7));
+await page.reload({ waitUntil: 'networkidle' });
+check('a weekday sticks to the template it was set on',
+  (await page.evaluate(() => state.templates[0].weekday)) === String((dayNow + 1) % 7));
+check('and a template set for another day says nothing today',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+await weekday.selectOption(String(dayNow));
+await page.reload({ waitUntil: 'networkidle' });
+check('a template set for today offers itself on the way in',
+  (await page.locator('#notices .notice [data-act="ask-template"]').innerText()) === 'Use Monday',
+  await page.locator('#notices').innerText());
+check('and has loaded nothing while it waits to be asked',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
+
+await page.click('#notices [data-act="ask-template"]');
+check('taking the offer asks the same question the shelf asks',
+  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  await page.locator('#notices .notice.warn').innerText());
+await page.click('#notices [data-act="load-template"]');
+check('and only then is anything replaced, with the same backup taken first',
+  (await page.evaluate(() => state.routes.length)) === 3
+  && (await page.evaluate(() => Store.backups()[0].label)) === 'Loading the Monday template',
+  await page.evaluate(() => Store.backups()[0].label));
+
+// Back to no day, and the offer goes with it.
+await weekday.selectOption('');
+await page.reload({ waitUntil: 'networkidle' });
+check('turning the weekday off again stops the offer',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
   document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
