@@ -59,7 +59,7 @@ changes shape and grows.
 - [x] **3. ⚠️ Clash rule absorbs `round`.** Position clashes key on position **and** round; a blank round is its own bucket; `multi` ("many cars") positions stay exempt.
       *Done when:* the same spot in two different rounds no longer warns, and the same spot in the same round still does — on screen and under "Check before posting".
       **Risky — review this item individually.** It changes the app's headline feature.
-- [ ] **4. Printed sheet: fold Round in.** Position cell renders `name · round`. Sheet stays four columns; `gapBefore` spacer colspan stays 4.
+- [x] **4. Printed sheet: fold Round in.** Position cell renders `name · round`. Sheet stays four columns; `gapBefore` spacer colspan stays 4.
       *Done when:* A4 print preview shows the round with column widths unchanged.
 - [ ] **5. Left rail: cars panel.** Compact list — reg + status colour chip + route number when assigned (reuse the `assign` string at `app.js:194`). Removes the Free/Parked pools below the table.
       *Done when:* every car shows with status in the rail, nothing renders below the table, and the print stylesheet is untouched.
@@ -140,5 +140,11 @@ which is the environment, not the code.
   the warning live without losing the caret. `npm run screens` also green: its
   exact-set assertion catches a duplicated status line, and raised the same 4
   warnings as before.
+
+- [x] **4. Printed sheet folds Round in** — 2989db3. `spotCell()` joins the
+  spot and the round with a middot; nothing else on the sheet moved, and the
+  print stylesheet was not touched. Gate: `npm test` all checks passed, with
+  three new cases — the cell reads `Spot 1/1 · 2`, the sheet still has four
+  `<th>`s, and the `gapBefore` spacer still has `colspan=4`.
 
 </details>
