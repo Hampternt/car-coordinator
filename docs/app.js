@@ -302,7 +302,7 @@ function renderPlan() {
    between the two managers in the exported JSON file, never in a share code. */
 function renderTemplates() {
   const shelf = state.templates.map((t) => `<div class="tpl">
-      <b>${esc(t.name)}</b>
+      ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
       <span class="rail-count">${t.routes.length} route${t.routes.length === 1 ? '' : 's'}</span>
       ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
     </div>`).join('');
@@ -544,7 +544,9 @@ function renderData() {
 
 function renderNotices() {
   $('#notices').innerHTML = notices.map((n, i) =>
-    `<div class="notice ${n.kind}">${esc(n.text)}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
+    `<div class="notice ${n.kind}">${esc(n.text)}${n.offer
+      ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
+      : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
 }
 
 /* The paper list on the pillar has four columns and has to keep them, so the
@@ -821,10 +823,28 @@ async function dataAction(act, b) {
   render();
 }
 
-const note = (kind, text) => {
+/* A notice can carry one button — the thing it is offering to do. Everything
+   else about it is unchanged: it is dismissable, and dismissing it does
+   nothing else at all. */
+const note = (kind, text, offer = null) => {
   notices = notices.filter((n) => n.text !== text);
-  notices.push({ kind, text });
+  notices.push({ kind, text, offer });
 };
+
+/* One live offer at a time: asking about Tuesday takes Monday's question away
+   rather than leaving two questions on screen that answer each other. */
+const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
+
+/* The confirmation for the only destructive action a click from the day plan.
+   It is a notice rather than a dialog because there is room here to say what
+   is about to be replaced in words — and because the weekday offer needs a
+   notice anyway, so both ways in end at the same question and the same load. */
+function askTemplate(t) {
+  dropOffers();
+  const now = state.routes.length;
+  note('warn', `Load the ${t.name} template over the plan on screen? That replaces the ${now} route${now === 1 ? '' : 's'} there now with the template's ${t.routes.length}. A backup is taken first, so Backups can undo it.`,
+    { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
+}
 
 function applyImport(text, source) {
   const { state: incoming, error, repaired } = Store.parseImport(text, defaults);
@@ -900,6 +920,22 @@ document.addEventListener('click', (e) => {
     case 'save-template':
       if (!addFromInput('#newTemplate', saveTemplate)) return;
       break;
+    // Two acts, because loading a template is two steps on purpose: the shelf
+    // (and the weekday offer) only ever ask, and the button in the question is
+    // the only thing that writes.
+    case 'ask-template':
+      askTemplate(list[i]);
+      break;
+    case 'load-template': {
+      const t = list[i];
+      Store.snapshot(state, `Loading the ${t.name} template`);
+      // Ids are minted here rather than stored, so loading the same template
+      // twice cannot leave two rows sharing one id and editing as one.
+      state.routes = t.routes.map((r) => ({ id: uid(), ...r }));
+      dropOffers();
+      note('info', `Loaded the ${t.name} template: ${state.routes.length} routes. The plan as it was is in Backups.`);
+      break;
+    }
     case 'group-member': {
       const g = list[i];
       const at = g.driverIds.indexOf(b.dataset.driver);

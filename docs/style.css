@@ -79,6 +79,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .notice { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
 .notice .btn { margin-left: auto; flex: none; }
+/* a notice that offers something carries two buttons: the offer, then the
+   dismiss beside it, not spread across the width */
+.notice .btn + .btn { margin-left: 0; }
 
 /* data tab */
 .card { background: var(--panel); padding: 14px 16px; margin-bottom: 16px; }

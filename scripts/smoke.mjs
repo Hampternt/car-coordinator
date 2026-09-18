@@ -699,7 +699,7 @@ check('a template carries every route field the plan does, and no date', await p
 }));
 
 await page.reload({ waitUntil: 'networkidle' });
-check('a saved template survives a reload', (await shelf.locator('b').innerText()) === 'Monday');
+check('a saved template survives a reload', (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Monday');
 
 // Saving a name that is already used replaces it: the second Monday is a
 // correction of the first, not a second Monday to choose between.
@@ -735,6 +735,78 @@ check('deleting a car takes it out of the templates too',
 await page.reload({ waitUntil: 'networkidle' });
 check('so the reload after it has nothing to repair', (await page.locator('#notices .notice').count()) === 0,
   await page.locator('#notices').innerText());
+
+// --- loading a template, behind a confirmation that says what it costs ---
+// The only destructive action a click away from the plan. It asks first, in
+// words, and snapshots before it writes: everything below is that promise.
+const mondayRoutes = [
+  { name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+  { name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
+  { name: '3' },
+];
+const plannedToday = { id: 'r9', name: '9', driver: 'Typed This Morning', carId: 'c1', positionId: 'p2', round: '5' };
+const withMonday = {
+  ...templatePlan,
+  labels: [{ id: 'l1', name: 'Workshop', color: '#6a1b9a' }],
+  routes: [plannedToday],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: mondayRoutes }],
+};
+await loadPlan(withMonday);
+const backupCount = () => page.evaluate(() => Store.backups().length);
+const planDrivers = () => page.evaluate(() => state.routes.map((r) => r.driver));
+const before = await backupCount();
+
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check('clicking a template asks before it does anything',
+  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  await page.locator('#notices .notice.warn').innerText());
+check('and the plan is untouched while the question stands',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
+
+await page.click('#notices .notice.warn [data-act="dismiss"]');
+check('dismissing the question changes nothing at all',
+  (await page.locator('#notices .notice').count()) === 0
+  && JSON.stringify(await planDrivers()) === '["Typed This Morning"]'
+  && (await backupCount()) === before,
+  `${await backupCount()} backups, was ${before}`);
+
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+await page.click('#notices [data-act="load-template"]');
+check('loading replaces every route field the template carries', await page.evaluate(() => {
+  const [one, two, three] = state.routes;
+  return state.routes.length === 3
+    && one.driver === 'Weekday One' && one.carId === 'c1' && one.positionId === 'p1'
+    && one.round === '1' && one.highlight === true
+    && two.gapBefore === true && three.driver === '' && three.carId === ''
+    && new Set(state.routes.map((r) => r.id)).size === 3;   // ids minted, not shared
+}));
+check('the day plan on screen is the template', (await page.locator('#tab-plan tbody tr').count()) === 3
+  && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Weekday One');
+check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === '2026-09-18');
+check('and the question is answered rather than left on screen',
+  (await page.locator('#notices .notice.warn').count()) === 0
+  && (await page.locator('#notices .notice.info').innerText()).includes('Loaded the Monday template: 3 routes'));
+
+await page.click('[data-act="tab"][data-tab="data"]');
+check('the backup taken before the load is in the Data tab',
+  (await page.locator('#tab-data table tbody').first().innerText()).includes('Loading the Monday template'));
+const undo = page.locator('[data-act="restore"]').first();
+await undo.click();
+await undo.click();                                    // two-click confirm
+check('and restoring it brings back the plan that was replaced',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]', JSON.stringify(await planDrivers()));
+
+// A template holds cars by id, so one that has gone to the workshop since it
+// was saved comes back with the app's usual warning rather than a refusal.
+await page.click('[data-act="tab"][data-tab="cars"]');
+await page.locator('#tab-cars tbody tr', { has: page.locator('[data-field="reg"][value="AA11111"]') }).locator('.chip', { hasText: 'Workshop' }).click();
+await page.click('[data-act="tab"][data-tab="plan"]');
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+await page.click('#notices [data-act="load-template"]');
+check('a template that brings back a car in the workshop warns, and still loads',
+  (await page.locator('#tab-plan .problems').innerText()).includes('AA11111 is marked Workshop')
+  && (await page.locator('#tab-plan tbody tr').count()) === 3,
+  await page.locator('#tab-plan .problems').innerText());
 
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
