@@ -849,6 +849,29 @@ await page.reload({ waitUntil: 'networkidle' });
 check('turning the weekday off again stops the offer',
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
+// --- templates are private to this PC, and travel in the JSON file ---
+// The decisions table's call, asserted in both directions: a share code
+// neither carries a template nor disturbs one, and the exported file does
+// carry them, because `normalise()` now names the field.
+await loadPlan(withMonday);
+await page.click('[data-act="tab"][data-tab="data"]');
+const ownCode = await copyCode(page, 'day');
+await readCode(page, ownCode);
+await page.click('[data-act="share-apply"]');
+check('loading a shared list leaves the templates on this PC alone',
+  await page.evaluate(() => state.templates.length === 1 && state.templates[0].name === 'Monday'));
+
+const [tplFile] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
+const tplJson = JSON.parse(await readFile(await tplFile.path(), 'utf8'));
+check('an exported copy carries the templates to the other manager',
+  tplJson.templates.length === 1 && tplJson.templates[0].routes.length === 3);
+
+await loadPlan(templatePlan);                          // a PC with no templates of its own
+await page.click('[data-act="tab"][data-tab="data"]');
+await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(tplJson)) });
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('and importing it brings them in', (await page.locator('#tab-plan .tpl').count()) === 1);
+
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
   document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
