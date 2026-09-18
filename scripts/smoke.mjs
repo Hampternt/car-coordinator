@@ -672,7 +672,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-for (const name of ['plan', 'cars', 'positions', 'labels', 'data']) {
+for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
   await page.click(`[data-act="tab"][data-tab="${name}"]`);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check(`the ${name} tab fits a phone screen`, !wide);
