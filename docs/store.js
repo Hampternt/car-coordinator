@@ -6,7 +6,7 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 2;
+  const SCHEMA = 3;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
@@ -147,12 +147,11 @@ const Store = (() => {
     // use the same field names for everything they do have, so normalise
     // covers them all: what they never wrote comes back as its default.
     //
-    // Templates arrived without a version bump, deliberately: they are added
-    // state, so v2 data still loads correctly and this build reads it without
-    // a word. The case that leaves quiet is the other direction — a build from
-    // before templates, handed a JSON file that has them, drops them on the
-    // first change and says nothing. Recorded in the manifest; a bump is what
-    // would make it speak.
+    // Templates bumped this to v3. Not because loading needs it — v2 data
+    // loads fine either way — but because of the other direction: the two
+    // managers swap JSON files, so a build from before templates will meet one
+    // that has them. Without the bump it drops them on the first change and
+    // says nothing; with it, the v > SCHEMA branch above speaks up first.
     return normalise(raw, defaults);
   }
 
