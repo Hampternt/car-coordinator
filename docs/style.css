@@ -170,4 +170,18 @@ body.show-sheet .sheet {
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 
+/* The QR on the sheet exists so a phone can open this page, so it has to
+   hold together at phone width: the wide tables scroll inside their own
+   container instead of pushing the whole page sideways. */
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; gap: 10px 16px; }
+  .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .tabs button { white-space: nowrap; }
+  main { padding: 16px; }
+  .tab { overflow-x: auto; }
+  table.grid { min-width: 700px; }
+  .pool { grid-template-columns: 1fr; }
+  .sheet .qr { float: none; margin: 6mm 0 0; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
