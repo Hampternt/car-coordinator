@@ -45,7 +45,7 @@ every one touches `docs/app.js`.
       *Done when:* data saved by the parent branch loads with `templates: []` and no repair notice.
 - [x] **2. Save as template.** A button at the foot of the Day plan that names and stores the current routes.
       *Done when:* saving produces a template that survives a reload, and a second save with the same name is handled deliberately (replace or refuse — pick one and say which in the ledger).
-- [ ] **3. ⚠️ Load a template, behind a confirm.** Saved templates render as buttons beside Save. Clicking asks a confirmation that names what is being replaced (e.g. the route count), and calls `Store.snapshot()` **before** overwriting so the Data tab can undo it.
+- [x] **3. ⚠️ Load a template, behind a confirm.** Saved templates render as buttons beside Save. Clicking asks a confirmation that names what is being replaced (e.g. the route count), and calls `Store.snapshot()` **before** overwriting so the Data tab can undo it.
       *Done when:* loading replaces every route field the template carries, a cancel changes nothing at all, and the backup appears in the Data tab's backup list.
       **Risky — review individually.** This is the only destructive action in the app that is one click from the main screen.
 - [ ] **4. Optional weekday auto-apply, default off.** A per-template weekday setting. When set, opening the app on that weekday raises a notice offering the template with one-click apply. Never applies on its own.
@@ -122,5 +122,34 @@ both entry points end in one confirm and one load path.
   route field carried with no date and no stored ids, reload, replace-not-add,
   the kept name, the backup the replace left, delete, and a deleted car
   leaving the template with a clean reload after it.
+
+- [x] **3. ⚠️ Load a template, behind a confirm** (risky — still wants the
+  individual review the item asks for) — 7236f8a. The shelf's name is a button;
+  clicking it only ever **asks**. The question is a warn notice naming both
+  counts — "replaces the 1 route there now with the template's 3. A backup is
+  taken first, so Backups can undo it." — with a single `Load Monday` button
+  inside it. `ask-template` asks, `load-template` writes, and nothing else
+  writes: `Store.snapshot(state, 'Loading the Monday template')` runs before the
+  overwrite, and dismissing the question leaves the plan and the backup list
+  exactly as they were.
+  *Why a notice and not a `<dialog>` or the armed two-click button:* the notice
+  has room to name the cost in a sentence, which "Sure? Click again" has not;
+  `#notices` is already hidden by `@media print` while `dialog` is not (the bug
+  the manager flagged, untouched); and item 4's offer needs a notice regardless,
+  so both entry points share one question and one load path. At most one offer
+  is ever live — asking about Tuesday takes Monday's question away.
+  *Detail worth the review's attention:* route ids are minted at load, not
+  stored, so loading the same template twice cannot leave two rows sharing an id
+  and editing as one. The date is never a template's to bring. A car that went
+  to the workshop since the template was saved comes back with the usual amber
+  warning rather than a refusal — the decisions table's call, asserted.
+  *Also:* item 2's "survives a reload" assertion moved from `b` to the new
+  button, markup this item changed.
+  Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` all checks passed,
+  **150 ok / 0 failed**, 10 new cases — the question names the cost, the plan is
+  untouched while it stands, dismiss changes nothing (routes *and* backup count),
+  every field lands with fresh distinct ids, the table shows it, the date does
+  not move, the question is cleared by answering it, the backup is in the Data
+  tab, restoring it brings the replaced plan back, and the workshop car warns.
 
 </details>
