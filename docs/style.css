@@ -110,6 +110,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* the status colour itself, small enough not to shout */
 .dot { flex: none; width: 10px; height: 10px; background: var(--c, #2e7d32); border: 1px solid rgba(0, 0, 0, .25); }
 .rail-empty { margin: 0; color: #555; font-size: 13px; }
+/* the "not in today" cross: present, but not competing with the name */
+.rail-list .btn { flex: none; padding: 0 5px; font-size: 11px; color: #555; }
+/* someone off the day's crew: still on the roster, just quieter */
+.grid tr.away td { color: #6b6e70; }
 
 /* a laptop in the warehouse office is not always wide: stack rather than squeeze */
 @media (max-width: 980px) {

@@ -88,6 +88,52 @@ check('a click that ends a round edit still lands',
   `round=${await secondRow.locator('[data-field="round"]').inputValue()} class=${await thirdRow.getAttribute('class')}`);
 await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();   // put it back
 
+// --- the driver roster ---
+// The roster starts empty, like the car list, and only ever offers names: the
+// day plan's driver box stays free text, so nothing here can refuse a name.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('the roster starts empty', await page.locator('#tab-drivers .empty').isVisible());
+await page.fill('#newDriver', 'Roster One, Roster Two');
+await page.click('[data-act="add-driver"]');
+check('one box adds several drivers, split on commas not spaces',
+  (await page.locator('#tab-drivers tbody tr').count()) === 2
+  && (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster One');
+await page.click('#tab-drivers tbody tr:nth-child(2) [data-act="up"]');
+check('the roster reorders', (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster Two');
+await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').fill('Roster Three');
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('roster edits survive a reload', (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster Three');
+
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('the roster reaches the day plan as suggestions',
+  (await page.locator('#driverNames option').count()) === 2
+  && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').getAttribute('list')) === 'driverNames');
+check('the rail shows who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
+// The driver typed into row 1 earlier is not on the roster, which is allowed:
+// put a roster name on row 2 and the rail should find it.
+await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('roster three ');
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('the rail matches a name however it was typed',
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText()).includes('Route 2'),
+  await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText());
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="toggle"]').click();
+check('marking someone away takes them out of the rail', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+check('but leaves the route they were written into alone',
+  (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
+
+// Deleting a driver must not touch the day plan: that text is the plan.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const delDriver = page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]');
+await delDriver.click();
+await delDriver.click();                              // two-click confirm
+check('a deleted driver leaves the roster', (await page.locator('#tab-drivers tbody tr').count()) === 1);
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('and the route keeps the name that was typed there',
+  (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
+await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('');
+
 // --- the left rail carries the fleet beside the plan ---
 check('the rail lists every car', (await page.locator('#tab-plan [data-panel="cars"] li').count()) === 3);
 check('the rail says where the assigned one went',

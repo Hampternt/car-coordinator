@@ -5,6 +5,10 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const byId = (arr, id) => arr.find((x) => x.id === id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* Matching the way a person reads, not the way a computer does: " 1" is the
+   round "1", and "ana " is the driver "Ana". Used for rounds and driver names
+   alike; share.js folds registrations the same way, for the same reason. */
+const fold = (s) => String(s || '').trim().toUpperCase();
 
 function today() {
   const d = new Date();
@@ -47,7 +51,7 @@ let notices = [];
 
 const save = () => Store.save(state);
 
-const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels })[kind];
+const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups })[kind];
 
 /* ---------- small html helpers ----------
    Ids reach attributes, and an imported JSON file can carry any string as an
@@ -79,11 +83,10 @@ function labelChips(kind, item) {
    matched the way a person would read them, trimmed and case-folded, for the
    same reason share.js matches registrations that way: a warning that goes
    quiet because someone typed a trailing space is worse than no warning. */
-const roundKey = (round) => String(round || '').trim().toUpperCase();
-const spotKey = (positionId, round) => `${positionId}\u0000${roundKey(round)}`;
+const spotKey = (positionId, round) => `${positionId}\u0000${fold(round)}`;
 // " in round 2", or nothing at all: a plan that uses no rounds must read
 // exactly as it did before rounds existed.
-const roundPhrase = (round) => (roundKey(round) ? ` in round ${String(round).trim()}` : '');
+const roundPhrase = (round) => (fold(round) ? ` in round ${String(round).trim()}` : '');
 
 function usage() {
   // Null-prototype, because ids come from imported files: a car id of
@@ -186,6 +189,39 @@ function railCars(use) {
   </section>`;
 }
 
+/* Routes are keyed by the driver's name, folded: the day plan's driver box is
+   free text and always will be, so the roster recognises a name rather than
+   owning it. Someone written in who is not on the roster still drives. */
+function driverUsage() {
+  const by = Object.create(null);
+  state.routes.forEach((r, at) => {
+    const k = fold(r.driver);
+    if (k) (by[k] ??= []).push({ r, at });
+  });
+  return by;
+}
+
+/* Who is in today, and what they have been given. Availability is the day's,
+   so it is what the rail shows; the roster itself lives on the Drivers tab. */
+function railDrivers() {
+  const assigned = driverUsage();
+  const inToday = state.drivers.filter((d) => d.available);
+  const rows = inToday.map((d) => {
+    const on = assigned[fold(d.name)];
+    const where = on
+      ? `<span class="assign yes">Route ${routeNames(on)}</span>`
+      : '<span class="assign none">Free</span>';
+    return `<li><b>${esc(d.name)}</b>${where}${actBtn('toggle', 'driver', d.id, '\u2715', '', 'data-field="available" title="Not in today"')}</li>`;
+  }).join('');
+  const away = state.drivers.length - inToday.length;
+  return `<section class="rail-panel" data-panel="drivers">
+    <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    ${state.drivers.length
+      ? (inToday.length ? `<ul class="rail-list">${rows}</ul>` : '<p class="rail-empty">Nobody is in today. Bring someone back on the Drivers tab.</p>')
+      : '<p class="rail-empty">No drivers yet \u2014 add them on the Drivers tab.</p>'}
+  </section>`;
+}
+
 function renderPlan() {
   const { lines: found, rows: flagged, use } = problems();
   const rows = state.routes.map((r, at) => {
@@ -216,7 +252,7 @@ function renderPlan() {
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
-      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-"')}</td>
+      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-" list="driverNames"')}</td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
       <td>${field('route', r.id, 'round', r.round, 'class="short" placeholder="-"')}</td>
@@ -246,7 +282,7 @@ function renderPlan() {
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
     <div class="plan">
-      <aside class="rail">${railCars(use)}</aside>
+      <aside class="rail">${railDrivers()}${railCars(use)}</aside>
       <table class="grid">
         <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -260,6 +296,34 @@ function assignCell(entries) {
     const pos = byId(state.positions, r.positionId)?.name;
     return `<span class="assign yes">Route ${esc(r.name)}${r.driver ? ', ' + esc(r.driver) : ''}${pos ? ', ' + esc(pos) : ''}</span>`;
   }).join('');
+}
+
+function renderDrivers() {
+  const assigned = driverUsage();
+  const rows = state.drivers.map((d) => {
+    const on = assigned[fold(d.name)];
+    return `<tr class="${d.available ? '' : 'away'}">
+      <td>${field('driver', d.id, 'name', d.name, 'style="width:200px"')}</td>
+      <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
+      <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In today' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
+      <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
+  }).join('');
+  $('#tab-drivers').innerHTML = `
+    <h2>Drivers</h2>
+    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in today.</p>
+    <div class="bar">
+      <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
+      <button class="btn" data-act="add-driver">+ Add driver</button>
+    </div>
+    ${state.drivers.length
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}`;
+}
+
+/* The roster as suggestions, never as a rulebook: the day plan's driver box
+   stays free text, so everyone is offered, away or not. */
+function renderDriverList() {
+  $('#driverNames').innerHTML = state.drivers.map((d) => `<option value="${esc(d.name)}"></option>`).join('');
 }
 
 function renderCars() {
@@ -448,7 +512,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  renderPlan(); renderDrivers(); renderDriverList(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
   queueQr();
   renderNotices();
 }
@@ -717,6 +781,9 @@ document.addEventListener('click', (e) => {
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
       if (kind === 'label') [...state.cars, ...state.positions].forEach((x) => { if (x.labelId === id) x.labelId = ''; });
+      // A deleted driver leaves every group, but the day plan keeps the name
+      // typed into it: that text is the plan, not a reference to the roster.
+      if (kind === 'driver') state.driverGroups.forEach((g) => { g.driverIds = g.driverIds.filter((x) => x !== id); });
       break;
     case 'clear-day':
       if (!confirmTwice('clear')) return;
@@ -732,6 +799,13 @@ document.addEventListener('click', (e) => {
     case 'add-car':
       if (!addFromInput('#newCar', (v) => v.toUpperCase().split(/[\s,;]+/).filter(Boolean).forEach((reg) => {
         if (!state.cars.some((c) => c.reg === reg)) state.cars.push({ id: uid(), reg, labelId: '', note: '' });
+      }))) return;
+      break;
+    case 'add-driver':
+      // Commas and newlines only: a driver's name has spaces in it, unlike a
+      // registration, so splitting on whitespace would make two of everyone.
+      if (!addFromInput('#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
+        if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push({ id: uid(), name, available: true });
       }))) return;
       break;
     case 'add-position':
@@ -760,7 +834,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  const map = { newDriver: 'add-driver', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
   const act = map[e.target.id];
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });

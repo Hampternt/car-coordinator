@@ -12,6 +12,7 @@
     <div class="brand">Car Coordinator</div>
     <nav class="tabs">
       <button data-act="tab" data-tab="plan">Day plan</button>
+      <button data-act="tab" data-tab="drivers">Drivers</button>
       <button data-act="tab" data-tab="cars">Cars</button>
       <button data-act="tab" data-tab="positions">Positions</button>
       <button data-act="tab" data-tab="labels">Labels</button>
@@ -25,6 +26,7 @@
 
   <main>
     <section id="tab-plan" class="tab"></section>
+    <section id="tab-drivers" class="tab"></section>
     <section id="tab-cars" class="tab"></section>
     <section id="tab-positions" class="tab"></section>
     <section id="tab-labels" class="tab"></section>
@@ -35,6 +37,10 @@
   </main>
 
   <dialog id="shareDlg"></dialog>
+
+  <!-- Suggestions for the day plan's driver box. Out here, not inside the
+       plan, because renderPlan() rebuilds that section wholesale. -->
+  <datalist id="driverNames"></datalist>
 
   <div id="sheet" class="sheet"></div>
 
