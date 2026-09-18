@@ -849,6 +849,29 @@ await page.reload({ waitUntil: 'networkidle' });
 check('turning the weekday off again stops the offer',
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
+// A repair notice and the offer, on screen together: exactly what a template
+// that lost a car, on its own weekday, produces. Dismiss buttons carry the
+// notice's index, so the wrong one going away would be quiet and wrong.
+await loadPlan({
+  ...withMonday,
+  templates: [{
+    id: 't1', name: 'Monday', weekday: String(dayNow),
+    routes: [{ name: '1', driver: 'Weekday One', carId: 'gone' }, ...mondayRoutes.slice(1)],
+  }],
+});
+check('a repair notice and an offer sit side by side', (await page.locator('#notices .notice').count()) === 2,
+  await page.locator('#notices').innerText());
+await page.click('#notices [data-act="ask-template"]');
+check('and the question joins them rather than piling up',
+  (await page.locator('#notices .notice').count()) === 2 && (await page.locator('#notices .notice.warn').count()) === 1,
+  await page.locator('#notices').innerText());
+await page.click('#notices .notice.warn [data-act="dismiss"]');
+check('dismissing the question takes the question, not the notice beside it',
+  (await page.locator('#notices .notice').count()) === 1
+  && (await page.locator('#notices .notice').innerText()).includes('Repaired saved data')
+  && JSON.stringify(await planDrivers()) === '["Typed This Morning"]',
+  await page.locator('#notices').innerText());
+
 // --- templates are private to this PC, and travel in the JSON file ---
 // The decisions table's call, asserted in both directions: a share code
 // neither carries a template nor disturbs one, and the exported file does
