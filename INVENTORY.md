@@ -15,7 +15,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself on its weekday, but that is off unless you turn it on, and even then it only asks.
 
 ## Fleet
-- 🚧 **Offer to split the round out of existing spot names** — see [`manifests/2026-09-18-spot-round-migration.md`](manifests/2026-09-18-spot-round-migration.md).
+- ✅ **Round split out of old spot names** — for lists made when the round was written into the spot's name (`Spot 1/1`). Offered on load, never applied: it states every rename and merge line by line, says how many routes gain a round and how many keep the one already typed, names any setting the merging spots disagree about, and takes a backup before it touches anything. Dismissing changes nothing and it asks again next time.
 - ✅ **Cars** — registrations (paste the whole fleet at once), one-click status chips, free-text note, "Assigned to" badge.
 - ✅ **Positions** — named packing spots, a "many cars" flag for shared ones like the Garage, status and note.
 - ✅ **Labels** — custom status labels with colours.

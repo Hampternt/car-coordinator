@@ -1,6 +1,6 @@
 # Pack: Offer to split the round out of existing spot names
 
-**Status:** ✅ all 4 items done, pack gate green — awaiting the browser walkthrough and a read of item 3
+**Status:** ✅ COMPLETE — 4 items, pack gate green, browser walkthrough done, item 3 read
 **Date:** 2026-09-18
 **Branch:** `spot-round-migration`, cut from `main` at `9c427cf`
 
@@ -113,8 +113,30 @@ note. That is the part worth getting right.
   notice has never been *looked* at. The smoke test proves the `<ul>` is
   there and readable, not that it sits well beside the buttons. First thing
   to look at in the walkthrough, at laptop width and at ~760px.
-- **Left for you:** the browser walkthrough on data with old names, and an
-  individual read of item 3 (the flagged one). Not done here, by design.
+- **Browser walkthrough 2026-09-18** — done on seeded data with old names,
+  at laptop width and at 760px. Seed: `Spot 1/1` + `Spot 1/2` (disagreeing on
+  all three settings), a plain `Spot 2` beside `Spot 2/3`, a `Garage` with no
+  round anywhere, a route carrying a typed round of 9, and a template route on
+  an absorbed spot. The offer listed all of it correctly; applying gave
+  `Spot 1` (keeping `Spot 1/1`'s note, the lowest round), `Spot 2` (the plain
+  name surviving and its routes gaining no round), `Garage` untouched, the
+  typed round 9 preserved, the template route moved onto `Spot 1` with round
+  2, and no dangling position ids. Backup written under the stated label. No
+  console errors. The list box reads well beside the buttons at both widths —
+  the thing no gate proved.
+- **Item 3 read 2026-09-18** — re-planning at the press is right: the report
+  reads back the plan that actually ran, so what was agreed and what was done
+  are the same lines. `b971135`'s message still describes the older behaviour;
+  `64a6545` corrected the code comment, not that message.
+- **Known, not introduced here:** two positions that already share a plain
+  name stay two after the migration (the group has one survivor and only
+  *numbered* members are absorbed). Nothing is corrupted — routes re-point
+  correctly and no id dangles — but the duplicate name that breaks share codes
+  survives. Pre-existing: the app has never deduplicated position names on
+  add. Verified in the browser with `Spot 9`, `Spot 9`, `Spot 9/2`.
+- **Copy defect, not fixed here:** `app.js:1004` reads "the spot below fold
+  into" when exactly one spot is absorbed — the noun pluralises, the verb does
+  not.
 - **Note (item 2):** clicking the weekday template question still clears this
   offer along with it (`dropOffers()`, one live offer at a time). Nothing is
   changed by that and the offer returns on the next load, so it was left as
