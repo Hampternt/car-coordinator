@@ -63,7 +63,7 @@ changes shape and grows.
       *Done when:* A4 print preview shows the round with column widths unchanged.
 - [x] **5. Left rail: cars panel.** Compact list — reg + status colour chip + route number when assigned (reuse the `assign` string at `app.js:194`). Removes the Free/Parked pools below the table.
       *Done when:* every car shows with status in the rail, nothing renders below the table, and the print stylesheet is untouched.
-- [ ] **6. Driver roster + rail panel.** Editable list (add / rename / delete / reorder), starts empty. Day-plan driver field backed by a `<datalist>` of the roster.
+- [x] **6. Driver roster + rail panel.** Editable list (add / rename / delete / reorder), starts empty. Day-plan driver field backed by a `<datalist>` of the roster.
       *Done when:* roster edits persist and roster names are pickable on the day plan while still typeable.
 - [ ] **7. Driver day groups.** Named groups holding a subset of the roster; create, rename, delete, apply. Applying sets the day's available drivers in the rail.
       *Done when:* a group can be built, saved, and applied, and survives a reload. See the assumption above.
@@ -171,5 +171,23 @@ survived.
 here:* `share-apply` assigns `Share.apply()`'s output straight to `state`
 without `Store.normalise` (`app.js`), and `@media print` hides
 `.topbar, main, #notices` but not `dialog`, so an open modal prints.
+
+- [x] **6. Driver roster + rail panel** — e85771b. New **Drivers** tab (before
+  Cars, matching the day plan's Route/Driver/Car order) with add-several,
+  rename, reorder, delete and an In/Away toggle; `railDrivers()` panel above
+  the cars panel; `<datalist id="driverNames">` in `index.html` — not in the
+  plan's markup, which `renderPlan()` rebuilds wholesale — filled by
+  `renderDriverList()`.
+  *Two notes for review:* (a) the `available` flag is item 1's, and its UI
+  (rail panel, In/Away chip) lands here rather than in item 7, because item 7
+  only needs to write it; (b) `roundKey()` from item 3 was renamed `fold()` and
+  is now shared with driver-name matching — one normaliser rather than two, and
+  `share.js` already folds registrations the same way. `problems()` was left
+  alone: nothing here warrants a new warning line.
+  Deleting a driver removes them from every group and touches no route — the
+  name typed into a route is the plan, not a reference to the roster.
+  Gate: `npm test` all checks passed, 12 new cases including reorder, reload,
+  case/space-insensitive matching into the rail, "away" hiding someone without
+  touching their route, and delete leaving the typed name in place.
 
 </details>
