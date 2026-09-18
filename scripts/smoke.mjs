@@ -388,6 +388,26 @@ const malformed = await fetch(base + '%').then((r) => r.status, () => 'connectio
 check('a malformed URL is a 404, not a crash', malformed === 404, String(malformed));
 check('the server is still alive after it', (await fetch(base).then((r) => r.status, () => 0)) === 200);
 
+// --- the page a phone opens must not scroll sideways ---
+// The QR on the printed sheet exists so a phone can open this page, so phone
+// width is a real use, not a courtesy.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [],
+  cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+for (const name of ['plan', 'cars', 'positions', 'labels', 'data']) {
+  await page.click(`[data-act="tab"][data-tab="${name}"]`);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  check(`the ${name} tab fits a phone screen`, !wide);
+}
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+
 // --- prints to A4 ---
 const pdf = await page.pdf({ format: 'A4', printBackground: true });
 check('renders a non-empty A4 PDF', pdf.length > 1000, `${pdf.length} bytes`);
