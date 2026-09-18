@@ -50,6 +50,12 @@ applying it sets who shows as available in the left rail. It is *not* read as a
 template that maps drivers onto specific routes. If you meant the latter, item 7
 changes shape and grows.
 
+> **Answered 2026-09-18, and the answer was "both".** The user's day template is
+> also meant to remember which driver is usually on which route. That half was
+> **deliberately not built here** — it touches the route list, not just the
+> roster, and is being scoped as its own pack. Item 7 shipped the narrow
+> reading only; see the ledger.
+
 ## Items
 
 - [x] **1. Schema: `round`, `drivers`, `driverGroups`.** Bump `schemaVersion`; extend `normalise()` so existing `carcoord:v1` data loads clean with `round: ''`, `drivers: []`, `driverGroups: []`.
@@ -190,7 +196,14 @@ without `Store.normalise` (`app.js`), and `@media print` hides
   case/space-insensitive matching into the rail, "away" hiding someone without
   touching their route, and delete leaving the typed name in place.
 
-- [x] **7. Driver day groups** — 92c051b. Groups live under the roster on the
+- [x] **7. Driver day groups** — 92c051b.
+  **Done condition as built:** a named set of drivers can be created, applied
+  and survives a reload. *Route↔driver memory ("who is usually on Monday's
+  route 3") was deliberately deferred to a follow-up pack — the user's answer
+  asked for it, it touches the route list rather than the roster, and building
+  it here would have grown the item.* No tag field was added either: planning
+  tags are transient ("sick", "coming later") and are a separate pack.
+  Groups live under the roster on the
   Drivers tab (name, roster-as-chips membership, "Use for today", reorder,
   delete) and are applied from the rail, which is where the day gets set up.
   Built to the manifest's assumption: a group is a **named set of drivers**,
