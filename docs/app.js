@@ -555,6 +555,13 @@ function renderNotices() {
     `<div class="notice ${n.kind}">${esc(n.text)}${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
       : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
+
+  const asking = notices.findIndex((n) => n.offer);
+  if (offerRaised && asking >= 0) {
+    offerRaised = false;
+    // 'nearest' so a question already on screen does not scroll the plan away.
+    $('#notices').children[asking]?.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 /* The paper list on the pillar has four columns and has to keep them, so the
@@ -834,9 +841,17 @@ async function dataAction(act, b) {
 /* A notice can carry one button — the thing it is offering to do. Everything
    else about it is unchanged: it is dismissable, and dismissing it does
    nothing else at all. */
+/* The template shelf sits at the foot of a long day plan while the notices sit
+   at its head, so a question raised from down there lands off screen and the
+   click reads as having done nothing at all. Scroll it into view once, as it is
+   raised — not on every render, or the page would yank itself about while the
+   question just sits there waiting. */
+let offerRaised = false;
+
 const note = (kind, text, offer = null) => {
   notices = notices.filter((n) => n.text !== text);
   notices.push({ kind, text, offer });
+  if (offer) offerRaised = true;
 };
 
 /* One live offer at a time: asking about Tuesday takes Monday's question away

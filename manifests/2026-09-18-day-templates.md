@@ -64,6 +64,15 @@ every one touches `docs/app.js`.
 <summary>Progress log</summary>
 
 - Go given 2026-09-18. Branch cut from `day-plan-rail-and-round` at its pack gate.
+- Browser walkthrough (manager, not the implementer): shelf, save, ask, dismiss,
+  900px narrow window and print preview all checked by hand. One defect found
+  that the suite could not see — see below.
+- **Walkthrough fix:** the shelf sits at the foot of a full plan while notices
+  render at its head, so asking from the shelf put the question off screen and
+  the click read as dead. `renderNotices()` now scrolls a newly raised question
+  into view once, with `block: 'nearest'` so a visible question does not move
+  the plan. Regression test added and **proved to bite**: disabling the scroll
+  turns `asking from the shelf scrolls the question into view` red.
 
 **Environment.** No `CLAUDE.md` at the repo root; conventions taken from the
 code, `HANDOFF.md` and the parent manifest. `scripts/check.sh` (the item gate)

@@ -921,6 +921,27 @@ check('the sheet still starts at the top of the page', printed.sheetTop <= 1, `t
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
+// --- a question raised from the shelf has to be somewhere you can see it ---
+// The shelf sits at the foot of a full day plan while notices render at its
+// head. Every other assertion about the question passes whether or not it is
+// on screen, so this is the only one that catches the click that looks dead.
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+await page.locator('#newTemplate').scrollIntoViewIfNeeded();
+const shelfWasBelow = await page.evaluate(() =>
+  document.querySelector('#newTemplate').getBoundingClientRect().top > window.innerHeight / 2);
+check('the shelf is far enough down the plan for this to be a real test', shelfWasBelow);
+await page.locator('[data-act="ask-template"]').first().click();
+check('asking from the shelf scrolls the question into view', await page.evaluate(() => {
+  const q = document.querySelector('#notices .notice.warn');
+  if (!q) return false;
+  const r = q.getBoundingClientRect();
+  return r.top >= 0 && r.bottom <= window.innerHeight;
+}));
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+
 // --- the server turns a bad URL into a 404, not a dead process ---
 const malformed = await fetch(base + '%').then((r) => r.status, () => 'connection died');
 check('a malformed URL is a 404, not a crash', malformed === 404, String(malformed));
