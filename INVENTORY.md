@@ -9,7 +9,6 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Route rows** — route name, driver (free text), car, packing position, with reorder and two-click delete.
 - ✅ **Mark / Gap** — pink highlight on the printout; blank line above a row (used before the HAU routes).
 - ✅ **Warnings, not blocks** — a car on two routes, a spot taken twice, or a marked-up car still in use are listed in an amber box and stripe the row, but never prevent the choice.
-- ✅ **Free / unavailable car pools** — shown below the table.
 - 🚧 **Left rail, driver roster with day groups, and a position/round split** — see [`manifests/2026-09-18-day-plan-rail-and-round.md`](manifests/2026-09-18-day-plan-rail-and-round.md).
 
 ## Fleet

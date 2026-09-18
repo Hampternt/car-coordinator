@@ -689,7 +689,7 @@ function renderShareDialog() {
     ${sum.hasEverything ? `<fieldset>
       <legend>What to take</legend>
       <label><input type="radio" name="shareMode" value="day" ${pending.mode === 'day' ? 'checked' : ''}> Just the day plan (date, routes, drivers)</label>
-      <label><input type="radio" name="shareMode" value="all" ${pending.mode === 'all' ? 'checked' : ''}> Everything \u2014 also update my cars, positions and labels</label>
+      <label><input type="radio" name="shareMode" value="all" ${pending.mode === 'all' ? 'checked' : ''}> Everything \u2014 also update my cars, positions, labels, drivers and day groups</label>
     </fieldset>` : ''}
 
     ${missing.length ? `<label class="block"><input type="checkbox" id="shareAdd" ${pending.addMissing ? 'checked' : ''}> Add the cars and positions I do not have</label>
@@ -806,7 +806,9 @@ document.addEventListener('click', (e) => {
     case 'setLabel': list[i].labelId = b.dataset.label; break;
     case 'del':
       if (!confirmTwice(`del:${id}`)) return;
-      Store.snapshot(state, `Deleting a ${kind}`);
+      // The backup list shows this label as written, so say it the way it
+      // reads on screen rather than the way the code spells it.
+      Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
