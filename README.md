@@ -26,6 +26,12 @@ Optional Windows app — grab the latest from **Releases**:
 
 Every push to `main` runs the tests and then builds and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
 
+## Run it from a checkout
+```
+npm run dev        # serves docs/ on http://localhost:5173 — no npm install needed
+npm run tauri:dev  # the Windows desktop shell instead; needs the Rust toolchain
+```
+
 ## Tests
 ```
 npm install
