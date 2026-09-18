@@ -54,7 +54,7 @@ changes shape and grows.
 
 - [x] **1. Schema: `round`, `drivers`, `driverGroups`.** Bump `schemaVersion`; extend `normalise()` so existing `carcoord:v1` data loads clean with `round: ''`, `drivers: []`, `driverGroups: []`.
       *Done when:* existing localStorage loads with no repair notice and the new fields default.
-- [ ] **2. Split the day-plan column.** Header `Packing round` → `Position` | `Round`. Position select unchanged; Round is a free-text field committing on blur like `driver`.
+- [x] **2. Split the day-plan column.** Header `Packing round` → `Position` | `Round`. Position select unchanged; Round is a free-text field committing on blur like `driver`.
       *Done when:* both fields edit and persist per route.
 - [ ] **3. ⚠️ Clash rule absorbs `round`.** Position clashes key on position **and** round; a blank round is its own bucket; `multi` ("many cars") positions stay exempt.
       *Done when:* the same spot in two different rounds no longer warns, and the same spot in the same round still does — on screen and under "Check before posting".
@@ -106,5 +106,22 @@ which is the environment, not the code.
   lie. *Also in this commit:* `smoke.mjs`'s `schemaVersion === 1` assertion
   became `=== 2`; the bump invalidated it, so it belongs here rather than in
   item 9.
+
+- [x] **2. Split the column** — c6dbaba. Header is `Position` | `Round`; the
+  round is `field('route', …, 'round')`, so it commits per keystroke exactly as
+  `driver` does. "Clear drivers, cars and positions" now clears rounds too, and
+  says so.
+  *Deviation from the item text, with evidence:* the item asked for a redraw
+  when the field is left. Measured in Chromium: the browser blurs on mousedown,
+  so a `change`-time `render()` lands between mousedown and mouseup and the
+  click that ended the edit is swallowed (debug run: round kept, "Mark" never
+  toggled; the same run inside the suite lost the round instead). Instead the
+  plan redraws on the keystroke that moves the warnings — compared through a
+  cheap `problemSig()` — and the caret is restored. `smoke.mjs` keeps the
+  failing case as a regression: type a round, click another row's Mark, both
+  must take.
+  Gate: `node --check docs/app.js`, `npm test` all checks passed (6 new/round
+  cases: split columns, free text, click-still-lands, survives reload, cleared
+  by Clear, restored from a backup).
 
 </details>
