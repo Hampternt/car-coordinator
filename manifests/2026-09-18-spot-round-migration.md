@@ -1,6 +1,6 @@
 # Pack: Offer to split the round out of existing spot names
 
-**Status:** 🚧 in flight — items 1-3 done
+**Status:** ✅ all 4 items done, pack gate green — awaiting the browser walkthrough and a read of item 3
 **Date:** 2026-09-18
 **Branch:** `spot-round-migration`, cut from `main` at `9c427cf`
 
@@ -52,7 +52,7 @@ note. That is the part worth getting right.
 - [x] **3. ⚠️ Apply it.** `Store.snapshot()` first, then merge positions, re-point routes, fill blank rounds only, and report what was done.
       *Done when:* applying produces exactly the plan that was shown, an already-filled round is untouched, and restoring the backup returns the old names.
       **Risky — review individually.** It rewrites positions and routes together.
-- [ ] **4. Tests.** Including the case that motivates the pack: PC A migrates, PC B does not, and a share code between them is shown to break — then both migrate and it works.
+- [x] **4. Tests.** Including the case that motivates the pack: PC A migrates, PC B does not, and a share code between them is shown to break — then both migrate and it works.
       *Done when:* `npm test` and `npm run screens` pass, with the two-PC case asserted both ways.
 
 ## Gates
@@ -88,6 +88,21 @@ note. That is the part worth getting right.
   template moved, the printed sheet unchanged, and restoring the backup).
   **Still flagged risky — wants an individual read:** it rewrites positions,
   routes and templates in one pass.
+- **Item 4** `34ad990` — the two-PC case in `scripts/smoke.mjs`: PC A splits,
+  PC B has not, the shared code is asserted to arrive with the position blank
+  on three routes ("Left blank: Spot 1"); then PC B splits, the same code
+  lands on its own spot ids with the rounds, and both sheets come out
+  character for character identical.
+- **Pack gate 2026-09-18:** `./scripts/check.sh` — CHECK OK.
+  `CHROMIUM_PATH=/usr/bin/google-chrome npm test` — **all checks passed**,
+  212 checks, 0 failures, no console errors, A4 PDF rendered.
+  `CHROMIUM_PATH=/usr/bin/google-chrome npm run screens` — **no console
+  errors, 4 warnings raised and asserted**; every screenshot re-rendered
+  byte-identical, so the notice's new list box changed no existing layout.
+  (Plain `npm test` cannot run on this machine — no browser binary — so
+  `CHROMIUM_PATH` is required, as the pack's Gates section already says.)
+- **Left for you:** the browser walkthrough on data with old names, and an
+  individual read of item 3 (the flagged one). Not done here, by design.
 - **Note (item 2):** clicking the weekday template question still clears this
   offer along with it (`dropOffers()`, one live offer at a time). Nothing is
   changed by that and the offer returns on the next load, so it was left as
