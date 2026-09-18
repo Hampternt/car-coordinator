@@ -29,8 +29,10 @@ function defaults() {
     schemaVersion: Store.SCHEMA,
     date: today(),
     qrOnSheet: true,
-    positions: ['Spot 1/1', 'Spot 1/2', 'Spot 2/1', 'Spot 2/2', 'Spot 3/1', 'Spot 3/2',
-      'Spot 4/1', 'Spot 5/1', 'Garage'].map(pos),
+    // Just the spots. The number after the slash on the pillar sheet is the
+    // round, not part of the spot's name, so it lives in the route's own round
+    // field and the two are joined back together for the printout.
+    positions: ['Spot 1', 'Spot 2', 'Spot 3', 'Spot 4', 'Spot 5', 'Garage'].map(pos),
     labels: [
       { id: uid(), name: 'Out of service', color: '#c62828' },
       { id: uid(), name: 'Unavailable', color: '#ef6c00' },
@@ -109,6 +111,108 @@ function usage() {
     }
   });
   return { cars, pos, spots };
+}
+
+/* ---------- the round hiding inside a spot's name ----------
+   Before a route carried a round of its own, the round was written into the
+   spot's name the way it is written by hand on the pillar sheet: "Spot 1/1"
+   is spot one, round one. Both of those names are the same physical spot, so
+   taking the round back out is a merge and not a rename — "Spot 1/1" and
+   "Spot 1/2" end as one "Spot 1", and every route on the one that goes has to
+   be re-pointed at the one that stays.
+
+   spotRoundPlan() only describes that: it writes nothing, and the offer reads
+   out the very object that applying it works from, so what the leader agrees
+   to and what is done to the data cannot drift apart. */
+
+// "Spot 1/1" -> { base: 'Spot 1', round: '1' }, and null for a name that is
+// only a name. The round stays text, exactly as a route's round is text.
+function spotNameParts(name) {
+  const m = /^(.*\S)\s*\/\s*(\d+)$/.exec(String(name || '').trim());
+  return m ? { base: m[1], round: m[2] } : null;
+}
+
+// Which of the positions folding into one spot keeps its settings. The lowest
+// round wins, so the answer does not depend on the order the list happens to
+// be in — except that a position already named "Spot 1" outranks every
+// numbered one: it is the name the leader already keeps, and its routes have
+// no round in their name to gain.
+function spotRank(m) {
+  return m.round === null ? -1 : Number(m.round);
+}
+
+/* Everything the migration would do, as data. Returns spots: [] when no
+   position has a round in its name, which is the answer on every PC that
+   started after this shipped. Never touches what it is given. */
+function spotRoundPlan(st) {
+  const positions = st.positions || [];
+
+  // Group by the name each position would end up under. A position that
+  // already has no round in its name joins its group too: "Spot 1" and
+  // "Spot 1/1" have to end as one spot rather than two of one name, which is
+  // the very thing that makes a share code blank the position on every route.
+  const groups = new Map();
+  positions.forEach((p) => {
+    const parts = spotNameParts(p.name);
+    const base = parts ? parts.base : String(p.name || '').trim();
+    if (!fold(base)) return;                      // a position named "/1" has no spot in it
+    const group = groups.get(fold(base)) || [];
+    group.push({ id: p.id, name: p.name, round: parts ? parts.round : null, multi: p.multi, labelId: p.labelId, note: p.note });
+    groups.set(fold(base), group);
+  });
+
+  const spots = [];
+  for (const members of groups.values()) {
+    if (!members.some((m) => m.round !== null)) continue;        // nothing to split out
+    const keep = members.reduce((a, b) => (spotRank(b) < spotRank(a) ? b : a));
+    const absorbed = members.filter((m) => m !== keep && m.round !== null);
+    // The settings of the absorbed positions are dropped rather than merged,
+    // because there is no honest way to merge two notes or two statuses. Say
+    // which ones disagree, so the offer can name what is being decided.
+    const conflicts = [];
+    const says = (what, get) => { if (absorbed.some((m) => get(m) !== get(keep))) conflicts.push(what); };
+    says('"many cars"', (m) => m.multi === true);
+    says('the status', (m) => m.labelId || '');
+    says('the note', (m) => String(m.note || '').trim());
+    spots.push({
+      // What it is called now, and what it would be called. A position that
+      // never had a round in its name keeps the name as typed.
+      keepId: keep.id, keepName: keep.name, name: keep.round === null ? keep.name : spotNameParts(keep.name).base,
+      round: keep.round, absorbed, conflicts,
+    });
+  }
+
+  // What each position means for the routes standing on it: where they move
+  // to, and the round their old spot name spelled out. Read before anything
+  // is re-pointed, because re-pointing is what takes the name away.
+  const moveTo = new Map();
+  const roundFrom = new Map();
+  for (const s of spots) {
+    if (s.round !== null) roundFrom.set(s.keepId, s.round);
+    for (const m of s.absorbed) { moveTo.set(m.id, s.keepId); roundFrom.set(m.id, m.round); }
+  }
+
+  // A round the leader typed is never overwritten: the name says round 1 and
+  // the route says round 2 because someone moved that car, and the route is
+  // the newer fact. Folded like the clash rule folds it, so a round of " "
+  // counts as blank rather than as a round nobody can see.
+  const tally = (routes) => {
+    const out = { filled: 0, kept: 0 };
+    for (const r of routes || []) {
+      if (!roundFrom.has(r.positionId)) continue;
+      if (fold(r.round)) out.kept++; else out.filled++;
+    }
+    return out;
+  };
+
+  // Templates hold a position and a round per route exactly as the day plan
+  // does, so they migrate with it. Left behind, every template route on an
+  // absorbed spot would come back on the next load as "pointed at a position
+  // that is gone" — a saved plan quietly losing its spots.
+  const templates = (st.templates || []).map((t) => ({ id: t.id, name: t.name, ...tally(t.routes) }))
+    .filter((t) => t.filled || t.kept);
+
+  return { spots, moveTo, roundFrom, routes: tally(st.routes), templates };
 }
 
 /* ---------- views ---------- */
@@ -452,7 +556,7 @@ function renderPositions() {
     <h2>Positions</h2>
     <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning.</p>
     <div class="bar">
-      <input id="newPos" type="text" placeholder="Name, e.g. Spot 6/1 or Port 3">
+      <input id="newPos" type="text" placeholder="Name, e.g. Spot 6 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>
     </div>
     <table class="grid"><thead><tr><th>Name</th><th>Sharing</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -555,8 +659,13 @@ function renderData() {
 }
 
 function renderNotices() {
+  // What it says sits in its own box, so the buttons stay a row beside it
+  // rather than joining the list. A notice that offers to change saved data
+  // states every line of what it would do; one that has nothing to list is
+  // the sentence alone, exactly as before.
   $('#notices').innerHTML = notices.map((n, i) =>
-    `<div class="notice ${n.kind}">${esc(n.text)}${n.offer
+    `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
+      ? `<ul>${n.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
       : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
 
@@ -569,8 +678,10 @@ function renderNotices() {
 }
 
 /* The paper list on the pillar has four columns and has to keep them, so the
-   round travels inside the packing cell: "Spot 1/1 · 2". */
-const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join(' \u00b7 ');
+   round travels inside the packing cell, written the way it is written by hand:
+   spot then round, separated by a slash. "Spot 1" packed on round 1 prints as
+   "Spot 1/1". A route with no round prints just the spot. */
+const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join('/');
 
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
@@ -855,9 +966,9 @@ async function dataAction(act, b) {
    question just sits there waiting. */
 let offerRaised = false;
 
-const note = (kind, text, offer = null) => {
+const note = (kind, text, offer = null, lines = []) => {
   notices = notices.filter((n) => n.text !== text);
-  notices.push({ kind, text, offer });
+  notices.push({ kind, text, offer, lines });
   if (offer) offerRaised = true;
 };
 
@@ -869,6 +980,102 @@ const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a
    notice anyway, so both ways in end at the same question and the same load. */
+/* The offer to take the round out of the spot names. It only ever asks, and
+   it asks with the list in its hand: every old name, what it becomes, what
+   merges into what, how many routes gain a round and how many keep the one
+   they were given. A leader agreeing to this is agreeing to a stated list,
+   not to a description of one — this rewrites saved names, and the only way
+   back is the backup taken when the button is pressed.
+
+   Raised beside the weekday template question rather than instead of it: the
+   two are different questions and neither answers the other. Asking about a
+   template does take this one off the screen (dropOffers), which is no loss —
+   nothing has been changed, and it is raised again on the next load. */
+const andList = (words) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
+
+/* One line per position, each saying where it lands. A spot that is already
+   called "Spot 1" keeps its name and its settings; the numbered ones fold
+   into it. The offer reads these out and so does the report afterwards, so
+   what was agreed to and what was done are the same list of lines. */
+function spotNameLines(plan) {
+  const lines = [];
+  for (const s of plan.spots) {
+    lines.push(s.round === null
+      ? `${s.keepName} → stays exactly as it is: the name the spot${s.absorbed.length === 1 ? '' : 's'} below fold into`
+      : `${s.keepName} → ${s.name}, round ${s.round}`);
+    for (const a of s.absorbed) lines.push(`${a.name} → ${s.name}, round ${a.round} — the same ${s.name}: two spots become one`);
+  }
+  return lines;
+}
+
+function spotRoundLines(plan) {
+  const lines = spotNameLines(plan);
+  const { filled, kept } = plan.routes;
+  if (filled) lines.push(`${filled} route${filled === 1 ? ' has its round' : 's have their rounds'} filled in from the spot name.`);
+  if (kept) lines.push(`${kept} route${kept === 1 ? '' : 's'} already ${kept === 1 ? 'has a round' : 'have rounds'} typed in and ${kept === 1 ? 'is' : 'are'} left exactly as ${kept === 1 ? 'it is' : 'they are'} — what was typed wins over the name.`);
+  for (const t of plan.templates) {
+    const say = [t.filled ? `${t.filled} route${t.filled === 1 ? '' : 's'} filled in` : '', t.kept ? `${t.kept} left as typed` : ''].filter(Boolean);
+    lines.push(`The ${t.name.trim() || 'unnamed'} template moves with the plan: ${say.join(', ')}.`);
+  }
+
+  for (const s of plan.spots) {
+    if (!s.conflicts.length) continue;
+    const names = andList([s.keepName, ...s.absorbed.map((a) => a.name)]);
+    lines.push(`${names} do not agree about ${andList(s.conflicts)}. ${s.name} keeps what ${s.keepName} has — ${s.round === null ? 'the spot that already had the plain name wins' : 'the lowest round wins'}.`);
+  }
+
+  lines.push('Do this on both PCs before swapping share codes again: a shared list finds a spot by its name, so while one side has split and the other has not, a code from one arrives on the other with the position blank on every route.');
+  lines.push('Dismissing this (✕) changes nothing at all, and the question comes back next time you open the app.');
+  return lines;
+}
+
+/* The only thing in this pack that writes, and it runs from one place: the
+   button inside the offer that has just listed what it would do.
+
+   The plan it works from is worked out again at the press rather than kept
+   from the offer, because the list on screen can be minutes old: a round
+   typed, a spot added or renamed since it was raised all belong in what
+   happens. The report afterwards reads that same plan back out, so what is
+   claimed is what was done.
+
+   The surviving position is renamed where it stands, so the Positions tab
+   does not reshuffle under the leader; the absorbed ones go, and everything
+   standing on one of them — the day plan and the saved templates alike — is
+   moved onto the survivor and given the round its old spot name spelled out.
+   A round already typed in is never overwritten: the name says round 1 and
+   the route says 2 because somebody moved that car, and the route is the
+   newer fact. */
+function applySpotRoundSplit(plan) {
+  const repoint = (routes) => {
+    for (const r of routes || []) {
+      // The round comes from the position the route is on now, so read it
+      // before the move: re-pointing is what takes the old name away.
+      const round = plan.roundFrom.get(r.positionId);
+      if (round === undefined) continue;
+      if (!fold(r.round)) r.round = round;
+      if (plan.moveTo.has(r.positionId)) r.positionId = plan.moveTo.get(r.positionId);
+    }
+  };
+  repoint(state.routes);
+  for (const t of state.templates || []) repoint(t.routes);
+
+  for (const s of plan.spots) {
+    const keep = byId(state.positions, s.keepId);
+    if (keep) keep.name = s.name;
+  }
+  state.positions = state.positions.filter((p) => !plan.moveTo.has(p.id));
+}
+
+function offerSpotRoundSplit() {
+  const plan = spotRoundPlan(state);
+  if (!plan.spots.length) return;                      // nothing has a round in its name
+  const merging = plan.spots.reduce((n, s) => n + s.absorbed.length, 0);
+  note('warn',
+    `Your packing spots still carry the round in their names. On the pillar sheet "Spot 1/1" is spot one, round one, and the app now keeps that round on the route instead${merging ? `, so ${merging === 1 ? 'one of these spots is' : `${merging} of these spots are`} the same spot as another and would be merged` : ''}. Nothing has been changed yet — this is the whole of what the button would do, and a backup is taken first:`,
+    { act: 'split-rounds', kind: '', id: '', text: 'Split the rounds out' },
+    spotRoundLines(plan));
+}
+
 /* The calendar half of templates, and the whole of it: a template offers
    itself on its day and never applies itself. It is opt-in per template —
    nothing has a weekday until one is chosen — because the plan on screen may
@@ -998,6 +1205,23 @@ document.addEventListener('click', (e) => {
       note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
       break;
     }
+    // The offer's button, and the only way in. The snapshot is what makes it
+    // safe to agree to: Backups can put every old name back in one click.
+    case 'split-rounds': {
+      const plan = spotRoundPlan(state);
+      // Nothing left to split: the button was pressed twice, or another tab
+      // on the same browser got there first.
+      if (!plan.spots.length) { dropOffers(); break; }
+      Store.snapshot(state, 'Splitting the round out of the spot names');
+      applySpotRoundSplit(plan);
+      const { filled, kept } = plan.routes;
+      const merged = plan.spots.reduce((n, s) => n + s.absorbed.length, 0);
+      const renamed = plan.spots.reduce((n, s) => n + (s.round === null ? 0 : 1) + s.absorbed.length, 0);
+      dropOffers();
+      note('info', `Done. ${renamed} spot name${renamed === 1 ? '' : 's'} had the round taken out${merged ? `, and ${merged} of them turned out to be the same spot as another and ${merged === 1 ? 'was' : 'were'} merged into it` : ''}. ${filled} route${filled === 1 ? '' : 's'} had the round filled in${kept ? `, and ${kept} kept the round already typed in` : ''}. The names as they were are in Backups, under "Splitting the round out of the spot names".`,
+        null, spotNameLines(plan));
+      break;
+    }
     case 'add-position':
       if (!addFromInput('#newPos', (name) => state.positions.push({ id: uid(), name, multi: false, labelId: '', note: '' }))) return;
       break;
@@ -1042,8 +1266,11 @@ async function start() {
   }
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
-  // An offer, never an application: this only ever adds a notice with a button
-  // in it, and that button asks the same question the shelf asks.
+  // Offers, never applications: these only ever add a notice with a button in
+  // it. The spot names come first because they are about the data itself
+  // rather than about today, and because the question scrolled into view
+  // should be the one that has to be answered before share codes work again.
+  offerSpotRoundSplit();
   offerTodaysTemplate();
   render();
 

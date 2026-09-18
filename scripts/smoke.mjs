@@ -215,7 +215,7 @@ check('sheet shows the car', sheet.includes('AA11111'));
 // Four columns is the whole constraint: the sheet mirrors the paper list on
 // the pillar, so the round rides inside the packing cell rather than taking a
 // column of its own.
-check('sheet folds the round into the packing cell', /Spot 1\/1 \u00b7 2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
+check('sheet folds the round into the packing cell', /Spot 1\/2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
 check('sheet still has four columns', (await page.locator('#sheet thead th').count()) === 4);
 check('and the gap spacer still spans all four', (await page.locator('#sheet tr.spacer td').first().getAttribute('colspan')) === '4');
 
@@ -257,7 +257,7 @@ check('survives corrupt saved data', await page.locator('#notices .notice.warn')
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: 'not-a-date', labels: 'nope', cars: [{ id: 'c1', reg: 'DD44444' }],
-  positions: [{ id: 'p1', name: 'Spot 9/9' }],
+  positions: [{ id: 'p1', name: 'Spot 9' }],
   routes: [{ id: 'r1', name: '1', carId: 'ghost', positionId: 'p1', driver: 'Kept' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
@@ -269,7 +269,7 @@ check('keeps the good fields while repairing', (await page.locator('#tab-plan tb
 // opening the new build on Monday should see nothing at all happen.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
@@ -283,7 +283,7 @@ check('v1 data gains round, drivers and driver groups', await page.evaluate(() =
 // empty template shelf and nothing to read about it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
   drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
 })));
@@ -296,7 +296,7 @@ check('v2 data loads with an empty template list and no repair notice',
 // repair: a car deleted since it was saved must not come back as a ghost id.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1' }],
   templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
     { name: '1', driver: 'Kept', carId: 'gone', positionId: 'p1', round: '2' },
@@ -321,6 +321,167 @@ check('warns about data from a newer version', (await page.locator('#notices .no
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
+// --- the round inside a spot's name: the plan, before anything is written ---
+// spotRoundPlan() is the whole migration as data. It is what the offer reads
+// out and what applying it works from, so it is worth pinning down on its own:
+// a merge, a round someone typed by hand, and two spots that disagree.
+const fixture = {
+  positions: [
+    { id: 'p1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'p2', name: 'Spot 1/2', multi: true, labelId: 'L1', note: 'lift parked in it' },
+    { id: 'p3', name: 'Spot 2/1', multi: false, labelId: '', note: '' },
+    { id: 'p4', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [
+    { id: 'r1', name: '1', positionId: 'p1', round: '' },        // gains round 1
+    { id: 'r2', name: '2', positionId: 'p2', round: '' },        // gains round 2, and moves to p1
+    { id: 'r3', name: '3', positionId: 'p2', round: '3' },       // keeps the 3 someone typed
+    { id: 'r4', name: '4', positionId: 'p4', round: '' },        // the Garage is not touched at all
+  ],
+  templates: [{ id: 't1', name: 'Monday', routes: [{ positionId: 'p2', round: '' }, { positionId: 'p4', round: '' }] }],
+};
+const planned = await page.evaluate((fx) => {
+  const before = JSON.stringify(fx);
+  const plan = spotRoundPlan(fx);
+  return {
+    untouched: JSON.stringify(fx) === before,
+    spots: plan.spots.map((s) => ({ name: s.name, keepId: s.keepId, keepName: s.keepName, round: s.round, absorbed: s.absorbed.map((a) => a.name), conflicts: s.conflicts })),
+    movesTo: plan.moveTo.get('p2'),
+    garageTouched: plan.roundFrom.has('p4') || plan.moveTo.has('p4'),
+    routes: plan.routes,
+    templates: plan.templates,
+    // Nothing to split out: the answer on every PC that started after this
+    // shipped, and the reason the offer stays quiet there.
+    quiet: spotRoundPlan({ positions: [{ id: 'z', name: 'Spot 1' }, { id: 'y', name: 'Garage' }], routes: [] }).spots.length,
+  };
+}, fixture);
+check('the plan describes itself without touching the state it read', planned.untouched);
+check('two spots to split, and the Garage is left out of it', planned.spots.length === 2 && !planned.garageTouched, JSON.stringify(planned.spots));
+check('the lowest round keeps the position, the rest merge into it',
+  planned.spots[0].name === 'Spot 1' && planned.spots[0].keepId === 'p1' && planned.spots[0].round === '1'
+  && planned.spots[0].absorbed.join() === 'Spot 1/2' && planned.movesTo === 'p1', JSON.stringify(planned.spots[0]));
+check('and the settings the merge has to decide are named, not resolved in silence',
+  planned.spots[0].conflicts.join(', ') === '"many cars", the status, the note', planned.spots[0].conflicts.join(', '));
+check('a spot with nothing to merge into it is still split', planned.spots[1].keepName === 'Spot 2/1' && planned.spots[1].name === 'Spot 2' && !planned.spots[1].absorbed.length);
+check('routes: two gain the round their spot spelled out, one keeps the round it was given',
+  planned.routes.filled === 2 && planned.routes.kept === 1, JSON.stringify(planned.routes));
+check('a saved template migrates with the plan', planned.templates.length === 1 && planned.templates[0].name === 'Monday' && planned.templates[0].filled === 1, JSON.stringify(planned.templates));
+check('and a fleet with no round in any name has nothing to offer', planned.quiet === 0);
+
+// "Spot 1" and "Spot 1/2" side by side have to end as one spot, not two of
+// one name: two positions of one name is what makes a share code blank the
+// position on every route. The one already named "Spot 1" is the survivor —
+// it is the name the leader keeps, and its routes have no round to gain.
+const already = await page.evaluate(() => {
+  const plan = spotRoundPlan({
+    positions: [{ id: 'q1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Spot 1/2', multi: false, labelId: '', note: '' }],
+    routes: [{ id: 'r1', positionId: 'q1', round: '' }, { id: 'r2', positionId: 'q2', round: '' }],
+  });
+  const s = plan.spots[0];
+  return { spots: plan.spots.length, keepId: s.keepId, name: s.name, round: s.round, absorbed: s.absorbed.map((a) => a.id), routes: plan.routes };
+});
+check('a spot that already has the plain name absorbs the numbered one',
+  already.spots === 1 && already.keepId === 'q1' && already.name === 'Spot 1' && already.absorbed.join() === 'q2', JSON.stringify(already));
+check('and its own routes are left alone, rather than being given a round out of nowhere',
+  already.round === null && already.routes.filled === 1 && already.routes.kept === 0, JSON.stringify(already.routes));
+
+// --- the offer: the list, spelled out, before anything is written ---
+// Data as a leader who started before this change still has it: the round
+// baked into the spot name, two of those names meaning one spot, and a round
+// already typed onto one route by hand.
+const oldNames = {
+  schemaVersion: 3, date: '2026-09-18', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Out of service', color: '#c62828' }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }],
+  positions: [
+    { id: 'p1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'p2', name: 'Spot 1/2', multi: true, labelId: 'L1', note: 'pallet jack in it' },
+    { id: 'p3', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1', round: '', highlight: false, gapBefore: false },
+    { id: 'r2', name: '2', driver: 'Bo', carId: '', positionId: 'p2', round: '', highlight: false, gapBefore: false },
+    { id: 'r3', name: '3', driver: 'Cai', carId: '', positionId: 'p2', round: '4', highlight: false, gapBefore: false },
+    { id: 'r4', name: '4', driver: 'Dee', carId: '', positionId: 'p3', round: '', highlight: false, gapBefore: false },
+  ],
+  drivers: [], driverGroups: [],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c1', positionId: 'p2', round: '', highlight: false, gapBefore: false }] }],
+};
+const loadOldNames = async (pg) => {
+  await pg.evaluate((plan) => localStorage.setItem('carcoord:v1', JSON.stringify(plan)), oldNames);
+  await pg.reload({ waitUntil: 'networkidle' });
+};
+await loadOldNames(page);
+const offer = page.locator('#notices .notice.warn');
+check('old spot names raise the offer', (await offer.count()) === 1 && (await offer.locator('[data-act="split-rounds"]').innerText()) === 'Split the rounds out', await page.locator('#notices').innerText());
+const offerLines = await offer.locator('li').allInnerTexts();
+check('it names every spot, old name to new, with the round it carried',
+  offerLines[0] === 'Spot 1/1 → Spot 1, round 1' && offerLines[1] === 'Spot 1/2 → Spot 1, round 2 — the same Spot 1: two spots become one',
+  offerLines.slice(0, 2).join(' | '));
+check('and says nothing about the spot it is not touching', !offerLines.join(' ').includes('Garage'));
+check('the counts separate a round it fills in from a round someone typed',
+  offerLines.some((l) => l === '2 routes have their rounds filled in from the spot name.')
+  && offerLines.some((l) => l.startsWith('1 route already has a round typed in and is left exactly as it is')),
+  offerLines.join(' | '));
+check('a saved template is counted too, by name', offerLines.some((l) => l === 'The Monday template moves with the plan: 1 route filled in.'), offerLines.join(' | '));
+check('the merge conflict is named, and so is what wins',
+  offerLines.some((l) => l === 'Spot 1/1 and Spot 1/2 do not agree about "many cars", the status and the note. Spot 1 keeps what Spot 1/1 has — the lowest round wins.'),
+  offerLines.join(' | '));
+check('it tells both PCs to do this before swapping codes again', offerLines.some((l) => l.includes('before swapping share codes again')));
+
+// Dismissing is not an answer, and must cost nothing: the saved data has to
+// come back byte for byte, because the offer is raised again next time.
+const savedBefore = await page.evaluate(() => localStorage.getItem('carcoord:v1'));
+await offer.locator('[data-act="dismiss"]').click();
+check('dismissing takes the question away', (await page.locator('#notices .notice').count()) === 0);
+check('and leaves the saved data byte for byte as it was', (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === savedBefore);
+await page.reload({ waitUntil: 'networkidle' });
+check('the question comes back on the next load', (await page.locator('#notices .notice.warn [data-act="split-rounds"]').count()) === 1);
+
+// --- applying it: exactly the plan that was shown, and nothing besides ---
+// The page is still on the offer raised above, so this is the leader's own
+// route into it: read the list, press the button.
+await page.locator('[data-act="split-rounds"]').click();
+const done = await page.evaluate(() => ({
+  positions: state.positions.map((p) => [p.id, p.name, p.multi, p.labelId, p.note].join('|')),
+  routes: state.routes.map((r) => [r.id, r.positionId, r.round].join('|')),
+  template: state.templates[0].routes.map((r) => [r.positionId, r.round].join('|')),
+  offers: notices.filter((n) => n.offer).length,
+  backup: Store.backups()[0].label,
+}));
+check('the two spots are one spot now, and the Garage is untouched',
+  done.positions.join(' / ') === 'p1|Spot 1|false|| / p3|Garage|true||', done.positions.join(' / '));
+check('every route on either name stands on the survivor',
+  done.routes.slice(0, 3).every((r) => r.split('|')[1] === 'p1'), done.routes.join(' / '));
+check('a blank round is filled in from the name the route stood on',
+  done.routes[0] === 'r1|p1|1' && done.routes[1] === 'r2|p1|2', done.routes.join(' / '));
+check('a round someone typed is left exactly as it was', done.routes[2] === 'r3|p1|4', done.routes[2]);
+check('a route on a spot with no round in its name is not touched at all', done.routes[3] === 'r4|p3|', done.routes[3]);
+check('the saved template moved with the plan', done.template.join() === 'p1|2', done.template.join());
+check('the question is answered and gone', done.offers === 0);
+check('and the report says what was done', (await page.locator('#notices .notice.info').innerText()).includes('2 routes had the round filled in'), await page.locator('#notices .notice.info').innerText());
+check('a backup was taken first, named for what it was taken before', done.backup === 'Splitting the round out of the spot names', done.backup);
+
+// The point of the whole exercise: the paper sheet is unchanged. "Spot 1"
+// packed in round 1 prints as "Spot 1/1", exactly as the old name did.
+await page.click('[data-act="tab"][data-tab="preview"]');
+const splitSheet = await page.locator('#sheet').innerText();
+check('the printed sheet reads exactly as it did before the split',
+  splitSheet.includes('Spot 1/1') && splitSheet.includes('Spot 1/2') && splitSheet.includes('Spot 1/4'), splitSheet.split('\n').slice(0, 6).join(' / '));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('the offer does not come back once there is nothing to split', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// One click in Backups undoes the lot. It is the only way back, so it is
+// worth a check of its own rather than trusting the label.
+await page.click('[data-act="tab"][data-tab="data"]');
+const undoSplit = page.locator('[data-act="restore"]').first();
+await undoSplit.click();
+await undoSplit.click();                              // two-click confirm
+check('restoring the backup brings the old names, and the routes, back', await page.evaluate(() =>
+  state.positions.map((p) => p.name).join() === 'Spot 1/1,Spot 1/2,Garage'
+  && state.routes.map((r) => `${r.positionId}:${r.round}`).join() === 'p1:,p2:,p2:4,p3:'));
+
 // --- sharing between two PCs ---
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
@@ -330,7 +491,7 @@ const planA = {
   drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   cars: [{ id: 'a1', reg: 'AA11111', labelId: '', note: '' }, { id: 'a2', reg: 'BB22222', labelId: 'L1', note: 'back Friday' }],
-  positions: [{ id: 'q1', name: 'Spot 1/1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
+  positions: [{ id: 'q1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
   routes: [
     { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', round: '2', highlight: true, gapBefore: false },
     { id: 'x2', name: 'HAU 1', driver: 'Bo', carId: 'a2', positionId: 'q2', highlight: false, gapBefore: true },
@@ -367,7 +528,7 @@ check('"everything" carries the roster and the groups by name',
 // A code made before rounds existed has five slots per route. It must load,
 // not throw, and leave the round blank.
 const oldCode = await page.evaluate(() => {
-  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1/1', 0]], m: [] });
+  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1', 0]], m: [] });
   return 'CC1U.' + btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 });
 const oldRead = await page.evaluate(async (code) => {
@@ -433,7 +594,7 @@ await b.goto(base, { waitUntil: 'networkidle' });
 await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
-  positions: [{ id: 'yyy', name: 'Spot 1/1', multi: false, labelId: '', note: '' }],
+  positions: [{ id: 'yyy', name: 'Spot 1', multi: false, labelId: '', note: '' }],
   drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
 })));
 await b.reload({ waitUntil: 'networkidle' });
@@ -459,7 +620,7 @@ await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
 check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
-check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/1 \u00b7 2'));
+check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/2'));
 await b.click('[data-act="tab"][data-tab="drivers"]');
 check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
 
@@ -506,6 +667,69 @@ check('no console errors on PC B or C', bErrors.length === 0, bErrors.join(' | '
 await pcB.close();
 await pcC.close();
 
+// --- the case the whole pack exists for: one PC splits, the other has not ---
+// Positions travel between PCs by name, so the two managers have to migrate
+// before they swap codes again: while one says "Spot 1" and the other still
+// calls it "Spot 1/1", the routes arrive with no position at all. That is
+// what the offer warns about, and it is worth failing here on purpose so the
+// warning cannot quietly stop being true.
+const oldNamesB = {
+  schemaVersion: 3, date: '2026-01-01', qrOnSheet: false, labels: [],
+  cars: [{ id: 'bc1', reg: 'AA11111', labelId: '', note: '' }],
+  positions: [
+    { id: 'b1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'b2', name: 'Spot 1/2', multi: false, labelId: '', note: '' },
+    { id: 'b3', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [], drivers: [], driverGroups: [], templates: [],
+};
+const pcSplit = await browser.newContext();
+const one = await pcSplit.newPage();
+one.on('pageerror', (e) => bErrors.push(String(e)));
+await one.goto(base, { waitUntil: 'networkidle' });
+await loadOldNames(one);
+await one.locator('[data-act="split-rounds"]').click();
+await one.click('[data-act="tab"][data-tab="data"]');
+const splitCode = await copyCode(one, 'day');
+
+const pcBehind = await browser.newContext();
+const two = await pcBehind.newPage();
+two.on('pageerror', (e) => bErrors.push(String(e)));
+await two.goto(base, { waitUntil: 'networkidle' });
+await two.evaluate((plan) => localStorage.setItem('carcoord:v1', JSON.stringify(plan)), oldNamesB);
+await two.reload({ waitUntil: 'networkidle' });
+await two.click('[data-act="tab"][data-tab="data"]');
+await readCode(two, splitCode);
+check('the PC that has not split is told the spot is one it has never heard of',
+  (await two.locator('#shareDlg').innerText()).includes('1 position you do not have (Spot 1)'), await two.locator('#shareDlg').innerText());
+await two.uncheck('#shareAdd');
+await two.click('[data-act="share-apply"]');
+check('and the list lands with the position blank on every route that used it',
+  (await two.locator('#notices .notice.info').last().innerText()).includes('Left blank: Spot 1'), await two.locator('#notices').innerText());
+check('which is three routes with nowhere to pack',
+  (await two.evaluate(() => state.routes.filter((r) => !r.positionId).length)) === 3,
+  await two.evaluate(() => JSON.stringify(state.routes.map((r) => r.positionId))));
+
+// Now PC B takes the same offer, and the same code lands properly.
+await two.reload({ waitUntil: 'networkidle' });
+await two.locator('[data-act="split-rounds"]').click();
+await two.click('[data-act="tab"][data-tab="data"]');
+await readCode(two, splitCode);
+check('once both have split, the code says nothing is missing',
+  !(await two.locator('#shareDlg').innerText()).includes('do not have'), await two.locator('#shareDlg').innerText());
+await two.click('[data-act="share-apply"]');
+check('and every route lands on the spot this PC already had, with its round',
+  (await two.evaluate(() => state.routes.map((r) => `${r.positionId}:${r.round}`).join())) === 'b1:1,b1:2,b1:4,b3:',
+  await two.evaluate(() => state.routes.map((r) => `${r.positionId}:${r.round}`).join()));
+
+await one.click('[data-act="tab"][data-tab="preview"]');
+await two.click('[data-act="tab"][data-tab="preview"]');
+check('so both PCs print the same sheet, reading exactly as the pillar list always did',
+  (await two.locator('#sheet').innerText()) === (await one.locator('#sheet').innerText()),
+  (await two.locator('#sheet').innerText()).split('\n').slice(0, 4).join(' / '));
+await pcSplit.close();
+await pcBehind.close();
+
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
@@ -516,7 +740,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18',
   labels: [{ id: 'L1', name: '', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [
     { id: 'dup', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
     { id: 'dup', name: '', driver: 'Bo', carId: 'c1', positionId: 'p1' },
@@ -579,7 +803,7 @@ for (const bad of ['42', '"hello"', 'true', 'null', '[]', '{oops']) {
 
 // --- a hostile imported file cannot execute or brick the app ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
   cars: [{ id: '"><img src=x onerror="window.__pwned=1">', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '"><img src=x onerror="window.__pwned=1">', positionId: 'p1' }],
 })));
@@ -600,7 +824,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
     { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1' },
@@ -611,7 +835,7 @@ await page.reload({ waitUntil: 'networkidle' });
 await page.click('[data-act="tab"][data-tab="preview"]');
 const clashSheet = await page.locator('#sheet').innerText();
 check('the sheet names the doubled car', clashSheet.includes('AA11111 is on 2 routes'));
-check('the sheet names the doubled spot', clashSheet.includes('Spot 1/1 is taken by 2 routes'));
+check('the sheet names the doubled spot', clashSheet.includes('Spot 1 is taken by 2 routes'));
 check('the sheet names the car that should be in the workshop', clashSheet.includes('BB22222 is marked Workshop'));
 check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
 check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
@@ -622,7 +846,7 @@ check('a shared Garage is not called a clash', !clashSheet.includes('Garage is t
 // are for, and warning about it would train the leader to ignore the box.
 const spotPlan = (routes) => ({
   schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Garage', multi: true }],
+  positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Garage', multi: true }],
   routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
 });
 const loadPlan = async (plan) => {
@@ -636,17 +860,17 @@ const warnRows = () => page.locator('#tab-plan tbody tr.warn').count();
 await loadPlan(spotPlan([['1', '1'], ['2', '2']]));
 check('the same spot in two rounds does not warn', (await problemCount()) === 0 && (await warnRows()) === 0, await problemText());
 const noteFor = async (row, spot) => (await page.locator('#tab-plan tbody tr').nth(row).locator(`[data-field="positionId"] option`).filter({ hasText: spot }).first().innerText());
-check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1/1')) === 'Spot 1/1', await noteFor(0, 'Spot 1/1'));
+check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1')) === 'Spot 1', await noteFor(0, 'Spot 1'));
 
 await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
-check('the same spot in the same round still warns', (await problemText()).includes('Spot 1/1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
+check('the same spot in the same round still warns', (await problemText()).includes('Spot 1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
 check('and both rows are flagged', (await warnRows()) === 2);
 await page.click('[data-act="tab"][data-tab="preview"]');
-check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1/1 in round 2 is taken by 2 routes'));
+check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1 in round 2 is taken by 2 routes'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 await loadPlan(spotPlan([['1', ''], ['2', '']]));
-check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1/1 is taken by 2 routes (1, 2)'), await problemText());
+check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1 is taken by 2 routes (1, 2)'), await problemText());
 
 await loadPlan(spotPlan([['1', ''], ['2', '2']]));
 check('a blank round is its own round, not every round', (await problemCount()) === 0, await problemText());
@@ -677,7 +901,7 @@ check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 const templatePlan = {
   schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
   cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Spot 1/2' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Spot 2' }],
   routes: [
     { id: 'r1', name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
     { id: 'r2', name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
@@ -958,7 +1182,7 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', labels: [],
   cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
   // A saved template too: the shelf card is the widest row the day plan can
   // grow — name button, route count, weekday select and delete, side by side.
