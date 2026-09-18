@@ -65,7 +65,7 @@ changes shape and grows.
       *Done when:* every car shows with status in the rail, nothing renders below the table, and the print stylesheet is untouched.
 - [x] **6. Driver roster + rail panel.** Editable list (add / rename / delete / reorder), starts empty. Day-plan driver field backed by a `<datalist>` of the roster.
       *Done when:* roster edits persist and roster names are pickable on the day plan while still typeable.
-- [ ] **7. Driver day groups.** Named groups holding a subset of the roster; create, rename, delete, apply. Applying sets the day's available drivers in the rail.
+- [x] **7. Driver day groups.** Named groups holding a subset of the roster; create, rename, delete, apply. Applying sets the day's available drivers in the rail.
       *Done when:* a group can be built, saved, and applied, and survives a reload. See the assumption above.
 - [ ] **8. Share payload carries the new fields.** `round` is per-route, so it rides with **"Just the day plan"**; the driver roster and groups go only in **"Everything"**. The decoder accepts a payload missing any of them rather than hard-failing.
       *Done when:* a code produced by the current build imports cleanly into the new build, and vice versa.
@@ -189,5 +189,18 @@ without `Store.normalise` (`app.js`), and `@media print` hides
   Gate: `npm test` all checks passed, 12 new cases including reorder, reload,
   case/space-insensitive matching into the rail, "away" hiding someone without
   touching their route, and delete leaving the typed name in place.
+
+- [x] **7. Driver day groups** — 92c051b. Groups live under the roster on the
+  Drivers tab (name, roster-as-chips membership, "Use for today", reorder,
+  delete) and are applied from the rail, which is where the day gets set up.
+  Built to the manifest's assumption: a group is a **named set of drivers**,
+  and applying it only sets who is in today — it maps nobody onto a route.
+  Applying is a write across the whole roster (in-group in, everyone else
+  away), not an addition, or "in today" stops meaning anything by Friday; a
+  notice says how the day now stands.
+  Gate: `npm test` all checks passed, 10 new cases — two groups made, members
+  ticked, apply sets the crew, a second apply *replaces* the first crew,
+  crew and groups survive a reload, deleting a driver leaves every group and
+  reloads with no repair notice, rename and delete. `npm run screens` green.
 
 </details>
