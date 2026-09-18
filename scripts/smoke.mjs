@@ -69,20 +69,161 @@ await firstRow.locator('[data-field="carId"]').selectOption({ index: 1 });
 await firstRow.locator('[data-field="positionId"]').selectOption({ index: 1 });
 check('assigns a driver, car and position', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
 
+// --- the packing round is a column of its own ---
+await firstRow.locator('[data-field="round"]').fill('2');
+check('position and round are separate columns', (await page.locator('#tab-plan thead th').allInnerTexts()).join('|').includes('Position|Round'));
+check('the round takes free text', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
+
+// Leaving a round redraws the plan, because the clash rule moved with it. The
+// click that ends the edit must still land: a redraw between mousedown and
+// mouseup would swallow it, and the leader would silently lose every click
+// made straight after typing a round.
+const secondRow = page.locator('#tab-plan tbody tr').nth(1);
+const thirdRow = page.locator('#tab-plan tbody tr').nth(2);
+await secondRow.locator('[data-field="round"]').click();
+await page.keyboard.type('3');
+await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();
+check('a click that ends a round edit still lands',
+  (await secondRow.locator('[data-field="round"]').inputValue()) === '3' && (await thirdRow.getAttribute('class')).includes('hl'),
+  `round=${await secondRow.locator('[data-field="round"]').inputValue()} class=${await thirdRow.getAttribute('class')}`);
+await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();   // put it back
+
+// --- the driver roster ---
+// The roster starts empty, like the car list, and only ever offers names: the
+// day plan's driver box stays free text, so nothing here can refuse a name.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('the roster starts empty', await page.locator('#tab-drivers .empty').first().isVisible());
+await page.fill('#newDriver', 'Roster One, Roster Two');
+await page.click('[data-act="add-driver"]');
+check('one box adds several drivers, split on commas not spaces',
+  (await page.locator('#tab-drivers tbody tr').count()) === 2
+  && (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster One');
+await page.click('#tab-drivers tbody tr:nth-child(2) [data-act="up"]');
+check('the roster reorders', (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster Two');
+await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').fill('Roster Three');
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('roster edits survive a reload', (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster Three');
+
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('the roster reaches the day plan as suggestions',
+  (await page.locator('#driverNames option').count()) === 2
+  && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').getAttribute('list')) === 'driverNames');
+check('the rail shows who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
+// The driver typed into row 1 earlier is not on the roster, which is allowed:
+// put a roster name on row 2 and the rail should find it.
+await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('roster three ');
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('the rail matches a name however it was typed',
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText()).includes('Route 2'),
+  await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText());
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="toggle"]').click();
+check('marking someone away takes them out of the rail', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+check('but leaves the route they were written into alone',
+  (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
+
+// Deleting a driver must not touch the day plan: that text is the plan.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const delDriver = page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]');
+await delDriver.click();
+await delDriver.click();                              // two-click confirm
+check('a deleted driver leaves the roster', (await page.locator('#tab-drivers tbody tr').count()) === 1);
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('and the route keeps the name that was typed there',
+  (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
+await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('');
+
+// --- driver day groups ---
+// A group is a named set of people, and applying it answers "who is in
+// today". It says nothing about who drives which route.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.fill('#newDriver', 'Group One, Group Two');
+await page.click('[data-act="add-driver"]');          // roster: Roster One, Group One, Group Two
+await page.fill('#newGroup', 'Monday');
+await page.click('[data-act="add-group"]');
+await page.fill('#newGroup', 'Weekend');
+await page.click('[data-act="add-group"]');
+check('two groups can be made', (await page.locator('#tab-drivers .group').count()) === 2);
+
+const group = (name) => page.locator('#tab-drivers .group', { has: page.locator(`[data-field="name"][value="${name}"]`) });
+await group('Monday').locator('.chip', { hasText: 'Roster One' }).click();
+await group('Monday').locator('.chip', { hasText: 'Group One' }).click();
+await group('Weekend').locator('.chip', { hasText: 'Group Two' }).click();
+check('a group holds the drivers ticked into it', (await group('Monday').locator('.chip.on').count()) === 2);
+
+await group('Monday').locator('[data-act="apply-group"]').click();
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('applying a group sets who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
+check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in today, 1 away'),
+  await page.locator('#notices .notice').last().innerText());
+
+// The one that matters: applying a second group must take the first group's
+// leftovers out, not simply add its own people in.
+await page.locator('#tab-plan [data-panel="drivers"] [data-act="apply-group"]', { hasText: 'Weekend' }).click();
+const inToday = () => page.locator('#tab-plan [data-panel="drivers"] li').allInnerTexts();
+check('applying another group replaces the crew rather than adding to it',
+  (await inToday()).length === 1 && (await inToday())[0].includes('Group Two'), JSON.stringify(await inToday()));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('the applied crew survives a reload', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('and so do the groups and their members',
+  (await page.locator('#tab-drivers .group').count()) === 2 && (await group('Monday').locator('.chip.on').count()) === 2);
+
+// A driver who leaves the roster leaves the groups with them.
+const delRosterOne = page.locator('#tab-drivers tbody tr', { has: page.locator('[data-field="name"][value="Roster One"]') }).locator('[data-act="del"]');
+await delRosterOne.click();
+await delRosterOne.click();                           // two-click confirm
+check('deleting a driver takes them out of every group', (await group('Monday').locator('.chip.on').count()) === 1);
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('and that sticks, with no repair notice on the way back',
+  (await group('Monday').locator('.chip.on').count()) === 1 && (await page.locator('#notices .notice').count()) === 0,
+  await page.locator('#notices').innerText());
+
+// Renaming and deleting a group.
+await group('Weekend').locator('[data-field="name"]').fill('Saturday');
+// Typing does not redraw (that is what keeps the caret), so come back to the
+// tab before matching on the value the markup carries.
+await page.click('[data-act="tab"][data-tab="plan"]');
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const delGroup = group('Saturday').locator('[data-act="del"]');
+await delGroup.click();
+await delGroup.click();
+check('a group can be renamed and deleted', (await page.locator('#tab-drivers .group').count()) === 1);
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// --- the left rail carries the fleet beside the plan ---
+check('the rail lists every car', (await page.locator('#tab-plan [data-panel="cars"] li').count()) === 3);
+check('the rail says where the assigned one went',
+  (await page.locator('#tab-plan [data-panel="cars"] li').first().innerText()).replace(/\s+/g, ' ') === 'AA11111 Route 1',
+  await page.locator('#tab-plan [data-panel="cars"] li').first().innerText());
+check('the rail calls the others free', (await page.locator('#tab-plan [data-panel="cars"] .assign.none').count()) === 2);
+check('the pools below the table are gone', (await page.locator('#tab-plan .pool').count()) === 0);
+
 // --- the sheet reflects the plan ---
 await page.click('[data-act="tab"][data-tab="preview"]');
 const sheet = await page.locator('#sheet').innerText();
 check('sheet shows the driver', sheet.includes('Test Driver'));
 check('sheet shows the car', sheet.includes('AA11111'));
+// Four columns is the whole constraint: the sheet mirrors the paper list on
+// the pillar, so the round rides inside the packing cell rather than taking a
+// column of its own.
+check('sheet folds the round into the packing cell', /Spot 1\/1 \u00b7 2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
+check('sheet still has four columns', (await page.locator('#sheet thead th').count()) === 4);
+check('and the gap spacer still spans all four', (await page.locator('#sheet tr.spacer td').first().getAttribute('colspan')) === '4');
 
 // --- survives a reload (localStorage) ---
 await page.reload({ waitUntil: 'networkidle' });
 check('state survives a reload', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+check('the round survives a reload', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="round"]').inputValue()) === '2');
 
 // --- backups and restore ---
 await page.click('[data-act="clear-day"]');
 await page.click('[data-act="clear-day"]');           // two-click confirm
 check('clear wipes the driver', (await firstRow.locator('[data-field="driver"]').inputValue()) === '');
+check('clear wipes the round too', (await firstRow.locator('[data-field="round"]').inputValue()) === '');
 await page.click('[data-act="tab"][data-tab="data"]');
 check('clearing left a backup', (await page.locator('#tab-data table tbody tr').count()) >= 1);
 const restoreBtn = page.locator('[data-act="restore"]').first();
@@ -90,13 +231,14 @@ await restoreBtn.click();
 await restoreBtn.click();                             // two-click confirm
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('restore brings the driver back', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
+check('restore brings the round back', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
 
 // --- export / import round trip ---
 await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 1 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 2 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -117,6 +259,20 @@ await page.reload({ waitUntil: 'networkidle' });
 check('repairs a dangling car reference', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').inputValue()) === '');
 check('keeps the good fields while repairing', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Kept');
 
+// --- data saved by the previous version (no round, no roster) ---
+// The fields v1 never wrote must arrive at their defaults, quietly: a leader
+// opening the new build on Monday should see nothing at all happen.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('v1 data loads with no repair notice', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+check('v1 data gains round, drivers and driver groups', await page.evaluate(() =>
+  state.routes.every((r) => r.round === '') && Array.isArray(state.drivers) && state.drivers.length === 0
+  && Array.isArray(state.driverGroups) && state.driverGroups.length === 0));
+
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
 check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));
@@ -128,12 +284,14 @@ await page.reload({ waitUntil: 'networkidle' });
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
 const planA = {
-  schemaVersion: 1, date: '2026-09-18',
+  schemaVersion: 2, date: '2026-09-18',
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
+  driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   cars: [{ id: 'a1', reg: 'AA11111', labelId: '', note: '' }, { id: 'a2', reg: 'BB22222', labelId: 'L1', note: 'back Friday' }],
   positions: [{ id: 'q1', name: 'Spot 1/1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
   routes: [
-    { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', highlight: true, gapBefore: false },
+    { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', round: '2', highlight: true, gapBefore: false },
     { id: 'x2', name: 'HAU 1', driver: 'Bo', carId: 'a2', positionId: 'q2', highlight: false, gapBefore: true },
   ],
 };
@@ -145,6 +303,40 @@ check('day-plan code is tagged and compact', dayCode.startsWith('CC1.') && dayCo
 
 const allCode = await copyCode(page, 'all');
 check('everything code is longer than the day plan', allCode.length > dayCode.length);
+
+// The round is per route, so it rides with the day plan — and it has to ride
+// where a build that predates it will not trip over it: appended after the
+// flags, with the version tag left at 1.
+const shape = await page.evaluate(async (code) => {
+  const { share, error } = await Share.decode(code);
+  return error ? { error } : { v: share.v, row: share.r[0], hasRoster: 'dr' in share };
+}, dayCode);
+check('the day-plan payload is still v1, with the round appended after the flags',
+  shape.v === 1 && shape.row.length === 6 && shape.row[4] === 1 && shape.row[5] === '2',
+  shape.error || JSON.stringify(shape.row));
+check('and it does not carry the roster', shape.hasRoster === false);
+const allShape = await page.evaluate(async (code) => {
+  const { share } = await Share.decode(code);
+  return { drivers: share.dr, groups: share.dg };
+}, allCode);
+check('"everything" carries the roster and the groups by name',
+  allShape.drivers.length === 2 && allShape.groups[0][0] === 'Monday' && allShape.groups[0][1][0] === 'Ana',
+  JSON.stringify(allShape));
+
+// A code made before rounds existed has five slots per route. It must load,
+// not throw, and leave the round blank.
+const oldCode = await page.evaluate(() => {
+  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1/1', 0]], m: [] });
+  return 'CC1U.' + btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+});
+const oldRead = await page.evaluate(async (code) => {
+  const { share, error } = await Share.decode(code);
+  if (error) return { error };
+  const { state: next } = Share.apply(state, share, { mode: 'day', addMissing: true });
+  return { routes: next.routes.length, round: next.routes[0].round, driver: next.routes[0].driver };
+}, oldCode);
+check('a code from before rounds existed still loads, with a blank round',
+  oldRead.round === '' && oldRead.driver === 'Ana' && oldRead.routes === 1, oldRead.error || JSON.stringify(oldRead));
 
 // --- the QR on the printed sheet ---
 // 30mm at 300dpi is ~354px, so decoding at that size is the question that
@@ -201,6 +393,7 @@ await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
   positions: [{ id: 'yyy', name: 'Spot 1/1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
 })));
 await b.reload({ waitUntil: 'networkidle' });
 await b.click('[data-act="tab"][data-tab="data"]');
@@ -214,6 +407,10 @@ await b.click('[data-act="tab"][data-tab="plan"]');
 const rowsB = b.locator('#tab-plan tbody tr');
 check('both routes arrived', (await rowsB.count()) === 2);
 check('driver came across', (await rowsB.first().locator('[data-field="driver"]').inputValue()) === 'Ana');
+// The round is part of the day plan, so a day-plan code carries it. Before
+// this it was dropped in silence, wiping the round on every route of any list
+// that was loaded — including one made minutes earlier on the same PC.
+check('the round came across too', (await rowsB.first().locator('[data-field="round"]').inputValue()) === '2');
 const carSel = rowsB.first().locator('[data-field="carId"]');
 check('matched the car it already had, case-insensitively', (await carSel.inputValue()) === 'zzz');
 check('added the car it did not have', (await rowsB.nth(1).locator('[data-field="carId"] option:checked').innerText()).includes('BB22222'));
@@ -221,6 +418,9 @@ await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
 check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
+check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/1 \u00b7 2'));
+await b.click('[data-act="tab"][data-tab="drivers"]');
+check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
 
 // "Everything" mode carries the car notes and labels too.
 await b.click('[data-act="tab"][data-tab="data"]');
@@ -231,6 +431,14 @@ await b.click('[data-act="tab"][data-tab="cars"]');
 const bbRow = b.locator('#tab-cars tbody tr', { has: b.locator('[data-field="reg"][value="BB22222"]') });
 check('everything mode brings the note across', (await bbRow.locator('[data-field="note"]').inputValue()) === 'back Friday');
 check('everything mode brings the label across', (await bbRow.locator('.chip.on').innerText()) === 'Workshop');
+await b.click('[data-act="tab"][data-tab="drivers"]');
+check('everything mode brings the roster across, merged with the local one',
+  (await b.locator('#tab-drivers tbody tr').count()) === 3);
+check('including who was away', (await b.locator('#tab-drivers tbody tr', { has: b.locator('[data-field="name"][value="Bo"]') }).locator('[data-act="toggle"]').innerText()) === 'Away');
+check('and the group, with its members matched back by name',
+  (await b.locator('#tab-drivers .group').count()) === 1
+  && (await b.locator('#tab-drivers .group .chip.on').allInnerTexts()).join() === 'Ana',
+  (await b.locator('#tab-drivers .group .chip.on').allInnerTexts()).join());
 
 // A share link does the same thing on arrival.
 const pcC = await browser.newContext();
@@ -367,6 +575,61 @@ check('the sheet names the car that should be in the workshop', clashSheet.inclu
 check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
 check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
 
+// --- the clash rule is per round, not per spot ---
+// The headline feature. Two routes in one spot are a clash only when they are
+// packed in the same round; in different rounds that is exactly what rounds
+// are for, and warning about it would train the leader to ignore the box.
+const spotPlan = (routes) => ({
+  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Garage', multi: true }],
+  routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
+});
+const loadPlan = async (plan) => {
+  await page.evaluate((d) => localStorage.setItem('carcoord:v1', JSON.stringify(d)), plan);
+  await page.reload({ waitUntil: 'networkidle' });
+};
+const problemCount = () => page.locator('#tab-plan .problems').count();
+const problemText = () => page.locator('#tab-plan .problems').innerText().catch(() => '');
+const warnRows = () => page.locator('#tab-plan tbody tr.warn').count();
+
+await loadPlan(spotPlan([['1', '1'], ['2', '2']]));
+check('the same spot in two rounds does not warn', (await problemCount()) === 0 && (await warnRows()) === 0, await problemText());
+const noteFor = async (row, spot) => (await page.locator('#tab-plan tbody tr').nth(row).locator(`[data-field="positionId"] option`).filter({ hasText: spot }).first().innerText());
+check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1/1')) === 'Spot 1/1', await noteFor(0, 'Spot 1/1'));
+
+await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
+check('the same spot in the same round still warns', (await problemText()).includes('Spot 1/1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
+check('and both rows are flagged', (await warnRows()) === 2);
+await page.click('[data-act="tab"][data-tab="preview"]');
+check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1/1 in round 2 is taken by 2 routes'));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+await loadPlan(spotPlan([['1', ''], ['2', '']]));
+check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1/1 is taken by 2 routes (1, 2)'), await problemText());
+
+await loadPlan(spotPlan([['1', ''], ['2', '2']]));
+check('a blank round is its own round, not every round', (await problemCount()) === 0, await problemText());
+
+await loadPlan(spotPlan([['1', ' a '], ['2', 'A']]));
+check('a stray space or a capital does not silence the warning', (await problemText()).includes('is taken by 2 routes'), await problemText());
+
+await loadPlan(spotPlan([['1', '2', 'p2'], ['2', '2', 'p2']]));
+check('a shared spot is still shared, round or no round', (await problemCount()) === 0, await problemText());
+
+// Typing a round has to answer the warning immediately: the leader fixes the
+// clash and looks straight at the box to see it go.
+await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
+const clashRound = page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="round"]');
+await clashRound.click();
+await page.keyboard.press('End');
+await page.keyboard.type('X');
+await page.waitForFunction(() => !document.querySelector('#tab-plan .problems'), null, { timeout: 2000 }).catch(() => {});
+check('moving a route to another round clears the warning there and then', (await problemCount()) === 0, await problemText());
+check('and the caret is still in the round being typed', await page.evaluate(() =>
+  document.activeElement.dataset.field === 'round' && document.activeElement.selectionStart === 2));
+await page.keyboard.type('Y');
+check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
+
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
   document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
@@ -374,10 +637,20 @@ await page.evaluate(() => {
 await page.emulateMedia({ media: 'print' });
 const printed = await page.evaluate(() => {
   const n = document.querySelector('#notices');
-  return { display: getComputedStyle(n).display, sheetTop: document.querySelector('#sheet').getBoundingClientRect().top };
+  const rail = document.querySelector('#tab-plan .rail');
+  return {
+    display: getComputedStyle(n).display,
+    // Boxes, not computed display: the rail's own display stays `grid` while
+    // the main it sits in is hidden, so only "does it lay out" answers this.
+    railBoxes: rail ? rail.getClientRects().length : 0,
+    sheetTop: document.querySelector('#sheet').getBoundingClientRect().top,
+  };
 });
 await page.emulateMedia({ media: null });
 check('notices are hidden when printing', printed.display === 'none', `display=${printed.display}`);
+// The rail is inside main, which the print rules already hide. Nothing about
+// the sheet's own stylesheet changed, and this is the check that says so.
+check('the rail does not reach the paper', printed.railBoxes === 0, `${printed.railBoxes} boxes`);
 check('the sheet still starts at the top of the page', printed.sheetTop <= 1, `top=${printed.sheetTop}`);
 
 await page.evaluate(() => localStorage.clear());
@@ -399,7 +672,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-for (const name of ['plan', 'cars', 'positions', 'labels', 'data']) {
+for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
   await page.click(`[data-act="tab"][data-tab="${name}"]`);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check(`the ${name} tab fits a phone screen`, !wide);

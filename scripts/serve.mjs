@@ -4,12 +4,12 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../docs/', import.meta.url));
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
-export async function startServer() {
+export async function startServer(port = 0) {
   const server = createServer(async (req, res) => {
     try {
       // decodeURIComponent throws on a malformed escape like '/%'. Inside the
@@ -24,9 +24,17 @@ export async function startServer() {
       res.writeHead(404).end('not found');
     }
   });
-  await new Promise((r) => server.listen(0, r));
+  await new Promise((r) => server.listen(port, r));
   return {
     base: `http://localhost:${server.address().port}/`,
     close: () => server.close(),
   };
+}
+
+// `node scripts/serve.mjs [port]` runs it as a plain dev server for docs/.
+// The test and screenshot runs import startServer() instead and keep port 0,
+// so several of them can run at once without fighting over a port.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { base } = await startServer(Number(process.argv[2]) || 5173);
+  console.log(`Serving docs/ at ${base}`);
 }

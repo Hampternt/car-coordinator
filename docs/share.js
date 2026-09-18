@@ -5,6 +5,10 @@
    registration, never by id: ids are generated per install, so they mean
    nothing on anyone else's machine.
 
+   Fields are only ever appended and the "CC1." tag never moves: a code has to
+   stay readable on a PC running last month's build, and a code made there has
+   to stay readable here.
+
    Wire format: "CC1." + base64url(deflate-raw(JSON)), or "CC1U." + base64url(JSON)
    where the browser has no CompressionStream. Both stay short enough for a
    URL fragment, which browsers never send to the server.
@@ -51,6 +55,12 @@ const Share = (() => {
         nameOf(state.cars, r.carId),
         nameOf(state.positions, r.positionId),
         (r.highlight ? HI : 0) | (r.gapBefore ? GAP : 0),
+        // Appended, never inserted, and the version tag stays 1: a build made
+        // before rounds existed takes the first five and ignores this one,
+        // while this build reads a five-long row as a route with no round.
+        // Bumping the tag instead would make every code unreadable to the PCs
+        // already using one, which is the opposite of degrading gracefully.
+        r.round || '',
       ]),
       // Names of the shared positions this plan uses. Without it the receiving
       // PC recreates a Garage as single-occupancy and reports the plan it was
@@ -61,6 +71,11 @@ const Share = (() => {
       out.l = state.labels.map((l) => [l.name, l.color]);
       out.c = state.cars.map((c) => [c.reg, nameOf(state.labels, c.labelId), c.note]);
       out.p = state.positions.map((p) => [p.name, p.multi ? 1 : 0, nameOf(state.labels, p.labelId), p.note]);
+      // The roster and its groups are standing lists like the fleet, so they
+      // travel with "everything" and never with a day plan. A group's members
+      // go by name for the same reason a route's car does.
+      out.dr = (state.drivers || []).map((d) => [d.name, d.available ? 1 : 0]);
+      out.dg = (state.driverGroups || []).map((g) => [g.name, g.driverIds.map((id) => nameOf(state.drivers || [], id)).filter(Boolean)]);
     }
     return out;
   }
@@ -118,6 +133,7 @@ const Share = (() => {
       unknownCars,
       unknownPos,
       addMissing,
+      drivers: share.dr ? share.dr.length : 0,
     };
   }
 
@@ -158,13 +174,32 @@ const Share = (() => {
       }
     }
 
+    if (mode === 'all' && share.dr) {
+      for (const [name, available] of share.dr) {
+        const at = next.drivers.find((d) => key(d.name) === key(name));
+        if (at) at.available = !!available;
+        else next.drivers.push({ id: uid(), name, available: !!available });
+      }
+    }
+
+    if (mode === 'all' && share.dg) {
+      const driverIds = new Map(next.drivers.map((d) => [key(d.name), d.id]));
+      for (const [name, members] of share.dg) {
+        // Anyone the sender grouped but did not send is simply not in it here.
+        const ids = (members || []).map((n) => driverIds.get(key(n))).filter(Boolean);
+        const at = next.driverGroups.find((g) => key(g.name) === key(name));
+        if (at) at.driverIds = ids;
+        else next.driverGroups.push({ id: uid(), name, driverIds: ids });
+      }
+    }
+
     // Day plan last, so it can point at anything the step above just added.
     const shared = new Set((share.m || []).map(key));
     const findCar = (reg) => next.cars.find((c) => key(c.reg) === key(reg));
     const findPos = (name) => next.positions.find((p) => key(p.name) === key(name));
 
     next.date = share.d || next.date;
-    next.routes = share.r.map(([name, driver, reg, pos, flags]) => {
+    next.routes = share.r.map(([name, driver, reg, pos, flags, round]) => {
       let car = reg ? findCar(reg) : null;
       if (reg && !car) {
         if (addMissing) { car = { id: uid(), reg, labelId: '', note: '' }; next.cars.push(car); }
@@ -178,6 +213,7 @@ const Share = (() => {
       return {
         id: uid(), name: name || '', driver: driver || '',
         carId: car ? car.id : '', positionId: position ? position.id : '',
+        round: round || '',                     // absent in codes from before rounds existed
         highlight: !!(flags & HI), gapBefore: !!(flags & GAP),
       };
     });

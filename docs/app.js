@@ -5,6 +5,10 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const byId = (arr, id) => arr.find((x) => x.id === id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* Matching the way a person reads, not the way a computer does: " 1" is the
+   round "1", and "ana " is the driver "Ana". Used for rounds and driver names
+   alike; share.js folds registrations the same way, for the same reason. */
+const fold = (s) => String(s || '').trim().toUpperCase();
 
 function today() {
   const d = new Date();
@@ -13,7 +17,7 @@ function today() {
 }
 
 function newRoute(name, gapBefore = false) {
-  return { id: uid(), name, driver: '', carId: '', positionId: '', highlight: false, gapBefore };
+  return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
 }
 
 function defaults() {
@@ -30,6 +34,8 @@ function defaults() {
       { id: uid(), name: 'Workshop', color: '#6a1b9a' },
     ],
     cars: [],
+    drivers: [],
+    driverGroups: [],
     routes: [
       ...['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14'].map((n) => newRoute(n)),
       newRoute('HAU 1', true),
@@ -45,7 +51,7 @@ let notices = [];
 
 const save = () => Store.save(state);
 
-const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels })[kind];
+const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups })[kind];
 
 /* ---------- small html helpers ----------
    Ids reach attributes, and an imported JSON file can carry any string as an
@@ -67,16 +73,38 @@ function labelChips(kind, item) {
   ).join('');
 }
 
+/* ---------- the clash rule ----------
+   Two routes can share a packing spot as long as they are packed in different
+   rounds: the first car has gone by the time the second one arrives. So a
+   double booking is a spot AND a round, never a spot on its own.
+
+   A blank round is a bucket of its own — "not filled in yet" is not "some
+   other round", and two blanks in the same spot are still a clash. Rounds are
+   matched the way a person would read them, trimmed and case-folded, for the
+   same reason share.js matches registrations that way: a warning that goes
+   quiet because someone typed a trailing space is worse than no warning. */
+const spotKey = (positionId, round) => `${positionId}\u0000${fold(round)}`;
+// " in round 2", or nothing at all: a plan that uses no rounds must read
+// exactly as it did before rounds existed.
+const roundPhrase = (round) => (fold(round) ? ` in round ${String(round).trim()}` : '');
+
 function usage() {
   // Null-prototype, because ids come from imported files: a car id of
   // '__proto__' would otherwise resolve to Object.prototype, skip the ??=,
   // and throw on every render with the bad data already saved.
-  const cars = Object.create(null), pos = Object.create(null);
+  const cars = Object.create(null), pos = Object.create(null), spots = Object.create(null);
   state.routes.forEach((r, at) => {
     if (r.carId) (cars[r.carId] ??= []).push({ r, at });
-    if (r.positionId) (pos[r.positionId] ??= []).push({ r, at });
+    // Two maps, because two different questions get asked of them: `pos` is
+    // "is this spot in use at all", which is what a spot's status and the rail
+    // care about, and `spots` is "is this spot taken twice over", which is
+    // per round.
+    if (r.positionId) {
+      (pos[r.positionId] ??= []).push({ r, at });
+      (spots[spotKey(r.positionId, r.round)] ??= []).push({ r, at });
+    }
   });
-  return { cars, pos };
+  return { cars, pos, spots };
 }
 
 /* ---------- views ---------- */
@@ -105,15 +133,97 @@ function problems() {
     const lab = byId(state.labels, car.labelId);
     if (lab) { lines.push(`${car.reg} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
+  // A spot's status belongs to the spot itself, so it is said once however
+  // many rounds are packed there.
   for (const posId of Object.keys(use.pos)) {
     const routes = use.pos[posId];
     const pos = byId(state.positions, posId);
     if (!pos) continue;
-    if (!pos.multi && routes.length > 1) { lines.push(`${pos.name} is taken by ${routes.length} routes (${named(routes)})`); flag(routes); }
     const lab = byId(state.labels, pos.labelId);
     if (lab) { lines.push(`${pos.name} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
+  // A double booking belongs to a spot and a round together. Spots flagged
+  // "many cars" (the Garage) are shared on purpose and never clash.
+  for (const key of Object.keys(use.spots)) {
+    const routes = use.spots[key];
+    if (routes.length < 2) continue;
+    const pos = byId(state.positions, routes[0].r.positionId);
+    if (!pos || pos.multi) continue;
+    lines.push(`${pos.name}${roundPhrase(routes[0].r.round)} is taken by ${routes.length} routes (${named(routes)})`);
+    flag(routes);
+  }
   return { lines, rows, use };
+}
+
+/* What the warnings currently say, as one string: cheap enough to take twice
+   per keystroke, and exact enough that a redraw only happens when something
+   really did change. */
+const problemSig = () => {
+  const { lines, rows } = problems();
+  return `${lines.join('|')}#${[...rows].sort().join(',')}`;
+};
+
+/* ---------- the day plan's left rail ----------
+   The fleet as it stands, beside the plan being made: which car is out on
+   which route, which one is marked up. All of it is on the Cars tab too —
+   this is the version you can read without leaving the plan you are typing. */
+function railCars(use) {
+  const rows = state.cars.map((c) => {
+    const lab = byId(state.labels, c.labelId);
+    const on = use.cars[c.id];
+    // The same sentence the Cars tab prints in its "Assigned to" column,
+    // shortened to what fits: the route number is the bit you look for.
+    const where = on
+      ? `<span class="assign yes">Route ${routeNames(on)}</span>`
+      : `<span class="assign ${lab ? 'down' : 'none'}">${lab ? esc(labelName(lab)) : 'Free'}</span>`;
+    const full = [c.reg, lab && labelName(lab), c.note].filter(Boolean).join(' · ');
+    return `<li title="${esc(full)}"><span class="dot" style="--c:${esc(lab ? lab.color : '#2e7d32')}"></span><b>${esc(c.reg)}</b>${where}</li>`;
+  }).join('');
+  const out = state.cars.filter((c) => use.cars[c.id]).length;
+  const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
+  return `<section class="rail-panel" data-panel="cars">
+    <h3>Cars <span class="rail-count">${out} out · ${free} free</span></h3>
+    ${state.cars.length
+      ? `<ul class="rail-list">${rows}</ul>`
+      : '<p class="rail-empty">No cars yet — add them on the Cars tab.</p>'}
+  </section>`;
+}
+
+/* Routes are keyed by the driver's name, folded: the day plan's driver box is
+   free text and always will be, so the roster recognises a name rather than
+   owning it. Someone written in who is not on the roster still drives. */
+function driverUsage() {
+  const by = Object.create(null);
+  state.routes.forEach((r, at) => {
+    const k = fold(r.driver);
+    if (k) (by[k] ??= []).push({ r, at });
+  });
+  return by;
+}
+
+/* Who is in today, and what they have been given. Availability is the day's,
+   so it is what the rail shows; the roster itself lives on the Drivers tab. */
+function railDrivers() {
+  const assigned = driverUsage();
+  const inToday = state.drivers.filter((d) => d.available);
+  const rows = inToday.map((d) => {
+    const on = assigned[fold(d.name)];
+    const where = on
+      ? `<span class="assign yes">Route ${routeNames(on)}</span>`
+      : '<span class="assign none">Free</span>';
+    return `<li><b>${esc(d.name)}</b>${where}${actBtn('toggle', 'driver', d.id, '\u2715', '', 'data-field="available" title="Not in today"')}</li>`;
+  }).join('');
+  const away = state.drivers.length - inToday.length;
+  // Monday morning is one click: the groups are here, where the day is set up.
+  const groups = state.driverGroups.map((g) =>
+    actBtn('apply-group', 'driverGroup', g.id, esc(g.name), '', 'title="Everyone in this group is in today"')).join('');
+  return `<section class="rail-panel" data-panel="drivers">
+    <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
+    ${state.drivers.length
+      ? (inToday.length ? `<ul class="rail-list">${rows}</ul>` : '<p class="rail-empty">Nobody is in today. Bring someone back on the Drivers tab.</p>')
+      : '<p class="rail-empty">No drivers yet \u2014 add them on the Drivers tab.</p>'}
+  </section>`;
 }
 
 function renderPlan() {
@@ -133,19 +243,23 @@ function renderPlan() {
     }).join('');
     const posOpts = state.positions.map((p) => {
       const lab = byId(state.labels, p.labelId);
-      const others = p.multi ? [] : elsewhere(use.pos[p.id], at);
+      // Scoped to this row's round: the question the note answers is "what am
+      // I walking into if I put *this* route here", and a route packed in
+      // another round is not in the way.
+      const others = p.multi ? [] : elsewhere(use.spots[spotKey(p.id, r.round)], at);
       const bits = [lab && labelName(lab), others.length && `route ${routeNames(others)}`, p.multi && 'many cars'].filter(Boolean);
       const sel = p.id === r.positionId;
       if (sel && lab) warns.push(`${p.name} is marked ${labelName(lab)}`);
-      if (sel && others.length) warns.push(`${p.name} is also used by route ${routeNames(others)}`);
+      if (sel && others.length) warns.push(`${p.name}${roundPhrase(r.round)} is also used by route ${routeNames(others)}`);
       return `<option value="${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
-      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-"')}</td>
+      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-" list="driverNames"')}</td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
+      <td>${field('route', r.id, 'round', r.round, 'class="short" placeholder="-"')}</td>
       <td class="btns">
         ${actBtn('toggle', 'route', r.id, 'Mark', r.highlight ? 'on' : '', 'data-field="highlight" title="Pink highlight on the printout"')}
         ${actBtn('toggle', 'route', r.id, 'Gap', r.gapBefore ? 'on' : '', 'data-field="gapBefore" title="Blank line above this route"')}
@@ -154,13 +268,6 @@ function renderPlan() {
       <td class="warntext">${esc(warns.join('; '))}</td>
     </tr>`;
   }).join('');
-
-  const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]);
-  const down = state.cars.filter((c) => c.labelId && !use.cars[c.id]);
-  const tag = (c) => {
-    const l = byId(state.labels, c.labelId);
-    return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' \u00b7 ' + esc(l.name) : ''}${c.note ? ' \u00b7 ' + esc(c.note) : ''}</span>`;
-  };
 
   const noCars = state.cars.length
     ? ''
@@ -176,15 +283,14 @@ function renderPlan() {
       <label for="date">Date</label>
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
       <button class="btn" data-act="add-route">+ Add route</button>
-      <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars and positions'}</button>
+      <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
-    <table class="grid">
-      <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Packing round</th><th></th><th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="pool">
-      <div><h3>Free cars (${free.length})</h3>${free.map(tag).join('') || '<em>None</em>'}</div>
-      <div><h3>Parked and marked (${down.length})</h3>${down.map(tag).join('') || '<em>None</em>'}</div>
+    <div class="plan">
+      <aside class="rail">${railDrivers()}${railCars(use)}</aside>
+      <table class="grid">
+        <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>`;
 }
 
@@ -194,6 +300,60 @@ function assignCell(entries) {
     const pos = byId(state.positions, r.positionId)?.name;
     return `<span class="assign yes">Route ${esc(r.name)}${r.driver ? ', ' + esc(r.driver) : ''}${pos ? ', ' + esc(pos) : ''}</span>`;
   }).join('');
+}
+
+function renderDrivers() {
+  const assigned = driverUsage();
+  const rows = state.drivers.map((d) => {
+    const on = assigned[fold(d.name)];
+    return `<tr class="${d.available ? '' : 'away'}">
+      <td>${field('driver', d.id, 'name', d.name, 'style="width:200px"')}</td>
+      <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
+      <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In today' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
+      <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
+  }).join('');
+  $('#tab-drivers').innerHTML = `
+    <h2>Drivers</h2>
+    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in today.</p>
+    <div class="bar">
+      <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
+      <button class="btn" data-act="add-driver">+ Add driver</button>
+    </div>
+    ${state.drivers.length
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
+    ${driverGroups()}`;
+}
+
+/* A group is a named set of drivers — Monday's crew is these people — and
+   nothing more. Applying one answers "who is in today", which is what the rail
+   shows; it says nothing about which route anyone drives. */
+function driverGroups() {
+  const cards = state.driverGroups.map((g) => {
+    const members = state.drivers.map((d) =>
+      `<button class="chip ${g.driverIds.includes(d.id) ? 'on' : ''}" style="--c:var(--steel)" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
+    return `<div class="group">
+      <div class="bar">
+        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}
+        ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Set who is in today to this group"')}
+        ${moveDel('driverGroup', g.id)}
+      </div>
+      ${state.drivers.length ? `<div class="chips">${members}</div>` : '<p class="hint" style="margin:0">Add drivers above, then tick them into this group.</p>'}
+    </div>`;
+  }).join('');
+  return `<h2 style="margin-top:22px">Day groups</h2>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <div class="bar">
+      <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
+      <button class="btn" data-act="add-group">+ Add group</button>
+    </div>
+    ${cards || '<p class="empty">No groups yet. Make one for the crew you plan with most \u2014 it takes one click to put them all in.</p>'}`;
+}
+
+/* The roster as suggestions, never as a rulebook: the day plan's driver box
+   stays free text, so everyone is offered, away or not. */
+function renderDriverList() {
+  $('#driverNames').innerHTML = state.drivers.map((d) => `<option value="${esc(d.name)}"></option>`).join('');
 }
 
 function renderCars() {
@@ -340,6 +500,10 @@ function renderNotices() {
     `<div class="notice ${n.kind}">${esc(n.text)}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
 }
 
+/* The paper list on the pillar has four columns and has to keep them, so the
+   round travels inside the packing cell: "Spot 1/1 · 2". */
+const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join(' \u00b7 ');
+
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
   const { lines: found, rows: flagged } = problems();
@@ -349,7 +513,7 @@ function renderSheet() {
       <td class="rn">${dash(r.name)}${flagged.has(at) ? '<span class="mark">!</span>' : ''}</td>
       <td>${dash(r.driver)}</td>
       <td>${dash(byId(state.cars, r.carId)?.reg)}</td>
-      <td>${dash(byId(state.positions, r.positionId)?.name)}</td>
+      <td>${dash(spotCell(r))}</td>
     </tr>`).join('');
 
   const marked = (arr, key) => arr.filter((x) => x.labelId).map((x) =>
@@ -378,7 +542,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  renderPlan(); renderDrivers(); renderDriverList(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
   queueQr();
   renderNotices();
 }
@@ -390,6 +554,9 @@ document.addEventListener('input', (e) => {
   const { kind, id, field: name } = el.dataset;
   if (!kind || !name) return;
   const value = el.type === 'checkbox' ? el.checked : el.value;
+  // A round feeds the clash rule, so one keystroke in it can turn a warning on
+  // or off. Remember how the warnings read before the change, to spot that.
+  const warnedBefore = kind === 'route' && name === 'round' ? problemSig() : null;
   if (kind === 'meta') state[name] = value;
   else {
     const item = byId(listFor(kind) || [], id);
@@ -397,8 +564,26 @@ document.addEventListener('input', (e) => {
     item[name] = value;
   }
   save();
-  if (el.tagName === 'SELECT' || el.type === 'checkbox') render(); else renderSheet();
+  if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
+  else if (warnedBefore !== null && problemSig() !== warnedBefore) redrawKeepingCaret(el);
+  else renderSheet();
 });
+
+/* Redraw the lot without interrupting the typing that caused it: render()
+   replaces the very field being typed into, so the caret goes back afterwards.
+
+   Waiting for the field to be left instead would be simpler and is wrong: the
+   browser blurs on mousedown, so the redraw lands between mousedown and mouseup
+   and the click that ended the edit is swallowed — measured, not guessed. */
+function redrawKeepingCaret(el) {
+  const { kind, id, field: name } = el.dataset;
+  const at = el.selectionStart;
+  render();
+  const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
+  if (!again) return;
+  again.focus();
+  again.setSelectionRange(at, at);
+}
 
 function confirmTwice(key) {
   if (armed === key) { armed = null; return true; }
@@ -497,14 +682,14 @@ function renderShareDialog() {
 
   dlg.innerHTML = `
     <h2>Load this list?</h2>
-    <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels` : ''}.</p>
+    <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels${sum.drivers ? `, and ${sum.drivers} drivers with their groups` : ''}` : ''}.</p>
     ${missing.length ? `<p class="status warn-status">It mentions ${missing.join(' and ')}.</p>` : ''}
     <p class="status warn-status"><b>This replaces the day plan on screen.</b> A backup is taken first, so you can undo it from Backups.</p>
 
     ${sum.hasEverything ? `<fieldset>
       <legend>What to take</legend>
       <label><input type="radio" name="shareMode" value="day" ${pending.mode === 'day' ? 'checked' : ''}> Just the day plan (date, routes, drivers)</label>
-      <label><input type="radio" name="shareMode" value="all" ${pending.mode === 'all' ? 'checked' : ''}> Everything \u2014 also update my cars, positions and labels</label>
+      <label><input type="radio" name="shareMode" value="all" ${pending.mode === 'all' ? 'checked' : ''}> Everything \u2014 also update my cars, positions, labels, drivers and day groups</label>
     </fieldset>` : ''}
 
     ${missing.length ? `<label class="block"><input type="checkbox" id="shareAdd" ${pending.addMissing ? 'checked' : ''}> Add the cars and positions I do not have</label>
@@ -621,16 +806,21 @@ document.addEventListener('click', (e) => {
     case 'setLabel': list[i].labelId = b.dataset.label; break;
     case 'del':
       if (!confirmTwice(`del:${id}`)) return;
-      Store.snapshot(state, `Deleting a ${kind}`);
+      // The backup list shows this label as written, so say it the way it
+      // reads on screen rather than the way the code spells it.
+      Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
       if (kind === 'label') [...state.cars, ...state.positions].forEach((x) => { if (x.labelId === id) x.labelId = ''; });
+      // A deleted driver leaves every group, but the day plan keeps the name
+      // typed into it: that text is the plan, not a reference to the roster.
+      if (kind === 'driver') state.driverGroups.forEach((g) => { g.driverIds = g.driverIds.filter((x) => x !== id); });
       break;
     case 'clear-day':
       if (!confirmTwice('clear')) return;
       Store.snapshot(state, 'Clearing the day');
-      state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.highlight = false; });
+      state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = today();
       break;
     case 'add-route': {
@@ -643,6 +833,32 @@ document.addEventListener('click', (e) => {
         if (!state.cars.some((c) => c.reg === reg)) state.cars.push({ id: uid(), reg, labelId: '', note: '' });
       }))) return;
       break;
+    case 'add-driver':
+      // Commas and newlines only: a driver's name has spaces in it, unlike a
+      // registration, so splitting on whitespace would make two of everyone.
+      if (!addFromInput('#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
+        if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push({ id: uid(), name, available: true });
+      }))) return;
+      break;
+    case 'add-group':
+      if (!addFromInput('#newGroup', (name) => state.driverGroups.push({ id: uid(), name, driverIds: [] }))) return;
+      break;
+    case 'group-member': {
+      const g = list[i];
+      const at = g.driverIds.indexOf(b.dataset.driver);
+      if (at >= 0) g.driverIds.splice(at, 1); else g.driverIds.push(b.dataset.driver);
+      break;
+    }
+    case 'apply-group': {
+      const g = list[i];
+      // A write across the whole roster, not an addition: picking Monday has
+      // to take yesterday's leftovers out, or "who is in today" is a lie by
+      // the end of the week.
+      state.drivers.forEach((d) => { d.available = g.driverIds.includes(d.id); });
+      const inToday = state.drivers.filter((d) => d.available).length;
+      note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
+      break;
+    }
     case 'add-position':
       if (!addFromInput('#newPos', (name) => state.positions.push({ id: uid(), name, multi: false, labelId: '', note: '' }))) return;
       break;
@@ -669,7 +885,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
   const act = map[e.target.id];
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });

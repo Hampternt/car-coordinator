@@ -7,10 +7,11 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 **Your data never leaves your PC.** The page is static; there is no server and no network call at runtime.
 
 ## Features
-- **Day plan**: route name, driver, car, packing round (spot / garage / port). Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes).
+- **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A rail down the left shows the day's drivers and the whole fleet with its status, so you can fill the table in without changing tab.
+- **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
 - **Cars / Positions**: add, rename, reorder, delete. One-click status buttons (OK, Out of service, Unavailable, Workshop, your own) plus a note.
-- **Warnings, not blocks**: a car on two routes, a spot taken twice, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it.
-- "Many cars" positions (Garage) can be shared by several routes.
+- **Warnings, not blocks**: a car on two routes, a spot taken twice **in the same round**, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it.
+- "Many cars" positions (Garage) can be shared by several routes, and any spot can be used again in a later round.
 - **Labels**: create custom status labels with colours.
 - **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.
 - **QR on the sheet** (browser version): the printed sheet carries a link to the day plan as a QR in the corner, so a phone can read the list off the paper on the pillar. Turn it off on the Data tab to keep the sheet bare.
@@ -25,6 +26,12 @@ Optional Windows app — grab the latest from **Releases**:
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
 
 Every push to `main` runs the tests and then builds and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
+
+## Run it from a checkout
+```
+npm run dev        # serves docs/ on http://localhost:5173 — no npm install needed
+npm run tauri:dev  # the Windows desktop shell instead; needs the Rust toolchain
+```
 
 ## Tests
 ```
