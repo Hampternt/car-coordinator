@@ -67,7 +67,7 @@ changes shape and grows.
       *Done when:* roster edits persist and roster names are pickable on the day plan while still typeable.
 - [x] **7. Driver day groups.** Named groups holding a subset of the roster; create, rename, delete, apply. Applying sets the day's available drivers in the rail.
       *Done when:* a group can be built, saved, and applied, and survives a reload. See the assumption above.
-- [ ] **8. Share payload carries the new fields.** `round` is per-route, so it rides with **"Just the day plan"**; the driver roster and groups go only in **"Everything"**. The decoder accepts a payload missing any of them rather than hard-failing.
+- [x] **8. Share payload carries the new fields.** `round` is per-route, so it rides with **"Just the day plan"**; the driver roster and groups go only in **"Everything"**. The decoder accepts a payload missing any of them rather than hard-failing.
       *Done when:* a code produced by the current build imports cleanly into the new build, and vice versa.
 - [ ] **9. Tests + screenshots.** `scripts/smoke.mjs` covers the split column, the new clash rule and the rail; `scripts/screens.mjs` captures the rail.
       *Done when:* `npm test` green with no console errors.
@@ -202,5 +202,19 @@ without `Store.normalise` (`app.js`), and `@media print` hides
   ticked, apply sets the crew, a second apply *replaces* the first crew,
   crew and groups survive a reload, deleting a driver leaves every group and
   reloads with no repair notice, rename and delete. `npm run screens` green.
+
+- [x] **8. Share payload** — 34da441. Fixes the data loss the manager found:
+  `round` now rides in the **day-plan** payload as a sixth tuple slot, appended
+  after the flags, `v: 1` untouched. Older build reads five slots and ignores
+  the sixth; this build reads a five-slot route as one with a blank round. The
+  roster (`dr`) and groups (`dg`, members by name) go only with "Everything",
+  and every new key is read behind an `if (share.x)` so a payload without them
+  applies rather than throwing. The import dialog counts the drivers it found.
+  Gate: `npm test` all checks passed, 9 new cases — payload shape asserted
+  (`v === 1`, six slots, round last), day code carries no roster, "everything"
+  carries roster + group members by name, a hand-built five-slot `CC1U.` code
+  from "before rounds" applies with a blank round, the round arrives on PC B in
+  the plan *and* on its printed sheet, a day-plan import leaves PC B's roster
+  alone, and "everything" merges roster, away flags and group membership.
 
 </details>
