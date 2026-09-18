@@ -273,6 +273,42 @@ check('v1 data gains round, drivers and driver groups', await page.evaluate(() =
   state.routes.every((r) => r.round === '') && Array.isArray(state.drivers) && state.drivers.length === 0
   && Array.isArray(state.driverGroups) && state.driverGroups.length === 0));
 
+// --- data saved by the build before templates (v2) ---
+// Same story one version on: the plan a leader already has must open with an
+// empty template shelf and nothing to read about it.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
+  drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('v2 data loads with an empty template list and no repair notice',
+  (await page.evaluate(() => Array.isArray(state.templates) && state.templates.length === 0))
+  && (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// A template is stored state like any other, so it goes through the same
+// repair: a car deleted since it was saved must not come back as a ghost id.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1' }],
+  templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
+    { name: '1', driver: 'Kept', carId: 'gone', positionId: 'p1', round: '2' },
+    { name: '2', driver: 'Kept too', carId: 'c1', positionId: 'p1' },
+  ] }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('a template keeps its routes but loses a car that is gone', await page.evaluate(() => {
+  const t = state.templates[0];
+  return t.routes.length === 2 && t.routes[0].carId === '' && t.routes[0].driver === 'Kept'
+    && t.routes[1].carId === 'c1' && t.routes[0].round === '2' && t.routes[1].round === '';
+}));
+check('and says so once, not once per route',
+  (await page.locator('#notices .notice.info').innerText()).includes('the Monday template pointed at a car that is gone'),
+  await page.locator('#notices').innerText());
+check('a weekday that is not a day is no weekday at all', await page.evaluate(() => state.templates[0].weekday === ''));
+
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
 check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));

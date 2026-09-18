@@ -76,6 +76,27 @@ const Store = (() => {
       }))
       .filter((g) => g.name);
 
+    // A day template is a route list worth planning again — Monday's plan, the
+    // weekend's. It carries no date: loading one fills in the day you are on.
+    // Its routes carry no id either, because a template is a copy to mint
+    // routes from rather than the routes themselves; ids are minted on load.
+    const templates = arr(raw.templates, 'templates')
+      .filter((t) => t && typeof t === 'object')
+      .map((t) => ({
+        id: str(t.id) || uid(), name: str(t.name),
+        // '' is "no day", and it is what every template starts as: nothing here
+        // applies itself by the calendar until a weekday is chosen for it.
+        weekday: /^[0-6]$/.test(str(t.weekday)) ? t.weekday : '',
+        routes: arr(t.routes, 'the routes in a template')
+          .filter((r) => r && typeof r === 'object')
+          .map((r) => ({
+            name: str(r.name), driver: str(r.driver), carId: str(r.carId),
+            positionId: str(r.positionId), round: str(r.round),
+            highlight: bool(r.highlight), gapBefore: bool(r.gapBefore),
+          })),
+      }))
+      .filter((t) => t.name);
+
     // Drop references to things that no longer exist, so the UI never has to
     // guess what a dangling id meant.
     const has = (list, id) => !id || list.some((x) => x.id === id);
@@ -90,12 +111,25 @@ const Store = (() => {
       if (onRoster.length !== g.driverIds.length) repaired.push(`the ${g.name} group listed a driver who is no longer on the roster`);
       g.driverIds = onRoster;
     }
+    for (const t of templates) {
+      const lost = { car: 0, position: 0 };
+      for (const r of t.routes) {
+        if (!has(cars, r.carId)) { r.carId = ''; lost.car++; }
+        if (!has(positions, r.positionId)) { r.positionId = ''; lost.position++; }
+      }
+      // One line per template, not one per route: a template built when the
+      // fleet was different would otherwise fill the notice with the same
+      // sentence fifteen times over.
+      const gone = (n, what) => `the ${t.name} template pointed at ${n === 1 ? `a ${what} that is gone` : `${n} ${what}s that are gone`}`;
+      if (lost.car) repaired.push(gone(lost.car, 'car'));
+      if (lost.position) repaired.push(gone(lost.position, 'position'));
+    }
 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? raw.date : defaults().date;
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
     const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups }, repaired, usable: true };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups, templates }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -109,9 +143,16 @@ const Store = (() => {
       // but say so, because saving will drop whatever we did not understand.
       notices.push({ kind: 'warn', text: 'This data was saved by a newer version of Car Coordinator. Anything that version added will be lost once you make a change here.' });
     }
-    // v0 (no schemaVersion) and v1 (no round, no roster) use the same field
-    // names for everything they do have, so normalise covers both: what they
-    // never wrote simply comes back as its default.
+    // v0 (no schemaVersion), v1 (no round, no roster) and v2 (no templates)
+    // use the same field names for everything they do have, so normalise
+    // covers them all: what they never wrote comes back as its default.
+    //
+    // Templates arrived without a version bump, deliberately: they are added
+    // state, so v2 data still loads correctly and this build reads it without
+    // a word. The case that leaves quiet is the other direction — a build from
+    // before templates, handed a JSON file that has them, drops them on the
+    // first change and says nothing. Recorded in the manifest; a bump is what
+    // would make it speak.
     return normalise(raw, defaults);
   }
 

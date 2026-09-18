@@ -36,6 +36,7 @@ function defaults() {
     cars: [],
     drivers: [],
     driverGroups: [],
+    templates: [],
     routes: [
       ...['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14'].map((n) => newRoute(n)),
       newRoute('HAU 1', true),
