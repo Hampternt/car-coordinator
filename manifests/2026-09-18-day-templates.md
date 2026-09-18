@@ -43,7 +43,7 @@ every one touches `docs/app.js`.
 
 - [x] **1. Schema: `templates` on state.** `templates: [{ id, name, weekday, routes: [...] }]`, `weekday` empty by default. Add it to `normalise()`'s whitelist and repair loop; migrate existing saved data.
       *Done when:* data saved by the parent branch loads with `templates: []` and no repair notice.
-- [ ] **2. Save as template.** A button at the foot of the Day plan that names and stores the current routes.
+- [x] **2. Save as template.** A button at the foot of the Day plan that names and stores the current routes.
       *Done when:* saving produces a template that survives a reload, and a second save with the same name is handled deliberately (replace or refuse — pick one and say which in the ledger).
 - [ ] **3. ⚠️ Load a template, behind a confirm.** Saved templates render as buttons beside Save. Clicking asks a confirmation that names what is being replaced (e.g. the route count), and calls `Store.snapshot()` **before** overwriting so the Data tab can undo it.
       *Done when:* loading replaces every route field the template carries, a cancel changes nothing at all, and the backup appears in the Data tab's backup list.
@@ -98,5 +98,29 @@ both entry points end in one confirm and one load path.
   4 new cases — v2 data loads with an empty template list and no repair notice,
   a template keeps its routes but loses a car that is gone, that is said once
   rather than once per route, and a weekday that is not a day is no weekday.
+
+- [x] **2. Save as template** — be8b148. `renderTemplates()` draws a shelf at
+  the foot of the Day plan: a name box, **Save as template**, and one card per
+  template with its route count. `listFor` gained `template`, so the shelf
+  reuses the existing machinery rather than growing its own.
+  **The same-name decision, as asked for: replace.** Saving "Monday" again
+  overwrites the Monday template (matched folded, so `monday` finds `Monday`) —
+  the second save is a correction of the first, not a second Monday to pick
+  between. It is an overwrite, so `Store.snapshot(state, 'Replacing the Monday
+  template')` runs first and a notice says what happened. The template keeps
+  the name it was given and the weekday it was given; only its routes change.
+  *Beyond the item text, both on existing machinery, flagged rather than
+  hidden:* a per-template delete (the generic two-click `del` action — a shelf
+  with no way to clear it is a dead end), and deleting a car or position now
+  scrubs it from every template, the way it already scrubs the plan. Without
+  that, the next reload repairs a template nobody touched and says so.
+  *Also:* the first-run assertion in `smoke.mjs` was scoped to `#tab-plan >
+  .empty`; the shelf's own "no templates yet" message made the old selector
+  match two elements. The bump belongs to the item that caused it.
+  Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` all checks passed,
+  **140 ok / 0 failed**, 11 new cases — the shelf, what the notice says, every
+  route field carried with no date and no stored ids, reload, replace-not-add,
+  the kept name, the backup the replace left, delete, and a deleted car
+  leaving the template with a clean reload after it.
 
 </details>
