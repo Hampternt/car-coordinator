@@ -61,7 +61,7 @@ changes shape and grows.
       **Risky — review this item individually.** It changes the app's headline feature.
 - [x] **4. Printed sheet: fold Round in.** Position cell renders `name · round`. Sheet stays four columns; `gapBefore` spacer colspan stays 4.
       *Done when:* A4 print preview shows the round with column widths unchanged.
-- [ ] **5. Left rail: cars panel.** Compact list — reg + status colour chip + route number when assigned (reuse the `assign` string at `app.js:194`). Removes the Free/Parked pools below the table.
+- [x] **5. Left rail: cars panel.** Compact list — reg + status colour chip + route number when assigned (reuse the `assign` string at `app.js:194`). Removes the Free/Parked pools below the table.
       *Done when:* every car shows with status in the rail, nothing renders below the table, and the print stylesheet is untouched.
 - [ ] **6. Driver roster + rail panel.** Editable list (add / rename / delete / reorder), starts empty. Day-plan driver field backed by a `<datalist>` of the roster.
       *Done when:* roster edits persist and roster names are pickable on the day plan while still typeable.
@@ -146,5 +146,16 @@ which is the environment, not the code.
   print stylesheet was not touched. Gate: `npm test` all checks passed, with
   three new cases — the cell reads `Spot 1/1 · 2`, the sheet still has four
   `<th>`s, and the `gapBefore` spacer still has `colspan=4`.
+
+- [x] **5. Left rail, cars panel** — aa584b2. `#tab-plan` is now
+  `.plan` = rail + table; `railCars()` draws reg, status dot and the route it
+  is out on, reusing the `.assign` badge from the Cars tab. The Free/Parked
+  pools and their now-dead `.pool`/`.tag` CSS are gone. The print stylesheet
+  was not touched — the rail sits inside `main`, which `@media print` already
+  hides. Rail stacks above the table under 980px.
+  Gate: `npm test` all checks passed (5 new: every car listed, the assigned one
+  shows its route, free ones read Free, no `.pool` left, and the rail lays out
+  zero boxes in print media). `npm run screens` green, and
+  `screens/02-day-plan-with-warnings.png` shows the rail beside the table.
 
 </details>
