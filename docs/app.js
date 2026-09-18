@@ -1001,7 +1001,7 @@ function spotNameLines(plan) {
   const lines = [];
   for (const s of plan.spots) {
     lines.push(s.round === null
-      ? `${s.keepName} → stays exactly as it is, and the spot${s.absorbed.length === 1 ? '' : 's'} below fold${s.absorbed.length === 1 ? 's' : ''} into it`
+      ? `${s.keepName} → stays exactly as it is: the name the spot${s.absorbed.length === 1 ? '' : 's'} below fold into`
       : `${s.keepName} → ${s.name}, round ${s.round}`);
     for (const a of s.absorbed) lines.push(`${a.name} → ${s.name}, round ${a.round} — the same ${s.name}: two spots become one`);
   }
@@ -1030,9 +1030,13 @@ function spotRoundLines(plan) {
 }
 
 /* The only thing in this pack that writes, and it runs from one place: the
-   button inside the offer that has just listed what it would do. It works
-   from that same plan rather than working it out again, so the list agreed to
-   is the change made.
+   button inside the offer that has just listed what it would do.
+
+   The plan it works from is worked out again at the press rather than kept
+   from the offer, because the list on screen can be minutes old: a round
+   typed, a spot added or renamed since it was raised all belong in what
+   happens. The report afterwards reads that same plan back out, so what is
+   claimed is what was done.
 
    The surviving position is renamed where it stands, so the Positions tab
    does not reshuffle under the leader; the absorbed ones go, and everything
@@ -1201,9 +1205,8 @@ document.addEventListener('click', (e) => {
       note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
       break;
     }
-    // The offer's button, and the only way in. Everything it is about to do
-    // was listed in the notice above it; the snapshot is what makes that
-    // safe to agree to, because Backups can put the names back in one click.
+    // The offer's button, and the only way in. The snapshot is what makes it
+    // safe to agree to: Backups can put every old name back in one click.
     case 'split-rounds': {
       const plan = spotRoundPlan(state);
       // Nothing left to split: the button was pressed twice, or another tab
