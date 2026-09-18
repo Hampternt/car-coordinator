@@ -993,18 +993,23 @@ const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
    nothing has been changed, and it is raised again on the next load. */
 const andList = (words) => (words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`);
 
-function spotRoundLines(plan) {
+/* One line per position, each saying where it lands. A spot that is already
+   called "Spot 1" keeps its name and its settings; the numbered ones fold
+   into it. The offer reads these out and so does the report afterwards, so
+   what was agreed to and what was done are the same list of lines. */
+function spotNameLines(plan) {
   const lines = [];
   for (const s of plan.spots) {
-    // One line per position, each saying where it lands. A spot that is
-    // already called "Spot 1" keeps its name and its settings; the numbered
-    // ones fold into it.
     lines.push(s.round === null
       ? `${s.keepName} → stays exactly as it is, and the spot${s.absorbed.length === 1 ? '' : 's'} below fold${s.absorbed.length === 1 ? 's' : ''} into it`
       : `${s.keepName} → ${s.name}, round ${s.round}`);
     for (const a of s.absorbed) lines.push(`${a.name} → ${s.name}, round ${a.round} — the same ${s.name}: two spots become one`);
   }
+  return lines;
+}
 
+function spotRoundLines(plan) {
+  const lines = spotNameLines(plan);
   const { filled, kept } = plan.routes;
   if (filled) lines.push(`${filled} route${filled === 1 ? ' has its round' : 's have their rounds'} filled in from the spot name.`);
   if (kept) lines.push(`${kept} route${kept === 1 ? '' : 's'} already ${kept === 1 ? 'has a round' : 'have rounds'} typed in and ${kept === 1 ? 'is' : 'are'} left exactly as ${kept === 1 ? 'it is' : 'they are'} — what was typed wins over the name.`);
@@ -1022,6 +1027,39 @@ function spotRoundLines(plan) {
   lines.push('Do this on both PCs before swapping share codes again: a shared list finds a spot by its name, so while one side has split and the other has not, a code from one arrives on the other with the position blank on every route.');
   lines.push('Dismissing this (✕) changes nothing at all, and the question comes back next time you open the app.');
   return lines;
+}
+
+/* The only thing in this pack that writes, and it runs from one place: the
+   button inside the offer that has just listed what it would do. It works
+   from that same plan rather than working it out again, so the list agreed to
+   is the change made.
+
+   The surviving position is renamed where it stands, so the Positions tab
+   does not reshuffle under the leader; the absorbed ones go, and everything
+   standing on one of them — the day plan and the saved templates alike — is
+   moved onto the survivor and given the round its old spot name spelled out.
+   A round already typed in is never overwritten: the name says round 1 and
+   the route says 2 because somebody moved that car, and the route is the
+   newer fact. */
+function applySpotRoundSplit(plan) {
+  const repoint = (routes) => {
+    for (const r of routes || []) {
+      // The round comes from the position the route is on now, so read it
+      // before the move: re-pointing is what takes the old name away.
+      const round = plan.roundFrom.get(r.positionId);
+      if (round === undefined) continue;
+      if (!fold(r.round)) r.round = round;
+      if (plan.moveTo.has(r.positionId)) r.positionId = plan.moveTo.get(r.positionId);
+    }
+  };
+  repoint(state.routes);
+  for (const t of state.templates || []) repoint(t.routes);
+
+  for (const s of plan.spots) {
+    const keep = byId(state.positions, s.keepId);
+    if (keep) keep.name = s.name;
+  }
+  state.positions = state.positions.filter((p) => !plan.moveTo.has(p.id));
 }
 
 function offerSpotRoundSplit() {
@@ -1161,6 +1199,24 @@ document.addEventListener('click', (e) => {
       state.drivers.forEach((d) => { d.available = g.driverIds.includes(d.id); });
       const inToday = state.drivers.filter((d) => d.available).length;
       note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
+      break;
+    }
+    // The offer's button, and the only way in. Everything it is about to do
+    // was listed in the notice above it; the snapshot is what makes that
+    // safe to agree to, because Backups can put the names back in one click.
+    case 'split-rounds': {
+      const plan = spotRoundPlan(state);
+      // Nothing left to split: the button was pressed twice, or another tab
+      // on the same browser got there first.
+      if (!plan.spots.length) { dropOffers(); break; }
+      Store.snapshot(state, 'Splitting the round out of the spot names');
+      applySpotRoundSplit(plan);
+      const { filled, kept } = plan.routes;
+      const merged = plan.spots.reduce((n, s) => n + s.absorbed.length, 0);
+      const renamed = plan.spots.reduce((n, s) => n + (s.round === null ? 0 : 1) + s.absorbed.length, 0);
+      dropOffers();
+      note('info', `Done. ${renamed} spot name${renamed === 1 ? '' : 's'} had the round taken out${merged ? `, and ${merged} of them turned out to be the same spot as another and ${merged === 1 ? 'was' : 'were'} merged into it` : ''}. ${filled} route${filled === 1 ? '' : 's'} had the round filled in${kept ? `, and ${kept} kept the round already typed in` : ''}. The names as they were are in Backups, under "Splitting the round out of the spot names".`,
+        null, spotNameLines(plan));
       break;
     }
     case 'add-position':

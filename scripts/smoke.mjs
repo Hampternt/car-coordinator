@@ -438,6 +438,50 @@ check('and leaves the saved data byte for byte as it was', (await page.evaluate(
 await page.reload({ waitUntil: 'networkidle' });
 check('the question comes back on the next load', (await page.locator('#notices .notice.warn [data-act="split-rounds"]').count()) === 1);
 
+// --- applying it: exactly the plan that was shown, and nothing besides ---
+// The page is still on the offer raised above, so this is the leader's own
+// route into it: read the list, press the button.
+await page.locator('[data-act="split-rounds"]').click();
+const done = await page.evaluate(() => ({
+  positions: state.positions.map((p) => [p.id, p.name, p.multi, p.labelId, p.note].join('|')),
+  routes: state.routes.map((r) => [r.id, r.positionId, r.round].join('|')),
+  template: state.templates[0].routes.map((r) => [r.positionId, r.round].join('|')),
+  offers: notices.filter((n) => n.offer).length,
+  backup: Store.backups()[0].label,
+}));
+check('the two spots are one spot now, and the Garage is untouched',
+  done.positions.join(' / ') === 'p1|Spot 1|false|| / p3|Garage|true||', done.positions.join(' / '));
+check('every route on either name stands on the survivor',
+  done.routes.slice(0, 3).every((r) => r.split('|')[1] === 'p1'), done.routes.join(' / '));
+check('a blank round is filled in from the name the route stood on',
+  done.routes[0] === 'r1|p1|1' && done.routes[1] === 'r2|p1|2', done.routes.join(' / '));
+check('a round someone typed is left exactly as it was', done.routes[2] === 'r3|p1|4', done.routes[2]);
+check('a route on a spot with no round in its name is not touched at all', done.routes[3] === 'r4|p3|', done.routes[3]);
+check('the saved template moved with the plan', done.template.join() === 'p1|2', done.template.join());
+check('the question is answered and gone', done.offers === 0);
+check('and the report says what was done', (await page.locator('#notices .notice.info').innerText()).includes('2 routes had the round filled in'), await page.locator('#notices .notice.info').innerText());
+check('a backup was taken first, named for what it was taken before', done.backup === 'Splitting the round out of the spot names', done.backup);
+
+// The point of the whole exercise: the paper sheet is unchanged. "Spot 1"
+// packed in round 1 prints as "Spot 1/1", exactly as the old name did.
+await page.click('[data-act="tab"][data-tab="preview"]');
+const splitSheet = await page.locator('#sheet').innerText();
+check('the printed sheet reads exactly as it did before the split',
+  splitSheet.includes('Spot 1/1') && splitSheet.includes('Spot 1/2') && splitSheet.includes('Spot 1/4'), splitSheet.split('\n').slice(0, 6).join(' / '));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('the offer does not come back once there is nothing to split', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// One click in Backups undoes the lot. It is the only way back, so it is
+// worth a check of its own rather than trusting the label.
+await page.click('[data-act="tab"][data-tab="data"]');
+const undoSplit = page.locator('[data-act="restore"]').first();
+await undoSplit.click();
+await undoSplit.click();                              // two-click confirm
+check('restoring the backup brings the old names, and the routes, back', await page.evaluate(() =>
+  state.positions.map((p) => p.name).join() === 'Spot 1/1,Spot 1/2,Garage'
+  && state.routes.map((r) => `${r.positionId}:${r.round}`).join() === 'p1:,p2:,p2:4,p3:'));
+
 // --- sharing between two PCs ---
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
