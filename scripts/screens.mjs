@@ -56,7 +56,7 @@ await tab('labels');
 await page.fill('#newLabel', 'No fuel card');
 await page.fill('#newLabelColor', '#1565c0');
 await page.click('[data-act="add-label"]');
-await shot('06-labels');
+await shot('07-labels');
 
 // tag a car with the new label straight away
 await tab('cars');
@@ -72,7 +72,7 @@ await page.fill('#newPos', 'Spot 6/1');
 await page.click('[data-act="add-position"]');
 await pos('Spot 2/2').locator('.chip', { hasText: 'Out of service' }).click();
 await pos('Spot 2/2').locator('[data-field="note"]').fill('Pallet jack parked in it');
-await shot('05-positions');
+await shot('06-positions');
 
 // --- the roster, and a crew you can put in with one click
 console.log('drivers and day groups');
@@ -161,17 +161,38 @@ if ((await page.locator('#tab-plan tbody tr.warn').count()) !== 4) {
   console.log(`\nexpected 4 flagged rows, got ${await page.locator('#tab-plan tbody tr.warn').count()}`);
   process.exit(1);
 }
+
+// --- the plan you make again: save it as a template, set it for Mondays
+console.log('day templates');
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+await page.locator('#tab-plan .tpl select[data-field="weekday"]').selectOption('1');
+if ((await page.locator('#tab-plan .tpl').count()) !== 1) {
+  console.log('\nthe template shelf under the plan is empty after saving one');
+  process.exit(1);
+}
 await shot('03-day-plan-with-warnings');
 
+// The question that guards the one destructive button on the main screen. It
+// is dismissed rather than answered: the plan below it is the day being built.
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+await page.waitForSelector('#notices .notice.warn [data-act="load-template"]');
+await shot('04-template-question');
+await page.click('#notices .notice.warn [data-act="dismiss"]');
+if ((await page.locator('#tab-plan tbody tr').count()) !== 15) {
+  console.log(`\ndismissing the question changed the plan: ${await page.locator('#tab-plan tbody tr').count()} routes`);
+  process.exit(1);
+}
+
 await tab('cars');
-await shot('04-cars');
+await shot('05-cars');
 
 // --- data tab and the share code
 console.log('data and sharing');
 await tab('data');
 await page.click('[data-act="share-make"][data-mode="day"]');
 await page.waitForFunction(() => document.querySelector('#shareOut')?.value.startsWith('CC1'));
-await shot('07-data');
+await shot('08-data');
 
 // --- the import preview another PC would see
 await page.click('[data-act="tab"][data-tab="data"]');
@@ -179,17 +200,17 @@ const code = await page.locator('#shareOut').inputValue();
 await page.fill('#shareIn', code);
 await page.click('[data-act="share-read"]');
 await page.waitForSelector('#shareDlg[open]');
-await page.screenshot({ path: `${OUT}/08-import-preview.png` });
-console.log(`  ${OUT}/08-import-preview.png`);
+await page.screenshot({ path: `${OUT}/09-import-preview.png` });
+console.log(`  ${OUT}/09-import-preview.png`);
 await page.click('[data-act="share-cancel"]');
 
 // --- the printout
 console.log('printout');
 await tab('preview');
 await page.waitForSelector('#sheet .qr svg');
-await shot('09-print-preview');
-await page.pdf({ path: `${OUT}/10-printed-sheet.pdf`, format: 'A4', printBackground: true });
-console.log(`  ${OUT}/10-printed-sheet.pdf`);
+await shot('10-print-preview');
+await page.pdf({ path: `${OUT}/11-printed-sheet.pdf`, format: 'A4', printBackground: true });
+console.log(`  ${OUT}/11-printed-sheet.pdf`);
 
 await browser.close();
 server.close();

@@ -9,6 +9,7 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 ## Features
 - **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A rail down the left shows the day's drivers and the whole fleet with its status, so you can fill the table in without changing tab.
 - **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
+- **Day templates**: save the plan as it stands — drivers, cars, positions, rounds and marks, but never the date — and put it back another day. Loading one asks first, saying how many routes it replaces, and takes a backup before it writes, so the Data tab can undo it. A template can offer itself when you open the app on its day: that is off until you pick a day for it, and even then it only offers.
 - **Cars / Positions**: add, rename, reorder, delete. One-click status buttons (OK, Out of service, Unavailable, Workshop, your own) plus a note.
 - **Warnings, not blocks**: a car on two routes, a spot taken twice **in the same round**, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it.
 - "Many cars" positions (Garage) can be shared by several routes, and any spot can be used again in a later round.

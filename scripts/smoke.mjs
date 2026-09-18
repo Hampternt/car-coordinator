@@ -41,7 +41,8 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(base, { waitUntil: 'networkidle' });
 
 // --- first run ---
-check('loads with an empty car list', await page.locator('#tab-plan .empty').isVisible());
+// The tab's own empty message, not the template shelf's further down it.
+check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
 check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 // An unescaped quote in an inline data: URI silently dumps the rest of the
@@ -238,7 +239,7 @@ await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 2 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 3 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -272,6 +273,42 @@ check('v1 data loads with no repair notice', (await page.locator('#notices .noti
 check('v1 data gains round, drivers and driver groups', await page.evaluate(() =>
   state.routes.every((r) => r.round === '') && Array.isArray(state.drivers) && state.drivers.length === 0
   && Array.isArray(state.driverGroups) && state.driverGroups.length === 0));
+
+// --- data saved by the build before templates (v2) ---
+// Same story one version on: the plan a leader already has must open with an
+// empty template shelf and nothing to read about it.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
+  drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('v2 data loads with an empty template list and no repair notice',
+  (await page.evaluate(() => Array.isArray(state.templates) && state.templates.length === 0))
+  && (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// A template is stored state like any other, so it goes through the same
+// repair: a car deleted since it was saved must not come back as a ghost id.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1' }],
+  templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
+    { name: '1', driver: 'Kept', carId: 'gone', positionId: 'p1', round: '2' },
+    { name: '2', driver: 'Kept too', carId: 'c1', positionId: 'p1' },
+  ] }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('a template keeps its routes but loses a car that is gone', await page.evaluate(() => {
+  const t = state.templates[0];
+  return t.routes.length === 2 && t.routes[0].carId === '' && t.routes[0].driver === 'Kept'
+    && t.routes[1].carId === 'c1' && t.routes[0].round === '2' && t.routes[1].round === '';
+}));
+check('and says so once, not once per route',
+  (await page.locator('#notices .notice.info').innerText()).includes('the Monday template pointed at a car that is gone'),
+  await page.locator('#notices').innerText());
+check('a weekday that is not a day is no weekday at all', await page.evaluate(() => state.templates[0].weekday === ''));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
@@ -630,6 +667,234 @@ check('and the caret is still in the round being typed', await page.evaluate(() 
 await page.keyboard.type('Y');
 check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 
+// --- day templates: saving the plan that gets made again ---
+// A template is the route list as it stands minus the date. Saving is not
+// destructive; saving over a name already used is, so that one is snapshotted.
+const templatePlan = {
+  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
+  cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Spot 1/2' }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+    { id: 'r2', name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
+    { id: 'r3', name: '3' },
+  ],
+};
+await loadPlan(templatePlan);
+const shelf = page.locator('#tab-plan .tpl');
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+check('saving puts a template on the shelf under the plan',
+  (await shelf.count()) === 1 && (await shelf.innerText()).replace(/\s+/g, ' ').includes('Monday 3 routes'),
+  await shelf.innerText());
+check('and says what it saved', (await page.locator('#notices .notice').last().innerText()).includes('Saved Monday: a template of 3 routes'),
+  await page.locator('#notices .notice').last().innerText());
+check('a template carries every route field the plan does, and no date', await page.evaluate(() => {
+  const t = state.templates[0];
+  const [one, two] = t.routes;
+  return t.routes.length === 3 && !('date' in t) && t.weekday === ''
+    && one.driver === 'Weekday One' && one.carId === 'c1' && one.positionId === 'p1'
+    && one.round === '1' && one.highlight === true && two.gapBefore === true
+    && !('id' in one);                                 // ids are minted on load, not stored
+}));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('a saved template survives a reload', (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Monday');
+
+// Saving a name that is already used replaces it: the second Monday is a
+// correction of the first, not a second Monday to choose between.
+await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Weekday Changed');
+await page.fill('#newTemplate', 'monday');             // the same name, typed differently
+await page.click('[data-act="save-template"]');
+check('saving the same name again replaces it rather than making a second',
+  (await shelf.count()) === 1 && (await page.evaluate(() => state.templates[0].routes[0].driver)) === 'Weekday Changed');
+check('and keeps the name it was given rather than the capitals just typed',
+  (await page.evaluate(() => state.templates[0].name)) === 'Monday');
+check('and says so', (await page.locator('#notices .notice').last().innerText()).includes('Replaced the Monday template'),
+  await page.locator('#notices .notice').last().innerText());
+await page.click('[data-act="tab"][data-tab="data"]');
+check('the template it replaced is in the backups', (await page.locator('#tab-data table tbody').first().innerText()).includes('Replacing the Monday template'));
+
+await page.click('[data-act="tab"][data-tab="plan"]');
+const delTemplate = shelf.locator('[data-act="del"]');
+await delTemplate.click();
+await delTemplate.click();                             // two-click confirm, like every other delete
+check('a template can be deleted', (await shelf.count()) === 0);
+
+// A car the template pointed at, deleted from the fleet, must leave the
+// template with it — otherwise the next reload repairs a template nobody
+// touched, and says so.
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+await page.click('[data-act="tab"][data-tab="cars"]');
+const delCar = page.locator('#tab-cars tbody tr', { has: page.locator('[data-field="reg"][value="AA11111"]') }).locator('[data-act="del"]');
+await delCar.click();
+await delCar.click();
+check('deleting a car takes it out of the templates too',
+  await page.evaluate(() => state.templates[0].routes[0].carId === ''));
+await page.reload({ waitUntil: 'networkidle' });
+check('so the reload after it has nothing to repair', (await page.locator('#notices .notice').count()) === 0,
+  await page.locator('#notices').innerText());
+
+// --- loading a template, behind a confirmation that says what it costs ---
+// The only destructive action a click away from the plan. It asks first, in
+// words, and snapshots before it writes: everything below is that promise.
+const mondayRoutes = [
+  { name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+  { name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
+  { name: '3' },
+];
+const plannedToday = { id: 'r9', name: '9', driver: 'Typed This Morning', carId: 'c1', positionId: 'p2', round: '5' };
+const withMonday = {
+  ...templatePlan,
+  labels: [{ id: 'l1', name: 'Workshop', color: '#6a1b9a' }],
+  routes: [plannedToday],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: mondayRoutes }],
+};
+await loadPlan(withMonday);
+const backupCount = () => page.evaluate(() => Store.backups().length);
+const planDrivers = () => page.evaluate(() => state.routes.map((r) => r.driver));
+const before = await backupCount();
+
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check('clicking a template asks before it does anything',
+  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  await page.locator('#notices .notice.warn').innerText());
+check('and the plan is untouched while the question stands',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
+
+await page.click('#notices .notice.warn [data-act="dismiss"]');
+check('dismissing the question changes nothing at all',
+  (await page.locator('#notices .notice').count()) === 0
+  && JSON.stringify(await planDrivers()) === '["Typed This Morning"]'
+  && (await backupCount()) === before,
+  `${await backupCount()} backups, was ${before}`);
+
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+await page.click('#notices [data-act="load-template"]');
+check('loading replaces every route field the template carries', await page.evaluate(() => {
+  const [one, two, three] = state.routes;
+  return state.routes.length === 3
+    && one.driver === 'Weekday One' && one.carId === 'c1' && one.positionId === 'p1'
+    && one.round === '1' && one.highlight === true
+    && two.gapBefore === true && three.driver === '' && three.carId === ''
+    && new Set(state.routes.map((r) => r.id)).size === 3;   // ids minted, not shared
+}));
+check('the day plan on screen is the template', (await page.locator('#tab-plan tbody tr').count()) === 3
+  && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Weekday One');
+check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === '2026-09-18');
+check('and the question is answered rather than left on screen',
+  (await page.locator('#notices .notice.warn').count()) === 0
+  && (await page.locator('#notices .notice.info').innerText()).includes('Loaded the Monday template: 3 routes'));
+
+await page.click('[data-act="tab"][data-tab="data"]');
+check('the backup taken before the load is in the Data tab',
+  (await page.locator('#tab-data table tbody').first().innerText()).includes('Loading the Monday template'));
+const undo = page.locator('[data-act="restore"]').first();
+await undo.click();
+await undo.click();                                    // two-click confirm
+check('and restoring it brings back the plan that was replaced',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]', JSON.stringify(await planDrivers()));
+
+// A template holds cars by id, so one that has gone to the workshop since it
+// was saved comes back with the app's usual warning rather than a refusal.
+await page.click('[data-act="tab"][data-tab="cars"]');
+await page.locator('#tab-cars tbody tr', { has: page.locator('[data-field="reg"][value="AA11111"]') }).locator('.chip', { hasText: 'Workshop' }).click();
+await page.click('[data-act="tab"][data-tab="plan"]');
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+await page.click('#notices [data-act="load-template"]');
+check('a template that brings back a car in the workshop warns, and still loads',
+  (await page.locator('#tab-plan .problems').innerText()).includes('AA11111 is marked Workshop')
+  && (await page.locator('#tab-plan tbody tr').count()) === 3,
+  await page.locator('#tab-plan .problems').innerText());
+
+// --- the weekday offer: off by default, and an offer even when it is on ---
+// The rule the pack exists for. A template never applies itself: the most it
+// ever does is raise the same question the shelf raises.
+await loadPlan(withMonday);
+check('a template is set for no day when it is saved', await page.evaluate(() => state.templates[0].weekday === ''));
+check('so opening the app raises nothing, whatever day it is',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+const weekday = page.locator('#tab-plan .tpl select[data-field="weekday"]');
+const dayNow = new Date().getDay();
+await weekday.selectOption(String((dayNow + 1) % 7));
+await page.reload({ waitUntil: 'networkidle' });
+check('a weekday sticks to the template it was set on',
+  (await page.evaluate(() => state.templates[0].weekday)) === String((dayNow + 1) % 7));
+check('and a template set for another day says nothing today',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+await weekday.selectOption(String(dayNow));
+await page.reload({ waitUntil: 'networkidle' });
+check('a template set for today offers itself on the way in',
+  (await page.locator('#notices .notice [data-act="ask-template"]').innerText()) === 'Use Monday',
+  await page.locator('#notices').innerText());
+check('and has loaded nothing while it waits to be asked',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
+
+await page.click('#notices [data-act="ask-template"]');
+check('taking the offer asks the same question the shelf asks',
+  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  await page.locator('#notices .notice.warn').innerText());
+await page.click('#notices [data-act="load-template"]');
+check('and only then is anything replaced, with the same backup taken first',
+  (await page.evaluate(() => state.routes.length)) === 3
+  && (await page.evaluate(() => Store.backups()[0].label)) === 'Loading the Monday template',
+  await page.evaluate(() => Store.backups()[0].label));
+
+// Back to no day, and the offer goes with it.
+await weekday.selectOption('');
+await page.reload({ waitUntil: 'networkidle' });
+check('turning the weekday off again stops the offer',
+  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+
+// A repair notice and the offer, on screen together: exactly what a template
+// that lost a car, on its own weekday, produces. Dismiss buttons carry the
+// notice's index, so the wrong one going away would be quiet and wrong.
+await loadPlan({
+  ...withMonday,
+  templates: [{
+    id: 't1', name: 'Monday', weekday: String(dayNow),
+    routes: [{ name: '1', driver: 'Weekday One', carId: 'gone' }, ...mondayRoutes.slice(1)],
+  }],
+});
+check('a repair notice and an offer sit side by side', (await page.locator('#notices .notice').count()) === 2,
+  await page.locator('#notices').innerText());
+await page.click('#notices [data-act="ask-template"]');
+check('and the question joins them rather than piling up',
+  (await page.locator('#notices .notice').count()) === 2 && (await page.locator('#notices .notice.warn').count()) === 1,
+  await page.locator('#notices').innerText());
+await page.click('#notices .notice.warn [data-act="dismiss"]');
+check('dismissing the question takes the question, not the notice beside it',
+  (await page.locator('#notices .notice').count()) === 1
+  && (await page.locator('#notices .notice').innerText()).includes('Repaired saved data')
+  && JSON.stringify(await planDrivers()) === '["Typed This Morning"]',
+  await page.locator('#notices').innerText());
+
+// --- templates are private to this PC, and travel in the JSON file ---
+// The decisions table's call, asserted in both directions: a share code
+// neither carries a template nor disturbs one, and the exported file does
+// carry them, because `normalise()` now names the field.
+await loadPlan(withMonday);
+await page.click('[data-act="tab"][data-tab="data"]');
+const ownCode = await copyCode(page, 'day');
+await readCode(page, ownCode);
+await page.click('[data-act="share-apply"]');
+check('loading a shared list leaves the templates on this PC alone',
+  await page.evaluate(() => state.templates.length === 1 && state.templates[0].name === 'Monday'));
+
+const [tplFile] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
+const tplJson = JSON.parse(await readFile(await tplFile.path(), 'utf8'));
+check('an exported copy carries the templates to the other manager',
+  tplJson.templates.length === 1 && tplJson.templates[0].routes.length === 3);
+
+await loadPlan(templatePlan);                          // a PC with no templates of its own
+await page.click('[data-act="tab"][data-tab="data"]');
+await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(tplJson)) });
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('and importing it brings them in', (await page.locator('#tab-plan .tpl').count()) === 1);
+
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
   document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
@@ -656,6 +921,27 @@ check('the sheet still starts at the top of the page', printed.sheetTop <= 1, `t
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
+// --- a question raised from the shelf has to be somewhere you can see it ---
+// The shelf sits at the foot of a full day plan while notices render at its
+// head. Every other assertion about the question passes whether or not it is
+// on screen, so this is the only one that catches the click that looks dead.
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+await page.locator('#newTemplate').scrollIntoViewIfNeeded();
+const shelfWasBelow = await page.evaluate(() =>
+  document.querySelector('#newTemplate').getBoundingClientRect().top > window.innerHeight / 2);
+check('the shelf is far enough down the plan for this to be a real test', shelfWasBelow);
+await page.locator('[data-act="ask-template"]').first().click();
+check('asking from the shelf scrolls the question into view', await page.evaluate(() => {
+  const q = document.querySelector('#notices .notice.warn');
+  if (!q) return false;
+  const r = q.getBoundingClientRect();
+  return r.top >= 0 && r.bottom <= window.innerHeight;
+}));
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+
 // --- the server turns a bad URL into a 404, not a dead process ---
 const malformed = await fetch(base + '%').then((r) => r.status, () => 'connection died');
 check('a malformed URL is a 404, not a crash', malformed === 404, String(malformed));
@@ -670,6 +956,10 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1/1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
+  // A saved template too: the shelf card is the widest row the day plan can
+  // grow — name button, route count, weekday select and delete, side by side.
+  templates: [{ id: 't1', name: 'Monday', weekday: '1',
+    routes: [{ name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1', round: '1' }] }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
 for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
