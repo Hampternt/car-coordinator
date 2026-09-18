@@ -190,19 +190,36 @@ both entry points end in one confirm and one load path.
   Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` **162 ok / 0
   failed**, `CHROMIUM_PATH=... npm run screens` exit 0.
 
+**After the items** — 8c7ae0d. Notices carry their array index into the
+dismiss button, and `askTemplate()` filters the array, so a question raised
+beside another notice was worth proving rather than reasoning about: a template
+that lost a car, on its own weekday, puts a repair notice *and* an offer up at
+once. Three cases — the pair sits side by side, the question joins them rather
+than piling up, and dismissing it takes the question while the repair notice
+and the plan stay as they were. Gate re-run green.
+
 **Pack gate — green, 2026-09-18.**
-`CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, **162 checks ok, 0
+`CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, **165 checks ok, 0
 failed, "all checks passed"**, no console errors on any of the four simulated
 PCs. `CHROMIUM_PATH=... npm run screens` → exit 0, "no console errors, 4
-warnings raised and asserted", 10 screenshots + the A4 PDF written.
+warnings raised and asserted", 10 screenshots + the A4 PDF written. Both
+re-run green after the commit above.
 `scripts/check.sh` OK on every shipped script.
 The `CHROMIUM_PATH` is the environment, not the code: plain `npm test` fails
 with *"Executable doesn't exist at …/chromium_headless_shell-1243/…"*, the
 pinned Playwright browser this sandbox cannot download. **The suite has
 therefore not run on the browser CI uses.**
 
+**Two things the gate cannot vouch for, for the walkthrough.** The shelf is
+only ever photographed at 1360px — each card is a button, a count and a
+weekday select, and under the 980px breakpoint the plan stacks. And
+`Store.snapshot()` skips a snapshot identical to the newest one, so saving a
+template and loading it straight back over an unchanged plan correctly adds no
+new backup; that reads like a failure if it is the first thing tried.
+
 **Left for the user:** the real-browser walkthrough (the shelf, the question,
-the load, the undo from Backups, and the weekday offer), the individual review
+the load, the undo from Backups, the weekday offer, and the shelf at a narrow
+window), the individual review
 item 3 asks for, `INVENTORY.md`'s 🚧 → ✅ at merge, and two calls recorded
 above that are reversible but are the user's to make — no `schemaVersion` bump
 (item 1) and the per-template delete button (item 2).
