@@ -69,16 +69,39 @@ function labelChips(kind, item) {
   ).join('');
 }
 
+/* ---------- the clash rule ----------
+   Two routes can share a packing spot as long as they are packed in different
+   rounds: the first car has gone by the time the second one arrives. So a
+   double booking is a spot AND a round, never a spot on its own.
+
+   A blank round is a bucket of its own — "not filled in yet" is not "some
+   other round", and two blanks in the same spot are still a clash. Rounds are
+   matched the way a person would read them, trimmed and case-folded, for the
+   same reason share.js matches registrations that way: a warning that goes
+   quiet because someone typed a trailing space is worse than no warning. */
+const roundKey = (round) => String(round || '').trim().toUpperCase();
+const spotKey = (positionId, round) => `${positionId}\u0000${roundKey(round)}`;
+// " in round 2", or nothing at all: a plan that uses no rounds must read
+// exactly as it did before rounds existed.
+const roundPhrase = (round) => (roundKey(round) ? ` in round ${String(round).trim()}` : '');
+
 function usage() {
   // Null-prototype, because ids come from imported files: a car id of
   // '__proto__' would otherwise resolve to Object.prototype, skip the ??=,
   // and throw on every render with the bad data already saved.
-  const cars = Object.create(null), pos = Object.create(null);
+  const cars = Object.create(null), pos = Object.create(null), spots = Object.create(null);
   state.routes.forEach((r, at) => {
     if (r.carId) (cars[r.carId] ??= []).push({ r, at });
-    if (r.positionId) (pos[r.positionId] ??= []).push({ r, at });
+    // Two maps, because two different questions get asked of them: `pos` is
+    // "is this spot in use at all", which is what a spot's status and the rail
+    // care about, and `spots` is "is this spot taken twice over", which is
+    // per round.
+    if (r.positionId) {
+      (pos[r.positionId] ??= []).push({ r, at });
+      (spots[spotKey(r.positionId, r.round)] ??= []).push({ r, at });
+    }
   });
-  return { cars, pos };
+  return { cars, pos, spots };
 }
 
 /* ---------- views ---------- */
@@ -107,13 +130,24 @@ function problems() {
     const lab = byId(state.labels, car.labelId);
     if (lab) { lines.push(`${car.reg} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
+  // A spot's status belongs to the spot itself, so it is said once however
+  // many rounds are packed there.
   for (const posId of Object.keys(use.pos)) {
     const routes = use.pos[posId];
     const pos = byId(state.positions, posId);
     if (!pos) continue;
-    if (!pos.multi && routes.length > 1) { lines.push(`${pos.name} is taken by ${routes.length} routes (${named(routes)})`); flag(routes); }
     const lab = byId(state.labels, pos.labelId);
     if (lab) { lines.push(`${pos.name} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
+  }
+  // A double booking belongs to a spot and a round together. Spots flagged
+  // "many cars" (the Garage) are shared on purpose and never clash.
+  for (const key of Object.keys(use.spots)) {
+    const routes = use.spots[key];
+    if (routes.length < 2) continue;
+    const pos = byId(state.positions, routes[0].r.positionId);
+    if (!pos || pos.multi) continue;
+    lines.push(`${pos.name}${roundPhrase(routes[0].r.round)} is taken by ${routes.length} routes (${named(routes)})`);
+    flag(routes);
   }
   return { lines, rows, use };
 }
@@ -143,11 +177,14 @@ function renderPlan() {
     }).join('');
     const posOpts = state.positions.map((p) => {
       const lab = byId(state.labels, p.labelId);
-      const others = p.multi ? [] : elsewhere(use.pos[p.id], at);
+      // Scoped to this row's round: the question the note answers is "what am
+      // I walking into if I put *this* route here", and a route packed in
+      // another round is not in the way.
+      const others = p.multi ? [] : elsewhere(use.spots[spotKey(p.id, r.round)], at);
       const bits = [lab && labelName(lab), others.length && `route ${routeNames(others)}`, p.multi && 'many cars'].filter(Boolean);
       const sel = p.id === r.positionId;
       if (sel && lab) warns.push(`${p.name} is marked ${labelName(lab)}`);
-      if (sel && others.length) warns.push(`${p.name} is also used by route ${routeNames(others)}`);
+      if (sel && others.length) warns.push(`${p.name}${roundPhrase(r.round)} is also used by route ${routeNames(others)}`);
       return `<option value="${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');

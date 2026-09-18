@@ -403,6 +403,61 @@ check('the sheet names the car that should be in the workshop', clashSheet.inclu
 check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
 check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
 
+// --- the clash rule is per round, not per spot ---
+// The headline feature. Two routes in one spot are a clash only when they are
+// packed in the same round; in different rounds that is exactly what rounds
+// are for, and warning about it would train the leader to ignore the box.
+const spotPlan = (routes) => ({
+  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Garage', multi: true }],
+  routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
+});
+const loadPlan = async (plan) => {
+  await page.evaluate((d) => localStorage.setItem('carcoord:v1', JSON.stringify(d)), plan);
+  await page.reload({ waitUntil: 'networkidle' });
+};
+const problemCount = () => page.locator('#tab-plan .problems').count();
+const problemText = () => page.locator('#tab-plan .problems').innerText().catch(() => '');
+const warnRows = () => page.locator('#tab-plan tbody tr.warn').count();
+
+await loadPlan(spotPlan([['1', '1'], ['2', '2']]));
+check('the same spot in two rounds does not warn', (await problemCount()) === 0 && (await warnRows()) === 0, await problemText());
+const noteFor = async (row, spot) => (await page.locator('#tab-plan tbody tr').nth(row).locator(`[data-field="positionId"] option`).filter({ hasText: spot }).first().innerText());
+check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1/1')) === 'Spot 1/1', await noteFor(0, 'Spot 1/1'));
+
+await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
+check('the same spot in the same round still warns', (await problemText()).includes('Spot 1/1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
+check('and both rows are flagged', (await warnRows()) === 2);
+await page.click('[data-act="tab"][data-tab="preview"]');
+check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1/1 in round 2 is taken by 2 routes'));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+await loadPlan(spotPlan([['1', ''], ['2', '']]));
+check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1/1 is taken by 2 routes (1, 2)'), await problemText());
+
+await loadPlan(spotPlan([['1', ''], ['2', '2']]));
+check('a blank round is its own round, not every round', (await problemCount()) === 0, await problemText());
+
+await loadPlan(spotPlan([['1', ' a '], ['2', 'A']]));
+check('a stray space or a capital does not silence the warning', (await problemText()).includes('is taken by 2 routes'), await problemText());
+
+await loadPlan(spotPlan([['1', '2', 'p2'], ['2', '2', 'p2']]));
+check('a shared spot is still shared, round or no round', (await problemCount()) === 0, await problemText());
+
+// Typing a round has to answer the warning immediately: the leader fixes the
+// clash and looks straight at the box to see it go.
+await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
+const clashRound = page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="round"]');
+await clashRound.click();
+await page.keyboard.press('End');
+await page.keyboard.type('X');
+await page.waitForFunction(() => !document.querySelector('#tab-plan .problems'), null, { timeout: 2000 }).catch(() => {});
+check('moving a route to another round clears the warning there and then', (await problemCount()) === 0, await problemText());
+check('and the caret is still in the round being typed', await page.evaluate(() =>
+  document.activeElement.dataset.field === 'round' && document.activeElement.selectionStart === 2));
+await page.keyboard.type('Y');
+check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
+
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {
   document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
