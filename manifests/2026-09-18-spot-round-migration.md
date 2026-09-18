@@ -1,6 +1,6 @@
 # Pack: Offer to split the round out of existing spot names
 
-**Status:** 🚧 in flight — item 1 done
+**Status:** 🚧 in flight — items 1-2 done
 **Date:** 2026-09-18
 **Branch:** `spot-round-migration`, cut from `main` at `9c427cf`
 
@@ -47,7 +47,7 @@ note. That is the part worth getting right.
 
 - [x] **1. Describe the migration, change nothing.** A pure function over state returning the plan: splits, merges, routes gaining a round, routes keeping one they already have, and conflicts. Returns empty when nothing matches.
       *Done when:* it is unit-tested against a fixture with merges, an already-filled round and a conflicting "many cars" flag, and never mutates its input.
-- [ ] **2. Offer it on load, spelled out.** When the plan is non-empty, raise a notice listing every line of it plus the two-manager warning, with one button to apply and dismissal that changes nothing.
+- [x] **2. Offer it on load, spelled out.** When the plan is non-empty, raise a notice listing every line of it plus the two-manager warning, with one button to apply and dismissal that changes nothing.
       *Done when:* the notice names each `old → new, round N` line, the counts are right, and dismissing leaves state byte-identical.
 - [ ] **3. ⚠️ Apply it.** `Store.snapshot()` first, then merge positions, re-point routes, fill blank rounds only, and report what was done.
       *Done when:* applying produces exactly the plan that was shown, an already-filled round is untouched, and restoring the backup returns the old names.
@@ -76,6 +76,15 @@ note. That is the part worth getting right.
   does, so leaving them out would blank the spot on every saved template at
   the next load (`store.js` reports it as "pointed at a position that is
   gone"). Counted separately, and the offer will say so.
+- **Item 2** `e49e944` — `offerSpotRoundSplit()` raises the offer from
+  `start()`; a notice can now carry a list (`note()` takes `lines`, rendered
+  as an escaped `<ul>` inside `.notice .say`). Gate: `./scripts/check.sh` OK;
+  `npm test` — all checks passed (10 new checks, including the offer's exact
+  lines and "dismissing leaves the saved data byte for byte").
+- **Note (item 2):** clicking the weekday template question still clears this
+  offer along with it (`dropOffers()`, one live offer at a time). Nothing is
+  changed by that and the offer returns on the next load, so it was left as
+  the existing rule has it.
 - **Decided while planning item 1:** a position already named `Spot 1` sitting
   beside `Spot 1/2` survives the merge and keeps its own name and settings;
   its routes gain no round, because its name never spelled one out.
