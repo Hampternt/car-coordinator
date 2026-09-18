@@ -1,6 +1,6 @@
 # Pack: Offer to split the round out of existing spot names
 
-**Status:** 📝 plan written — awaiting go to execute
+**Status:** 🚧 in flight — item 1 done
 **Date:** 2026-09-18
 **Branch:** `spot-round-migration`, cut from `main` at `9c427cf`
 
@@ -45,7 +45,7 @@ note. That is the part worth getting right.
 
 ## Items
 
-- [ ] **1. Describe the migration, change nothing.** A pure function over state returning the plan: splits, merges, routes gaining a round, routes keeping one they already have, and conflicts. Returns empty when nothing matches.
+- [x] **1. Describe the migration, change nothing.** A pure function over state returning the plan: splits, merges, routes gaining a round, routes keeping one they already have, and conflicts. Returns empty when nothing matches.
       *Done when:* it is unit-tested against a fixture with merges, an already-filled round and a conflicting "many cars" flag, and never mutates its input.
 - [ ] **2. Offer it on load, spelled out.** When the plan is non-empty, raise a notice listing every line of it plus the two-manager warning, with one button to apply and dismissal that changes nothing.
       *Done when:* the notice names each `old → new, round N` line, the counts are right, and dismissing leaves state byte-identical.
@@ -67,5 +67,17 @@ note. That is the part worth getting right.
 
 - Plan written 2026-09-18, before any code, per the standing rule that a change
   to saved state gets its migration plan first.
+- **Item 1** `d4cce83` — `spotRoundPlan()` in `docs/app.js`, pure, plus its
+  fixture tests in `scripts/smoke.mjs`. Gate: `./scripts/check.sh` OK;
+  `CHROMIUM_PATH=/usr/bin/google-chrome npm test` — all checks passed
+  (9 new checks in the "round inside a spot's name" section).
+- **Deviation (item 1):** the plan covers **day templates** as well as routes.
+  They hold a `positionId` and a `round` per route exactly as the day plan
+  does, so leaving them out would blank the spot on every saved template at
+  the next load (`store.js` reports it as "pointed at a position that is
+  gone"). Counted separately, and the offer will say so.
+- **Decided while planning item 1:** a position already named `Spot 1` sitting
+  beside `Spot 1/2` survives the merge and keeps its own name and settings;
+  its routes gain no round, because its name never spelled one out.
 
 </details>
