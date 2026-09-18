@@ -56,7 +56,7 @@ changes shape and grows.
       *Done when:* existing localStorage loads with no repair notice and the new fields default.
 - [x] **2. Split the day-plan column.** Header `Packing round` → `Position` | `Round`. Position select unchanged; Round is a free-text field committing on blur like `driver`.
       *Done when:* both fields edit and persist per route.
-- [ ] **3. ⚠️ Clash rule absorbs `round`.** Position clashes key on position **and** round; a blank round is its own bucket; `multi` ("many cars") positions stay exempt.
+- [x] **3. ⚠️ Clash rule absorbs `round`.** Position clashes key on position **and** round; a blank round is its own bucket; `multi` ("many cars") positions stay exempt.
       *Done when:* the same spot in two different rounds no longer warns, and the same spot in the same round still does — on screen and under "Check before posting".
       **Risky — review this item individually.** It changes the app's headline feature.
 - [ ] **4. Printed sheet: fold Round in.** Position cell renders `name · round`. Sheet stays four columns; `gapBefore` spacer colspan stays 4.
@@ -123,5 +123,22 @@ which is the environment, not the code.
   Gate: `node --check docs/app.js`, `npm test` all checks passed (6 new/round
   cases: split columns, free text, click-still-lands, survives reload, cleared
   by Clear, restored from a backup).
+
+- [x] **3. Clash rule absorbs `round`** (⚠️ risky, still wants the individual
+  review the item asks for) — 167630b. `usage()` returns two maps:
+  `pos` (in use at all → status warnings, and the rail in item 5) and `spots`
+  (keyed `positionId \u0000 roundKey` → double bookings). The status line stays
+  on `pos`, so a marked spot used in two rounds is still reported once, not
+  twice. The dropdown note reads `spots` against the row's own round.
+  Round matching is trimmed and case-folded, like `share.js`'s registration
+  matching — a warning silenced by a trailing space is worse than none.
+  Gate: `npm test` all checks passed, with 11 new cases covering both
+  directions of the rule — two rounds do not warn (banner, rows and dropdown
+  note), one round still does (banner, rows and "Check before posting" on the
+  sheet), two blanks still clash, blank vs filled does not, `' a '` vs `'A'`
+  still clashes, a "many cars" spot never clashes, and typing a round clears
+  the warning live without losing the caret. `npm run screens` also green: its
+  exact-set assertion catches a duplicated status line, and raised the same 4
+  warnings as before.
 
 </details>
