@@ -1,6 +1,6 @@
 # Pack: Day-plan left rail, driver roster with day groups, position/round split
 
-**Status:** 🚧 in flight
+**Status:** 🚧 all items committed, pack gate green — awaiting the browser walkthrough and item 3's review
 **Date:** 2026-09-18
 **Branch:** `day-plan-rail-and-round`
 
@@ -75,7 +75,7 @@ changes shape and grows.
       *Done when:* a group can be built, saved, and applied, and survives a reload. See the assumption above.
 - [x] **8. Share payload carries the new fields.** `round` is per-route, so it rides with **"Just the day plan"**; the driver roster and groups go only in **"Everything"**. The decoder accepts a payload missing any of them rather than hard-failing.
       *Done when:* a code produced by the current build imports cleanly into the new build, and vice versa.
-- [ ] **9. Tests + screenshots.** `scripts/smoke.mjs` covers the split column, the new clash rule and the rail; `scripts/screens.mjs` captures the rail.
+- [x] **9. Tests + screenshots.** `scripts/smoke.mjs` covers the split column, the new clash rule and the rail; `scripts/screens.mjs` captures the rail.
       *Done when:* `npm test` green with no console errors.
 
 ## Gates
@@ -229,5 +229,32 @@ without `Store.normalise` (`app.js`), and `@media print` hides
   from "before rounds" applies with a blank round, the round arrives on PC B in
   the plan *and* on its printed sheet, a day-plan import leaves PC B's roster
   alone, and "everything" merges roster, away flags and group membership.
+
+- [x] **9. Tests + screenshots** — 52683e4. Most of the smoke coverage landed
+  with the item it tests (that is the item gate); this item added the
+  screenshot walkthrough: it builds a roster, groups it into a Monday crew,
+  applies it, and asserts the rail actually holds 8 drivers and 6 cars — an
+  empty rail photographs perfectly well. Rounds go in as a case worth reading:
+  routes 1 and 5 share a spot in the same round and are flagged, route 8 shares
+  it in round 2 and is not, and the exact-set assertion fails if that ever
+  starts warning. Shots renumbered for the new Drivers tab.
+  *Beyond the item text, flagged:* the README described a "packing round"
+  column that is now two and said nothing about the roster, so its feature list
+  was corrected in the same commit. `INVENTORY.md` was deliberately left alone
+  — flipping 🚧 to ✅ belongs to the merge.
+
+**Pack gate — green, 2026-09-18.** `npm install` clean.
+`CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, **125 checks ok, 0
+failed, "all checks passed"**, no console errors on any of the four simulated
+PCs. `CHROMIUM_PATH=... npm run screens` → exit 0, "no console errors, 4
+warnings raised and asserted", 9 screenshots + the A4 PDF written.
+The `CHROMIUM_PATH` is the environment, not the code: `npx playwright install
+chromium` cannot reach the download host from this sandbox, and both scripts
+already support the fallback. Plain `npm test` fails on the missing browser
+binary alone.
+
+**Left for the user:** the real-browser walkthrough of the Day plan and the
+print preview, the individual review of item 3 (the clash rule), and flipping
+this pack's 🚧 line in `INVENTORY.md` at merge.
 
 </details>
