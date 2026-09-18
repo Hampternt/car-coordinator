@@ -66,12 +66,12 @@ await row('AA55555').locator('.chip', { hasText: 'No fuel card' }).click();
 console.log('positions');
 await tab('positions');
 const pos = (name) => page.locator('#tab-positions tbody tr', { has: page.locator(`[data-field="name"][value="${name}"]`) });
-await pos('Spot 5/1').locator('[data-field="name"]').fill('Port 3');
+await pos('Spot 5').locator('[data-field="name"]').fill('Port 3');
 await page.keyboard.press('Tab');
-await page.fill('#newPos', 'Spot 6/1');
+await page.fill('#newPos', 'Spot 6');
 await page.click('[data-act="add-position"]');
-await pos('Spot 2/2').locator('.chip', { hasText: 'Out of service' }).click();
-await pos('Spot 2/2').locator('[data-field="note"]').fill('Pallet jack parked in it');
+await pos('Spot 6').locator('.chip', { hasText: 'Out of service' }).click();
+await pos('Spot 6').locator('[data-field="note"]').fill('Pallet jack parked in it');
 await shot('06-positions');
 
 // --- the roster, and a crew you can put in with one click
@@ -107,15 +107,15 @@ const assign = async (i, driver, car, position) => {
   if (car) await pick(routes.nth(i).locator('[data-field="carId"]'), car);
   if (position) await pick(routes.nth(i).locator('[data-field="positionId"]'), position);
 };
-await assign(0, 'Ana Ruiz', 'AA11111', 'Spot 1/1');
-await assign(1, 'Bo Lind', 'AA22222', 'Spot 1/2');
-await assign(2, 'Cai Mensah', 'AA44444', 'Spot 2/1');
+await assign(0, 'Ana Ruiz', 'AA11111', 'Spot 1');
+await assign(1, 'Bo Lind', 'AA22222', 'Spot 2');
+await assign(2, 'Cai Mensah', 'AA44444', 'Spot 3');
 // mistake 1: the same car on two routes
-await assign(3, 'Dee Okafor', 'AA11111', 'Spot 3/1');
+await assign(3, 'Dee Okafor', 'AA11111', 'Spot 4');
 // mistake 2: a position already taken
-await assign(4, 'Efe Yilmaz', 'AA55555', 'Spot 1/1');
+await assign(4, 'Efe Yilmaz', 'AA55555', 'Spot 1');
 // mistake 3: a car that is in the workshop
-await assign(5, 'Fia Berg', 'AA33333', 'Spot 3/2');
+await assign(5, 'Fia Berg', 'AA33333', 'Port 3');
 // mistake 4 came earlier and for free: AA55555 was tagged 'No fuel card'
 // and a normal one that shares the garage, which is allowed
 await assign(6, 'Gus Hald', 'BB99999', 'Garage');
@@ -128,7 +128,7 @@ await round(0, '1');
 await round(1, '1');
 await round(2, '2');
 await round(4, '1');
-await assign(7, 'Ida Ngo', '', 'Spot 1/1');
+await assign(7, 'Ida Ngo', '', 'Spot 1');
 await round(7, '2');
 
 await routes.nth(13).locator('[data-field="driver"]').fill('Hana Sol');
@@ -142,7 +142,7 @@ warned.forEach((w) => console.log(`    - ${w}`));
 // expected' and exits 0 when problems() is broken.
 const expected = [
   'AA11111 is on 2 routes (1, 4)',            // same car twice
-  'Spot 1/1 in round 1 is taken by 2 routes (1, 5)',   // same spot, same round
+  'Spot 1 in round 1 is taken by 2 routes (1, 5)',      // same spot, same round
   'AA33333 is marked Workshop but is on route 6',
   'AA55555 is marked No fuel card but is on route 5',
 ];

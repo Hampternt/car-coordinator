@@ -29,8 +29,10 @@ function defaults() {
     schemaVersion: Store.SCHEMA,
     date: today(),
     qrOnSheet: true,
-    positions: ['Spot 1/1', 'Spot 1/2', 'Spot 2/1', 'Spot 2/2', 'Spot 3/1', 'Spot 3/2',
-      'Spot 4/1', 'Spot 5/1', 'Garage'].map(pos),
+    // Just the spots. The number after the slash on the pillar sheet is the
+    // round, not part of the spot's name, so it lives in the route's own round
+    // field and the two are joined back together for the printout.
+    positions: ['Spot 1', 'Spot 2', 'Spot 3', 'Spot 4', 'Spot 5', 'Garage'].map(pos),
     labels: [
       { id: uid(), name: 'Out of service', color: '#c62828' },
       { id: uid(), name: 'Unavailable', color: '#ef6c00' },
@@ -452,7 +454,7 @@ function renderPositions() {
     <h2>Positions</h2>
     <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning.</p>
     <div class="bar">
-      <input id="newPos" type="text" placeholder="Name, e.g. Spot 6/1 or Port 3">
+      <input id="newPos" type="text" placeholder="Name, e.g. Spot 6 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>
     </div>
     <table class="grid"><thead><tr><th>Name</th><th>Sharing</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -569,8 +571,10 @@ function renderNotices() {
 }
 
 /* The paper list on the pillar has four columns and has to keep them, so the
-   round travels inside the packing cell: "Spot 1/1 · 2". */
-const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join(' \u00b7 ');
+   round travels inside the packing cell, written the way it is written by hand:
+   spot then round, separated by a slash. "Spot 1" packed on round 1 prints as
+   "Spot 1/1". A route with no round prints just the spot. */
+const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join('/');
 
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');

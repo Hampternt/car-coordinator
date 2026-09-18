@@ -215,7 +215,7 @@ check('sheet shows the car', sheet.includes('AA11111'));
 // Four columns is the whole constraint: the sheet mirrors the paper list on
 // the pillar, so the round rides inside the packing cell rather than taking a
 // column of its own.
-check('sheet folds the round into the packing cell', /Spot 1\/1 \u00b7 2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
+check('sheet folds the round into the packing cell', /Spot 1\/2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
 check('sheet still has four columns', (await page.locator('#sheet thead th').count()) === 4);
 check('and the gap spacer still spans all four', (await page.locator('#sheet tr.spacer td').first().getAttribute('colspan')) === '4');
 
@@ -257,7 +257,7 @@ check('survives corrupt saved data', await page.locator('#notices .notice.warn')
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: 'not-a-date', labels: 'nope', cars: [{ id: 'c1', reg: 'DD44444' }],
-  positions: [{ id: 'p1', name: 'Spot 9/9' }],
+  positions: [{ id: 'p1', name: 'Spot 9' }],
   routes: [{ id: 'r1', name: '1', carId: 'ghost', positionId: 'p1', driver: 'Kept' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
@@ -269,7 +269,7 @@ check('keeps the good fields while repairing', (await page.locator('#tab-plan tb
 // opening the new build on Monday should see nothing at all happen.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
@@ -283,7 +283,7 @@ check('v1 data gains round, drivers and driver groups', await page.evaluate(() =
 // empty template shelf and nothing to read about it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
   drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
 })));
@@ -296,7 +296,7 @@ check('v2 data loads with an empty template list and no repair notice',
 // repair: a car deleted since it was saved must not come back as a ghost id.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1' }],
   templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
     { name: '1', driver: 'Kept', carId: 'gone', positionId: 'p1', round: '2' },
@@ -330,7 +330,7 @@ const planA = {
   drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   cars: [{ id: 'a1', reg: 'AA11111', labelId: '', note: '' }, { id: 'a2', reg: 'BB22222', labelId: 'L1', note: 'back Friday' }],
-  positions: [{ id: 'q1', name: 'Spot 1/1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
+  positions: [{ id: 'q1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Garage', multi: true, labelId: '', note: '' }],
   routes: [
     { id: 'x1', name: '1', driver: 'Ana', carId: 'a1', positionId: 'q1', round: '2', highlight: true, gapBefore: false },
     { id: 'x2', name: 'HAU 1', driver: 'Bo', carId: 'a2', positionId: 'q2', highlight: false, gapBefore: true },
@@ -367,7 +367,7 @@ check('"everything" carries the roster and the groups by name',
 // A code made before rounds existed has five slots per route. It must load,
 // not throw, and leave the round blank.
 const oldCode = await page.evaluate(() => {
-  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1/1', 0]], m: [] });
+  const json = JSON.stringify({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', 'Spot 1', 0]], m: [] });
   return 'CC1U.' + btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 });
 const oldRead = await page.evaluate(async (code) => {
@@ -433,7 +433,7 @@ await b.goto(base, { waitUntil: 'networkidle' });
 await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
-  positions: [{ id: 'yyy', name: 'Spot 1/1', multi: false, labelId: '', note: '' }],
+  positions: [{ id: 'yyy', name: 'Spot 1', multi: false, labelId: '', note: '' }],
   drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
 })));
 await b.reload({ waitUntil: 'networkidle' });
@@ -459,7 +459,7 @@ await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
 check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
-check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/1 \u00b7 2'));
+check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/2'));
 await b.click('[data-act="tab"][data-tab="drivers"]');
 check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
 
@@ -516,7 +516,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18',
   labels: [{ id: 'L1', name: '', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [
     { id: 'dup', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
     { id: 'dup', name: '', driver: 'Bo', carId: 'c1', positionId: 'p1' },
@@ -579,7 +579,7 @@ for (const bad of ['42', '"hello"', 'true', 'null', '[]', '{oops']) {
 
 // --- a hostile imported file cannot execute or brick the app ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
   cars: [{ id: '"><img src=x onerror="window.__pwned=1">', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '"><img src=x onerror="window.__pwned=1">', positionId: 'p1' }],
 })));
@@ -600,7 +600,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
     { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1' },
@@ -611,7 +611,7 @@ await page.reload({ waitUntil: 'networkidle' });
 await page.click('[data-act="tab"][data-tab="preview"]');
 const clashSheet = await page.locator('#sheet').innerText();
 check('the sheet names the doubled car', clashSheet.includes('AA11111 is on 2 routes'));
-check('the sheet names the doubled spot', clashSheet.includes('Spot 1/1 is taken by 2 routes'));
+check('the sheet names the doubled spot', clashSheet.includes('Spot 1 is taken by 2 routes'));
 check('the sheet names the car that should be in the workshop', clashSheet.includes('BB22222 is marked Workshop'));
 check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
 check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
@@ -622,7 +622,7 @@ check('a shared Garage is not called a clash', !clashSheet.includes('Garage is t
 // are for, and warning about it would train the leader to ignore the box.
 const spotPlan = (routes) => ({
   schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Garage', multi: true }],
+  positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Garage', multi: true }],
   routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
 });
 const loadPlan = async (plan) => {
@@ -636,17 +636,17 @@ const warnRows = () => page.locator('#tab-plan tbody tr.warn').count();
 await loadPlan(spotPlan([['1', '1'], ['2', '2']]));
 check('the same spot in two rounds does not warn', (await problemCount()) === 0 && (await warnRows()) === 0, await problemText());
 const noteFor = async (row, spot) => (await page.locator('#tab-plan tbody tr').nth(row).locator(`[data-field="positionId"] option`).filter({ hasText: spot }).first().innerText());
-check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1/1')) === 'Spot 1/1', await noteFor(0, 'Spot 1/1'));
+check('and the dropdown does not call it taken either', (await noteFor(0, 'Spot 1')) === 'Spot 1', await noteFor(0, 'Spot 1'));
 
 await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
-check('the same spot in the same round still warns', (await problemText()).includes('Spot 1/1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
+check('the same spot in the same round still warns', (await problemText()).includes('Spot 1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
 check('and both rows are flagged', (await warnRows()) === 2);
 await page.click('[data-act="tab"][data-tab="preview"]');
-check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1/1 in round 2 is taken by 2 routes'));
+check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1 in round 2 is taken by 2 routes'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 await loadPlan(spotPlan([['1', ''], ['2', '']]));
-check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1/1 is taken by 2 routes (1, 2)'), await problemText());
+check('two blank rounds in one spot are still a clash', (await problemText()).includes('Spot 1 is taken by 2 routes (1, 2)'), await problemText());
 
 await loadPlan(spotPlan([['1', ''], ['2', '2']]));
 check('a blank round is its own round, not every round', (await problemCount()) === 0, await problemText());
@@ -677,7 +677,7 @@ check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 const templatePlan = {
   schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
   cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Spot 1/2' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Spot 2' }],
   routes: [
     { id: 'r1', name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
     { id: 'r2', name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
@@ -958,7 +958,7 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', labels: [],
   cars: [{ id: 'c1', reg: 'AA11111' }],
-  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
   // A saved template too: the shelf card is the widest row the day plan can
   // grow — name button, route count, weekday select and delete, side by side.
