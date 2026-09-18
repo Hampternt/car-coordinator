@@ -93,6 +93,12 @@ await page.click('[data-act="tab"][data-tab="preview"]');
 const sheet = await page.locator('#sheet').innerText();
 check('sheet shows the driver', sheet.includes('Test Driver'));
 check('sheet shows the car', sheet.includes('AA11111'));
+// Four columns is the whole constraint: the sheet mirrors the paper list on
+// the pillar, so the round rides inside the packing cell rather than taking a
+// column of its own.
+check('sheet folds the round into the packing cell', /Spot 1\/1 \u00b7 2/.test(sheet), sheet.split('\n').slice(0, 3).join(' / '));
+check('sheet still has four columns', (await page.locator('#sheet thead th').count()) === 4);
+check('and the gap spacer still spans all four', (await page.locator('#sheet tr.spacer td').first().getAttribute('colspan')) === '4');
 
 // --- survives a reload (localStorage) ---
 await page.reload({ waitUntil: 'networkidle' });

@@ -388,6 +388,10 @@ function renderNotices() {
     `<div class="notice ${n.kind}">${esc(n.text)}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
 }
 
+/* The paper list on the pillar has four columns and has to keep them, so the
+   round travels inside the packing cell: "Spot 1/1 · 2". */
+const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join(' \u00b7 ');
+
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
   const { lines: found, rows: flagged } = problems();
@@ -397,7 +401,7 @@ function renderSheet() {
       <td class="rn">${dash(r.name)}${flagged.has(at) ? '<span class="mark">!</span>' : ''}</td>
       <td>${dash(r.driver)}</td>
       <td>${dash(byId(state.cars, r.carId)?.reg)}</td>
-      <td>${dash(byId(state.positions, r.positionId)?.name)}</td>
+      <td>${dash(spotCell(r))}</td>
     </tr>`).join('');
 
   const marked = (arr, key) => arr.filter((x) => x.labelId).map((x) =>
