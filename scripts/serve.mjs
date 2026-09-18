@@ -11,9 +11,12 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 export async function startServer() {
   const server = createServer(async (req, res) => {
-    const path = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
-    const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
     try {
+      // decodeURIComponent throws on a malformed escape like '/%'. Inside the
+      // try that is a 404; outside it, it rejects with nobody listening and
+      // Node tears the whole test run down.
+      const path = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
+      const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
       const body = await readFile(file);
       res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
       res.end(body);

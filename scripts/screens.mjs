@@ -6,9 +6,11 @@
 // picture shows it.
 import { chromium } from 'playwright';
 import { mkdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
 
-const OUT = 'screens';
+// Anchored to the repo, not the cwd: line 2 below is a recursive force delete.
+const OUT = fileURLToPath(new URL('../screens', import.meta.url));
 const server = await startServer();
 await rm(OUT, { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });
@@ -96,6 +98,7 @@ await assign(3, 'Dee Okafor', 'AA11111', 'Spot 3/1');
 await assign(4, 'Efe Yilmaz', 'AA55555', 'Spot 1/1');
 // mistake 3: a car that is in the workshop
 await assign(5, 'Fia Berg', 'AA33333', 'Spot 3/2');
+// mistake 4 came earlier and for free: AA55555 was tagged 'No fuel card'
 // and a normal one that shares the garage, which is allowed
 await assign(6, 'Gus Hald', 'BB99999', 'Garage');
 
@@ -105,6 +108,25 @@ await routes.nth(13).locator('[data-act="toggle"][data-field="highlight"]').clic
 const warned = await page.locator('.problems li').allInnerTexts();
 console.log(`  ${warned.length} warnings raised:`);
 warned.forEach((w) => console.log(`    - ${w}`));
+
+// Assert, do not narrate: without this the run prints '0 warnings shown as
+// expected' and exits 0 when problems() is broken.
+const expected = [
+  'AA11111 is on 2 routes (1, 4)',            // same car twice
+  'Spot 1/1 is taken by 2 routes (1, 5)',     // same spot twice
+  'AA33333 is marked Workshop but is on route 6',
+  'AA55555 is marked No fuel card but is on route 5',
+];
+const missing = expected.filter((e) => !warned.includes(e));
+const extra = warned.filter((w) => !expected.includes(w));
+if (missing.length || extra.length) {
+  console.log(`\nwarnings did not match.\n  missing: ${missing.join(' | ') || 'none'}\n  unexpected: ${extra.join(' | ') || 'none'}`);
+  process.exit(1);
+}
+if ((await page.locator('#tab-plan tbody tr.warn').count()) !== 4) {
+  console.log(`\nexpected 4 flagged rows, got ${await page.locator('#tab-plan tbody tr.warn').count()}`);
+  process.exit(1);
+}
 await shot('02-day-plan-with-warnings');
 
 await tab('cars');
@@ -142,4 +164,4 @@ if (errors.length) {
   console.log(`\n${errors.length} console error(s): ${errors.join(' | ')}`);
   process.exit(1);
 }
-console.log(`\nno console errors, ${warned.length} warnings shown as expected`);
+console.log(`\nno console errors, ${warned.length} warnings raised and asserted`);

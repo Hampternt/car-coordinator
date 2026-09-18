@@ -17,6 +17,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm test
+      - run: npm run screens
 
   windows:
     # The exe is the optional delivery; the web app on Pages is the main one.

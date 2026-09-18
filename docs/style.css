@@ -121,6 +121,10 @@ body.show-sheet .sheet {
 .sheet td { padding: .6mm 2mm; }
 .sheet td.rn { width: 18%; text-align: right; padding-right: 6mm; }
 .sheet tr.hl td { background: var(--marker); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+/* dotted, so it reads as an annotation rather than a table rule, and
+   survives a black-and-white laser printer where a colour would not */
+.sheet tr.warn td { border-bottom: 0.4mm dotted #000; }
+.sheet .mark { font-size: 12pt; vertical-align: super; padding-left: 1mm; }
 .sheet tr.spacer td { height: 8mm; }
 /* QR floats beside the footer notes so the route table above is untouched */
 .sheet .qr { float: right; margin: 6mm 0 3mm 6mm; text-align: center; width: 30mm; }
@@ -133,7 +137,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: #fff; }
-  .topbar, main { display: none !important; }
+  .topbar, main, #notices { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 

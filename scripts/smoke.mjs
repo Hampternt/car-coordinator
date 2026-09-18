@@ -2,28 +2,12 @@
 // clipboard APIs need a secure-ish origin), drives the UI, and fails on any
 // console error. Run: npm test
 import { chromium } from 'playwright';
-import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
-import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { startServer } from './serve.mjs';
 
-const ROOT = fileURLToPath(new URL('../docs/', import.meta.url));
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
-
-const server = createServer(async (req, res) => {
-  const path = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
-  const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
-  try {
-    const body = await readFile(file);
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
-    res.end(body);
-  } catch {
-    res.writeHead(404).end('not found');
-  }
-});
-await new Promise((r) => server.listen(0, r));
-const base = `http://localhost:${server.address().port}/`;
+const server = await startServer();
+const base = server.base;
 
 const failures = [];
 const check = (name, ok, detail = '') => {
@@ -65,9 +49,12 @@ check('a first run shows no warnings', (await page.locator('#notices .notice').c
 const leaked = await page.evaluate(() => {
   let text = '', n = document.body.firstChild;
   while (n && n.nodeType === Node.TEXT_NODE) { text += n.textContent.trim(); n = n.nextSibling; }
-  return { text, headerIsFirst: document.body.children[0] === document.querySelector('header.topbar') };
+  const first = document.body.children[0];
+  return { text, first: first ? first.tagName : 'none', ok: text === '' && first === document.querySelector('header.topbar') };
 });
-check('no markup leaked into the page', leaked.text === '' && leaked.headerIsFirst, leaked.text);
+// Report what is actually first, not the text walk: a leaked attribute
+// becomes an element, so leaked.text is empty even when this fails.
+check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts with <${leaked.first}> ${leaked.text}`);
 
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');
@@ -272,6 +259,75 @@ await pcC.close();
 
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
+
+// --- damaged saved data must not masquerade as a first run ---
+// A scalar in the key used to be silently swallowed: no notice, and the
+// linked save file was never consulted because the key still existed.
+for (const bad of ['42', '"hello"', 'true', 'null', '[]', '{oops']) {
+  await page.evaluate((v) => localStorage.setItem('carcoord:v1', v), bad);
+  await page.reload({ waitUntil: 'networkidle' });
+  check(`damaged save (${bad}) is reported, not swallowed`, (await page.locator('#notices .notice.warn').count()) === 1);
+}
+
+// --- a hostile imported file cannot execute or brick the app ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  cars: [{ id: '"><img src=x onerror="window.__pwned=1">', reg: 'AA11111' }],
+  routes: [{ id: 'r1', name: '1', carId: '"><img src=x onerror="window.__pwned=1">', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+const injected = await page.evaluate(() => ({ pwned: !!window.__pwned, imgs: document.querySelectorAll('#tab-plan img').length }));
+check('an id from an imported file cannot inject markup', !injected.pwned && injected.imgs === 0, JSON.stringify(injected));
+
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [],
+  cars: [{ id: '__proto__', reg: 'AA11111' }],
+  routes: [{ id: 'r1', name: '1', carId: '__proto__' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('a car id of __proto__ does not brick the app', (await page.locator('#tab-plan tbody tr').count()) === 1);
+
+// --- the printed sheet carries the clashes it is showing on screen ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
+    { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1' },
+    { id: 'r3', name: '3', driver: 'Cai', carId: 'c2', positionId: 'p2' },
+  ],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="preview"]');
+const clashSheet = await page.locator('#sheet').innerText();
+check('the sheet names the doubled car', clashSheet.includes('AA11111 is on 2 routes'));
+check('the sheet names the doubled spot', clashSheet.includes('Spot 1/1 is taken by 2 routes'));
+check('the sheet names the car that should be in the workshop', clashSheet.includes('BB22222 is marked Workshop'));
+check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
+check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
+
+// --- app notices must not print on the sheet ---
+await page.evaluate(() => {
+  document.querySelector('#notices').innerHTML = '<div class="notice info">Loaded 15 routes for 2026-09-18.</div>';
+});
+await page.emulateMedia({ media: 'print' });
+const printed = await page.evaluate(() => {
+  const n = document.querySelector('#notices');
+  return { display: getComputedStyle(n).display, sheetTop: document.querySelector('#sheet').getBoundingClientRect().top };
+});
+await page.emulateMedia({ media: null });
+check('notices are hidden when printing', printed.display === 'none', `display=${printed.display}`);
+check('the sheet still starts at the top of the page', printed.sheetTop <= 1, `top=${printed.sheetTop}`);
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+
+// --- the server turns a bad URL into a 404, not a dead process ---
+const malformed = await fetch(base + '%').then((r) => r.status, () => 'connection died');
+check('a malformed URL is a 404, not a crash', malformed === 404, String(malformed));
+check('the server is still alive after it', (await fetch(base).then((r) => r.status, () => 0)) === 200);
 
 // --- prints to A4 ---
 const pdf = await page.pdf({ format: 'A4', printBackground: true });
