@@ -956,6 +956,10 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1/1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
+  // A saved template too: the shelf card is the widest row the day plan can
+  // grow — name button, route count, weekday select and delete, side by side.
+  templates: [{ id: 't1', name: 'Monday', weekday: '1',
+    routes: [{ name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1', round: '1' }] }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
 for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
