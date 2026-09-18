@@ -240,14 +240,30 @@ without `Store.normalise` (`app.js`), and `@media print` hides
   starts warning. Shots renumbered for the new Drivers tab.
   *Beyond the item text, flagged:* the README described a "packing round"
   column that is now two and said nothing about the roster, so its feature list
-  was corrected in the same commit. `INVENTORY.md` was deliberately left alone
-  — flipping 🚧 to ✅ belongs to the merge.
+  was corrected in the same commit.
+- **After-the-items sweep** — 3186d82, gate re-run green. Three places where
+  the new state was written but not *said*: the "Everything" radio still
+  offered "cars, positions and labels" although item 8 made it overwrite the
+  roster, the groups and who is in today; deleting a group was snapshotted as
+  "Deleting a driverGroup", which the Backups table prints verbatim; and
+  `INVENTORY.md` still listed the free/parked pools below the table as shipped,
+  which item 5 removed. The 🚧 pointer line in `INVENTORY.md` is untouched —
+  flipping it, and writing the Drivers entries, belongs to the merge.
+
+**Item 8's "and vice versa", executed rather than argued.** A one-off script
+(scratchpad, not wired into `smoke.mjs` — it needs git history) loaded
+`git show 7b8b1fd:docs/share.js`, the build that shipped before this pack, and
+fed it codes made by this build: both `day` and `all` decode and apply with no
+error, keeping name, driver, car, position and the pink/gap flags, and simply
+having no `round` on the route. Old → new is covered inside `npm test` by the
+hand-built five-slot `CC1U.` code.
 
 **Pack gate — green, 2026-09-18.** `npm install` clean.
 `CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, **125 checks ok, 0
 failed, "all checks passed"**, no console errors on any of the four simulated
 PCs. `CHROMIUM_PATH=... npm run screens` → exit 0, "no console errors, 4
-warnings raised and asserted", 9 screenshots + the A4 PDF written.
+warnings raised and asserted", 9 screenshots + the A4 PDF written. Both re-run
+green after the sweep commit above.
 The `CHROMIUM_PATH` is the environment, not the code: `npx playwright install
 chromium` cannot reach the download host from this sandbox, and both scripts
 already support the fallback. Plain `npm test` fails on the missing browser
