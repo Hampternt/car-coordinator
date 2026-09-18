@@ -52,7 +52,7 @@ changes shape and grows.
 
 ## Items
 
-- [ ] **1. Schema: `round`, `drivers`, `driverGroups`.** Bump `schemaVersion`; extend `normalise()` so existing `carcoord:v1` data loads clean with `round: ''`, `drivers: []`, `driverGroups: []`.
+- [x] **1. Schema: `round`, `drivers`, `driverGroups`.** Bump `schemaVersion`; extend `normalise()` so existing `carcoord:v1` data loads clean with `round: ''`, `drivers: []`, `driverGroups: []`.
       *Done when:* existing localStorage loads with no repair notice and the new fields default.
 - [ ] **2. Split the day-plan column.** Header `Packing round` → `Position` | `Round`. Position select unchanged; Round is a free-text field committing on blur like `driver`.
       *Done when:* both fields edit and persist per route.
@@ -84,5 +84,27 @@ changes shape and grows.
 
 - Go given 2026-09-18. Branch `day-plan-rail-and-round` cut from `main` at 7b8b1fd.
 - Pre-item commit 55a1b23: made the web app runnable from a checkout (`npm run dev` served `docs/`), so the pack gate's browser walkthrough has something to run.
+
+**Environment.** No `CLAUDE.md` at the repo root; conventions taken from
+`HANDOFF.md`, the existing code and this manifest. `npm install` ran clean, but
+`npx playwright install chromium` cannot reach the download host from this
+sandbox (request timeout), so both scripts run with
+`CHROMIUM_PATH=/usr/bin/google-chrome`, the fallback they already support.
+Baseline before any edit: `CHROMIUM_PATH=... npm test` — all checks passed.
+Plain `npm test` with no `CHROMIUM_PATH` fails on the missing browser binary,
+which is the environment, not the code.
+
+- [x] **1. Schema** — 94b6de0. `SCHEMA` 1 → 2; `round` on routes, `drivers` and
+  `driverGroups` on the state, all built and returned inside `normalise()`
+  (which whitelists its output, so an unnamed field would round-trip to
+  nothing). Gate: `node --check` on both files, `npm test` all checks passed,
+  including two new cases — v1 data loads with no repair notice, and gains
+  `round`/`drivers`/`driverGroups` at their defaults.
+  *Decision, needed by item 7:* the day's availability is a per-driver
+  `available` flag, defaulting to true, rather than an `activeGroupId` on the
+  state — hand-toggling one driver in the rail would make a stored group id a
+  lie. *Also in this commit:* `smoke.mjs`'s `schemaVersion === 1` assertion
+  became `=== 2`; the bump invalidated it, so it belongs here rather than in
+  item 9.
 
 </details>
