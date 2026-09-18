@@ -72,16 +72,20 @@ function usage() {
   // '__proto__' would otherwise resolve to Object.prototype, skip the ??=,
   // and throw on every render with the bad data already saved.
   const cars = Object.create(null), pos = Object.create(null);
-  for (const r of state.routes) {
-    if (r.carId) (cars[r.carId] ??= []).push(r);
-    if (r.positionId) (pos[r.positionId] ??= []).push(r);
-  }
+  state.routes.forEach((r, at) => {
+    if (r.carId) (cars[r.carId] ??= []).push({ r, at });
+    if (r.positionId) (pos[r.positionId] ??= []).push({ r, at });
+  });
   return { cars, pos };
 }
 
 /* ---------- views ---------- */
 const dash = (v) => esc(v) || '-';
 const labelName = (l) => (l && l.name.trim() ? l.name : 'a status with no name');
+const routeNames = (entries) => entries.map(({ r }) => dash(r.name)).join(', ');
+// By position, not by id: an imported file can repeat an id, and filtering on
+// it would drop a genuine twin along with the route itself.
+const elsewhere = (entries, at) => (entries || []).filter((e) => e.at !== at);
 
 /* Every logical problem in the current plan. These are advisory: a leader
    sometimes genuinely wants two routes on one car for half a day, so the
@@ -90,8 +94,8 @@ function problems() {
   const use = usage();
   const lines = [];
   const rows = new Set();
-  const named = (routes) => routes.map((r) => dash(r.name)).join(', ');
-  const flag = (routes) => routes.forEach((r) => rows.add(r.id));
+  const named = routeNames;
+  const flag = (entries) => entries.forEach(({ at }) => rows.add(at));
 
   for (const carId of Object.keys(use.cars)) {
     const routes = use.cars[carId];
@@ -109,34 +113,34 @@ function problems() {
     const lab = byId(state.labels, pos.labelId);
     if (lab) { lines.push(`${pos.name} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
-  return { lines, rows };
+  return { lines, rows, use };
 }
 
 function renderPlan() {
-  const use = usage();
-  const rows = state.routes.map((r) => {
+  const { lines: found, rows: flagged, use } = problems();
+  const rows = state.routes.map((r, at) => {
     const warns = [];
     // Options stay pickable even when they clash; the note says what you are
     // walking into and the row flags it afterwards.
     const carOpts = state.cars.map((c) => {
       const lab = byId(state.labels, c.labelId);
-      const others = (use.cars[c.id] || []).filter((x) => x.id !== r.id);
-      const bits = [lab && lab.name, others.length && `on route ${others.map((o) => o.name).join(', ')}`].filter(Boolean);
+      const others = elsewhere(use.cars[c.id], at);
+      const bits = [lab && labelName(lab), others.length && `on route ${routeNames(others)}`].filter(Boolean);
       const sel = c.id === r.carId;
-      if (sel && lab) warns.push(`${c.reg} is marked ${lab.name}`);
-      if (sel && others.length) warns.push(`also on route ${others.map((o) => o.name).join(', ')}`);
+      if (sel && lab) warns.push(`${c.reg} is marked ${labelName(lab)}`);
+      if (sel && others.length) warns.push(`${c.reg} is also on route ${routeNames(others)}`);
       return `<option value="${esc(c.id)}" ${sel ? 'selected' : ''}>${esc(c.reg + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const posOpts = state.positions.map((p) => {
       const lab = byId(state.labels, p.labelId);
-      const others = p.multi ? [] : (use.pos[p.id] || []).filter((x) => x.id !== r.id);
-      const bits = [lab && lab.name, others.length && `route ${others.map((o) => o.name).join(', ')}`, p.multi && 'many cars'].filter(Boolean);
+      const others = p.multi ? [] : elsewhere(use.pos[p.id], at);
+      const bits = [lab && labelName(lab), others.length && `route ${routeNames(others)}`, p.multi && 'many cars'].filter(Boolean);
       const sel = p.id === r.positionId;
-      if (sel && lab) warns.push(`${p.name} is marked ${lab.name}`);
-      if (sel && others.length) warns.push(`${p.name} also used by route ${others.map((o) => o.name).join(', ')}`);
+      if (sel && lab) warns.push(`${p.name} is marked ${labelName(lab)}`);
+      if (sel && others.length) warns.push(`${p.name} is also used by route ${routeNames(others)}`);
       return `<option value="${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
-    const cls = [r.highlight && 'hl', r.gapBefore && 'gap', warns.length && 'warn'].filter(Boolean).join(' ');
+    const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
       <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-"')}</td>
@@ -152,13 +156,12 @@ function renderPlan() {
   }).join('');
 
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]);
-  const down = state.cars.filter((c) => c.labelId);
+  const down = state.cars.filter((c) => c.labelId && !use.cars[c.id]);
   const tag = (c) => {
     const l = byId(state.labels, c.labelId);
     return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' \u00b7 ' + esc(l.name) : ''}${c.note ? ' \u00b7 ' + esc(c.note) : ''}</span>`;
   };
 
-  const { lines: found, rows: flagged } = problems();
   const noCars = state.cars.length
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
@@ -181,13 +184,13 @@ function renderPlan() {
     </table>
     <div class="pool">
       <div><h3>Free cars (${free.length})</h3>${free.map(tag).join('') || '<em>None</em>'}</div>
-      <div><h3>Not available (${down.length})</h3>${down.map(tag).join('') || '<em>None</em>'}</div>
+      <div><h3>Parked and marked (${down.length})</h3>${down.map(tag).join('') || '<em>None</em>'}</div>
     </div>`;
 }
 
-function assignCell(routes) {
-  if (!routes) return '<span class="assign none">Not assigned</span>';
-  return routes.map((r) => {
+function assignCell(entries) {
+  if (!entries) return '<span class="assign none">Not assigned</span>';
+  return entries.map(({ r }) => {
     const pos = byId(state.positions, r.positionId)?.name;
     return `<span class="assign yes">Route ${esc(r.name)}${r.driver ? ', ' + esc(r.driver) : ''}${pos ? ', ' + esc(pos) : ''}</span>`;
   }).join('');
@@ -195,8 +198,10 @@ function assignCell(routes) {
 
 function renderCars() {
   const use = usage();
+  // Every car lands in exactly one of these: on a route (whatever its
+  // status), parked but marked, or genuinely free.
   const onRoute = state.cars.filter((c) => use.cars[c.id]).length;
-  const down = state.cars.filter((c) => c.labelId).length;
+  const down = state.cars.filter((c) => c.labelId && !use.cars[c.id]).length;
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
   const rows = state.cars.map((c) => `<tr class="${use.cars[c.id] ? 'assigned' : ''}">
     <td>${field('car', c.id, 'reg', c.reg, 'class="short" style="width:110px"')}</td>
@@ -207,7 +212,7 @@ function renderCars() {
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
     <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning, and they are listed on the printout.</p>
-    <p class="counts"><span class="assign yes">${onRoute} on a route</span><span class="assign none">${free} free</span><span class="assign down">${down} not available</span></p>
+    <p class="counts"><span class="assign yes">${onRoute} on a route</span><span class="assign none">${free} free</span><span class="assign down">${down} parked and marked</span></p>
     <div class="bar">
       <input id="newCar" type="text" placeholder="Registration(s), e.g. SD12345 SE67890">
       <button class="btn" data-act="add-car">+ Add car</button>
@@ -338,10 +343,10 @@ function renderNotices() {
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
   const { lines: found, rows: flagged } = problems();
-  const rows = state.routes.map((r) =>
+  const rows = state.routes.map((r, at) =>
     (r.gapBefore ? '<tr class="spacer"><td colspan="4"></td></tr>' : '') +
-    `<tr class="${[r.highlight && 'hl', flagged.has(r.id) && 'warn'].filter(Boolean).join(' ')}">
-      <td class="rn">${dash(r.name)}${flagged.has(r.id) ? '<span class="mark">!</span>' : ''}</td>
+    `<tr class="${[r.highlight && 'hl', flagged.has(at) && 'warn'].filter(Boolean).join(' ')}">
+      <td class="rn">${dash(r.name)}${flagged.has(at) ? '<span class="mark">!</span>' : ''}</td>
       <td>${dash(r.driver)}</td>
       <td>${dash(byId(state.cars, r.carId)?.reg)}</td>
       <td>${dash(byId(state.positions, r.positionId)?.name)}</td>
