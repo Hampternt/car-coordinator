@@ -321,6 +321,70 @@ check('warns about data from a newer version', (await page.locator('#notices .no
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
+// --- the round inside a spot's name: the plan, before anything is written ---
+// spotRoundPlan() is the whole migration as data. It is what the offer reads
+// out and what applying it works from, so it is worth pinning down on its own:
+// a merge, a round someone typed by hand, and two spots that disagree.
+const fixture = {
+  positions: [
+    { id: 'p1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'p2', name: 'Spot 1/2', multi: true, labelId: 'L1', note: 'lift parked in it' },
+    { id: 'p3', name: 'Spot 2/1', multi: false, labelId: '', note: '' },
+    { id: 'p4', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [
+    { id: 'r1', name: '1', positionId: 'p1', round: '' },        // gains round 1
+    { id: 'r2', name: '2', positionId: 'p2', round: '' },        // gains round 2, and moves to p1
+    { id: 'r3', name: '3', positionId: 'p2', round: '3' },       // keeps the 3 someone typed
+    { id: 'r4', name: '4', positionId: 'p4', round: '' },        // the Garage is not touched at all
+  ],
+  templates: [{ id: 't1', name: 'Monday', routes: [{ positionId: 'p2', round: '' }, { positionId: 'p4', round: '' }] }],
+};
+const planned = await page.evaluate((fx) => {
+  const before = JSON.stringify(fx);
+  const plan = spotRoundPlan(fx);
+  return {
+    untouched: JSON.stringify(fx) === before,
+    spots: plan.spots.map((s) => ({ name: s.name, keepId: s.keepId, keepName: s.keepName, round: s.round, absorbed: s.absorbed.map((a) => a.name), conflicts: s.conflicts })),
+    movesTo: plan.moveTo.get('p2'),
+    garageTouched: plan.roundFrom.has('p4') || plan.moveTo.has('p4'),
+    routes: plan.routes,
+    templates: plan.templates,
+    // Nothing to split out: the answer on every PC that started after this
+    // shipped, and the reason the offer stays quiet there.
+    quiet: spotRoundPlan({ positions: [{ id: 'z', name: 'Spot 1' }, { id: 'y', name: 'Garage' }], routes: [] }).spots.length,
+  };
+}, fixture);
+check('the plan describes itself without touching the state it read', planned.untouched);
+check('two spots to split, and the Garage is left out of it', planned.spots.length === 2 && !planned.garageTouched, JSON.stringify(planned.spots));
+check('the lowest round keeps the position, the rest merge into it',
+  planned.spots[0].name === 'Spot 1' && planned.spots[0].keepId === 'p1' && planned.spots[0].round === '1'
+  && planned.spots[0].absorbed.join() === 'Spot 1/2' && planned.movesTo === 'p1', JSON.stringify(planned.spots[0]));
+check('and the settings the merge has to decide are named, not resolved in silence',
+  planned.spots[0].conflicts.join(', ') === '"many cars", the status, the note', planned.spots[0].conflicts.join(', '));
+check('a spot with nothing to merge into it is still split', planned.spots[1].keepName === 'Spot 2/1' && planned.spots[1].name === 'Spot 2' && !planned.spots[1].absorbed.length);
+check('routes: two gain the round their spot spelled out, one keeps the round it was given',
+  planned.routes.filled === 2 && planned.routes.kept === 1, JSON.stringify(planned.routes));
+check('a saved template migrates with the plan', planned.templates.length === 1 && planned.templates[0].name === 'Monday' && planned.templates[0].filled === 1, JSON.stringify(planned.templates));
+check('and a fleet with no round in any name has nothing to offer', planned.quiet === 0);
+
+// "Spot 1" and "Spot 1/2" side by side have to end as one spot, not two of
+// one name: two positions of one name is what makes a share code blank the
+// position on every route. The one already named "Spot 1" is the survivor —
+// it is the name the leader keeps, and its routes have no round to gain.
+const already = await page.evaluate(() => {
+  const plan = spotRoundPlan({
+    positions: [{ id: 'q1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'q2', name: 'Spot 1/2', multi: false, labelId: '', note: '' }],
+    routes: [{ id: 'r1', positionId: 'q1', round: '' }, { id: 'r2', positionId: 'q2', round: '' }],
+  });
+  const s = plan.spots[0];
+  return { spots: plan.spots.length, keepId: s.keepId, name: s.name, round: s.round, absorbed: s.absorbed.map((a) => a.id), routes: plan.routes };
+});
+check('a spot that already has the plain name absorbs the numbered one',
+  already.spots === 1 && already.keepId === 'q1' && already.name === 'Spot 1' && already.absorbed.join() === 'q2', JSON.stringify(already));
+check('and its own routes are left alone, rather than being given a round out of nowhere',
+  already.round === null && already.routes.filled === 1 && already.routes.kept === 0, JSON.stringify(already.routes));
+
 // --- sharing between two PCs ---
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.

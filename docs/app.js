@@ -113,6 +113,108 @@ function usage() {
   return { cars, pos, spots };
 }
 
+/* ---------- the round hiding inside a spot's name ----------
+   Before a route carried a round of its own, the round was written into the
+   spot's name the way it is written by hand on the pillar sheet: "Spot 1/1"
+   is spot one, round one. Both of those names are the same physical spot, so
+   taking the round back out is a merge and not a rename — "Spot 1/1" and
+   "Spot 1/2" end as one "Spot 1", and every route on the one that goes has to
+   be re-pointed at the one that stays.
+
+   spotRoundPlan() only describes that: it writes nothing, and the offer reads
+   out the very object that applying it works from, so what the leader agrees
+   to and what is done to the data cannot drift apart. */
+
+// "Spot 1/1" -> { base: 'Spot 1', round: '1' }, and null for a name that is
+// only a name. The round stays text, exactly as a route's round is text.
+function spotNameParts(name) {
+  const m = /^(.*\S)\s*\/\s*(\d+)$/.exec(String(name || '').trim());
+  return m ? { base: m[1], round: m[2] } : null;
+}
+
+// Which of the positions folding into one spot keeps its settings. The lowest
+// round wins, so the answer does not depend on the order the list happens to
+// be in — except that a position already named "Spot 1" outranks every
+// numbered one: it is the name the leader already keeps, and its routes have
+// no round in their name to gain.
+function spotRank(m) {
+  return m.round === null ? -1 : Number(m.round);
+}
+
+/* Everything the migration would do, as data. Returns spots: [] when no
+   position has a round in its name, which is the answer on every PC that
+   started after this shipped. Never touches what it is given. */
+function spotRoundPlan(st) {
+  const positions = st.positions || [];
+
+  // Group by the name each position would end up under. A position that
+  // already has no round in its name joins its group too: "Spot 1" and
+  // "Spot 1/1" have to end as one spot rather than two of one name, which is
+  // the very thing that makes a share code blank the position on every route.
+  const groups = new Map();
+  positions.forEach((p) => {
+    const parts = spotNameParts(p.name);
+    const base = parts ? parts.base : String(p.name || '').trim();
+    if (!fold(base)) return;                      // a position named "/1" has no spot in it
+    const group = groups.get(fold(base)) || [];
+    group.push({ id: p.id, name: p.name, round: parts ? parts.round : null, multi: p.multi, labelId: p.labelId, note: p.note });
+    groups.set(fold(base), group);
+  });
+
+  const spots = [];
+  for (const members of groups.values()) {
+    if (!members.some((m) => m.round !== null)) continue;        // nothing to split out
+    const keep = members.reduce((a, b) => (spotRank(b) < spotRank(a) ? b : a));
+    const absorbed = members.filter((m) => m !== keep && m.round !== null);
+    // The settings of the absorbed positions are dropped rather than merged,
+    // because there is no honest way to merge two notes or two statuses. Say
+    // which ones disagree, so the offer can name what is being decided.
+    const conflicts = [];
+    const says = (what, get) => { if (absorbed.some((m) => get(m) !== get(keep))) conflicts.push(what); };
+    says('"many cars"', (m) => m.multi === true);
+    says('the status', (m) => m.labelId || '');
+    says('the note', (m) => String(m.note || '').trim());
+    spots.push({
+      // What it is called now, and what it would be called. A position that
+      // never had a round in its name keeps the name as typed.
+      keepId: keep.id, keepName: keep.name, name: keep.round === null ? keep.name : spotNameParts(keep.name).base,
+      round: keep.round, absorbed, conflicts,
+    });
+  }
+
+  // What each position means for the routes standing on it: where they move
+  // to, and the round their old spot name spelled out. Read before anything
+  // is re-pointed, because re-pointing is what takes the name away.
+  const moveTo = new Map();
+  const roundFrom = new Map();
+  for (const s of spots) {
+    if (s.round !== null) roundFrom.set(s.keepId, s.round);
+    for (const m of s.absorbed) { moveTo.set(m.id, s.keepId); roundFrom.set(m.id, m.round); }
+  }
+
+  // A round the leader typed is never overwritten: the name says round 1 and
+  // the route says round 2 because someone moved that car, and the route is
+  // the newer fact. Folded like the clash rule folds it, so a round of " "
+  // counts as blank rather than as a round nobody can see.
+  const tally = (routes) => {
+    const out = { filled: 0, kept: 0 };
+    for (const r of routes || []) {
+      if (!roundFrom.has(r.positionId)) continue;
+      if (fold(r.round)) out.kept++; else out.filled++;
+    }
+    return out;
+  };
+
+  // Templates hold a position and a round per route exactly as the day plan
+  // does, so they migrate with it. Left behind, every template route on an
+  // absorbed spot would come back on the next load as "pointed at a position
+  // that is gone" — a saved plan quietly losing its spots.
+  const templates = (st.templates || []).map((t) => ({ id: t.id, name: t.name, ...tally(t.routes) }))
+    .filter((t) => t.filled || t.kept);
+
+  return { spots, moveTo, roundFrom, routes: tally(st.routes), templates };
+}
+
 /* ---------- views ---------- */
 const dash = (v) => esc(v) || '-';
 const labelName = (l) => (l && l.name.trim() ? l.name : 'a status with no name');
