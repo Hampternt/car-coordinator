@@ -41,7 +41,7 @@ every one touches `docs/app.js`.
 
 ## Items
 
-- [ ] **1. Schema: `templates` on state.** `templates: [{ id, name, weekday, routes: [...] }]`, `weekday` empty by default. Add it to `normalise()`'s whitelist and repair loop; migrate existing saved data.
+- [x] **1. Schema: `templates` on state.** `templates: [{ id, name, weekday, routes: [...] }]`, `weekday` empty by default. Add it to `normalise()`'s whitelist and repair loop; migrate existing saved data.
       *Done when:* data saved by the parent branch loads with `templates: []` and no repair notice.
 - [ ] **2. Save as template.** A button at the foot of the Day plan that names and stores the current routes.
       *Done when:* saving produces a template that survives a reload, and a second save with the same name is handled deliberately (replace or refuse — pick one and say which in the ledger).
@@ -64,5 +64,39 @@ every one touches `docs/app.js`.
 <summary>Progress log</summary>
 
 - Go given 2026-09-18. Branch cut from `day-plan-rail-and-round` at its pack gate.
+
+**Environment.** No `CLAUDE.md` at the repo root; conventions taken from the
+code, `HANDOFF.md` and the parent manifest. `scripts/check.sh` (the item gate)
+exists in the working tree but is **untracked** — left as found, not this
+pack's to commit. Baseline before any edit:
+`CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, "all checks passed".
+Plain `npm test` fails on the missing pinned Chromium; that is the sandbox, not
+the code, and the suite has therefore not run on the browser CI uses.
+
+**Confirm mechanism, decided before item 2 (affects items 3 and 4).** Loading a
+template asks in a **notice**, not a `<dialog>` and not the armed two-click
+button. Reasons: the notice can name the cost in a sentence ("replaces the 15
+routes on the plan now"), which "Sure? Click again" cannot; `#notices` is
+already hidden by `@media print`, so it steers clear of the open-dialog print
+bug the manager flagged; and item 4's weekday offer needs a notice anyway, so
+both entry points end in one confirm and one load path.
+
+- [x] **1. Schema** — 7db427b. `templates` built and returned inside
+  `normalise()`, `templates: []` in `defaults()`. A template's routes carry the
+  seven fields the decisions table names and **no id** — a template is a copy to
+  mint routes from, so ids are minted at load; that also makes "not the date"
+  structural rather than a promise. `weekday` accepts `0`–`6` (`Date.getDay()`)
+  and nothing else, so anything unrecognised means "no day".
+  *Deviation from the parent pack's habit, deliberate:* **no `schemaVersion`
+  bump** (stays 2). The item did not ask for one, v2 data loads with
+  `templates: []` and no notice either way, and not bumping leaves the smoke
+  suite's `schemaVersion === 2` assertion honest. ⚠️ **What that leaves quiet,
+  for review:** a build from before this pack, handed an exported JSON file
+  that has templates in it, drops them on the first change without a word — a
+  bump to 3 is what would make it warn. Reversible in a later pack.
+  Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` all checks passed,
+  4 new cases — v2 data loads with an empty template list and no repair notice,
+  a template keeps its routes but loses a car that is gone, that is said once
+  rather than once per route, and a weekday that is not a day is no weekday.
 
 </details>
