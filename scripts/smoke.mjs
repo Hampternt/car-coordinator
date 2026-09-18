@@ -96,7 +96,7 @@ await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 1 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 2 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -116,6 +116,20 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
 await page.reload({ waitUntil: 'networkidle' });
 check('repairs a dangling car reference', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').inputValue()) === '');
 check('keeps the good fields while repairing', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Kept');
+
+// --- data saved by the previous version (no round, no roster) ---
+// The fields v1 never wrote must arrive at their defaults, quietly: a leader
+// opening the new build on Monday should see nothing at all happen.
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+check('v1 data loads with no repair notice', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+check('v1 data gains round, drivers and driver groups', await page.evaluate(() =>
+  state.routes.every((r) => r.round === '') && Array.isArray(state.drivers) && state.drivers.length === 0
+  && Array.isArray(state.driverGroups) && state.driverGroups.length === 0));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });

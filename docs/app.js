@@ -13,7 +13,7 @@ function today() {
 }
 
 function newRoute(name, gapBefore = false) {
-  return { id: uid(), name, driver: '', carId: '', positionId: '', highlight: false, gapBefore };
+  return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
 }
 
 function defaults() {
@@ -30,6 +30,8 @@ function defaults() {
       { id: uid(), name: 'Workshop', color: '#6a1b9a' },
     ],
     cars: [],
+    drivers: [],
+    driverGroups: [],
     routes: [
       ...['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14'].map((n) => newRoute(n)),
       newRoute('HAU 1', true),

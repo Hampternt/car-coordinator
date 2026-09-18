@@ -6,7 +6,7 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 1;
+  const SCHEMA = 2;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
@@ -52,9 +52,29 @@ const Store = (() => {
       .filter((r) => r && typeof r === 'object')
       .map((r) => ({
         id: str(r.id) || uid(), name: str(r.name), driver: str(r.driver),
-        carId: str(r.carId), positionId: str(r.positionId),
+        carId: str(r.carId), positionId: str(r.positionId), round: str(r.round),
         highlight: bool(r.highlight), gapBefore: bool(r.gapBefore),
       }));
+
+    // The roster: who drives, kept apart from the day plan because it outlives
+    // any one day. `available` is who is in today, so a driver saved before
+    // that field existed counts as available rather than silently vanishing
+    // from the rail.
+    const drivers = arr(raw.drivers, 'drivers')
+      .filter((d) => d && typeof d === 'object')
+      .map((d) => ({ id: str(d.id) || uid(), name: str(d.name), available: d.available === undefined ? true : bool(d.available) }))
+      .filter((d) => d.name);
+
+    // A group is a named set of drivers ("Monday"), nothing more: it holds
+    // ids, and the names stay on the roster so renaming a driver reaches
+    // every group at once.
+    const driverGroups = arr(raw.driverGroups, 'driverGroups')
+      .filter((g) => g && typeof g === 'object')
+      .map((g) => ({
+        id: str(g.id) || uid(), name: str(g.name),
+        driverIds: arr(g.driverIds, 'the drivers in a group').map((x) => str(x)).filter(Boolean),
+      }))
+      .filter((g) => g.name);
 
     // Drop references to things that no longer exist, so the UI never has to
     // guess what a dangling id meant.
@@ -65,12 +85,17 @@ const Store = (() => {
       if (!has(cars, r.carId)) { r.carId = ''; repaired.push(`route ${r.name} pointed at a missing car`); }
       if (!has(positions, r.positionId)) { r.positionId = ''; repaired.push(`route ${r.name} pointed at a missing position`); }
     }
+    for (const g of driverGroups) {
+      const onRoster = g.driverIds.filter((id) => drivers.some((d) => d.id === id));
+      if (onRoster.length !== g.driverIds.length) repaired.push(`the ${g.name} group listed a driver who is no longer on the roster`);
+      g.driverIds = onRoster;
+    }
 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? raw.date : defaults().date;
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
     const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes }, repaired, usable: true };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -84,7 +109,9 @@ const Store = (() => {
       // but say so, because saving will drop whatever we did not understand.
       notices.push({ kind: 'warn', text: 'This data was saved by a newer version of Car Coordinator. Anything that version added will be lost once you make a change here.' });
     }
-    // v0 (no schemaVersion) has the same field names, so normalise covers it.
+    // v0 (no schemaVersion) and v1 (no round, no roster) use the same field
+    // names for everything they do have, so normalise covers both: what they
+    // never wrote simply comes back as its default.
     return normalise(raw, defaults);
   }
 
