@@ -1,6 +1,6 @@
 # Pack: Day templates — save a plan, load it back
 
-**Status:** 🚧 in flight
+**Status:** 🚧 all items committed, pack gate green — awaiting the browser walkthrough and item 3's review
 **Date:** 2026-09-18
 **Branch:** `day-templates`, cut from `day-plan-rail-and-round` (which is unmerged)
 
@@ -50,7 +50,7 @@ every one touches `docs/app.js`.
       **Risky — review individually.** This is the only destructive action in the app that is one click from the main screen.
 - [x] **4. Optional weekday auto-apply, default off.** A per-template weekday setting. When set, opening the app on that weekday raises a notice offering the template with one-click apply. Never applies on its own.
       *Done when:* default state raises no notice on any day; with a weekday set, the notice appears and applying it goes through the same confirm and snapshot as item 3.
-- [ ] **5. Tests + screenshots.** `scripts/smoke.mjs` covers save, load, cancel-changes-nothing, the snapshot being taken, and the default-off behaviour. `scripts/screens.mjs` captures the template row.
+- [x] **5. Tests + screenshots.** `scripts/smoke.mjs` covers save, load, cancel-changes-nothing, the snapshot being taken, and the default-off behaviour. `scripts/screens.mjs` captures the template row.
       *Done when:* `npm test` and `npm run screens` pass with no console errors.
 
 ## Gates
@@ -171,5 +171,44 @@ both entry points end in one confirm and one load path.
   offers itself, nothing is loaded while it waits, the offer reaches the same
   question, only then does it replace (with `Loading the Monday template` at the
   top of Backups), and turning the day off again stops the offer.
+
+- [x] **5. Tests + screenshots** — 971ebee. Most of the smoke coverage landed
+  with the item it tests, which is the item gate doing its job; this item added
+  what only makes sense once the whole pack is in.
+  `screens.mjs`: the walkthrough now saves the Monday plan as a template and
+  sets it for Mondays, so the shelf is in `03-day-plan-with-warnings.png`, then
+  raises the load question for `04-template-question.png` and **dismisses** it —
+  asserted, not narrated: the run exits 1 if the 15 routes underneath move.
+  Later shots renumbered (cars→05 … sheet→11).
+  `smoke.mjs`: three cases that span items — a share code leaves this PC's
+  templates alone (`share.js` untouched *is* the implementation, per the
+  decisions table, so it is asserted rather than assumed), an exported copy
+  carries them, and importing that copy on a PC with none brings them in.
+  *Beyond the item text, flagged:* the README's feature list described an app
+  with no templates in it; one bullet added. `INVENTORY.md`'s 🚧 pointer is
+  left as it is — flipping it to ✅ belongs to the merge, as it did last pack.
+  Gate: `scripts/check.sh` OK, `CHROMIUM_PATH=... npm test` **162 ok / 0
+  failed**, `CHROMIUM_PATH=... npm run screens` exit 0.
+
+**Pack gate — green, 2026-09-18.**
+`CHROMIUM_PATH=/usr/bin/google-chrome npm test` → exit 0, **162 checks ok, 0
+failed, "all checks passed"**, no console errors on any of the four simulated
+PCs. `CHROMIUM_PATH=... npm run screens` → exit 0, "no console errors, 4
+warnings raised and asserted", 10 screenshots + the A4 PDF written.
+`scripts/check.sh` OK on every shipped script.
+The `CHROMIUM_PATH` is the environment, not the code: plain `npm test` fails
+with *"Executable doesn't exist at …/chromium_headless_shell-1243/…"*, the
+pinned Playwright browser this sandbox cannot download. **The suite has
+therefore not run on the browser CI uses.**
+
+**Left for the user:** the real-browser walkthrough (the shelf, the question,
+the load, the undo from Backups, and the weekday offer), the individual review
+item 3 asks for, `INVENTORY.md`'s 🚧 → ✅ at merge, and two calls recorded
+above that are reversible but are the user's to make — no `schemaVersion` bump
+(item 1) and the per-template delete button (item 2).
+
+**Not touched, as instructed:** `docs/share.js`; the `share-apply` normalise
+bug; `@media print` not hiding `dialog` — this pack added no dialog, so that
+one is neither worsened nor tested here.
 
 </details>
