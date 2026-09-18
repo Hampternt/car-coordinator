@@ -214,8 +214,12 @@ function railDrivers() {
     return `<li><b>${esc(d.name)}</b>${where}${actBtn('toggle', 'driver', d.id, '\u2715', '', 'data-field="available" title="Not in today"')}</li>`;
   }).join('');
   const away = state.drivers.length - inToday.length;
+  // Monday morning is one click: the groups are here, where the day is set up.
+  const groups = state.driverGroups.map((g) =>
+    actBtn('apply-group', 'driverGroup', g.id, esc(g.name), '', 'title="Everyone in this group is in today"')).join('');
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
     ${state.drivers.length
       ? (inToday.length ? `<ul class="rail-list">${rows}</ul>` : '<p class="rail-empty">Nobody is in today. Bring someone back on the Drivers tab.</p>')
       : '<p class="rail-empty">No drivers yet \u2014 add them on the Drivers tab.</p>'}
@@ -317,7 +321,33 @@ function renderDrivers() {
     </div>
     ${state.drivers.length
       ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-      : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}`;
+      : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
+    ${driverGroups()}`;
+}
+
+/* A group is a named set of drivers — Monday's crew is these people — and
+   nothing more. Applying one answers "who is in today", which is what the rail
+   shows; it says nothing about which route anyone drives. */
+function driverGroups() {
+  const cards = state.driverGroups.map((g) => {
+    const members = state.drivers.map((d) =>
+      `<button class="chip ${g.driverIds.includes(d.id) ? 'on' : ''}" style="--c:var(--steel)" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
+    return `<div class="group">
+      <div class="bar">
+        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}
+        ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Set who is in today to this group"')}
+        ${moveDel('driverGroup', g.id)}
+      </div>
+      ${state.drivers.length ? `<div class="chips">${members}</div>` : '<p class="hint" style="margin:0">Add drivers above, then tick them into this group.</p>'}
+    </div>`;
+  }).join('');
+  return `<h2 style="margin-top:22px">Day groups</h2>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <div class="bar">
+      <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
+      <button class="btn" data-act="add-group">+ Add group</button>
+    </div>
+    ${cards || '<p class="empty">No groups yet. Make one for the crew you plan with most \u2014 it takes one click to put them all in.</p>'}`;
 }
 
 /* The roster as suggestions, never as a rulebook: the day plan's driver box
@@ -808,6 +838,25 @@ document.addEventListener('click', (e) => {
         if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push({ id: uid(), name, available: true });
       }))) return;
       break;
+    case 'add-group':
+      if (!addFromInput('#newGroup', (name) => state.driverGroups.push({ id: uid(), name, driverIds: [] }))) return;
+      break;
+    case 'group-member': {
+      const g = list[i];
+      const at = g.driverIds.indexOf(b.dataset.driver);
+      if (at >= 0) g.driverIds.splice(at, 1); else g.driverIds.push(b.dataset.driver);
+      break;
+    }
+    case 'apply-group': {
+      const g = list[i];
+      // A write across the whole roster, not an addition: picking Monday has
+      // to take yesterday's leftovers out, or "who is in today" is a lie by
+      // the end of the week.
+      state.drivers.forEach((d) => { d.available = g.driverIds.includes(d.id); });
+      const inToday = state.drivers.filter((d) => d.available).length;
+      note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
+      break;
+    }
     case 'add-position':
       if (!addFromInput('#newPos', (name) => state.positions.push({ id: uid(), name, multi: false, labelId: '', note: '' }))) return;
       break;
@@ -834,7 +883,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
   const act = map[e.target.id];
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });

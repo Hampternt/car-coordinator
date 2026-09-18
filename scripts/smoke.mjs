@@ -92,7 +92,7 @@ await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();  
 // The roster starts empty, like the car list, and only ever offers names: the
 // day plan's driver box stays free text, so nothing here can refuse a name.
 await page.click('[data-act="tab"][data-tab="drivers"]');
-check('the roster starts empty', await page.locator('#tab-drivers .empty').isVisible());
+check('the roster starts empty', await page.locator('#tab-drivers .empty').first().isVisible());
 await page.fill('#newDriver', 'Roster One, Roster Two');
 await page.click('[data-act="add-driver"]');
 check('one box adds several drivers, split on commas not spaces',
@@ -133,6 +133,66 @@ await page.click('[data-act="tab"][data-tab="plan"]');
 check('and the route keeps the name that was typed there',
   (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
 await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('');
+
+// --- driver day groups ---
+// A group is a named set of people, and applying it answers "who is in
+// today". It says nothing about who drives which route.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.fill('#newDriver', 'Group One, Group Two');
+await page.click('[data-act="add-driver"]');          // roster: Roster One, Group One, Group Two
+await page.fill('#newGroup', 'Monday');
+await page.click('[data-act="add-group"]');
+await page.fill('#newGroup', 'Weekend');
+await page.click('[data-act="add-group"]');
+check('two groups can be made', (await page.locator('#tab-drivers .group').count()) === 2);
+
+const group = (name) => page.locator('#tab-drivers .group', { has: page.locator(`[data-field="name"][value="${name}"]`) });
+await group('Monday').locator('.chip', { hasText: 'Roster One' }).click();
+await group('Monday').locator('.chip', { hasText: 'Group One' }).click();
+await group('Weekend').locator('.chip', { hasText: 'Group Two' }).click();
+check('a group holds the drivers ticked into it', (await group('Monday').locator('.chip.on').count()) === 2);
+
+await group('Monday').locator('[data-act="apply-group"]').click();
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('applying a group sets who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
+check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in today, 1 away'),
+  await page.locator('#notices .notice').last().innerText());
+
+// The one that matters: applying a second group must take the first group's
+// leftovers out, not simply add its own people in.
+await page.locator('#tab-plan [data-panel="drivers"] [data-act="apply-group"]', { hasText: 'Weekend' }).click();
+const inToday = () => page.locator('#tab-plan [data-panel="drivers"] li').allInnerTexts();
+check('applying another group replaces the crew rather than adding to it',
+  (await inToday()).length === 1 && (await inToday())[0].includes('Group Two'), JSON.stringify(await inToday()));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('the applied crew survives a reload', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('and so do the groups and their members',
+  (await page.locator('#tab-drivers .group').count()) === 2 && (await group('Monday').locator('.chip.on').count()) === 2);
+
+// A driver who leaves the roster leaves the groups with them.
+const delRosterOne = page.locator('#tab-drivers tbody tr', { has: page.locator('[data-field="name"][value="Roster One"]') }).locator('[data-act="del"]');
+await delRosterOne.click();
+await delRosterOne.click();                           // two-click confirm
+check('deleting a driver takes them out of every group', (await group('Monday').locator('.chip.on').count()) === 1);
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('and that sticks, with no repair notice on the way back',
+  (await group('Monday').locator('.chip.on').count()) === 1 && (await page.locator('#notices .notice').count()) === 0,
+  await page.locator('#notices').innerText());
+
+// Renaming and deleting a group.
+await group('Weekend').locator('[data-field="name"]').fill('Saturday');
+// Typing does not redraw (that is what keeps the caret), so come back to the
+// tab before matching on the value the markup carries.
+await page.click('[data-act="tab"][data-tab="plan"]');
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const delGroup = group('Saturday').locator('[data-act="del"]');
+await delGroup.click();
+await delGroup.click();
+check('a group can be renamed and deleted', (await page.locator('#tab-drivers .group').count()) === 1);
+await page.click('[data-act="tab"][data-tab="plan"]');
 
 // --- the left rail carries the fleet beside the plan ---
 check('the rail lists every car', (await page.locator('#tab-plan [data-panel="cars"] li').count()) === 3);
