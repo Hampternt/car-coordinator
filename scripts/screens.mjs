@@ -56,7 +56,7 @@ await tab('labels');
 await page.fill('#newLabel', 'No fuel card');
 await page.fill('#newLabelColor', '#1565c0');
 await page.click('[data-act="add-label"]');
-await shot('05-labels');
+await shot('06-labels');
 
 // tag a car with the new label straight away
 await tab('cars');
@@ -72,7 +72,25 @@ await page.fill('#newPos', 'Spot 6/1');
 await page.click('[data-act="add-position"]');
 await pos('Spot 2/2').locator('.chip', { hasText: 'Out of service' }).click();
 await pos('Spot 2/2').locator('[data-field="note"]').fill('Pallet jack parked in it');
-await shot('04-positions');
+await shot('05-positions');
+
+// --- the roster, and a crew you can put in with one click
+console.log('drivers and day groups');
+await tab('drivers');
+await page.fill('#newDriver', 'Ana Ruiz, Bo Lind, Cai Mensah, Dee Okafor, Efe Yilmaz, Fia Berg, Gus Hald, Hana Sol, Ida Ngo');
+await page.click('[data-act="add-driver"]');
+await page.fill('#newGroup', 'Monday');
+await page.click('[data-act="add-group"]');
+const monday = page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') });
+for (const who of ['Ana Ruiz', 'Bo Lind', 'Cai Mensah', 'Dee Okafor', 'Efe Yilmaz', 'Fia Berg', 'Gus Hald', 'Ida Ngo']) {
+  await monday.locator('.chip', { hasText: who }).click();
+}
+await monday.locator('[data-act="apply-group"]').click();
+if ((await page.locator('#tab-drivers tbody tr.away').count()) !== 1) {
+  console.log(`\nexpected one driver left out of Monday, got ${await page.locator('#tab-drivers tbody tr.away').count()}`);
+  process.exit(1);
+}
+await shot('02-drivers');
 
 // --- the day plan, including deliberate mistakes
 console.log('day plan, with mistakes left in on purpose');
@@ -102,6 +120,17 @@ await assign(5, 'Fia Berg', 'AA33333', 'Spot 3/2');
 // and a normal one that shares the garage, which is allowed
 await assign(6, 'Gus Hald', 'BB99999', 'Garage');
 
+// Rounds. Routes 1 and 5 are in the same spot in the same round, which is a
+// clash and stays one. Route 8 is in that spot too, in round 2, which is what
+// rounds are for — the assertion below is that nothing new is raised for it.
+const round = (i, value) => routes.nth(i).locator('[data-field="round"]').fill(value);
+await round(0, '1');
+await round(1, '1');
+await round(2, '2');
+await round(4, '1');
+await assign(7, 'Ida Ngo', '', 'Spot 1/1');
+await round(7, '2');
+
 await routes.nth(13).locator('[data-field="driver"]').fill('Hana Sol');
 await routes.nth(13).locator('[data-act="toggle"][data-field="highlight"]').click();
 
@@ -113,7 +142,7 @@ warned.forEach((w) => console.log(`    - ${w}`));
 // expected' and exits 0 when problems() is broken.
 const expected = [
   'AA11111 is on 2 routes (1, 4)',            // same car twice
-  'Spot 1/1 is taken by 2 routes (1, 5)',     // same spot twice
+  'Spot 1/1 in round 1 is taken by 2 routes (1, 5)',   // same spot, same round
   'AA33333 is marked Workshop but is on route 6',
   'AA55555 is marked No fuel card but is on route 5',
 ];
@@ -123,21 +152,26 @@ if (missing.length || extra.length) {
   console.log(`\nwarnings did not match.\n  missing: ${missing.join(' | ') || 'none'}\n  unexpected: ${extra.join(' | ') || 'none'}`);
   process.exit(1);
 }
+if ((await page.locator('#tab-plan [data-panel="drivers"] li').count()) !== 8
+  || (await page.locator('#tab-plan [data-panel="cars"] li').count()) !== 6) {
+  console.log('\nthe rail beside the plan is not showing the crew and the fleet');
+  process.exit(1);
+}
 if ((await page.locator('#tab-plan tbody tr.warn').count()) !== 4) {
   console.log(`\nexpected 4 flagged rows, got ${await page.locator('#tab-plan tbody tr.warn').count()}`);
   process.exit(1);
 }
-await shot('02-day-plan-with-warnings');
+await shot('03-day-plan-with-warnings');
 
 await tab('cars');
-await shot('03-cars');
+await shot('04-cars');
 
 // --- data tab and the share code
 console.log('data and sharing');
 await tab('data');
 await page.click('[data-act="share-make"][data-mode="day"]');
 await page.waitForFunction(() => document.querySelector('#shareOut')?.value.startsWith('CC1'));
-await shot('06-data');
+await shot('07-data');
 
 // --- the import preview another PC would see
 await page.click('[data-act="tab"][data-tab="data"]');
@@ -145,17 +179,17 @@ const code = await page.locator('#shareOut').inputValue();
 await page.fill('#shareIn', code);
 await page.click('[data-act="share-read"]');
 await page.waitForSelector('#shareDlg[open]');
-await page.screenshot({ path: `${OUT}/07-import-preview.png` });
-console.log(`  ${OUT}/07-import-preview.png`);
+await page.screenshot({ path: `${OUT}/08-import-preview.png` });
+console.log(`  ${OUT}/08-import-preview.png`);
 await page.click('[data-act="share-cancel"]');
 
 // --- the printout
 console.log('printout');
 await tab('preview');
 await page.waitForSelector('#sheet .qr svg');
-await shot('08-print-preview');
-await page.pdf({ path: `${OUT}/09-printed-sheet.pdf`, format: 'A4', printBackground: true });
-console.log(`  ${OUT}/09-printed-sheet.pdf`);
+await shot('09-print-preview');
+await page.pdf({ path: `${OUT}/10-printed-sheet.pdf`, format: 'A4', printBackground: true });
+console.log(`  ${OUT}/10-printed-sheet.pdf`);
 
 await browser.close();
 server.close();
