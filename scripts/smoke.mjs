@@ -41,7 +41,8 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(base, { waitUntil: 'networkidle' });
 
 // --- first run ---
-check('loads with an empty car list', await page.locator('#tab-plan .empty').isVisible());
+// The tab's own empty message, not the template shelf's further down it.
+check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
 check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 // An unescaped quote in an inline data: URI silently dumps the rest of the
@@ -665,6 +666,75 @@ check('and the caret is still in the round being typed', await page.evaluate(() 
   document.activeElement.dataset.field === 'round' && document.activeElement.selectionStart === 2));
 await page.keyboard.type('Y');
 check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
+
+// --- day templates: saving the plan that gets made again ---
+// A template is the route list as it stands minus the date. Saving is not
+// destructive; saving over a name already used is, so that one is snapshotted.
+const templatePlan = {
+  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
+  cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
+  positions: [{ id: 'p1', name: 'Spot 1/1' }, { id: 'p2', name: 'Spot 1/2' }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Weekday One', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+    { id: 'r2', name: '2', driver: 'Weekday Two', carId: 'c2', positionId: 'p2', round: '2', gapBefore: true },
+    { id: 'r3', name: '3' },
+  ],
+};
+await loadPlan(templatePlan);
+const shelf = page.locator('#tab-plan .tpl');
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+check('saving puts a template on the shelf under the plan',
+  (await shelf.count()) === 1 && (await shelf.innerText()).replace(/\s+/g, ' ').includes('Monday 3 routes'),
+  await shelf.innerText());
+check('and says what it saved', (await page.locator('#notices .notice').last().innerText()).includes('Saved Monday: a template of 3 routes'),
+  await page.locator('#notices .notice').last().innerText());
+check('a template carries every route field the plan does, and no date', await page.evaluate(() => {
+  const t = state.templates[0];
+  const [one, two] = t.routes;
+  return t.routes.length === 3 && !('date' in t) && t.weekday === ''
+    && one.driver === 'Weekday One' && one.carId === 'c1' && one.positionId === 'p1'
+    && one.round === '1' && one.highlight === true && two.gapBefore === true
+    && !('id' in one);                                 // ids are minted on load, not stored
+}));
+
+await page.reload({ waitUntil: 'networkidle' });
+check('a saved template survives a reload', (await shelf.locator('b').innerText()) === 'Monday');
+
+// Saving a name that is already used replaces it: the second Monday is a
+// correction of the first, not a second Monday to choose between.
+await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Weekday Changed');
+await page.fill('#newTemplate', 'monday');             // the same name, typed differently
+await page.click('[data-act="save-template"]');
+check('saving the same name again replaces it rather than making a second',
+  (await shelf.count()) === 1 && (await page.evaluate(() => state.templates[0].routes[0].driver)) === 'Weekday Changed');
+check('and keeps the name it was given rather than the capitals just typed',
+  (await page.evaluate(() => state.templates[0].name)) === 'Monday');
+check('and says so', (await page.locator('#notices .notice').last().innerText()).includes('Replaced the Monday template'),
+  await page.locator('#notices .notice').last().innerText());
+await page.click('[data-act="tab"][data-tab="data"]');
+check('the template it replaced is in the backups', (await page.locator('#tab-data table tbody').first().innerText()).includes('Replacing the Monday template'));
+
+await page.click('[data-act="tab"][data-tab="plan"]');
+const delTemplate = shelf.locator('[data-act="del"]');
+await delTemplate.click();
+await delTemplate.click();                             // two-click confirm, like every other delete
+check('a template can be deleted', (await shelf.count()) === 0);
+
+// A car the template pointed at, deleted from the fleet, must leave the
+// template with it — otherwise the next reload repairs a template nobody
+// touched, and says so.
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+await page.click('[data-act="tab"][data-tab="cars"]');
+const delCar = page.locator('#tab-cars tbody tr', { has: page.locator('[data-field="reg"][value="AA11111"]') }).locator('[data-act="del"]');
+await delCar.click();
+await delCar.click();
+check('deleting a car takes it out of the templates too',
+  await page.evaluate(() => state.templates[0].routes[0].carId === ''));
+await page.reload({ waitUntil: 'networkidle' });
+check('so the reload after it has nothing to repair', (await page.locator('#notices .notice').count()) === 0,
+  await page.locator('#notices').innerText());
 
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {

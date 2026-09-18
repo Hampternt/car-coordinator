@@ -117,6 +117,16 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-groups { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
 .rail-groups .btn { flex: none; padding: 2px 8px; font-size: 12px; color: inherit; }
 
+/* ---------- day templates, at the foot of the plan ----------
+   A shelf of saved route lists. Loading one replaces the plan, so the shelf
+   itself is quiet: the question gets asked in a notice at the top of the page,
+   where there is room to say what it costs. */
+.templates { margin-top: 22px; }
+.templates h3 { font: 600 17px var(--head); margin: 0 0 6px; }
+.shelf { display: flex; flex-wrap: wrap; gap: 8px; }
+.tpl { display: flex; align-items: center; gap: 8px; background: var(--panel); padding: 6px 8px; }
+.tpl .btn { padding: 2px 7px; color: #555; }
+
 /* a day group: a name, the roster as tick-on chips, and one button to use it */
 .group { background: var(--panel); padding: 10px 12px; margin-bottom: 10px; }
 .group .bar { margin-bottom: 6px; }

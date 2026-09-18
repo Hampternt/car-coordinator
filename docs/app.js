@@ -52,7 +52,7 @@ let notices = [];
 
 const save = () => Store.save(state);
 
-const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups })[kind];
+const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups, template: state.templates })[kind];
 
 /* ---------- small html helpers ----------
    Ids reach attributes, and an imported JSON file can carry any string as an
@@ -292,7 +292,53 @@ function renderPlan() {
         <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>`;
+    </div>
+    ${renderTemplates()}`;
+}
+
+/* ---------- day templates ----------
+   The plan that gets made again: Monday's routes, the weekend's. A template is
+   the route list as it stands minus the date, kept on this PC — it travels
+   between the two managers in the exported JSON file, never in a share code. */
+function renderTemplates() {
+  const shelf = state.templates.map((t) => `<div class="tpl">
+      <b>${esc(t.name)}</b>
+      <span class="rail-count">${t.routes.length} route${t.routes.length === 1 ? '' : 's'}</span>
+      ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
+    </div>`).join('');
+  return `<section class="templates">
+    <h3>Day templates</h3>
+    <p class="hint">A saved copy of the routes as they stand — drivers, cars, positions, rounds and marks, but never the date. Save the way Monday usually runs once, and put it back next Monday.</p>
+    <div class="bar">
+      <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
+      <button class="btn" data-act="save-template">Save as template</button>
+    </div>
+    ${shelf ? `<div class="shelf">${shelf}</div>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+  </section>`;
+}
+
+/* Saving over a name that is already used replaces it, rather than leaving two
+   Mondays to choose between: the second save is a correction of the first. It
+   is an overwrite, so it is snapshotted first, and the weekday already chosen
+   for that template stays put — the plan changed, not what it is for. */
+function saveTemplate(name) {
+  const routes = state.routes.map((r) => ({
+    name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId,
+    round: r.round, highlight: r.highlight, gapBefore: r.gapBefore,
+  }));
+  const at = state.templates.findIndex((t) => fold(t.name) === fold(name));
+  if (at >= 0) {
+    // The name it already has, not the one just typed: "monday" over "Monday"
+    // is the same template being corrected, and the shelf should not quietly
+    // rename itself under a leader who was only re-saving the routes.
+    const kept = state.templates[at];
+    Store.snapshot(state, `Replacing the ${kept.name} template`);
+    state.templates[at] = { ...kept, routes };
+    note('info', `Replaced the ${kept.name} template with the ${routes.length} routes on the plan now.`);
+  } else {
+    state.templates.push({ id: uid(), name, weekday: '', routes });
+    note('info', `Saved ${name}: a template of ${routes.length} routes.`);
+  }
 }
 
 function assignCell(entries) {
@@ -817,6 +863,13 @@ document.addEventListener('click', (e) => {
       // A deleted driver leaves every group, but the day plan keeps the name
       // typed into it: that text is the plan, not a reference to the roster.
       if (kind === 'driver') state.driverGroups.forEach((g) => { g.driverIds = g.driverIds.filter((x) => x !== id); });
+      // Templates hold the same car and position ids the plan does, so a
+      // deleted one has to leave them as well. Left in, the id would come back
+      // as a repair notice on the next reload, about a template nobody touched.
+      if (kind === 'car' || kind === 'position') {
+        const ref = kind === 'car' ? 'carId' : 'positionId';
+        state.templates.forEach((t) => t.routes.forEach((r) => { if (r[ref] === id) r[ref] = ''; }));
+      }
       break;
     case 'clear-day':
       if (!confirmTwice('clear')) return;
@@ -843,6 +896,9 @@ document.addEventListener('click', (e) => {
       break;
     case 'add-group':
       if (!addFromInput('#newGroup', (name) => state.driverGroups.push({ id: uid(), name, driverIds: [] }))) return;
+      break;
+    case 'save-template':
+      if (!addFromInput('#newTemplate', saveTemplate)) return;
       break;
     case 'group-member': {
       const g = list[i];
@@ -886,7 +942,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newGroup: 'add-group', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
   const act = map[e.target.id];
   if (act) document.querySelector(`[data-act="${act}"]`).click();
 });
