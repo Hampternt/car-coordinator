@@ -30,6 +30,7 @@ Every push to `main` runs the tests and then builds and publishes the release. B
 ```
 npm install
 npm test          # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
+npm run screens   # drives the whole app the way a leader would and writes a screenshot of every tab
 ```
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
 
@@ -47,4 +48,4 @@ npx tauri build    # release exe
 - `docs/` : the app (plain HTML/CSS/JS, no framework). GitHub Pages serves this folder.
 - `src-tauri/` : Rust shell, exposes `print_page`
 - `scripts/make_icon.py` : generates the app icon at build time
-- `scripts/smoke.mjs` : the test suite
+- `scripts/smoke.mjs` : the test suite, `scripts/screens.mjs` : the screenshot walkthrough, `scripts/serve.mjs` : the static server both use

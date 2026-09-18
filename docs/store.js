@@ -19,9 +19,14 @@ const Store = (() => {
      crashing on the first render, coerce it into a shape the UI can draw. */
 
   function normalise(raw, defaults) {
-    // Nothing saved yet is a first run, not damage worth warning about.
-    if (raw === null || raw === undefined) return { state: defaults(), repaired: [] };
-    if (typeof raw !== 'object' || Array.isArray(raw)) return { state: defaults(), repaired: ['the saved data was not in the expected shape'] };
+    // Three different cases, and conflating any two of them loses data:
+    // nothing saved yet (a first run, say nothing), something saved that we
+    // cannot use (say so loudly, and do NOT let it stand in for real data),
+    // and something usable (repair what needs it).
+    if (raw === null || raw === undefined) return { state: defaults(), repaired: [], usable: false };
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      return { state: defaults(), repaired: ['the saved data was not a Car Coordinator plan'], usable: false };
+    }
     const repaired = [];
     const arr = (v, what) => {
       if (Array.isArray(v)) return v;
@@ -65,7 +70,7 @@ const Store = (() => {
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
     const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes }, repaired };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -73,8 +78,7 @@ const Store = (() => {
   const takeNotices = () => { const n = notices; notices = []; return n; };
 
   function migrate(raw, defaults) {
-    if (!raw || typeof raw !== 'object') return normalise(null, defaults);
-    const v = Number(raw.schemaVersion) || 0;
+    const v = raw && typeof raw === 'object' ? Number(raw.schemaVersion) || 0 : 0;
     if (v > SCHEMA) {
       // Written by a newer build. Load it anyway (fields we know still work),
       // but say so, because saving will drop whatever we did not understand.
@@ -85,11 +89,19 @@ const Store = (() => {
   }
 
   /* ---------- localStorage ---------- */
+  let localUsable = false;
+
   function readLocal(defaults) {
     let raw = null;
-    try { raw = JSON.parse(localStorage.getItem(KEY)); } catch { notices.push({ kind: 'warn', text: 'Saved data could not be read and was replaced with a fresh start. Check Backups below before entering anything.' }); }
-    const { state, repaired } = migrate(raw, defaults);
-    if (repaired.length) notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
+    let unreadable = false;
+    try { raw = JSON.parse(localStorage.getItem(KEY)); } catch { unreadable = true; }
+    const { state, repaired, usable } = migrate(raw, defaults);
+    localUsable = usable;
+    if (unreadable || (!usable && localStorage.getItem(KEY) !== null)) {
+      notices.push({ kind: 'warn', text: 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
+    } else if (repaired.length) {
+      notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
+    }
     return state;
   }
 
@@ -314,15 +326,14 @@ const Store = (() => {
     } catch { return null; }
   }
 
-  const hadLocalData = () => {
-    try { return !!localStorage.getItem(KEY); } catch { return false; }
-  };
+  // Only usable data should stop us reading the linked save file back.
+  const hasUsableLocalData = () => localUsable;
 
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, init, recoverFromFile, hadLocalData,
+    SCHEMA, init, recoverFromFile, hasUsableLocalData,
     save(state) { writeLocal(state); queueFileWrite(state); },
     flush, snapshot, dailySnapshot, backups, restore,
     file, persistence, fileSupported, linkFile, openFile, reconnect, unlink,

@@ -47,25 +47,31 @@ const save = () => Store.save(state);
 
 const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels })[kind];
 
-/* ---------- small html helpers ---------- */
+/* ---------- small html helpers ----------
+   Ids reach attributes, and an imported JSON file can carry any string as an
+   id, so every one of them goes through esc() even though the app's own uid()
+   never produces anything that needs it. */
 const field = (kind, id, name, value, extra = '') =>
-  `<input type="text" data-kind="${kind}" data-id="${id}" data-field="${name}" value="${esc(value)}" ${extra}>`;
+  `<input type="text" data-kind="${kind}" data-id="${esc(id)}" data-field="${esc(name)}" value="${esc(value)}" ${extra}>`;
 const actBtn = (act, kind, id, text, cls = '', extra = '') =>
-  `<button class="btn ${cls}" data-act="${act}" data-kind="${kind}" data-id="${id}" ${extra}>${text}</button>`;
+  `<button class="btn ${cls}" data-act="${act}" data-kind="${kind}" data-id="${esc(id)}" ${extra}>${text}</button>`;
 const moveDel = (kind, id) =>
   actBtn('up', kind, id, '↑', '', 'title="Move up"') +
   actBtn('down', kind, id, '↓', '', 'title="Move down"') +
   actBtn('del', kind, id, armed === `del:${id}` ? 'Sure?' : '✕', armed === `del:${id}` ? 'armed' : '', 'title="Delete"');
 
 function labelChips(kind, item) {
-  const ok = `<button class="chip ok ${item.labelId ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${item.id}" data-label="">OK</button>`;
+  const ok = `<button class="chip ok ${item.labelId ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
   return ok + state.labels.map((l) =>
-    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(l.color)}" data-act="setLabel" data-kind="${kind}" data-id="${item.id}" data-label="${l.id}">${esc(l.name)}</button>`
+    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(l.color)}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
   ).join('');
 }
 
 function usage() {
-  const cars = {}, pos = {};
+  // Null-prototype, because ids come from imported files: a car id of
+  // '__proto__' would otherwise resolve to Object.prototype, skip the ??=,
+  // and throw on every render with the bad data already saved.
+  const cars = Object.create(null), pos = Object.create(null);
   for (const r of state.routes) {
     if (r.carId) (cars[r.carId] ??= []).push(r);
     if (r.positionId) (pos[r.positionId] ??= []).push(r);
@@ -74,27 +80,36 @@ function usage() {
 }
 
 /* ---------- views ---------- */
+const dash = (v) => esc(v) || '-';
+const labelName = (l) => (l && l.name.trim() ? l.name : 'a status with no name');
+
 /* Every logical problem in the current plan. These are advisory: a leader
    sometimes genuinely wants two routes on one car for half a day, so the
    app says so rather than refusing. */
 function problems() {
   const use = usage();
-  const out = [];
-  for (const [carId, routes] of Object.entries(use.cars)) {
+  const lines = [];
+  const rows = new Set();
+  const named = (routes) => routes.map((r) => dash(r.name)).join(', ');
+  const flag = (routes) => routes.forEach((r) => rows.add(r.id));
+
+  for (const carId of Object.keys(use.cars)) {
+    const routes = use.cars[carId];
     const car = byId(state.cars, carId);
     if (!car) continue;
-    if (routes.length > 1) out.push(`${car.reg} is on ${routes.length} routes (${routes.map((r) => r.name).join(', ')})`);
+    if (routes.length > 1) { lines.push(`${car.reg} is on ${routes.length} routes (${named(routes)})`); flag(routes); }
     const lab = byId(state.labels, car.labelId);
-    if (lab) out.push(`${car.reg} is marked ${lab.name} but is on route ${routes.map((r) => r.name).join(', ')}`);
+    if (lab) { lines.push(`${car.reg} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
-  for (const [posId, routes] of Object.entries(use.pos)) {
+  for (const posId of Object.keys(use.pos)) {
+    const routes = use.pos[posId];
     const pos = byId(state.positions, posId);
     if (!pos) continue;
-    if (!pos.multi && routes.length > 1) out.push(`${pos.name} is taken by ${routes.length} routes (${routes.map((r) => r.name).join(', ')})`);
+    if (!pos.multi && routes.length > 1) { lines.push(`${pos.name} is taken by ${routes.length} routes (${named(routes)})`); flag(routes); }
     const lab = byId(state.labels, pos.labelId);
-    if (lab) out.push(`${pos.name} is marked ${lab.name} but is on route ${routes.map((r) => r.name).join(', ')}`);
+    if (lab) { lines.push(`${pos.name} is marked ${labelName(lab)} but is on ${routes.length > 1 ? 'routes' : 'route'} ${named(routes)}`); flag(routes); }
   }
-  return out;
+  return { lines, rows };
 }
 
 function renderPlan() {
@@ -110,7 +125,7 @@ function renderPlan() {
       const sel = c.id === r.carId;
       if (sel && lab) warns.push(`${c.reg} is marked ${lab.name}`);
       if (sel && others.length) warns.push(`also on route ${others.map((o) => o.name).join(', ')}`);
-      return `<option value="${c.id}" ${sel ? 'selected' : ''}>${esc(c.reg + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
+      return `<option value="${esc(c.id)}" ${sel ? 'selected' : ''}>${esc(c.reg + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const posOpts = state.positions.map((p) => {
       const lab = byId(state.labels, p.labelId);
@@ -119,14 +134,14 @@ function renderPlan() {
       const sel = p.id === r.positionId;
       if (sel && lab) warns.push(`${p.name} is marked ${lab.name}`);
       if (sel && others.length) warns.push(`${p.name} also used by route ${others.map((o) => o.name).join(', ')}`);
-      return `<option value="${p.id}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
+      return `<option value="${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', warns.length && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
       <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-"')}</td>
-      <td><select data-kind="route" data-id="${r.id}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
-      <td><select data-kind="route" data-id="${r.id}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
+      <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
+      <td><select data-kind="route" data-id="${esc(r.id)}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
       <td class="btns">
         ${actBtn('toggle', 'route', r.id, 'Mark', r.highlight ? 'on' : '', 'data-field="highlight" title="Pink highlight on the printout"')}
         ${actBtn('toggle', 'route', r.id, 'Gap', r.gapBefore ? 'on' : '', 'data-field="gapBefore" title="Blank line above this route"')}
@@ -143,7 +158,7 @@ function renderPlan() {
     return `<span class="tag" style="--c:${esc(l ? l.color : '#2e7d32')}">${esc(c.reg)}${l ? ' \u00b7 ' + esc(l.name) : ''}${c.note ? ' \u00b7 ' + esc(c.note) : ''}</span>`;
   };
 
-  const found = problems();
+  const { lines: found, rows: flagged } = problems();
   const noCars = state.cars.length
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
@@ -151,7 +166,7 @@ function renderPlan() {
   $('#tab-plan').innerHTML = `
     ${noCars}
     ${found.length ? `<div class="problems">
-      <b>${found.length} thing${found.length > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
+      <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
       <ul>${found.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
     </div>` : ''}
     <div class="bar">
@@ -205,7 +220,7 @@ function renderCars() {
 function renderPositions() {
   const rows = state.positions.map((p) => `<tr>
     <td>${field('position', p.id, 'name', p.name, 'style="width:140px"')}</td>
-    <td><label><input type="checkbox" data-kind="position" data-id="${p.id}" data-field="multi" ${p.multi ? 'checked' : ''}> Many cars</label></td>
+    <td><label><input type="checkbox" data-kind="position" data-id="${esc(p.id)}" data-field="multi" ${p.multi ? 'checked' : ''}> Many cars</label></td>
     <td>${labelChips('position', p)}</td>
     <td>${field('position', p.id, 'note', p.note, 'placeholder="Note"')}</td>
     <td class="btns">${moveDel('position', p.id)}</td></tr>`).join('');
@@ -222,7 +237,7 @@ function renderPositions() {
 function renderLabels() {
   const rows = state.labels.map((l) => `<tr>
     <td>${field('label', l.id, 'name', l.name)}</td>
-    <td><input type="color" data-kind="label" data-id="${l.id}" data-field="color" value="${esc(l.color)}"></td>
+    <td><input type="color" data-kind="label" data-id="${esc(l.id)}" data-field="color" value="${esc(l.color)}"></td>
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
     <h2>Status labels</h2>
@@ -322,11 +337,11 @@ function renderNotices() {
 
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
-  const dash = (v) => esc(v) || '-';
+  const { lines: found, rows: flagged } = problems();
   const rows = state.routes.map((r) =>
     (r.gapBefore ? '<tr class="spacer"><td colspan="4"></td></tr>' : '') +
-    `<tr class="${r.highlight ? 'hl' : ''}">
-      <td class="rn">${dash(r.name)}</td>
+    `<tr class="${[r.highlight && 'hl', flagged.has(r.id) && 'warn'].filter(Boolean).join(' ')}">
+      <td class="rn">${dash(r.name)}${flagged.has(r.id) ? '<span class="mark">!</span>' : ''}</td>
       <td>${dash(r.driver)}</td>
       <td>${dash(byId(state.cars, r.carId)?.reg)}</td>
       <td>${dash(byId(state.positions, r.positionId)?.name)}</td>
@@ -347,6 +362,7 @@ function renderSheet() {
     </table>
     ${qrCache.svg ? `<div class="qr">${qrCache.svg}<span>Scan to load<br>this list</span></div>` : ''}
     <div class="extra">
+      ${found.length ? `<h4>Check before posting</h4>${found.map((t) => `<p>! ${esc(t)}</p>`).join('')}` : ''}
       ${downCars ? `<h4>Cars not available</h4>${downCars}` : ''}
       ${downPos ? `<h4>Positions not available</h4>${downPos}` : ''}
       ${free ? `<h4>Free cars</h4><p>${free}</p>` : ''}
@@ -660,7 +676,7 @@ async function start() {
   state = await Store.init(defaults, render);
   // A browser with no data of its own but a linked file (new PC, cleared
   // profile, different Windows user) should come back to what is in the file.
-  if (!Store.hadLocalData()) {
+  if (!Store.hasUsableLocalData()) {
     const fromFile = await Store.recoverFromFile(defaults);
     if (fromFile) { state = fromFile; note('info', `Loaded your data from ${Store.file.name}.`); }
   }
