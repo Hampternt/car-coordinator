@@ -114,8 +114,12 @@ check('the rail shows who is in today', (await page.locator('#tab-plan [data-pan
 // The driver typed into row 1 earlier is not on the roster, which is allowed:
 // put a roster name on row 2 and the rail should find it.
 await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').fill('roster three ');
-await page.click('[data-act="tab"][data-tab="drivers"]');
-await page.click('[data-act="tab"][data-tab="plan"]');
+// Deliberately no tab switch here. Leaving and returning forces a full
+// render() and would hide the thing actually under test: typing a name has to
+// move the rail by itself, while the leader is still looking at the plan.
+check('the rail follows a name as it is typed, with no other interaction',
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText()).includes('Route 2'),
+  await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText());
 check('the rail matches a name however it was typed',
   (await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText()).includes('Route 2'),
   await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText());

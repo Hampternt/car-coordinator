@@ -159,12 +159,16 @@ function problems() {
   return { lines, rows, use };
 }
 
-/* What the warnings currently say, as one string: cheap enough to take twice
-   per keystroke, and exact enough that a redraw only happens when something
-   really did change. */
-const problemSig = () => {
+/* Everything a keystroke in the plan can change somewhere else on screen, as
+   one string: what the warnings say, and who the rail has out on which route.
+   Cheap enough to take twice per keystroke, and exact enough that a redraw
+   only happens when something really did change. */
+const liveSig = () => {
   const { lines, rows } = problems();
-  return `${lines.join('|')}#${[...rows].sort().join(',')}`;
+  // The rail resolves a driver by folded name, so fold here for the same
+  // reason: "a. novak" becoming "A. Novak" must not read as a change.
+  const atWheel = state.routes.map((r) => `${r.name}:${fold(r.driver)}`).join(',');
+  return `${lines.join('|')}#${[...rows].sort().join(',')}#${atWheel}`;
 };
 
 /* ---------- the day plan's left rail ----------
@@ -619,8 +623,11 @@ document.addEventListener('input', (e) => {
   if (!kind || !name) return;
   const value = el.type === 'checkbox' ? el.checked : el.value;
   // A round feeds the clash rule, so one keystroke in it can turn a warning on
-  // or off. Remember how the warnings read before the change, to spot that.
-  const warnedBefore = kind === 'route' && name === 'round' ? problemSig() : null;
+  // or off; a driver's name is what the rail matches a roster entry against,
+  // so one keystroke there moves someone between Free and a route number.
+  // Remember how both read before the change, to spot either.
+  const watched = kind === 'route' && (name === 'round' || name === 'driver');
+  const before = watched ? liveSig() : null;
   if (kind === 'meta') state[name] = value;
   else {
     const item = byId(listFor(kind) || [], id);
@@ -629,7 +636,7 @@ document.addEventListener('input', (e) => {
   }
   save();
   if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
-  else if (warnedBefore !== null && problemSig() !== warnedBefore) redrawKeepingCaret(el);
+  else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else renderSheet();
 });
 
