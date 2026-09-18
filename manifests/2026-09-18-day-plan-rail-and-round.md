@@ -158,4 +158,18 @@ which is the environment, not the code.
   zero boxes in print media). `npm run screens` green, and
   `screens/02-day-plan-with-warnings.png` shows the rail beside the table.
 
+**Held for item 8 (from the manager, 2026-09-18).** `share.js` has no reference
+to `round` at all, so as of item 2 `Share.apply()` silently wipes the round on
+every route of any code that is loaded — including one made on the same PC
+minutes earlier. That is data loss, not version skew. Item 8 must: carry
+`round` in the **day-plan** payload; keep `v: 1` (`decode()` hard-rejects
+anything else, so a bump makes the payload unreadable to builds already in
+use); apply a payload with no `round` cleanly, leaving it blank; and keep a
+`smoke.mjs` round-trip that sets a round, encodes, applies and asserts it
+survived.
+*Not this pack, flagged by the manager and queued separately — do not fix
+here:* `share-apply` assigns `Share.apply()`'s output straight to `state`
+without `Store.normalise` (`app.js`), and `@media print` hides
+`.topbar, main, #notices` but not `dialog`, so an open modal prints.
+
 </details>
