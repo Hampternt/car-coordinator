@@ -667,6 +667,69 @@ check('no console errors on PC B or C', bErrors.length === 0, bErrors.join(' | '
 await pcB.close();
 await pcC.close();
 
+// --- the case the whole pack exists for: one PC splits, the other has not ---
+// Positions travel between PCs by name, so the two managers have to migrate
+// before they swap codes again: while one says "Spot 1" and the other still
+// calls it "Spot 1/1", the routes arrive with no position at all. That is
+// what the offer warns about, and it is worth failing here on purpose so the
+// warning cannot quietly stop being true.
+const oldNamesB = {
+  schemaVersion: 3, date: '2026-01-01', qrOnSheet: false, labels: [],
+  cars: [{ id: 'bc1', reg: 'AA11111', labelId: '', note: '' }],
+  positions: [
+    { id: 'b1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
+    { id: 'b2', name: 'Spot 1/2', multi: false, labelId: '', note: '' },
+    { id: 'b3', name: 'Garage', multi: true, labelId: '', note: '' },
+  ],
+  routes: [], drivers: [], driverGroups: [], templates: [],
+};
+const pcSplit = await browser.newContext();
+const one = await pcSplit.newPage();
+one.on('pageerror', (e) => bErrors.push(String(e)));
+await one.goto(base, { waitUntil: 'networkidle' });
+await loadOldNames(one);
+await one.locator('[data-act="split-rounds"]').click();
+await one.click('[data-act="tab"][data-tab="data"]');
+const splitCode = await copyCode(one, 'day');
+
+const pcBehind = await browser.newContext();
+const two = await pcBehind.newPage();
+two.on('pageerror', (e) => bErrors.push(String(e)));
+await two.goto(base, { waitUntil: 'networkidle' });
+await two.evaluate((plan) => localStorage.setItem('carcoord:v1', JSON.stringify(plan)), oldNamesB);
+await two.reload({ waitUntil: 'networkidle' });
+await two.click('[data-act="tab"][data-tab="data"]');
+await readCode(two, splitCode);
+check('the PC that has not split is told the spot is one it has never heard of',
+  (await two.locator('#shareDlg').innerText()).includes('1 position you do not have (Spot 1)'), await two.locator('#shareDlg').innerText());
+await two.uncheck('#shareAdd');
+await two.click('[data-act="share-apply"]');
+check('and the list lands with the position blank on every route that used it',
+  (await two.locator('#notices .notice.info').last().innerText()).includes('Left blank: Spot 1'), await two.locator('#notices').innerText());
+check('which is three routes with nowhere to pack',
+  (await two.evaluate(() => state.routes.filter((r) => !r.positionId).length)) === 3,
+  await two.evaluate(() => JSON.stringify(state.routes.map((r) => r.positionId))));
+
+// Now PC B takes the same offer, and the same code lands properly.
+await two.reload({ waitUntil: 'networkidle' });
+await two.locator('[data-act="split-rounds"]').click();
+await two.click('[data-act="tab"][data-tab="data"]');
+await readCode(two, splitCode);
+check('once both have split, the code says nothing is missing',
+  !(await two.locator('#shareDlg').innerText()).includes('do not have'), await two.locator('#shareDlg').innerText());
+await two.click('[data-act="share-apply"]');
+check('and every route lands on the spot this PC already had, with its round',
+  (await two.evaluate(() => state.routes.map((r) => `${r.positionId}:${r.round}`).join())) === 'b1:1,b1:2,b1:4,b3:',
+  await two.evaluate(() => state.routes.map((r) => `${r.positionId}:${r.round}`).join()));
+
+await one.click('[data-act="tab"][data-tab="preview"]');
+await two.click('[data-act="tab"][data-tab="preview"]');
+check('so both PCs print the same sheet, reading exactly as the pillar list always did',
+  (await two.locator('#sheet').innerText()) === (await one.locator('#sheet').innerText()),
+  (await two.locator('#sheet').innerText()).split('\n').slice(0, 4).join(' / '));
+await pcSplit.close();
+await pcBehind.close();
+
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
 
