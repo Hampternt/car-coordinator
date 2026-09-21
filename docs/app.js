@@ -9,6 +9,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
    round "1", and "ana " is the driver "Ana". Used for rounds and driver names
    alike; share.js folds registrations the same way, for the same reason. */
 const fold = (s) => String(s || '').trim().toUpperCase();
+/* esc() makes a string safe to put between quotes; it does not make one safe
+   to put inside a style attribute, where a semicolon starts a new declaration
+   rather than closing anything. Label colours are the only values that go
+   there, they arrive from imported files and share codes as well as from the
+   colour picker, and store.js and share.js both check them on the way in —
+   this is the same check at the last moment, so no path into the page skips it. */
+const colour = (c, fallback = '#c62828') => (/^#[0-9a-f]{6}$/i.test(String(c || '')) ? String(c) : fallback);
 
 // Indexed by Date.getDay(), which is how a weekday is stored: Sunday is 0.
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -75,7 +82,7 @@ const moveDel = (kind, id) =>
 function labelChips(kind, item) {
   const ok = `<button class="chip ok ${item.labelId ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
   return ok + state.labels.map((l) =>
-    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(l.color)}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
+    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(colour(l.color))}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
   ).join('');
 }
 
@@ -289,7 +296,7 @@ function railCars(use) {
       ? `<span class="assign yes">Route ${routeNames(on)}</span>`
       : `<span class="assign ${lab ? 'down' : 'none'}">${lab ? esc(labelName(lab)) : 'Free'}</span>`;
     const full = [c.reg, lab && labelName(lab), c.note].filter(Boolean).join(' · ');
-    return `<li title="${esc(full)}"><span class="dot" style="--c:${esc(lab ? lab.color : '#2e7d32')}"></span><b>${esc(c.reg)}</b>${where}</li>`;
+    return `<li title="${esc(full)}"><span class="dot" style="--c:${esc(lab ? colour(lab.color) : '#2e7d32')}"></span><b>${esc(c.reg)}</b>${where}</li>`;
   }).join('');
   const out = state.cars.filter((c) => use.cars[c.id]).length;
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
@@ -565,7 +572,7 @@ function renderPositions() {
 function renderLabels() {
   const rows = state.labels.map((l) => `<tr>
     <td>${field('label', l.id, 'name', l.name)}</td>
-    <td><input type="color" data-kind="label" data-id="${esc(l.id)}" data-field="color" value="${esc(l.color)}"></td>
+    <td><input type="color" data-kind="label" data-id="${esc(l.id)}" data-field="color" value="${esc(colour(l.color))}"></td>
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
     <h2>Status labels</h2>
@@ -618,12 +625,21 @@ function renderData() {
   }[p] || 'Checking\u2026';
 
   const list = Store.backups();
-  const rows = list.map((b, i) => `<tr>
+  // A backup written while the browser was running out of room is half a line
+  // of JSON. Reading it throws, and this runs inside render(), so one bad
+  // entry used to take the whole app down — including the Data tab holding
+  // the eleven good backups beside it. Say what it is instead, and leave its
+  // Restore button off.
+  const rows = list.map((b, i) => {
+    let contents = null;
+    try { const s = JSON.parse(b.json); contents = `${s.routes.length} routes, ${s.cars.length} cars`; } catch { /* unreadable */ }
+    return `<tr>
       <td>${esc(when(b.t))}</td>
       <td>${esc(b.label)}</td>
-      <td>${JSON.parse(b.json).routes.length} routes, ${JSON.parse(b.json).cars.length} cars</td>
-      <td class="btns">${actBtn('restore', 'backup', String(i), armed === `restore:${i}` ? 'Sure?' : 'Restore', armed === `restore:${i}` ? 'armed' : '')}</td>
-    </tr>`).join('');
+      <td>${contents === null ? 'Unreadable \u2014 only half of it was saved' : esc(contents)}</td>
+      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', String(i), armed === `restore:${i}` ? 'Sure?' : 'Restore', armed === `restore:${i}` ? 'armed' : '')}</td>
+    </tr>`;
+  }).join('');
 
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
@@ -718,6 +734,11 @@ function renderSheet() {
 }
 
 function render() {
+  // Anything Store had to say since the last draw — a browser save that
+  // failed, a backup that would not fit, a file it could not write — belongs
+  // on screen with everything else. It goes through note(), so a save failing
+  // on every keystroke leaves one notice rather than a hundred.
+  for (const n of Store.takeNotices()) note(n.kind, n.text);
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
@@ -919,8 +940,11 @@ async function shareAction(act, b) {
   }
 }
 
+/* Always the day plan to begin with, even when the code carries everything:
+   the radio offers "everything" and the dialog says what it costs, but the
+   option that is pre-selected should be the one that replaces least. */
 function openShare(share) {
-  pending = { share, mode: Array.isArray(share.c) ? 'day' : 'day', addMissing: true };
+  pending = { share, mode: 'day', addMissing: true };
   renderShareDialog();
 }
 
@@ -945,7 +969,9 @@ async function dataAction(act, b) {
       const entry = Store.backups()[i];
       if (!entry) break;
       Store.snapshot(state, 'Restoring a backup');
-      state = Store.restore(entry, defaults);
+      const next = Store.restore(entry, defaults);
+      if (!next) break;                        // render() carries its reason
+      state = next;
       note('info', `Restored the backup from ${when(entry.t)}.`);
       save();
       break;
@@ -1116,6 +1142,11 @@ document.addEventListener('click', (e) => {
   if (DATA_ACTS.has(act)) { dataAction(act, b); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
+  // Every act below that reads list[i] needs there to be an i. There should
+  // always be one — the button was drawn from that very list — but a stale
+  // button is cheap to survive and expensive not to: list[-1] throws, and
+  // splice(-1, 1) quietly deletes the last row instead of the one clicked.
+  if (ITEM_ACTS.has(act) && i < 0) return;
 
   switch (act) {
     case 'tab': tab = b.dataset.tab; break;
@@ -1157,7 +1188,10 @@ document.addEventListener('click', (e) => {
     }
     case 'add-car':
       if (!addFromInput('#newCar', (v) => v.toUpperCase().split(/[\s,;]+/).filter(Boolean).forEach((reg) => {
-        if (!state.cars.some((c) => c.reg === reg)) state.cars.push({ id: uid(), reg, labelId: '', note: '' });
+        // Folded, like every other match in the app: a reg that came in from
+        // a share code or an imported file in lower case is the same car, and
+        // adding it again would put one lorry on the fleet twice.
+        if (!state.cars.some((c) => fold(c.reg) === fold(reg))) state.cars.push({ id: uid(), reg, labelId: '', note: '' });
       }))) return;
       break;
     case 'add-driver':
@@ -1183,8 +1217,10 @@ document.addEventListener('click', (e) => {
       const t = list[i];
       Store.snapshot(state, `Loading the ${t.name} template`);
       // Ids are minted here rather than stored, so loading the same template
-      // twice cannot leave two rows sharing one id and editing as one.
-      state.routes = t.routes.map((r) => ({ id: uid(), ...r }));
+      // twice cannot leave two rows sharing one id and editing as one. The
+      // spread goes first, so a stored id (from an imported file, say) cannot
+      // put itself back over the new one and undo exactly that.
+      state.routes = t.routes.map((r) => ({ ...r, id: uid() }));
       dropOffers();
       note('info', `Loaded the ${t.name} template: ${state.routes.length} routes. The plan as it was is in Backups.`);
       break;
@@ -1250,10 +1286,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
   const act = map[e.target.id];
-  if (act) document.querySelector(`[data-act="${act}"]`).click();
+  if (act) document.querySelector(`[data-act="${act}"]`)?.click();
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
+// The acts that act on one item out of a list, and so need to find it first.
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'group-member', 'apply-group']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 async function start() {

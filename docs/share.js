@@ -107,6 +107,18 @@ const Share = (() => {
     if (!json || json.v !== 1 || !Array.isArray(json.r)) {
       return { error: 'That list was made by a different version of Car Coordinator.' };
     }
+    // Every list in the payload is a list of rows, and everything below reads a
+    // row by pulling it apart. A code that arrives truncated, or edited by hand
+    // in a chat window, can parse as JSON and still hold a row that is not a
+    // row — which used to throw out of the click that pasted it, leaving no
+    // dialog and no word of why. Check the shape once, here, so the rest of
+    // this file can go on taking a row for a row.
+    const rowsOk = (v) => v === undefined || (Array.isArray(v) && v.every(Array.isArray));
+    const namesOk = (v) => v === undefined || Array.isArray(v);
+    if (!json.r.every(Array.isArray) || !rowsOk(json.l) || !rowsOk(json.c) || !rowsOk(json.p)
+      || !rowsOk(json.dr) || !rowsOk(json.dg) || !namesOk(json.m)) {
+      return { error: 'That list is damaged \u2014 some of it went missing in the copy. Ask for it again.' };
+    }
     return { share: json };
   }
 
@@ -115,12 +127,26 @@ const Share = (() => {
      name, the label name. Case and stray spaces should not matter. */
   const key = (s) => String(s || '').trim().toUpperCase();
 
+  /* A share code is typed, pasted and forwarded by people, so nothing in it is
+     trusted to be the type it should be. `str` is what stops an object
+     reaching the page as "[object Object]"; `colour` matters more than it
+     looks, because a label colour is written into an inline style and esc()
+     has no reason to escape a semicolon \u2014 unchecked, a colour is a way to
+     smuggle CSS onto someone else's screen. The same shapes store.js checks
+     when it reads saved data, for the same reason. */
+  const COLOUR = /^#[0-9a-f]{6}$/i;
+  const DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const str = (v) => (typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v));
+  const colour = (v) => (COLOUR.test(str(v)) ? str(v) : '#c62828');
+
   function summarise(state, share, addMissing) {
     const haveCar = new Map(state.cars.map((c) => [key(c.reg), c]));
     const havePos = new Map(state.positions.map((p) => [key(p.name), p]));
     const unknownCars = [];
     const unknownPos = [];
-    for (const [, , reg, pos] of share.r) {
+    for (const [, , rawReg, rawPos] of share.r) {
+      const reg = String(rawReg ?? '');
+      const pos = String(rawPos ?? '');
       if (reg && !haveCar.has(key(reg)) && !unknownCars.includes(reg)) unknownCars.push(reg);
       if (pos && !havePos.has(key(pos)) && !unknownPos.includes(pos)) unknownPos.push(pos);
     }
@@ -149,8 +175,8 @@ const Share = (() => {
     if (mode === 'all' && share.l) {
       for (const [name, color] of share.l) {
         const at = next.labels.find((l) => key(l.name) === key(name));
-        if (at) at.color = color;
-        else next.labels.push({ id: uid(), name, color });
+        if (at) at.color = colour(color);
+        else next.labels.push({ id: uid(), name: str(name), color: colour(color) });
       }
     }
 
@@ -159,8 +185,8 @@ const Share = (() => {
       for (const [reg, labelName, note] of share.c) {
         const at = next.cars.find((c) => key(c.reg) === key(reg));
         const labelId = labelName ? (labels.get(key(labelName)) || '') : '';
-        if (at) { at.labelId = labelId; at.note = note || ''; }
-        else next.cars.push({ id: uid(), reg, labelId, note: note || '' });
+        if (at) { at.labelId = labelId; at.note = str(note); }
+        else next.cars.push({ id: uid(), reg: str(reg), labelId, note: str(note) });
       }
     }
 
@@ -169,8 +195,8 @@ const Share = (() => {
       for (const [name, multi, labelName, note] of share.p) {
         const at = next.positions.find((p) => key(p.name) === key(name));
         const labelId = labelName ? (labels.get(key(labelName)) || '') : '';
-        if (at) { at.multi = !!multi; at.labelId = labelId; at.note = note || ''; }
-        else next.positions.push({ id: uid(), name, multi: !!multi, labelId, note: note || '' });
+        if (at) { at.multi = !!multi; at.labelId = labelId; at.note = str(note); }
+        else next.positions.push({ id: uid(), name: str(name), multi: !!multi, labelId, note: str(note) });
       }
     }
 
@@ -178,7 +204,7 @@ const Share = (() => {
       for (const [name, available] of share.dr) {
         const at = next.drivers.find((d) => key(d.name) === key(name));
         if (at) at.available = !!available;
-        else next.drivers.push({ id: uid(), name, available: !!available });
+        else next.drivers.push({ id: uid(), name: str(name), available: !!available });
       }
     }
 
@@ -189,7 +215,7 @@ const Share = (() => {
         const ids = (members || []).map((n) => driverIds.get(key(n))).filter(Boolean);
         const at = next.driverGroups.find((g) => key(g.name) === key(name));
         if (at) at.driverIds = ids;
-        else next.driverGroups.push({ id: uid(), name, driverIds: ids });
+        else next.driverGroups.push({ id: uid(), name: str(name), driverIds: ids });
       }
     }
 
@@ -198,8 +224,12 @@ const Share = (() => {
     const findCar = (reg) => next.cars.find((c) => key(c.reg) === key(reg));
     const findPos = (name) => next.positions.find((p) => key(p.name) === key(name));
 
-    next.date = share.d || next.date;
-    next.routes = share.r.map(([name, driver, reg, pos, flags, round]) => {
+    // A date that is not a date would print as "//" across the top of the
+    // sheet, so the day on screen is kept instead.
+    next.date = DATE.test(str(share.d)) ? share.d : next.date;
+    next.routes = share.r.map(([name, driver, rawReg, rawPos, flags, round]) => {
+      const reg = str(rawReg);
+      const pos = str(rawPos);
       let car = reg ? findCar(reg) : null;
       if (reg && !car) {
         if (addMissing) { car = { id: uid(), reg, labelId: '', note: '' }; next.cars.push(car); }
@@ -211,9 +241,9 @@ const Share = (() => {
         else if (!skipped.positions.includes(pos)) skipped.positions.push(pos);
       }
       return {
-        id: uid(), name: name || '', driver: driver || '',
+        id: uid(), name: str(name), driver: str(driver),
         carId: car ? car.id : '', positionId: position ? position.id : '',
-        round: round || '',                     // absent in codes from before rounds existed
+        round: str(round),                     // absent in codes from before rounds existed
         highlight: !!(flags & HI), gapBefore: !!(flags & GAP),
       };
     });

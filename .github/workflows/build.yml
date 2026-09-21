@@ -18,6 +18,12 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: npm run screens
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: screens/
+          if-no-files-found: ignore
 
   windows:
     # The exe is the optional delivery; the web app on Pages is the main one.
