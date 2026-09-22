@@ -201,7 +201,15 @@ const Store = (() => {
     if (list[0] && list[0].json === entry.json) return;
     list.unshift(entry);
     while (list.length > MAX_BACKUPS) list.pop();
-    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); } catch { list.length = Math.max(1, list.length - 3); }
+    // Storage can be full, and dropping the oldest entries is worth nothing
+    // unless the write is tried again afterwards. Every destructive action in
+    // the app promises "a backup is taken first", so a snapshot that fails
+    // quietly turns that promise into a lie: trim until it fits, and if it
+    // never does, leave the backups already stored alone and say so.
+    while (list.length) {
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch { list.pop(); }
+    }
+    notices.push({ kind: 'warn', text: `Could not take a backup before "${label}" \u2014 this browser's storage is full. Export a copy from the Data tab before you go any further.` });
   }
 
   function dailySnapshot(state) {
@@ -210,21 +218,42 @@ const Store = (() => {
     snapshot(state, 'Start of day');
   }
 
-  const restore = (entry, defaults) => migrate(JSON.parse(entry.json), defaults).state;
+  // Returns null rather than throwing: a backup written by a half-finished
+  // save is exactly the case this list exists for, and the tab that lists it
+  // must stay usable so the one beside it can be restored instead.
+  function restore(entry, defaults) {
+    try { return migrate(JSON.parse(entry.json), defaults).state; }
+    catch {
+      notices.push({ kind: 'warn', text: 'That backup could not be read \u2014 it was only half written. Try the one above or below it.' });
+      return null;
+    }
+  }
 
   /* ---------- IndexedDB (one key: the save-file handle) ---------- */
+  /* Every path out of here has to resolve. init() awaits this before the first
+     render, so a promise left pending is not a lost file handle — it is an app
+     that never finishes starting, on a blank page, with no way to say why.
+     A missing object store throws on .get(), another tab holding an older
+     version fires onblocked and nothing else, and neither used to resolve. */
   function idb(fn) {
     return new Promise((resolve) => {
+      const done = (v) => { clearTimeout(guard); resolve(v); };
+      const guard = setTimeout(() => resolve(undefined), 4000);
       let req;
-      try { req = indexedDB.open('carcoord', 1); } catch { return resolve(undefined); }
-      req.onupgradeneeded = () => req.result.createObjectStore('kv');
-      req.onerror = () => resolve(undefined);
+      try { req = indexedDB.open('carcoord', 1); } catch { return done(undefined); }
+      req.onupgradeneeded = () => { try { req.result.createObjectStore('kv'); } catch { /* already there */ } };
+      req.onerror = () => done(undefined);
+      req.onblocked = () => done(undefined);
       req.onsuccess = () => {
         const db = req.result;
-        const tx = db.transaction('kv', 'readwrite');
-        const out = fn(tx.objectStore('kv'));
-        tx.oncomplete = () => { db.close(); resolve(out && out.result); };
-        tx.onerror = () => { db.close(); resolve(undefined); };
+        let tx, out;
+        try {
+          tx = db.transaction('kv', 'readwrite');
+          out = fn(tx.objectStore('kv'));
+        } catch { db.close(); return done(undefined); }
+        tx.oncomplete = () => { db.close(); done(out && out.result); };
+        tx.onerror = () => { db.close(); done(undefined); };
+        tx.onabort = () => { db.close(); done(undefined); };
       };
     });
   }

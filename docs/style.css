@@ -198,7 +198,6 @@ body.show-sheet .sheet {
   main { padding: 16px; }
   .tab { overflow-x: auto; }
   table.grid { min-width: 700px; }
-  .pool { grid-template-columns: 1fr; }
   .sheet .qr { float: none; margin: 6mm 0 0; }
 }
 

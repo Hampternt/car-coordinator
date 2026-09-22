@@ -548,8 +548,12 @@ await page.waitForSelector('#sheet .qr svg', { timeout: 5000 }).catch(() => {});
 check('the sheet carries a QR code', (await page.locator('#sheet .qr svg').count()) === 1);
 
 // jsQR is a test-only dependency: the app writes QR codes but never reads
-// them, so the decoder does not ship. Inject it here to check our own output.
-await page.addScriptTag({ content: await readFile('node_modules/jsqr/dist/jsQR.js', 'utf8') });
+// them, so the decoder does not ship. Serve it from the page's own origin
+// rather than inlining it: the app ships a CSP of script-src 'self', and a
+// test that had to be let through it would be testing a different page.
+await page.route('**/jsqr-test-only.js', async (r) =>
+  r.fulfill({ contentType: 'text/javascript', body: await readFile('node_modules/jsqr/dist/jsQR.js', 'utf8') }));
+await page.addScriptTag({ url: 'jsqr-test-only.js' });
 const qrRead = await page.evaluate(async () => {
   const svg = document.querySelector('#sheet .qr svg');
   if (!svg) return { error: 'no qr on the sheet' };
@@ -1198,6 +1202,128 @@ for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
+
+// --- a share code is written by people, so nothing in it is taken on trust ---
+// These are payloads no honest build produces: a row truncated to nothing by a
+// chat client, a colour typed by someone curious, a date that is a sentence.
+// All three used to reach code that assumed otherwise.
+const rawCode = (payload) => 'CC1U.' + Buffer.from(JSON.stringify(payload)).toString('base64url');
+const pcHostile = await browser.newContext();
+const h = await pcHostile.newPage();
+const hErrors = [];
+h.on('console', (m) => m.type() === 'error' && hErrors.push(m.text()));
+h.on('pageerror', (e) => hErrors.push(String(e)));
+await h.goto(base, { waitUntil: 'networkidle' });
+await h.click('[data-act="tab"][data-tab="data"]');
+
+// A row that is not a row. Before this it threw out of the click that pasted
+// it: no dialog, no message, nothing to tell the leader what went wrong.
+await readCode(h, rawCode({ v: 1, d: '2026-09-18', r: [['1', 'Ana', '', '', 0, ''], null] }));
+await h.waitForSelector('#notices .notice.warn');
+check('a code with a row missing is reported, not thrown',
+  (await h.locator('#notices .notice.warn').last().innerText()).includes('damaged')
+  && !(await h.locator('#shareDlg[open]').count()));
+
+// A label colour goes into a style attribute, and esc() has no reason to
+// escape a semicolon: unchecked, this is CSS on someone else's screen.
+const hostile = 'red;position:fixed;inset:0;z-index:99';
+await readCode(h, rawCode({
+  v: 1, d: '2026-09-18', r: [], m: [],
+  l: [['Workshop', hostile]], c: [['AA11111', 'Workshop', '']], p: [], dr: [], dg: [],
+}));
+await h.waitForSelector('#shareDlg[open]');
+await h.check('#shareDlg input[value="all"]');
+await h.click('[data-act="share-apply"]');
+await h.click('[data-act="tab"][data-tab="cars"]');
+const styles = await h.evaluate(() =>
+  [...document.querySelectorAll('[style*="--c"]')].map((el) => el.getAttribute('style')));
+check('a colour out of a share code cannot smuggle CSS into the page',
+  styles.length > 0 && styles.every((s) => /^--c:#[0-9a-f]{6}$/i.test(s.trim().replace(/;$/, ''))),
+  styles.slice(0, 4).join(' | '));
+check('and nothing it sent is laid over the page',
+  (await h.evaluate(() => [...document.querySelectorAll('*')].every((el) => getComputedStyle(el).position !== 'fixed'))));
+
+// A date that is not a date printed as "//" across the top of the sheet.
+const dateBefore = await h.evaluate(() => state.date);
+await h.click('[data-act="tab"][data-tab="data"]');
+await readCode(h, rawCode({ v: 1, d: 'the day after tomorrow', r: [['1', 'Ana', '', '', 0, '']] }));
+await h.waitForSelector('#shareDlg[open]');
+await h.click('[data-act="share-apply"]');
+check('a date that is not a date leaves the day on screen alone',
+  (await h.evaluate(() => state.date)) === dateBefore, await h.evaluate(() => state.date));
+check('no console errors on the hostile-code PC', hErrors.length === 0, hErrors.join(' | '));
+await pcHostile.close();
+
+// --- the backup promise, when the browser has no room left ---
+// Every destructive action in the app says "a backup is taken first". A
+// snapshot that cannot be written has to say so: trimming the list and
+// walking away leaves that sentence a lie with nothing on screen to correct it.
+const pcFull = await browser.newContext();
+const f = await pcFull.newPage();
+const fErrors = [];
+// Saving to a full localStorage logs on purpose; everything else is a failure.
+f.on('console', (m) => m.type() === 'error' && !m.text().includes('localStorage save failed') && fErrors.push(m.text()));
+f.on('pageerror', (e) => fErrors.push(String(e)));
+await f.goto(base, { waitUntil: 'networkidle' });
+const quota = await f.evaluate(() => {
+  localStorage.removeItem('carcoord:backups');
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  // The last 64KB, a kilobyte at a time, so not even one small backup fits.
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  Store.snapshot(state, 'Will not fit');
+  return { chunks, stored: Store.backups().length, said: Store.takeNotices().map((n) => n.text).join(' ') };
+});
+check('the test really did fill this browser up', quota.chunks > 0 && quota.chunks < 2000, `${quota.chunks} chunks`);
+check('a backup that cannot fit says so rather than failing in silence',
+  quota.stored === 0 && /storage is full/.test(quota.said), JSON.stringify(quota).slice(0, 240));
+
+// --- one unreadable backup must not take every render down with it ---
+await f.evaluate(() => {
+  localStorage.clear();
+  const t = new Date().toISOString();
+  localStorage.setItem('carcoord:backups', JSON.stringify([
+    { t, label: 'Half written', json: '{"routes":[' },
+    { t, label: 'Whole', json: JSON.stringify({ schemaVersion: 3, date: '2026-09-18', labels: [], cars: [], positions: [], routes: [{ id: 'r1', name: '7' }] }) },
+  ]));
+});
+await f.reload({ waitUntil: 'networkidle' });
+await f.click('[data-act="tab"][data-tab="data"]');
+// A third row joins them: the start-of-day snapshot this very load took.
+const rowsF = f.locator('#tab-data .card:last-child tbody tr');
+const halfRow = rowsF.filter({ hasText: 'Half written' });
+const wholeRow = rowsF.filter({ hasText: 'Whole' });
+check('a half-written backup is listed as unreadable, not crashed on',
+  (await rowsF.count()) === 3 && (await halfRow.innerText()).includes('Unreadable'),
+  `${await rowsF.count()} rows`);
+check('and it has no Restore button to press', (await halfRow.locator('[data-act="restore"]').count()) === 0);
+check('while the good one beside it still restores',
+  (await wholeRow.locator('[data-act="restore"]').count()) === 1);
+await wholeRow.locator('[data-act="restore"]').click();
+await wholeRow.locator('[data-act="restore"]').click();
+await f.click('[data-act="tab"][data-tab="plan"]');
+check('and restoring it works', (await f.locator('#tab-plan tbody tr').count()) === 1);
+check('no crash when a backup is only half there', fErrors.length === 0, fErrors.join(' | '));
+await pcFull.close();
+
+// --- the promise on the tin: nothing the page loads comes from anywhere else ---
+// On a context of its own, because a refusal is logged as a console error and
+// the run below fails on those — rightly, everywhere but here.
+const pcCsp = await browser.newContext();
+const p = await pcCsp.newPage();
+await p.goto(base, { waitUntil: 'networkidle' });
+const csp = await p.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || '');
+check('the page ships a content security policy', /default-src 'none'/.test(csp) && /script-src 'self'/.test(csp), csp);
+check('and it refuses an inline script', await p.evaluate(() => {
+  // An inline script is how a markup injection would have to land.
+  const s = document.createElement('script');
+  s.textContent = 'window.__inlineRan = 1';
+  document.body.appendChild(s);
+  s.remove();
+  return !window.__inlineRan;
+}));
+check('and the app itself still ran under it', await p.evaluate(() => document.querySelectorAll('#tab-plan tbody tr').length > 0));
+await pcCsp.close();
 
 // --- prints to A4 ---
 const pdf = await page.pdf({ format: 'A4', printBackground: true });

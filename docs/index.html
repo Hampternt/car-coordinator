@@ -3,6 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The app's one promise is that nothing you type leaves this PC. Until now
+       that held because no line of code made a request; this makes the browser
+       enforce it, so a stray CDN link or a fetch added by mistake fails loudly
+       instead of quietly shipping the fleet somewhere. Inline styles are
+       allowed because the label colours are written as style attributes;
+       inline script is not, which is what turns any future markup injection
+       from a hole into a blank. `ipc:` and `http://ipc.localhost` are how the
+       Tauri shell reaches its own print command, and reach nothing else. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; form-action 'none'; base-uri 'none'">
   <title>Car Coordinator</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%231a1c1e'/><rect y='48' width='64' height='16' fill='%23ffd400'/><path d='M8 36V20h26v16zm28-10h10l8 10H36z' fill='%23ffd400'/><circle cx='18' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/><circle cx='44' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/></svg>">
   <link rel="stylesheet" href="style.css">
