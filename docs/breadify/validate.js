@@ -22,6 +22,7 @@ const Validate = (() => {
     'address-on-two-routes',
     'product-details-disagree',
     'unfamiliar-value',
+    'supplier-code-collision',
     'unsequenced-stops',
     'unlabelled-column',
   ];
@@ -266,6 +267,43 @@ const Validate = (() => {
   }
 
   /**
+   * Two suppliers whose short codes come out the same.
+   *
+   * The code is what prints against each bread on the line — there is no room
+   * for the name — so where two of them collide the sheet says `SB` for both
+   * Sola Bakeri and Stavanger Bakeri and the picker cannot tell which bakery a
+   * loaf came from. Nothing in the file is wrong; the codes are derived, and
+   * only the warehouse can decide which one to rename.
+   */
+  function collidingSupplierCodes(rows) {
+    const byCode = new Map();
+    for (const row of rows) {
+      if (row.supplier === '') continue;
+      const code = Model.supplierCode(row.supplier);
+      if (!byCode.has(code)) byCode.set(code, new Map());
+      const names = byCode.get(code);
+      if (!names.has(row.supplier)) names.set(row.supplier, []);
+      names.get(row.supplier).push(row.excelRow);
+    }
+
+    const findings = [];
+    for (const [code, names] of Array.from(byCode).sort()) {
+      if (names.size < 2) continue;
+      findings.push({
+        severity: WARNING,
+        kind: 'supplier-code-collision',
+        headline: `${names.size} suppliers share the code ${code}`,
+        detail:
+          `${quoted(names.keys())} all print as ${code} on the bread lines, so ` +
+          'the sheet cannot tell them apart. The route total names each one in ' +
+          'full, and so does the key at the top of every sheet.',
+        rows: Array.from(names.values()).flat().sort((a, b) => a - b),
+      });
+    }
+    return findings;
+  }
+
+  /**
    * Not a problem — but the user should know before printing that some stops
    * will come out after the sequenced ones, under a flag, because the export
    * gave them no position.
@@ -325,6 +363,7 @@ const Validate = (() => {
       ...addressesOnTwoRoutes(rows),
       ...productsThatDisagree(rows),
       ...unfamiliarValues(rows, kind),
+      ...collidingSupplierCodes(rows),
       ...unsequencedStops(rows),
       ...unlabelledColumn(rows),
     ];

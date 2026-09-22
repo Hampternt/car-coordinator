@@ -485,6 +485,111 @@ check(
 
 // ── Console ────────────────────────────────────────────────────────────────
 
+// ── Shapes the warehouse could hand it one morning ─────────────────────────
+//
+// The two sample exports are one good day. These are the awkward days:
+// a third bakery, a canteen with a very long name, an order with more lines
+// than a sheet holds. Every one of them used to put ink outside the paper —
+// silently, which is the part that mattered: a picking list is only useful if
+// what is missing from it is missing from the van too.
+//
+// scripts/make_edge_fixtures.py regenerates them.
+
+const EDGE = [
+  ['suppliers-12', 'twelve bakeries on one route'],
+  ['supplier-code-collision', 'two bakeries deriving the same code'],
+  ['one-giant-stop', 'one order with 300 product lines'],
+  ['200-stops', 'two hundred stops on one route'],
+  ['long-customer', 'a customer name 200 characters long'],
+  ['long-department', 'a department spelled out in full'],
+  ['long-route-name', 'a route nicknamed in a sentence'],
+  ['long-supplier', 'a bakery with nine words in its name'],
+];
+
+for (const [fixture, what] of EDGE) {
+  const bytes = Array.from(
+    await readFile(`scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-${fixture}.xlsx`),
+  );
+  const shape = await page.evaluate(async ([b]) => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-10000px;top:0';
+    document.body.append(host);
+    const ruler = document.createElement('div');
+    ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+    document.body.append(ruler);
+    const perPx = 100 / ruler.getBoundingClientRect().width;
+    ruler.remove();
+    try {
+      const book = await Xlsx.open(new Uint8Array(b).buffer);
+      const rows = Model.readRows(await book.sheet('Data'));
+      const settings = {
+        kind: Model.BREAD,
+        showOrderId: true,
+        marker: 'word-only',
+        crates: Model.defaultCrateRules(),
+      };
+      const pages = [];
+      for (const route of Model.group(Model.fold(rows))) {
+        pages.push(
+          ...Sheet.paginate(
+            route,
+            settings,
+            { dates: null, source: 'edge', routeStops: route.stops.length,
+              routeLines: Model.lineCount(route) },
+            { host },
+          ),
+        );
+      }
+      for (const sheet of pages) host.appendChild(sheet);
+
+      let down = 0;
+      let across = 0;
+      let clearance = Infinity;
+      for (const sheet of pages) {
+        const body = sheet.querySelector('.bf-body');
+        const foot = sheet.querySelector('.bf-footer');
+        const last = body.lastElementChild;
+        const bottom = last
+          ? last.getBoundingClientRect().bottom
+          : body.getBoundingClientRect().top;
+        clearance = Math.min(clearance, (foot.getBoundingClientRect().top - bottom) * perPx);
+        down = Math.max(down, (sheet.scrollHeight - sheet.clientHeight) * perPx);
+        const edge =
+          sheet.getBoundingClientRect().right -
+          parseFloat(getComputedStyle(sheet).paddingRight);
+        for (const node of sheet.querySelectorAll('.bf-name, .bf-product, .bf-dpt-name, .bf-total-product, .bf-route-number, .bf-crates, .bf-total-col')) {
+          across = Math.max(across, (node.getBoundingClientRect().right - edge) * perPx);
+        }
+      }
+      // Every code the lines print has to be spelled out in the key above them.
+      const codes = new Set(Array.from(host.querySelectorAll('.bf-code'), (n) => n.textContent));
+      const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
+      const unexplained = Array.from(codes).filter((code) => !key.includes(code));
+      return {
+        pages: pages.length,
+        down: Math.round(down * 10) / 10,
+        across: Math.round(across * 10) / 10,
+        clearance: Math.round(clearance * 10) / 10,
+        unexplained,
+      };
+    } finally {
+      host.remove();
+    }
+  }, [bytes]);
+
+  check(
+    `${what}: nothing runs off the paper`,
+    shape.down <= 0.5 && shape.across <= 0.5,
+    `${shape.down} mm down, ${shape.across} mm across, ${shape.pages} sheets`,
+  );
+  check(
+    `${what}: every sheet still keeps its 10 mm`,
+    shape.clearance >= 10,
+    `${shape.clearance} mm`,
+  );
+  same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
+}
+
 same('no console errors', errors.slice(0, 5), []);
 
 await browser.close();

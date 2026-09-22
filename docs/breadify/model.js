@@ -254,9 +254,18 @@ const Model = (() => {
   }
 
   /**
-   * The two-letter code. A wholesaler nobody has configured falls back to its
+   * The short code. A wholesaler nobody has configured falls back to its
    * initials, or its first two letters when it is a single word.
+   *
+   * Capped at three, because the code prints in a fixed 8 mm slot on every
+   * bread line: "Det Store Sandnes og Jæren Håndverksbakeri og Konditori AS"
+   * derived nine initials and set them straight through the product name
+   * beside it. Two suppliers can still derive the same code — nothing here
+   * can tell Sola Bakeri from Stavanger Bakeri — which is why validate.js
+   * says so and the legend names both.
    */
+  const CODE_LENGTH = 3;
+
   function supplierCode(supplier) {
     const known = knownSupplier(supplier);
     if (known) return known[1];
@@ -270,7 +279,7 @@ const Model = (() => {
       Array.from(initials).length >= 2
         ? initials
         : Array.from(String(supplier)).slice(0, 2).join('');
-    return derived.toUpperCase();
+    return Array.from(derived).slice(0, CODE_LENGTH).join('').toUpperCase();
   }
 
   function supplierName(supplier) {

@@ -226,6 +226,31 @@ main {
   }
 }
 
+/* A phone is a real way in, not a courtesy: the QR on Car Coordinator's
+ * printed sheet exists so a phone can open that site off the paper on the
+ * pillar, and the Breadify link is one tap from there. The four-step nav is
+ * the widest thing here and took the whole page sideways with it — so it
+ * scrolls inside itself, the way Car Coordinator's wide tables do, and the
+ * page stays put. */
+@media (max-width: 760px) {
+  .steps {
+    flex: 1 1 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .steps::-webkit-scrollbar {
+    display: none;
+  }
+  .steps button {
+    flex: none;
+    white-space: nowrap;
+  }
+  .sibling {
+    margin-left: 0;
+  }
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 
 button {
