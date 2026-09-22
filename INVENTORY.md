@@ -66,6 +66,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
 - ✅ **Route selection** — all ticked, untick any you don't want; the preview and the sheet count follow.
 - ✅ **Crate rules remembered** — capacities and per-bread sizes, because those are facts about the warehouse. Nothing else about today's print is kept.
+- ✅ **Two jokes at low opacity** behind the steps that carry them: a bread roll at a computer behind Check, and Megamind asking `NO BREAD?` behind Open while nothing has been opened. The Check step's finding cards are translucent for the first one's sake.
 
 ## Considered
 - 💭 **Printing the freezer `Position`** as a where-to-look-first hint. The loader carries it; the page does not show it.

@@ -137,6 +137,9 @@
     for (const name of STEPS) {
       $(`step-${name}`).hidden = name !== step;
     }
+    // The Open step's joke only lands while nothing has been opened, which is
+    // the one moment in the day when there is, in fact, no bread.
+    $('step-open').classList.toggle('empty-handed', !state.rows);
     for (const button of $('steps').querySelectorAll('button')) {
       const name = button.dataset.step;
       button.disabled = !state.reached.has(name);

@@ -47,8 +47,33 @@ same('the sheet’s own faces all load', fonts, []);
 
 // ── 01 Open ────────────────────────────────────────────────────────────────
 
+// The two jokes. They carry no information, but a 404 behind one is still a
+// broken asset shipped to Pages.
+const noBread = await page.evaluate(
+  () =>
+    getComputedStyle(document.querySelector('#step-open .drop'), '::before').backgroundImage,
+);
+check(
+  'the Open step wears its joke while nothing is open',
+  noBread.includes('nobread.jpg'),
+  noBread,
+);
+
 await page.setInputFiles('#file', `scripts/fixtures/${BREAD}`);
 await page.waitForSelector('#step-check:not([hidden])', { timeout: 20000 });
+
+const breadGuy = await page.evaluate(() => ({
+  image: getComputedStyle(document.getElementById('step-check'), '::before').backgroundImage,
+  // The finding cards are translucent for his sake; an opaque one deletes him.
+  cards: getComputedStyle(document.querySelector('.finding')).backgroundColor,
+  openJokeGone: !document.getElementById('step-open').classList.contains('empty-handed'),
+}));
+check(
+  'the Check step wears its own, behind translucent finding cards',
+  breadGuy.image.includes('breadmve.jpg') && /rgba\(.+0\.5\d*\)/.test(breadGuy.cards),
+  `${breadGuy.image} / ${breadGuy.cards}`,
+);
+check('the Open step’s joke retires once a file is open', breadGuy.openJokeGone);
 
 // ── 02 Check ───────────────────────────────────────────────────────────────
 

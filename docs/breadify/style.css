@@ -256,14 +256,67 @@ button {
   cursor: default;
 }
 
+/* ── The mascots ─────────────────────────────────────────────────────────
+ * Two jokes, sitting behind two steps at almost no opacity. They are jokes
+ * and nothing else — no state, no interaction, and nothing under them that a
+ * person needs to read through them.
+ *
+ * The numbers are the desktop app's: how much of the step each is allowed to
+ * cover, how far from invisible it is, and how far up the step it is nudged.
+ * `inset` is half the room the fill leaves over, and the lift is given as a
+ * share of the box rather than the step, so it is divided by the fill.
+ */
+.mascot {
+  position: relative;
+}
+
+.mascot::before {
+  content: '';
+  position: absolute;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.mascot > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* ── 01 Open ─────────────────────────────────────────────────────────── */
 
+/* The copy sits in the middle of a tall box rather than filling a short one,
+ * because the mascot behind it is square and sized by the box's height: in a
+ * short box the picture shrinks until its caption lands on the copy, which is
+ * the collision the lift below exists to avoid. */
 .drop {
+  min-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   border: 2px dashed var(--border-strong);
   border-radius: 14px;
   padding: 56px 32px;
   text-align: center;
   background: var(--raised);
+  overflow: hidden;
+}
+
+/* Behind the Open step, and only while nothing has been opened — which is
+ * the one moment in the day when there is, in fact, no bread.
+ *
+ * Higher opacity than the bread guy: this one is a mid-grey photograph on a
+ * near-black panel, and at his 13 % the face disappears and only the caption
+ * survives, which is the half of the joke that needs the other. Centred, the
+ * eyes land squarely behind the heading; up a little puts them in the empty
+ * room above it and the caption below the button. */
+#step-open.empty-handed .drop::before {
+  inset: 4%;
+  transform: translateY(-10.9%);
+  background-image: url('assets/nobread.jpg');
+  opacity: 0.204;
 }
 
 .drop.over {
@@ -277,6 +330,19 @@ button {
 }
 
 /* ── 02 Check ────────────────────────────────────────────────────────── */
+
+/* Behind the Check step: a bread roll at a computer in a Matvare Expressen
+ * cap, sweating. The step has a floor under it so he has room to be seen on
+ * a short findings list — the desktop window gives him the whole pane. */
+#step-check {
+  min-height: 60vh;
+}
+
+#step-check::before {
+  inset: 11%;
+  background-image: url('assets/breadmve.jpg');
+  opacity: 0.133;
+}
 
 /* F10: a full-width banner rather than a pill row, worn in the list's own
  * colour, so the mode is impossible to miss. */
@@ -376,8 +442,11 @@ button {
   gap: 8px;
 }
 
+/* The finding cards are translucent for the bread guy's sake — he sits
+ * behind them and an opaque card would simply delete him. The text on them
+ * is drawn at full strength regardless. */
 .finding {
-  background: var(--card);
+  background: rgba(23, 20, 31, 0.55);
   border: 1px solid var(--border);
   border-left: 3px solid var(--info);
   border-radius: var(--radius-card);
