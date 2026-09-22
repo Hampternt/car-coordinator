@@ -649,23 +649,23 @@
 /* One column per bakery, and the export decides how many bakeries there are.
  * Two share the measure comfortably; twelve used to be squeezed to 8.5 mm
  * each, where a product name wrapped one letter to a line and stood 70 mm
- * tall. Wrapping the grid keeps every column readable and costs rows of the
- * total instead — which the paginator can carry, where unreadable cannot. */
+ * tall.
+ *
+ * A grid rather than a wrapping flex row, because flex stretches whatever is
+ * on the last row to fill it: four bakeries came out as three at 59 mm and a
+ * fourth at 194 mm, and five as three narrow and two wide. Every column is a
+ * track of the same width now, and a short last row simply ends early.
+ * layout.js sets --cols; see columnsPerRow(). */
 .bf-total-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
   gap: 4.2mm 8.4mm;
   margin-top: 1.6mm;
-  align-items: flex-start;
+  align-items: start;
 }
 
-/* 58 mm holds a bakery's name in its heading and a bread's name on its lines
- * without either breaking mid-word; three fit the 194 mm measure, and the
- * fourth bakery starts a second row. Four to a row was narrower and read
- * worse for it. */
 .bf-total-col {
-  flex: 1 1 58mm;
-  min-width: 58mm;
+  min-width: 0;
 }
 
 /* The export decides how many bakeries there are, so this heading has to hold

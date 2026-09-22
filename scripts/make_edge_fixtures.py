@@ -204,3 +204,32 @@ for name, rows in [('busy-real-day', busy),
     path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-{name}.xlsx')
     write(path, rows)
     print(f'{name:26s} {len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')
+
+
+# ── More bakeries than the page was drawn for ──────────────────────────────
+#
+# The bread total was designed around two. Three or four is the change the
+# warehouse might actually make one day, so these are real-shaped: plausible
+# Norwegian bakery names, plausible breads, and enough stops to give the
+# total something to add up.
+
+BAKERS = [
+    ('Sandnes Bakeri', [('Rundstykke', 60), ('Grovbrød 750g', 48),
+                        ('Kneippbrød', 36), ('Loff Oppskåret', 24)]),
+    ('Bakehuset', [('Baguette', 40), ('Rugbrød 12biter', 30), ('Horn', 18)]),
+    ('Jæren Bakeri', [('Speltbrød 500g', 28), ('Solsikkebrød', 22), ('Byggbrød', 14)]),
+    ('Stavanger Steinovnsbakeri', [('Surdeigsbrød 1kg', 20), ('Focaccia', 16)]),
+    ('Ålgård Konditori', [('Skolebolle', 26), ('Wienerbrød', 12)]),
+]
+
+for many in (3, 4, 5):
+    rows = []
+    for stop in range(3):
+        for supplier, breads in BAKERS[:many]:
+            for product, quantity in breads:
+                rows.append(line(6000 + stop, (stop + 1) * 100, '3', f'Kafé {stop + 1:02d}',
+                                 product, max(4, quantity // (stop + 2)), supplier,
+                                 400 + abs(hash((supplier, product))) % 900))
+    path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-bakeries-{many}.xlsx')
+    write(path, rows)
+    print(f'bakeries-{many}{"":18s}{len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')

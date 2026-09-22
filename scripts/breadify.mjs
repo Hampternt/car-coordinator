@@ -507,6 +507,12 @@ const EDGE = [
   // Numbers wider than the slots that hold them. Nothing ran off the paper
   // for these; the quantity simply printed on top of the product name.
   ['edge', 'busy-real-day', 'a school kitchen ordering 400 of one bread'],
+  // The total was drawn for two bakeries. Three or four is the change the
+  // warehouse might really make; four used to print three columns at 59 mm
+  // and a fourth stretched across the whole 194 mm measure.
+  ['edge', 'bakeries-3', 'a third bakery'],
+  ['edge', 'bakeries-4', 'a fourth bakery'],
+  ['edge', 'bakeries-5', 'a fifth bakery'],
   ['edge', 'four-figure-line', 'a four-figure quantity on one line'],
   ['shape', 'quantity-2-billion', 'a quantity far past anything real'],
   ['shape', 'quantity-beyond-float', 'a quantity past what a double holds'],
@@ -601,6 +607,16 @@ for (const [folder, fixture, what] of EDGE) {
         }
       }
 
+      // One bakery, one column — and every column the same width. A wrapping
+      // flex row stretched whatever landed on the last row to fill it, so a
+      // fourth bakery printed three columns at 59 mm and a fourth at 194.
+      const widths = new Set();
+      for (const sheet of pages) {
+        for (const col of sheet.querySelectorAll('.bf-total-col')) {
+          widths.add(Math.round(col.getBoundingClientRect().width * perPx));
+        }
+      }
+
       return {
         pages: pages.length,
         down: Math.round(down * 10) / 10,
@@ -609,6 +625,7 @@ for (const [folder, fixture, what] of EDGE) {
         unexplained,
         collisions: Array.from(new Set(collisions)),
         clipped: Array.from(new Set(clipped)),
+        columnWidths: Array.from(widths).sort((a, b) => a - b),
       };
     } finally {
       host.remove();
@@ -628,6 +645,11 @@ for (const [folder, fixture, what] of EDGE) {
   same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
   same(`${what}: nothing is set on top of anything else`, shape.collisions, []);
   same(`${what}: nothing is clipped away by the box holding it`, shape.clipped, []);
+  check(
+    `${what}: the bakery columns are all one width`,
+    shape.columnWidths.length <= 1,
+    `${shape.columnWidths.join(', ')} mm`,
+  );
 }
 
 // ── Changes to the export's own shape ──────────────────────────────────────
@@ -771,6 +793,81 @@ same('a line asking for nothing is called out', quantitySays.zero,
   [['warning', '1 line(s) ask for nothing']]);
 same('half a bread is not quietly made whole', quantitySays.fractional,
   [['warning', '1 quantity(ies) are not whole breads']]);
+
+// ── More bakeries than the key can name ────────────────────────────────────
+//
+// The key is furniture: it prints on every sheet, so whatever it costs, it
+// costs once per page. Unbounded, it eats the page it sits on — 250 bakeries
+// on one route grew the band to 228 mm, left 15 mm of body, and emitted 500
+// near-empty sheets that still spilled, saying nothing. The key gives up the
+// names first, then the codes, rather than the page.
+
+const crowded = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px';
+  document.body.append(host);
+  const ruler = document.createElement('div');
+  ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+  document.body.append(ruler);
+  const perPx = 100 / ruler.getBoundingClientRect().width;
+  ruler.remove();
+
+  const measure = (count) => {
+    const route = {
+      nickname: '3',
+      stops: [{
+        id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
+        route: '3', sequence: 100, acceptAlternatives: true, comment: null,
+        lines: Array.from({ length: count }, (_, i) => ({
+          quantity: 12,
+          product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
+                     supplier: `Bakeri Nummer ${i + 1}` },
+        })),
+      }],
+    };
+    const pages = Sheet.paginate(
+      route,
+      { kind: Model.BREAD, showOrderId: true, marker: 'word-only', crates: Model.defaultCrateRules() },
+      { dates: null, source: 'crowded', routeStops: 1, routeLines: count },
+      { host },
+    );
+    for (const sheet of pages) host.appendChild(sheet);
+    let spill = 0;
+    let clearance = Infinity;
+    for (const sheet of pages) {
+      spill = Math.max(spill, (sheet.scrollHeight - sheet.clientHeight) * perPx);
+      const body = sheet.querySelector('.bf-body');
+      const foot = sheet.querySelector('.bf-footer');
+      const last = body.lastElementChild;
+      const bottom = last ? last.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
+      clearance = Math.min(clearance, (foot.getBoundingClientRect().top - bottom) * perPx);
+    }
+    const legend = Math.round(pages[0].querySelector('.bf-legend').getBoundingClientRect().height * perPx);
+    const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
+    host.innerHTML = '';
+    return { pages: pages.length, legend, spill: Math.round(spill),
+             clearance: Math.round(clearance), spelled: /Bakeri Nummer/.test(key),
+             saysMore: /\+\d+ more/.test(key) };
+  };
+
+  try {
+    return { twelve: measure(12), many: measure(250) };
+  } finally {
+    host.remove();
+  }
+});
+
+check('a dozen bakeries are still spelled out in the key',
+  crowded.twelve.spelled && crowded.twelve.legend <= 24,
+  JSON.stringify(crowded.twelve));
+check('far more bakeries than the key can name does not eat the page',
+  crowded.many.legend <= 24 && crowded.many.spill === 0 && crowded.many.clearance >= 10,
+  JSON.stringify(crowded.many));
+check('and the sheet count stays sane rather than one page per line',
+  crowded.many.pages < 40,
+  `${crowded.many.pages} sheets for 250 lines`);
+check('the key says how many it could not name', crowded.many.saysMore,
+  JSON.stringify(crowded.many));
 
 // A file that is not this file at all still fails with a sentence, not a stack.
 for (const [what, bytes] of [
