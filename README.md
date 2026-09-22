@@ -51,9 +51,12 @@ npm install
 npm test               # both suites
 npm run test:car       # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
 npm run test:breadify  # drives Breadify with both real exports and checks the sheets against the spec's figures
+python3 scripts/make_edge_fixtures.py   # regenerates scripts/fixtures/edge/, only needed if you change those shapes
 npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
 ```
 `test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
+
+It then drives eight deliberately awkward exports from `scripts/fixtures/edge/` — twelve bakeries on one route, an order with 300 product lines, a canteen with a 200-character name — and asserts that no ink leaves the paper, every sheet keeps its 10 mm, and no supplier code prints without the key above it explaining what it stands for. They are shapes the warehouse could plausibly hand the app one morning, and each one used to break the printed page in silence.
 
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
 

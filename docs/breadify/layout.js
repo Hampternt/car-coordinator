@@ -75,10 +75,22 @@ const Sheet = (() => {
 
     return {
       node: host,
-      /** How tall a piece is, once laid out at the column's real width. */
+      /**
+       * How tall a piece is, once laid out at the column's real width —
+       * margins included.
+       *
+       * `getBoundingClientRect` measures the border box and stops there, so a
+       * piece that carries a margin costs the page more than it measured. The
+       * route total's 5 mm rule above it is exactly that, and a page that
+       * ended on one came out 5 mm tighter than the paginator believed —
+       * eating the clearance that exists so a printer with slightly different
+       * metrics does not clip the last row.
+       */
       height(node) {
         host.appendChild(node);
-        const height = node.getBoundingClientRect().height * perPx;
+        const style = getComputedStyle(node);
+        const margins = parseFloat(style.marginTop) + parseFloat(style.marginBottom);
+        const height = (node.getBoundingClientRect().height + margins) * perPx;
         host.removeChild(node);
         return height;
       },
@@ -285,6 +297,75 @@ const Sheet = (() => {
     return row;
   }
 
+  /**
+   * The same block again, carrying only some of its lines — the last resort
+   * for a stop that cannot fit a page whole.
+   *
+   * The heading is repeated so the continuation is still addressed to a
+   * customer, and marked, so nobody reads it as a second delivery to the same
+   * place. D16's "one order, one block" is kept wherever it can be: this only
+   * ever runs when the alternative is ink off the edge of the paper.
+   */
+  function stopSlice(stop, lines, settings, measure, part, parts) {
+    const slice = { ...stop, lines };
+    const block = stopBlock(slice, settings, measure);
+    if (parts > 1) {
+      const tag = element('span', 'bf-block-part', `part ${part} of ${parts}`);
+      const first = block.querySelector('.bf-head-line');
+      if (first) first.appendChild(tag);
+      else block.insertBefore(tag, block.firstChild);
+    }
+    return block;
+  }
+
+  /**
+   * A stop's block, split across as few pages as it takes.
+   *
+   * Measured after the fact rather than predicted: the heading's own height
+   * depends on how many lines its marks needed, so the only honest way to
+   * know how many product lines fit is to build a slice and measure it. The
+   * search halves the slice until one fits, then keeps going from there.
+   *
+   * Returns one piece when the block fits, which is every real stop in both
+   * sample exports — this costs nothing until a file needs it.
+   */
+  function stopPieces(stop, settings, measure, limit) {
+    const whole = stopBlock(stop, settings, measure);
+    const height = measure.height(whole);
+    if (height <= limit || stop.lines.length < 2) {
+      return [{ node: whole, height, keepWithNext: false, over: height > limit }];
+    }
+
+    // How many lines fit, found once and reused: every slice carries the same
+    // heading, so the answer does not change between them.
+    let fits = stop.lines.length;
+    while (fits > 1) {
+      const trial = stopSlice(stop, stop.lines.slice(0, fits), settings, measure, 1, 2);
+      if (measure.height(trial) <= limit) break;
+      fits = Math.floor(fits / 2);
+    }
+    for (let more = fits + 1; more <= stop.lines.length; more += 1) {
+      const trial = stopSlice(stop, stop.lines.slice(0, more), settings, measure, 1, 2);
+      if (measure.height(trial) > limit) break;
+      fits = more;
+    }
+
+    const parts = Math.ceil(stop.lines.length / fits);
+    const pieces = [];
+    for (let index = 0; index < parts; index += 1) {
+      const node = stopSlice(
+        stop,
+        stop.lines.slice(index * fits, (index + 1) * fits),
+        settings,
+        measure,
+        index + 1,
+        parts,
+      );
+      pieces.push({ node, height: measure.height(node), keepWithNext: false });
+    }
+    return pieces;
+  }
+
   /** One order — one stop, one block, one crate label (D16). */
   function stopBlock(stop, settings, measure) {
     const barred = !stop.acceptAlternatives && settings.marker !== 'word-only';
@@ -351,16 +432,47 @@ const Sheet = (() => {
    * The bread route's closing total: one column per bakery, Sandnes Bakeri
    * first, most needed to least.
    */
-  function routeTotalBlock(route) {
-    const total = Model.routeTotal(route);
-    const types = Model.totalTypes(total);
-    const units = Model.totalUnits(total);
+  /**
+   * The same total, carrying only the lines from `from` up to `to` counted
+   * across its columns. A column with nothing left in the slice is dropped
+   * rather than printed empty.
+   */
+  function totalSlice(total, from, to) {
+    const columns = [];
+    let at = 0;
+    for (const column of total.columns) {
+      const start = Math.max(from - at, 0);
+      const end = Math.min(to - at, column.lines.length);
+      if (end > start) {
+        columns.push({ supplier: column.supplier, lines: column.lines.slice(start, end) });
+      }
+      at += column.lines.length;
+    }
+    return { columns };
+  }
+
+  /** `Route 8 total`, or `Route 8 total · part 2 of 3`. */
+  function totalTitle(route, part, parts) {
+    const title = element('div', 'bf-total-title', `Route ${route.nickname} total`);
+    if (parts > 1) {
+      title.appendChild(element('span', 'bf-block-part', `part ${part} of ${parts}`));
+    }
+    return title;
+  }
+
+  function routeTotalBlock(route, slice, part = 1, parts = 1) {
+    const full = Model.routeTotal(route);
+    const total = slice || full;
+    // The headline figures are the route's, not the slice's: a total split
+    // across two sheets is still one total, and half a count would be a lie.
+    const types = Model.totalTypes(full);
+    const units = Model.totalUnits(full);
     const tens = Model.totalFullTens(total);
 
     const section = element('section', 'bf-total');
     append(
       section,
-      element('div', 'bf-total-title', `Route ${route.nickname} total`),
+      totalTitle(route, part, parts),
       element(
         'div',
         'bf-total-meta',
@@ -414,18 +526,19 @@ const Sheet = (() => {
    * and no supplier code — those are receiving-check machinery, and the cue
    * already lives on the stop lines.
    */
-  function checkTotalBlock(route) {
-    const lines = Model.flatTotal(route);
-    const units = lines.reduce((sum, line) => sum + line.units, 0);
+  function checkTotalBlock(route, slice, part = 1, parts = 1) {
+    const full = Model.flatTotal(route);
+    const lines = slice || full;
+    const units = full.reduce((sum, line) => sum + line.units, 0);
 
     const section = element('section', 'bf-total');
     append(
       section,
-      element('div', 'bf-total-title', `Route ${route.nickname} total`),
+      totalTitle(route, part, parts),
       element(
         'div',
         'bf-total-meta',
-        `${Model.summary(lines.length, units)} · most to least`,
+        `${Model.summary(full.length, units)} · most to least`,
       ),
     );
 
@@ -438,6 +551,48 @@ const Sheet = (() => {
     }
     section.appendChild(grid);
     return section;
+  }
+
+  /**
+   * The route total, split across as many blocks as it takes.
+   *
+   * A route with more distinct breads than a sheet has room for used to print
+   * the ones that fit and send the rest off the bottom of the paper — the same
+   * failure as an over-long stop, in the one block that is supposed to be the
+   * receiving check for the whole route.
+   */
+  function totalPieces(route, settings, measure, limit) {
+    const bread = settings.kind === Model.BREAD;
+    const full = bread ? Model.routeTotal(route) : Model.flatTotal(route);
+    const count = bread ? Model.totalTypes(full) : full.length;
+    const cut = (from, to, part, parts) =>
+      bread
+        ? routeTotalBlock(route, totalSlice(full, from, to), part, parts)
+        : checkTotalBlock(route, full.slice(from, to), part, parts);
+
+    const whole = bread ? routeTotalBlock(route) : checkTotalBlock(route);
+    const height = measure.height(whole);
+    if (height <= limit || count < 2) {
+      return [{ node: whole, height, keepWithNext: false, over: height > limit }];
+    }
+
+    let fits = count;
+    while (fits > 1) {
+      if (measure.height(cut(0, fits, 1, 2)) <= limit) break;
+      fits = Math.floor(fits / 2);
+    }
+    for (let more = fits + 1; more <= count; more += 1) {
+      if (measure.height(cut(0, more, 1, 2)) > limit) break;
+      fits = more;
+    }
+
+    const parts = Math.ceil(count / fits);
+    const pieces = [];
+    for (let index = 0; index < parts; index += 1) {
+      const node = cut(index * fits, (index + 1) * fits, index + 1, parts);
+      pieces.push({ node, height: measure.height(node), keepWithNext: false });
+    }
+    return pieces;
   }
 
   // ── Page furniture ─────────────────────────────────────────────────────
@@ -572,19 +727,34 @@ const Sheet = (() => {
     return band;
   }
 
+  /**
+   * Which suppliers the band spells out.
+   *
+   * The two house bakeries are always named on a bread sheet, present on the
+   * route or not, so the key reads the same on every sheet of the day. But the
+   * codes on the lines come from the file, not from that list: a bakery nobody
+   * has configured used to print `WC` against its breads with nothing on the
+   * page saying what `WC` was. Whatever the route actually draws from joins
+   * the key, in the same order the route total puts its columns.
+   */
   function supplierKey(route, settings, spelled) {
-    const list =
-      settings.kind === Model.BREAD
-        ? Model.KNOWN_SUPPLIERS.map(([name]) => name)
-        : Array.from(
-            new Set(
-              route.stops
-                .flatMap((stop) => stop.lines)
-                .map((line) => line.product.supplier),
-            ),
-          ).sort((left, right) =>
-            Model.compare(Model.supplierPosition(left), Model.supplierPosition(right)),
-          );
+    const used = Array.from(
+      new Set(
+        route.stops.flatMap((stop) => stop.lines).map((line) => line.product.supplier),
+      ),
+    );
+    const house = settings.kind === Model.BREAD ? Model.KNOWN_SUPPLIERS.map(([name]) => name) : [];
+    const seen = new Set();
+    const list = [...house, ...used]
+      .filter((name) => {
+        const key = String(name).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((left, right) =>
+        Model.compare(Model.supplierPosition(left), Model.supplierPosition(right)),
+      );
 
     return list
       .map((name) => {
@@ -676,6 +846,39 @@ const Sheet = (() => {
     try {
       // Every piece the route puts on paper, in order: its stops, the flag
       // above the unsequenced ones, and the total that closes it.
+      // How much of the sheet the furniture leaves for them.
+      //
+      // Budgeted against the *tallest* masthead, not page 1's. Page 1 has no
+      // `continued` line, so it is the shortest; spending its extra room used
+      // to be free, on the reasoning that a taller page 2 only eats its own
+      // 10 mm of clearance. It does — and a route long enough to need
+      // thirteen sheets ate it down to 8.8 mm, under the floor print-spec sets
+      // and the floor this app's own suite asserts. A page costs less than a
+      // clipped row.
+      const probe = { ...context, page: 1, pages: 1 };
+      const tallest = { ...context, page: 2, pages: 2 };
+      const furnitureHeight = Math.max(
+        ...[probe, tallest].map((where) =>
+          [
+            masthead(route, where, wordmark),
+            pageNote(route, settings, measure),
+            legend(route, settings, measure),
+          ].reduce((sum, node) => sum + measure.height(node), 0),
+        ),
+      );
+      const footerHeight = Math.max(
+        measure.height(footer(route, probe)),
+        measure.height(footer(route, tallest)),
+      );
+      const bodyMargin = 1.5;
+      const limit =
+        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+
+      // Every piece the route puts on paper, in order: its stops, the flag
+      // above the unsequenced ones, and the total that closes it. The limit is
+      // worked out first because a stop with more lines than a page can hold
+      // has to be cut against it — 300 lines on one order used to print 45 and
+      // send the other 255 off the bottom of the paper without a word.
       const pieces = [];
       let flagged = false;
       for (const stop of route.stops) {
@@ -684,31 +887,9 @@ const Sheet = (() => {
           const flag = unsequencedFlag();
           pieces.push({ node: flag, height: measure.height(flag), keepWithNext: true });
         }
-        const block = stopBlock(stop, settings, measure);
-        pieces.push({ node: block, height: measure.height(block), keepWithNext: false });
+        pieces.push(...stopPieces(stop, settings, measure, limit));
       }
-      const total =
-        settings.kind === Model.BREAD ? routeTotalBlock(route) : checkTotalBlock(route);
-      pieces.push({ node: total, height: measure.height(total), keepWithNext: false });
-
-      // How much of the sheet the furniture leaves for them. Page 1 has no
-      // `continued`, so it is the shortest masthead and therefore the safe one
-      // to budget against; a taller one on page 2 only takes from its own
-      // clearance, which starts at 10 mm.
-      const probe = { ...context, page: 1, pages: 1 };
-      const furniture = [
-        masthead(route, probe, wordmark),
-        pageNote(route, settings, measure),
-        legend(route, settings, measure),
-      ];
-      const furnitureHeight = furniture.reduce(
-        (sum, node) => sum + measure.height(node),
-        0,
-      );
-      const footerHeight = measure.height(footer(route, probe));
-      const bodyMargin = 1.5;
-      const limit =
-        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+      pieces.push(...totalPieces(route, settings, measure, limit));
 
       const pages = shareOut(pieces, limit);
       return pages.map((indices, index) => {

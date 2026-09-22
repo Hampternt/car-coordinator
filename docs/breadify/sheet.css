@@ -166,11 +166,14 @@
 /* The nickname, never the integer parsed out of it — `hau 1` prints as
  * `HAU 1`, never as `1` (D12). The masthead sets it in caps; the page note
  * and the footer spell it as the file does. */
+/* A nickname is usually "8" or "hau 1", but nothing in the export makes it
+ * short, and a descriptive one took the masthead 167 mm off the page. */
 .bf-route-number {
-  font: 900 25pt/0.85 Archivo, sans-serif;
+  font: 900 25pt/0.9 Archivo, sans-serif;
   letter-spacing: -0.03em;
   text-transform: uppercase;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .bf-continued {
@@ -344,6 +347,18 @@
   margin-left: auto;
 }
 
+/* The mark on a stop that had to be cut across pages. Quiet — it is not a
+ * warning, it is the answer to "why is this customer here twice". */
+.bf-block-part {
+  margin-left: auto;
+  padding-left: 3mm;
+  font: 400 8.6pt/1 'IBM Plex Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rule-sub);
+  white-space: nowrap;
+}
+
 /* D24: a run that will not fit whole on one line is set as `×N` beside a
  * single glyph, never wrapped onto a second row of squares. */
 .bf-crates-compact {
@@ -390,19 +405,29 @@
 
 /* `flex: none` so a long name overflows the row rather than quietly
  * shrinking: the heading decides where the crates go by asking whether the
- * row overflows, and a name that can shrink makes that question unanswerable. */
+ * row overflows, and a name that can shrink makes that question unanswerable.
+ *
+ * Shrinking and wrapping are not the same thing, though, and the name still
+ * must not leave the paper: a canteen with a 200-character name ran 317 mm
+ * past the right edge of a 194 mm column, taking its own second half with it.
+ * `max-width` caps it at the column and lets it wrap there instead. A name
+ * that fits is untouched — it has nothing to wrap at — so the overflow
+ * question the crates depend on is answered exactly as before. */
 .bf-name {
   flex: none;
+  max-width: 100%;
   margin-right: 4.6mm;
   font: 800 14pt/1.12 Archivo, sans-serif;
   letter-spacing: -0.02em;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* The department sits under the customer name, not beside it: a heading is
  * one crate label in two parts, and side by side they read as equals (D19). */
 .bf-dpt {
   flex: none;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   align-items: stretch;
   margin-right: 4.6mm;
@@ -420,13 +445,16 @@
   align-items: center;
 }
 
+/* Capped and wrappable for the same reason as the name above: a department
+ * spelled out in full ran 93 mm off the sheet. */
 .bf-dpt-name {
-  font: 800 10.4pt/1 Archivo, sans-serif;
+  font: 800 10.4pt/1.2 Archivo, sans-serif;
   letter-spacing: -0.015em;
   padding-left: 1.3mm;
+  min-width: 0;
   display: flex;
   align-items: center;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* The crates, the marker and the order id form one column the eye finds once
@@ -505,9 +533,13 @@
 
 /* The code, not the name: dropping the repeated bakery name off every row is
  * what paid for the 11 pt body (D4). */
+/* Wide enough for the codes supplierCode() can now produce, and no wider:
+ * a code that outgrew this slot used to print on top of the product name. */
 .bf-code {
   flex: none;
   width: 8mm;
+  overflow: hidden;
+  white-space: nowrap;
   font: 700 10.7pt/1 'IBM Plex Mono', monospace;
   letter-spacing: 0.02em;
 }
@@ -598,16 +630,24 @@
   print-color-adjust: exact;
 }
 
+/* One column per bakery, and the export decides how many bakeries there are.
+ * Two share the measure comfortably; twelve used to be squeezed to 8.5 mm
+ * each, where a product name wrapped one letter to a line and stood 70 mm
+ * tall. Wrapping the grid keeps every column readable and costs rows of the
+ * total instead — which the paginator can carry, where unreadable cannot. */
 .bf-total-grid {
   display: flex;
-  gap: 8.4mm;
+  flex-wrap: wrap;
+  gap: 4.2mm 8.4mm;
   margin-top: 1.6mm;
   align-items: flex-start;
 }
 
+/* 42 mm is the narrowest a column stays readable at 9.2 pt; four fit the
+ * 194 mm measure, and the fifth bakery starts a second row. */
 .bf-total-col {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 42mm;
+  min-width: 42mm;
 }
 
 .bf-total-head {
