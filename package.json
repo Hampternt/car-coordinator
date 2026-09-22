@@ -7,8 +7,10 @@
     "tauri:dev": "tauri dev",
     "build": "tauri build",
     "icon": "tauri icon app-icon.png",
-    "test": "node scripts/smoke.mjs",
-    "screens": "node scripts/screens.mjs"
+    "test": "node scripts/smoke.mjs && node scripts/breadify.mjs",
+    "screens": "node scripts/screens.mjs",
+    "test:car": "node scripts/smoke.mjs",
+    "test:breadify": "node scripts/breadify.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

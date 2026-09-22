@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Breadify</title>
+  <meta name="description" content="Turns a daily bread or freezer order export into printed A4 picking lists.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='8' fill='%230b0910'/><rect x='10' y='22' width='44' height='8' rx='2' fill='%23f2c44d'/><rect x='10' y='34' width='34' height='6' rx='2' fill='%23b48ef7'/><rect x='10' y='44' width='24' height='6' rx='2' fill='%23b48ef7'/><circle cx='50' cy='47' r='6' fill='%23ff4f46'/></svg>">
+  <link rel="stylesheet" href="sheet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">Breadify</div>
+  <nav class="steps" id="steps">
+    <button type="button" data-step="open"><span class="num">01</span> Open</button>
+    <button type="button" data-step="check"><span class="num">02</span> Check</button>
+    <button type="button" data-step="configure"><span class="num">03</span> Configure</button>
+    <button type="button" data-step="print"><span class="num">04</span> Print</button>
+  </nav>
+  <a class="sibling" href="../" title="The other half of the day: routes, drivers and cars">Car Coordinator</a>
+</header>
+
+<main>
+
+  <!-- 01 Open ------------------------------------------------------------ -->
+  <section class="step" id="step-open">
+    <div class="drop" id="drop">
+      <h1>Drop today's export here</h1>
+      <p>
+        Keep the filename as it came — <code>PSR-BREAD-…</code> or
+        <code>PSR-FREEZER-…</code>. The delivery date is read from the name,
+        not from inside the sheet.
+      </p>
+      <p>
+        <button type="button" class="primary" id="choose">Choose a file</button>
+        <input type="file" id="file" accept=".xlsx" hidden>
+      </p>
+      <p class="hint">
+        Nothing is uploaded. The file is read in this browser, on this PC, and
+        never leaves it.
+      </p>
+    </div>
+    <p class="error" id="openError" hidden></p>
+  </section>
+
+  <!-- 02 Check ----------------------------------------------------------- -->
+  <section class="step" id="step-check" hidden>
+    <!-- F10: the kind stays automatic, with a visible override — a renamed or
+         custom filename is the case this exists for. -->
+    <div class="mode" id="mode">
+      <span class="mode-label">Treated as</span>
+      <span class="mode-buttons">
+        <button type="button" data-kind="bread">Bread</button>
+        <button type="button" data-kind="freezer">Freezer</button>
+      </span>
+      <span class="mode-why" id="modeWhy"></span>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <h2>What the file says</h2>
+    <div class="findings" id="findings"></div>
+  </section>
+
+  <!-- 03 Configure ------------------------------------------------------- -->
+  <section class="step" id="step-configure" hidden>
+    <div class="panes">
+      <div class="pane">
+        <h2>The page</h2>
+        <label class="row">
+          <input type="checkbox" id="showOrderId" checked>
+          <span>
+            <b>Show the order ID</b>
+            <em>The only field that is yours to show or hide. Everything else
+              on the page is fixed.</em>
+          </span>
+        </label>
+
+        <h3>When a customer refuses substitutes</h3>
+        <div class="choices" id="markerChoices">
+          <button type="button" data-marker="word-only">
+            <b>Word only</b><em>The words alone, in the heading. The default.</em>
+          </button>
+          <button type="button" data-marker="inverted-badge">
+            <b>Inverted badge</b><em>White on solid black, with a bar down the
+              block. Two channels, so it survives a photocopy.</em>
+          </button>
+          <button type="button" data-marker="heavy-rule">
+            <b>Heavy left rule</b><em>The bar alone.</em>
+          </button>
+        </div>
+      </div>
+
+      <div class="pane" id="cratePane">
+        <h2>The crates</h2>
+        <p class="hint">
+          Facts about the warehouse, worked out once at the crates — so these
+          are remembered on this PC and the rest of the settings are not.
+        </p>
+        <div class="capacities">
+          <label>Large crate holds
+            <input type="number" id="largeCapacity" min="1" max="999" value="10"> slots
+          </label>
+          <label>Small crate holds
+            <input type="number" id="smallCapacity" min="1" max="998" value="5"> slots
+          </label>
+        </div>
+
+        <h3>How much room each bread takes</h3>
+        <p class="hint">
+          A roll is half a slot; something bulky takes two. Click a bread to
+          set it. Set once — it is remembered from then on.
+        </p>
+        <div class="sizes" id="sizes"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 Print ----------------------------------------------------------- -->
+  <section class="step" id="step-print" hidden>
+    <div class="panes">
+      <div class="pane">
+        <h2>Routes</h2>
+        <p class="hint">All routes are ticked; untick any you don't want.</p>
+        <div class="routes" id="routes"></div>
+      </div>
+      <div class="pane">
+        <h2>Printing</h2>
+        <p class="notice">
+          <b>Print at 100 %, actual size.</b> A viewer's default
+          <em>fit to printable area</em> shrinks A4 by about 4 %, which takes
+          the 11 pt body below its floor.
+        </p>
+        <p class="hint" id="printSummary"></p>
+        <p>
+          <button type="button" class="primary" id="print">Print / save PDF</button>
+        </p>
+        <p class="hint">
+          Pick your printer in the dialog, or choose
+          <em>Microsoft Print to PDF</em> to save a file instead.
+        </p>
+      </div>
+    </div>
+
+    <h2>Preview</h2>
+    <p class="hint">This is exactly what gets printed, at actual size.</p>
+    <div class="preview" id="preview"></div>
+  </section>
+
+</main>
+
+<div class="actionbar">
+  <button type="button" id="back" hidden>Back</button>
+  <button type="button" class="primary" id="advance" hidden></button>
+  <span class="blocked" id="blocked" hidden></span>
+</div>
+
+<!-- The sheets, as they print. Hidden on screen; the preview holds its own
+     copy scaled to fit. -->
+<div id="sheets"></div>
+
+<script src="xlsx.js"></script>
+<script src="model.js"></script>
+<script src="validate.js"></script>
+<script src="layout.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

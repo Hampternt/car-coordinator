@@ -1,0 +1,771 @@
+// Turning a route into printed sheets.
+//
+// The Rust app measures type itself and settles every millimetre before
+// drawing. Here the browser is the type-setter, so the shape of the work is
+// inverted: each piece — a stop block, the unsequenced flag, the route total —
+// is built and measured on its own at the content column's exact width, and
+// then the same share-out the Rust paginator performs decides which pieces go
+// on which sheet.
+//
+// The rules it enforces, all from docs/print-spec.md in the Breadify repo:
+// one route per sheet set and no page carrying two routes (D1); no stop block
+// and no route total ever split across a break (D9); the unsequenced flag
+// never left as the last thing on a page; and at least 10 mm of clearance
+// between the last content and the footer, below which a printer with
+// slightly different metrics silently clips a row.
+
+'use strict';
+
+const Sheet = (() => {
+  /** A4, and the margins that leave a 194 mm content column. */
+  const PAGE_HEIGHT = 297;
+  const MARGIN_TOP = 9;
+  const MARGIN_BOTTOM = 5;
+  const CONTENT_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
+
+  /** The gap every page keeps between its last content and the footer. */
+  const FOOTER_CLEARANCE = 10;
+
+  /** Crate glyph geometry, for working out whether a run will fit. */
+  const CRATE_WIDTH = 7.1;
+  const CRATE_GAP = 1.1;
+  const TOTAL_DOT = 2.7;
+  const TOTAL_DOT_GAP = 0.8;
+  const TOTAL_DOT_COLUMN = 18;
+
+  // ── Building blocks ────────────────────────────────────────────────────
+
+  function element(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+
+  function append(parent, ...children) {
+    for (const child of children) if (child) parent.appendChild(child);
+    return parent;
+  }
+
+  // ── Measuring ──────────────────────────────────────────────────────────
+
+  /**
+   * A hidden column exactly as wide as the sheet's, where pieces are laid out
+   * so they can be measured before anyone knows which page they land on.
+   *
+   * It carries the `.bf-sheet` class too, because that is where the fonts and
+   * the ink variables are declared — measuring outside it would measure a
+   * different typeface and every height would be a lie.
+   */
+  function measuringHost(parent) {
+    const host = element('div', 'bf-sheet bf-measure');
+    host.style.height = 'auto';
+    host.style.padding = '0';
+    host.style.display = 'block';
+    (parent || document.body).appendChild(host);
+
+    // One probe settles the pixel-to-millimetre ratio for the whole run.
+    const probe = element('div');
+    probe.style.width = '100mm';
+    probe.style.height = '100mm';
+    host.appendChild(probe);
+    const box = probe.getBoundingClientRect();
+    const perPx = box.width > 0 ? 100 / box.width : 0;
+    host.removeChild(probe);
+
+    return {
+      node: host,
+      /** How tall a piece is, once laid out at the column's real width. */
+      height(node) {
+        host.appendChild(node);
+        const height = node.getBoundingClientRect().height * perPx;
+        host.removeChild(node);
+        return height;
+      },
+      /** Whether a nowrap row has more in it than it has room for. */
+      overflows(node) {
+        host.appendChild(node);
+        const over = node.scrollWidth > node.clientWidth + 1;
+        host.removeChild(node);
+        return over;
+      },
+      destroy() {
+        if (host.parentNode) host.parentNode.removeChild(host);
+      },
+    };
+  }
+
+  // ── The crate glyphs (D17, D20, D24) ──────────────────────────────────
+
+  function crateGlyph(full) {
+    return element('span', `bf-crate ${full ? 'bf-crate-full' : 'bf-crate-half'}`);
+  }
+
+  /** A run of glyphs, full ones first. */
+  function crateRun(count) {
+    const run = element('span', 'bf-crates');
+    for (let index = 0; index < count.large; index += 1) run.appendChild(crateGlyph(true));
+    for (let index = 0; index < count.small; index += 1) run.appendChild(crateGlyph(false));
+    return run;
+  }
+
+  /**
+   * The compact form of a count too wide to draw glyph by glyph: `×24` beside
+   * one full crate, then `×1` beside one half — the notation the route total
+   * already uses when its tray dots outgrow their column (D24).
+   *
+   * The trade is knowing: the driver reads a number where the run let them
+   * count squares. It only appears when the alternative was rows of wrapped
+   * glyphs, which were no easier to take in at a glance.
+   */
+  function crateCompact(count) {
+    const run = element('span', 'bf-crates bf-crates-compact');
+    for (const [part, full] of [
+      [count.large, true],
+      [count.small, false],
+    ]) {
+      if (part === 0) continue;
+      const group = element('span', 'bf-crate-group');
+      append(group, element('span', 'bf-crate-count', `×${part}`), crateGlyph(full));
+      run.appendChild(group);
+    }
+    return run;
+  }
+
+  function crateRunWidth(total) {
+    return total === 0 ? 0 : total * (CRATE_WIDTH + CRATE_GAP) - CRATE_GAP;
+  }
+
+  // ── The substitute marker (D8, D21) ───────────────────────────────────
+
+  /**
+   * Quiet when substitutes are fine, loud when they are not. The words print
+   * in Archivo ExtraBold caps under every treatment; the badge and the bar
+   * down the block are the non-default extras.
+   */
+  function marker(stop, settings) {
+    if (stop.acceptAlternatives) {
+      return element('span', 'bf-marker', 'want substitute: true');
+    }
+    const badge = settings.marker === 'inverted-badge';
+    return element(
+      'span',
+      `bf-marker-loud${badge ? ' bf-marker-badge' : ''}`,
+      'WANT SUBSTITUTE: FALSE',
+    );
+  }
+
+  /**
+   * The marker and the order id, set as one thing: the id is only ever a way
+   * of telling two otherwise identical stops apart, so it belongs beside the
+   * mark rather than adrift on its own line.
+   */
+  function stamp(stop, settings) {
+    const group = element('span', 'bf-stamp');
+    group.appendChild(marker(stop, settings));
+    if (settings.showOrderId) {
+      group.appendChild(element('span', 'bf-order-id', stop.id));
+    }
+    return group;
+  }
+
+  /** The crate label: a `DPT` tag and the department name in a hard box. */
+  function departmentBox(department) {
+    const box = element('div', 'bf-dpt');
+    append(
+      box,
+      element('span', 'bf-dpt-tag', 'DPT'),
+      element('span', 'bf-dpt-name', department),
+    );
+    return box;
+  }
+
+  // ── A stop block ───────────────────────────────────────────────────────
+
+  /**
+   * The heading, placed the way the Rust layout places it.
+   *
+   * Nothing here is positioned by assuming it will fit. The name can be
+   * 127 mm of a 194 mm column, the order id ten digits, and the crate count is
+   * unbounded because the per-bread sizes are the warehouse's to set. So each
+   * mark is offered the name's line, then the department's, then a line of its
+   * own, and takes the first that measures. The marker and the id travel
+   * together; the crates may travel without them.
+   */
+  function heading(stop, settings, count, measure) {
+    const nameLine = append(
+      element('div', 'bf-head-line'),
+      element('div', 'bf-name', stop.customer),
+    );
+    const departmentLine = stop.department
+      ? append(element('div', 'bf-head-line'), departmentBox(stop.department))
+      : null;
+    const lines = departmentLine ? [nameLine, departmentLine] : [nameLine];
+
+    const total = count.large + count.small;
+    let cratesWanted = total > 0;
+    let stampWanted = true;
+
+    /**
+     * Puts a mark on a line and keeps it only if the line still fits.
+     *
+     * The line is measured detached, which is why it can be handed straight to
+     * the measuring column and taken back again.
+     */
+    const place = (line, node, before) => {
+      line.insertBefore(node, before || null);
+      if (!measure.overflows(line)) return true;
+      line.removeChild(node);
+      return false;
+    };
+
+    /** Full glyphs first, then the compact form (D24), then give up here. */
+    const placeCrates = (line) => {
+      const before = line.querySelector('.bf-stamp');
+      if (crateRunWidth(total) <= 194 && place(line, crateRun(count), before)) return true;
+      return place(line, crateCompact(count), before);
+    };
+
+    for (const line of lines) {
+      if (stampWanted && place(line, stamp(stop, settings))) stampWanted = false;
+      // The crates sit immediately left of the marker (D20), so they only go
+      // on a line whose stamp is already settled.
+      if (cratesWanted && !stampWanted && placeCrates(line)) cratesWanted = false;
+      if (!stampWanted && !cratesWanted) break;
+    }
+
+    // A line of their own, for whatever is left over.
+    if (stampWanted || cratesWanted) {
+      const spare = element('div', 'bf-head-line');
+      if (stampWanted) spare.appendChild(stamp(stop, settings));
+      if (cratesWanted) placeCrates(spare);
+      lines.push(spare);
+    }
+
+    return lines;
+  }
+
+  function tickBox(letter) {
+    return element('span', 'bf-tick', letter);
+  }
+
+  /**
+   * One product line, with every second one tinted.
+   *
+   * The bread list writes a pick line: `P` box, quantity, code, name, then the
+   * missing and fixed boxes at the right. The freezer list writes a check line
+   * (F8): a *checked* box on the left, a dotted field for a note in the slack
+   * after the name, and only the *missing* box on the right.
+   */
+  function breadLine(line, settings, tinted) {
+    const bread = settings.kind === Model.BREAD;
+    const row = element(
+      'div',
+      `bf-row${bread ? '' : ' bf-row-check'}${tinted ? ' bf-row-zebra' : ''}`,
+    );
+
+    append(
+      row,
+      tickBox(bread ? 'P' : 'C'),
+      element('span', 'bf-qty', line.quantity),
+      element('span', 'bf-code', Model.supplierCode(line.product.supplier)),
+      element('span', 'bf-product', line.product.name),
+    );
+
+    if (bread) {
+      const boxes = element('span', 'bf-ticks');
+      append(boxes, tickBox('M'), tickBox('F'));
+      row.appendChild(boxes);
+    } else {
+      // A leader of full stops, clipped to whatever room the name left. A name
+      // long enough to leave none simply has no field — nothing wraps.
+      row.appendChild(element('span', 'bf-note-field', '.'.repeat(120)));
+      row.appendChild(tickBox('M'));
+    }
+    return row;
+  }
+
+  /** One order — one stop, one block, one crate label (D16). */
+  function stopBlock(stop, settings, measure) {
+    const barred = !stop.acceptAlternatives && settings.marker !== 'word-only';
+    const block = element('article', `bf-block${barred ? ' bf-block-barred' : ''}`);
+
+    const count =
+      settings.kind === Model.BREAD
+        ? Model.crateCount(stop, settings.crates)
+        : { large: 0, small: 0 };
+
+    for (const line of heading(stop, settings, count, measure)) block.appendChild(line);
+
+    const lines = element('div', 'bf-lines');
+    stop.lines.forEach((line, index) => {
+      lines.appendChild(breadLine(line, settings, index % 2 === 1));
+    });
+    block.appendChild(lines);
+    return block;
+  }
+
+  /**
+   * The separator that says the stops below it were never given a position.
+   *
+   * The design pass dropped this; print-spec §6 puts it back, because without
+   * it a driver cannot tell "nobody sequenced this" from "this is the last
+   * delivery of the day", and route 5 has five such stops in a row.
+   */
+  function unsequencedFlag() {
+    return element('div', 'bf-flag', 'No position assigned — driver decides the order');
+  }
+
+  // ── The route total (D15, D23, F9) ────────────────────────────────────
+
+  /** One dot per full ten, or the compact count when they outgrow 18 mm. */
+  function tenDots(fullTens) {
+    const dots = element('span', 'bf-total-dots');
+    if (fullTens === 0) return dots;
+
+    const run = fullTens * TOTAL_DOT + (fullTens - 1) * TOTAL_DOT_GAP;
+    if (run > TOTAL_DOT_COLUMN) {
+      append(
+        dots,
+        element('span', 'bf-total-dots-compact', `×${fullTens}`),
+        element('span', 'bf-dot'),
+      );
+      return dots;
+    }
+    for (let index = 0; index < fullTens; index += 1) dots.appendChild(element('span', 'bf-dot'));
+    return dots;
+  }
+
+  function totalRow(line, withDots) {
+    const row = element('div', 'bf-total-row');
+    append(
+      row,
+      element('span', 'bf-total-qty', line.units),
+      element('span', 'bf-total-product', line.product.name),
+      withDots ? tenDots(line.fullTens) : null,
+    );
+    return row;
+  }
+
+  /**
+   * The bread route's closing total: one column per bakery, Sandnes Bakeri
+   * first, most needed to least.
+   */
+  function routeTotalBlock(route) {
+    const total = Model.routeTotal(route);
+    const types = Model.totalTypes(total);
+    const units = Model.totalUnits(total);
+    const tens = Model.totalFullTens(total);
+
+    const section = element('section', 'bf-total');
+    append(
+      section,
+      element('div', 'bf-total-title', `Route ${route.nickname} total`),
+      element(
+        'div',
+        'bf-total-meta',
+        `${types} bread ${types === 1 ? 'type' : 'types'} · ` +
+          `${units} ${units === 1 ? 'unit' : 'units'} · most to least`,
+      ),
+    );
+
+    if (tens > 0) {
+      const note = element('div', 'bf-total-dotnote');
+      append(
+        note,
+        element('span', 'bf-dot'),
+        element(
+          'span',
+          null,
+          `one full ten inside a single order — ${tens} on this route`,
+        ),
+      );
+      section.appendChild(note);
+    }
+
+    const grid = element('div', 'bf-total-grid');
+    for (const column of total.columns) {
+      const holder = element('div', 'bf-total-col');
+      const head = element('div', 'bf-total-head');
+      append(
+        head,
+        element('span', 'bf-total-code', Model.supplierCode(column.supplier)),
+        element('span', 'bf-total-name', Model.supplierName(column.supplier)),
+        element(
+          'span',
+          'bf-total-subtotal',
+          Model.summary(column.lines.length, Model.columnUnits(column)),
+        ),
+      );
+      holder.appendChild(head);
+      for (const line of column.lines) holder.appendChild(totalRow(line, true));
+      grid.appendChild(holder);
+    }
+    // A single-bakery route would otherwise stretch its one column across the
+    // whole page; the grid keeps two columns' worth of measure either way.
+    if (total.columns.length === 1) grid.appendChild(element('div', 'bf-total-col'));
+    section.appendChild(grid);
+    return section;
+  }
+
+  /**
+   * The freezer route's closing total (F9): one list in two balanced columns,
+   * read down the first then down the second. No bakery columns, no ten-dots
+   * and no supplier code — those are receiving-check machinery, and the cue
+   * already lives on the stop lines.
+   */
+  function checkTotalBlock(route) {
+    const lines = Model.flatTotal(route);
+    const units = lines.reduce((sum, line) => sum + line.units, 0);
+
+    const section = element('section', 'bf-total');
+    append(
+      section,
+      element('div', 'bf-total-title', `Route ${route.nickname} total`),
+      element(
+        'div',
+        'bf-total-meta',
+        `${Model.summary(lines.length, units)} · most to least`,
+      ),
+    );
+
+    const half = Math.ceil(lines.length / 2);
+    const grid = element('div', 'bf-total-grid');
+    for (const part of [lines.slice(0, half), lines.slice(half)]) {
+      const holder = element('div', 'bf-total-col');
+      for (const line of part) holder.appendChild(totalRow(line, false));
+      grid.appendChild(holder);
+    }
+    section.appendChild(grid);
+    return section;
+  }
+
+  // ── Page furniture ─────────────────────────────────────────────────────
+
+  function masthead(route, context, wordmark) {
+    const header = element('header', 'bf-masthead');
+
+    const brand = element('div', 'bf-brand');
+    const logo = element('div', 'bf-logo');
+    const image = element('img');
+    image.src = wordmark;
+    image.alt = 'Matvare Expressen';
+    logo.appendChild(image);
+    append(
+      brand,
+      logo,
+      element('div', 'bf-route-label', 'Route'),
+      element('div', 'bf-route-number', route.nickname),
+      context.page > 1 ? element('div', 'bf-continued', 'continued') : null,
+    );
+
+    const right = element('div', 'bf-masthead-right');
+    append(
+      right,
+      element('div', 'bf-date', Model.formatDates(context.dates)),
+      element(
+        'div',
+        'bf-counter',
+        `Page ${context.page} of ${context.pages} · ` +
+          `${context.routeStops} stops · ${context.routeLines} lines`,
+      ),
+    );
+
+    return append(header, brand, right);
+  }
+
+  /**
+   * One sentence of context on the left, the substitute convention on the
+   * right.
+   *
+   * The pallet call is made once for the whole route, so it lives here on
+   * every sheet rather than in the total that closes it (D25) — and the line
+   * is measured before it grows, which is the lesson D23 paid for. A line
+   * already crowded by a long nickname and the unsequenced note gets the short
+   * form instead of colliding.
+   */
+  function pageNote(route, settings, measure) {
+    const bread = settings.kind === Model.BREAD;
+    const note = element('div', 'bf-note');
+    const left = element('div');
+    const right = element('div');
+    right.innerHTML = '<em>want substitute: true</em> unless marked FALSE';
+    append(note, left, right);
+
+    const unsequenced = Model.unsequencedStops(route).length;
+    const what = bread ? 'in full' : 'check list';
+    const sentence =
+      unsequenced === 0
+        ? `Route ${route.nickname} ${what} — ${route.stops.length} stops.`
+        : `Route ${route.nickname} ${what} — ${route.stops.length} stops, ` +
+          `${unsequenced} with no position assigned.`;
+    left.textContent = sentence;
+
+    if (bread) {
+      const crates = Model.routeCrates(route, settings.crates);
+      if (crates > Model.PALLET_THRESHOLD) {
+        for (const suffix of [`${crates} crates — take a pallet.`, 'Take a pallet.']) {
+          left.textContent = `${sentence} ${suffix}`;
+          if (!measure.overflows(note)) break;
+          left.textContent = sentence;
+        }
+      }
+    }
+    return note;
+  }
+
+  /**
+   * The tinted band explaining the boxes, the crate glyphs and the supplier
+   * codes.
+   *
+   * The two lists differ in three ways: the freezer sheet has no crates to
+   * explain (F4), its `P` means *packed* rather than *picked*, and its
+   * suppliers are whichever wholesalers this route actually draws from rather
+   * than the two house bakeries.
+   */
+  function legend(route, settings, measure) {
+    const bread = settings.kind === Model.BREAD;
+    const band = element('div', 'bf-legend');
+
+    const boxes = bread
+      ? [
+          ['P', 'Picked'],
+          ['M', 'Missing'],
+          ['F', 'Fixed'],
+        ]
+      : [
+          ['C', 'Checked'],
+          ['M', 'Missing'],
+        ];
+
+    const boxGroup = element('div', 'bf-legend-group');
+    boxGroup.appendChild(element('span', 'bf-legend-tag', 'Boxes'));
+    for (const [letter, word] of boxes) {
+      boxGroup.appendChild(tickBox(letter));
+      const label = element('span', 'bf-legend-word');
+      label.innerHTML = `<b>${letter}</b>${word.slice(1)}`;
+      boxGroup.appendChild(label);
+    }
+    band.appendChild(boxGroup);
+
+    if (bread) {
+      const crateGroup = element('div', 'bf-legend-group');
+      crateGroup.appendChild(element('span', 'bf-legend-tag', 'Crates'));
+      for (const [full, count] of [
+        [true, '10'],
+        [false, '5'],
+      ]) {
+        crateGroup.appendChild(crateGlyph(full));
+        crateGroup.appendChild(element('span', null, count));
+      }
+      band.appendChild(crateGroup);
+    }
+
+    const suppliers = element('div', 'bf-legend-suppliers');
+    band.appendChild(suppliers);
+
+    const spelled = supplierKey(route, settings, true);
+    suppliers.innerHTML = spelled;
+    // When the spelled-out names will not fit what the left of the band has
+    // left over, the codes stand alone.
+    if (measure.overflows(band)) suppliers.innerHTML = supplierKey(route, settings, false);
+    return band;
+  }
+
+  function supplierKey(route, settings, spelled) {
+    const list =
+      settings.kind === Model.BREAD
+        ? Model.KNOWN_SUPPLIERS.map(([name]) => name)
+        : Array.from(
+            new Set(
+              route.stops
+                .flatMap((stop) => stop.lines)
+                .map((line) => line.product.supplier),
+            ),
+          ).sort((left, right) =>
+            Model.compare(Model.supplierPosition(left), Model.supplierPosition(right)),
+          );
+
+    return list
+      .map((name) => {
+        const code = `<b>${Model.supplierCode(name)}</b>`;
+        return spelled ? `${code} ${Model.supplierName(name)}` : code;
+      })
+      .join(' · ');
+  }
+
+  function footer(route, context) {
+    const bar = element('footer', 'bf-footer');
+    const state =
+      context.page < context.pages
+        ? `Route ${route.nickname} continues on page ${context.page + 1}`
+        : `Route ${route.nickname} — end of route`;
+    append(
+      bar,
+      element('div', null, state),
+      element('div', null, `${context.source} · Matvare Expressen`),
+    );
+    return bar;
+  }
+
+  // ── Sharing the pieces out between sheets ─────────────────────────────
+
+  /**
+   * Decides which pieces go on which page.
+   *
+   * A piece never splits, and a piece marked `keepWithNext` never ends a page
+   * — the unsequenced flag belongs above the stops it covers. When the last
+   * page would carry nothing but the route total, the stop above it comes down
+   * too rather than leave a sheet nearly empty.
+   */
+  function shareOut(pieces, limit) {
+    const pages = [[]];
+    let used = 0;
+
+    pieces.forEach((piece, index) => {
+      const follower =
+        piece.keepWithNext && pieces[index + 1] ? pieces[index + 1].height : 0;
+      const fits = used + piece.height + follower <= limit;
+
+      if (!fits && pages[pages.length - 1].length > 0) {
+        pages.push([]);
+        used = 0;
+      }
+      pages[pages.length - 1].push(index);
+      used += piece.height;
+    });
+
+    rebalance(pieces, pages, limit);
+    return pages;
+  }
+
+  /** Pulls the previous stop down onto a final page that carries only the total. */
+  function rebalance(pieces, pages, limit) {
+    if (pages.length < 2) return;
+    const last = pages[pages.length - 1];
+    if (last.length !== 1) return;
+
+    const previous = pages[pages.length - 2];
+    if (previous.length < 2) return;
+    const moved = previous[previous.length - 1];
+    if (pieces[moved].keepWithNext) return;
+
+    // Moving this one down must not leave a separator as the last thing on
+    // the page it came from.
+    const leftBehind = previous[previous.length - 2];
+    if (pieces[leftBehind].keepWithNext) return;
+
+    if (pieces[moved].height + pieces[last[0]].height > limit) return;
+    previous.pop();
+    last.unshift(moved);
+  }
+
+  // ── Laying a route out ─────────────────────────────────────────────────
+
+  /**
+   * Every sheet one route needs, as detached elements.
+   *
+   * `options.wordmark` is the path to the Matvare Expressen mark, and
+   * `options.host` an element to measure inside (the measuring column is
+   * removed again before this returns).
+   */
+  function paginate(route, settings, context, options) {
+    const wordmark = (options && options.wordmark) || 'assets/matvare-expressen.svg';
+    const measure = measuringHost(options && options.host);
+
+    try {
+      // Every piece the route puts on paper, in order: its stops, the flag
+      // above the unsequenced ones, and the total that closes it.
+      const pieces = [];
+      let flagged = false;
+      for (const stop of route.stops) {
+        if (!Model.isSequenced(stop) && !flagged) {
+          flagged = true;
+          const flag = unsequencedFlag();
+          pieces.push({ node: flag, height: measure.height(flag), keepWithNext: true });
+        }
+        const block = stopBlock(stop, settings, measure);
+        pieces.push({ node: block, height: measure.height(block), keepWithNext: false });
+      }
+      const total =
+        settings.kind === Model.BREAD ? routeTotalBlock(route) : checkTotalBlock(route);
+      pieces.push({ node: total, height: measure.height(total), keepWithNext: false });
+
+      // How much of the sheet the furniture leaves for them. Page 1 has no
+      // `continued`, so it is the shortest masthead and therefore the safe one
+      // to budget against; a taller one on page 2 only takes from its own
+      // clearance, which starts at 10 mm.
+      const probe = { ...context, page: 1, pages: 1 };
+      const furniture = [
+        masthead(route, probe, wordmark),
+        pageNote(route, settings, measure),
+        legend(route, settings, measure),
+      ];
+      const furnitureHeight = furniture.reduce(
+        (sum, node) => sum + measure.height(node),
+        0,
+      );
+      const footerHeight = measure.height(footer(route, probe));
+      const bodyMargin = 1.5;
+      const limit =
+        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+
+      const pages = shareOut(pieces, limit);
+      return pages.map((indices, index) => {
+        const sheetContext = { ...context, page: index + 1, pages: pages.length };
+        const sheet = element('section', 'bf-sheet');
+        sheet.dataset.route = route.nickname;
+        sheet.dataset.page = String(index + 1);
+        sheet.dataset.of = String(pages.length);
+
+        const body = element('div', 'bf-body');
+        for (const piece of indices) body.appendChild(pieces[piece].node);
+
+        append(
+          sheet,
+          masthead(route, sheetContext, wordmark),
+          pageNote(route, settings, measure),
+          legend(route, settings, measure),
+          body,
+          footer(route, sheetContext),
+        );
+        return sheet;
+      });
+    } finally {
+      measure.destroy();
+    }
+  }
+
+  /**
+   * Every sheet a day's routes need, in printing order. Routes come in the
+   * order they are given, each starting a fresh page (D1).
+   */
+  function day(routes, settings, context, options) {
+    return routes.flatMap((route) =>
+      paginate(
+        route,
+        settings,
+        {
+          ...context,
+          routeStops: route.stops.length,
+          routeLines: Model.lineCount(route),
+        },
+        options,
+      ),
+    );
+  }
+
+  return {
+    PAGE_HEIGHT,
+    CONTENT_HEIGHT,
+    FOOTER_CLEARANCE,
+    paginate,
+    day,
+    stopBlock,
+    routeTotalBlock,
+    checkTotalBlock,
+    measuringHost,
+  };
+})();
+
+if (typeof module !== 'undefined') module.exports = Sheet;

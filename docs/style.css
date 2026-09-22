@@ -29,6 +29,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .tabs button { background: none; border: 0; padding: 8px 14px; color: #cfd3d6; cursor: pointer; font-family: var(--head); font-size: 16px; }
 .tabs button.active { color: var(--ink); background: var(--hivis); }
 button.primary { background: var(--hivis); color: var(--ink); border: 0; padding: 9px 16px; font: 700 15px var(--head); cursor: pointer; }
+/* The link across to Breadify. Quieter than the print button: it leaves this
+   app rather than doing anything in it. */
+.sibling { padding: 8px 14px; border: 1px solid #4a5157; color: #cfd3d6; text-decoration: none; font: 600 14px var(--head); white-space: nowrap; }
+.sibling::after { content: ' \2192'; }
+.sibling:hover { color: var(--ink); background: var(--hivis); border-color: var(--hivis); }
 
 main { padding: 20px; max-width: 1200px; }
 .tab { display: none; }
