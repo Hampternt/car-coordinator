@@ -56,7 +56,11 @@ npm run screens        # drives the whole app the way a leader would and writes 
 ```
 `test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
 
-It then drives eight deliberately awkward exports from `scripts/fixtures/edge/` — twelve bakeries on one route, an order with 300 product lines, a canteen with a 200-character name — and asserts that no ink leaves the paper, every sheet keeps its 10 mm, and no supplier code prints without the key above it explaining what it stands for. They are shapes the warehouse could plausibly hand the app one morning, and each one used to break the printed page in silence.
+It then drives the awkward exports in `scripts/fixtures/edge/` and `scripts/fixtures/shape/` (regenerate either with `python3 scripts/make_edge_fixtures.py` / `make_shape_fixtures.py`). `edge/` is about scale and length — twelve bakeries on one route, an order with 300 product lines, a school kitchen taking 400 of one bread; `shape/` is about the file itself — a column added, a header renamed, a quantity that is zero, negative, fractional or four figures.
+
+What it asserts of them is what a reader of the paper would: no ink leaves the sheet, every sheet keeps its 10 mm, no supplier code prints without the key explaining it, **nothing is set on top of anything else, and nothing is clipped away by the box holding it**. The last two matter most — a quantity of 1000 printed straight through the product name beside it, and the supplier key lost its final codes off the end of the band, and neither moved a single bounding box outside the page.
+
+A change to the file's own shape must be either refused with a message naming the problem, or read correctly. It is never printed wrong.
 
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
 

@@ -88,6 +88,20 @@ const Model = (() => {
   }
 
   /**
+   * The number a cell holds before `integer` truncates it, or null where it
+   * held no number at all.
+   *
+   * Kept because truncating is a decision, not a reading: a quantity of 2.5
+   * becomes 2 and the picker is told to pick two. validate.js compares the two
+   * and says so rather than letting half a bread disappear in silence.
+   */
+  function exactNumber(cell) {
+    if (!cell) return null;
+    const number = cell.kind === 'number' ? cell.value : Number(cell.value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  /**
    * `Accept alternatives` is a genuine Excel boolean. An exporter that ever
    * writes it as 0/1 or as the words still reads correctly here.
    */
@@ -114,6 +128,15 @@ const Model = (() => {
       throw new ReadError(
         `the sheet does not start at row 1 (it starts at row ${header.number}), ` +
           'so the columns cannot be trusted',
+      );
+    }
+    // Before the column count, because a file with its headers and nothing
+    // under them has 14 columns — the fifteenth carries no header — and
+    // "expected 15 columns but the sheet has 14" blames the wrong thing.
+    if (sheet.rows.length < 2) {
+      throw new ReadError(
+        'the sheet has its headers but no order lines under them \u2014 ' +
+          'this looks like an export of an empty day',
       );
     }
     if (sheet.width !== COLUMN_COUNT) {
@@ -145,6 +168,7 @@ const Model = (() => {
         excelRow: row.number,
         orderId: integer(cell(COLUMN.orderId)),
         quantity: integer(cell(COLUMN.quantity)),
+        quantityExact: exactNumber(cell(COLUMN.quantity)),
         productId: integer(cell(COLUMN.productId)),
         productName: text(cell(COLUMN.productName)),
         supplierSku: text(cell(COLUMN.supplierSku)),

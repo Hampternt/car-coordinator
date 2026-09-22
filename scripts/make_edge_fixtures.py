@@ -183,3 +183,24 @@ for name, rows in S.items():
     path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-{name}.xlsx')
     write(path, rows)
     print(f'{name:26s} {len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')
+
+# A school kitchen's morning: the biggest order a real route carries. 400 of
+# one bread is a big day and must print without comment; the four-figure line
+# below is a decimal point in the wrong place and must not.
+SB, BH = 'Sandnes Bakeri', 'Bakehuset'
+BIG = [('Rundstykke', 400, SB), ('Grovbrød 750g', 250, SB), ('Kneippbrød', 180, SB),
+       ('Loff Oppskåret', 120, SB), ('Baguette', 96, BH), ('Rugbrød 12biter', 60, BH),
+       ('Horn', 48, BH)]
+busy = [line(5001, 100, '7', 'Storkjøkken Nord', p, q, s, 300 + i, dept='Hovedkjøkken')
+        for i, (p, q, s) in enumerate(BIG)]
+for stop in range(4):
+    for i, (p, q, s) in enumerate([('Rundstykke', 40, SB), ('Grovbrød 750g', 24, SB),
+                                   ('Baguette', 12, BH)]):
+        busy.append(line(5010 + stop, (stop + 2) * 100, '7', f'Kafé {stop + 1:02d}', p, q, s, 300 + i))
+
+for name, rows in [('busy-real-day', busy),
+                   ('four-figure-line', [line(1, 100, '7', 'Storkjøkken Nord', 'Rundstykke',
+                                              4000, SB, 300)])]:
+    path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-{name}.xlsx')
+    write(path, rows)
+    print(f'{name:26s} {len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')

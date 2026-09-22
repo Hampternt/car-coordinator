@@ -772,3 +772,24 @@ input[type='number'] {
     display: block;
   }
 }
+
+/* The colophon. Quiet — it is a legal courtesy and a statement of fact, not
+   something anyone came here to read. */
+.colophon {
+  margin: 28px auto 0;
+  max-width: 900px;
+  padding: 0 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.colophon a {
+  color: inherit;
+}
+
+@media print {
+  .colophon {
+    display: none;
+  }
+}

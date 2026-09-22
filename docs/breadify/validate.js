@@ -21,6 +21,7 @@ const Validate = (() => {
     'order-lines-disagree',
     'address-on-two-routes',
     'product-details-disagree',
+    'impossible-quantity',
     'unfamiliar-value',
     'supplier-code-collision',
     'unsequenced-stops',
@@ -267,6 +268,100 @@ const Validate = (() => {
   }
 
   /**
+   * Quantities that cannot be picked.
+   *
+   * Nothing checked this column at all, and every one of these printed as it
+   * stood: a line reading `-5`, a line reading `0`, and a 2.5 that became a 2
+   * on the way through with nobody told. A picking list is an instruction, so
+   * an instruction that cannot be carried out is worth stopping for, and one
+   * that was quietly rewritten is worth a word.
+   */
+  /**
+   * More of one bread, on one line, than any real morning has asked for.
+   *
+   * A school kitchen taking 400 rundstykker is a big order and prints fine.
+   * Four figures is a different thing: it is a decimal point in the wrong
+   * place, a formula filled down one row too far, or a units column that
+   * changed meaning. The app cannot know which, so it does not refuse — it
+   * says the number out loud, where a person can recognise it as wrong.
+   */
+  const IMPLAUSIBLE_QUANTITY = 1000;
+
+  function impossibleQuantities(rows) {
+    const negative = [];
+    const empty = [];
+    const rounded = [];
+    const enormous = [];
+    for (const row of rows) {
+      if (row.quantity < 0) negative.push(row);
+      else if (row.quantity === 0) empty.push(row);
+      else if (row.quantity >= IMPLAUSIBLE_QUANTITY) enormous.push(row);
+      if (
+        row.quantityExact !== null &&
+        row.quantityExact !== row.quantity &&
+        row.quantityExact >= 0
+      ) {
+        rounded.push(row);
+      }
+    }
+
+    const findings = [];
+    if (negative.length) {
+      findings.push({
+        severity: BLOCKING,
+        kind: 'impossible-quantity',
+        headline: `${negative.length} line(s) ask for a negative quantity`,
+        detail:
+          `Row(s) ${rowNumbers(negative)} ask for fewer than none. Nobody can ` +
+          'pick that, and the crate arithmetic counts it as nothing, so the ' +
+          'sheet would understate what the van needs.',
+        rows: negative.map((row) => row.excelRow),
+      });
+    }
+    if (empty.length) {
+      findings.push({
+        severity: WARNING,
+        kind: 'impossible-quantity',
+        headline: `${empty.length} line(s) ask for nothing`,
+        detail:
+          `Row(s) ${rowNumbers(empty)} have a quantity of 0. They still print, ` +
+          'as a line telling the picker to pick none of something \u2014 which ' +
+          'is usually a cancelled line that was left in the export.',
+        rows: empty.map((row) => row.excelRow),
+      });
+    }
+    if (enormous.length) {
+      const worst = enormous.reduce((a, b) => (b.quantity > a.quantity ? b : a));
+      findings.push({
+        severity: WARNING,
+        kind: 'impossible-quantity',
+        headline: `${enormous.length} line(s) ask for ${IMPLAUSIBLE_QUANTITY} or more of one bread`,
+        detail:
+          `Row ${worst.excelRow} asks for ${worst.quantity} \u00d7 ` +
+          `${worst.productName || 'a bread'} for ${worst.customer || 'one stop'}. ` +
+          'The biggest real order runs to a few hundred, so a four-figure line is ' +
+          'usually a decimal point in the wrong place or a formula filled down too ' +
+          'far. It will print as it stands \u2014 check the export first.',
+        rows: enormous.map((row) => row.excelRow),
+      });
+    }
+    if (rounded.length) {
+      const example = rounded[0];
+      findings.push({
+        severity: WARNING,
+        kind: 'impossible-quantity',
+        headline: `${rounded.length} quantity(ies) are not whole breads`,
+        detail:
+          `Row ${example.excelRow} says ${example.quantityExact} and prints as ` +
+          `${example.quantity}. A part of a bread cannot be picked, so the ` +
+          'remainder is dropped rather than rounded up \u2014 check the export.',
+        rows: rounded.map((row) => row.excelRow),
+      });
+    }
+    return findings;
+  }
+
+  /**
    * Two suppliers whose short codes come out the same.
    *
    * The code is what prints against each bread on the line — there is no room
@@ -362,6 +457,7 @@ const Validate = (() => {
       ...ordersThatDisagree(rows),
       ...addressesOnTwoRoutes(rows),
       ...productsThatDisagree(rows),
+      ...impossibleQuantities(rows),
       ...unfamiliarValues(rows, kind),
       ...collidingSupplierCodes(rows),
       ...unsequencedStops(rows),
