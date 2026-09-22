@@ -6,6 +6,17 @@ Runs as a web page (GitHub Pages) or as a Windows desktop app (Tauri 2) — same
 
 **Your data never leaves your PC.** The page is static; there is no server and no network call at runtime.
 
+## Two apps, one Pages site
+
+This repo publishes both halves of the warehouse morning:
+
+- **Car Coordinator** — at the site root. Plans the day: which route, which driver, which car, which packing spot.
+- **[Breadify](docs/breadify/)** — at `/breadify/`. Turns the day's bread or freezer export into the A4 picking lists the drivers pack those same routes from.
+
+They share the routes and nothing else: no data passes between them, and each stores only its own settings in its own browser storage. Car Coordinator stays at the root because its share links and the QR codes on already-printed sheets encode that URL.
+
+Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Breadify), which still ships its own `.exe` and is still the source of truth for the printed page. The port follows that repo's `docs/print-spec.md` and the decision log `D1`–`D25` / `F1`–`F10`; `scripts/breadify.mjs` checks the output against the figures those documents state.
+
 ## Features
 - **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A rail down the left shows the day's drivers and the whole fleet with its status, so you can fill the table in without changing tab.
 - **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
@@ -37,9 +48,13 @@ npm run tauri:dev  # the Windows desktop shell instead; needs the Rust toolchain
 ## Tests
 ```
 npm install
-npm test          # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
-npm run screens   # drives the whole app the way a leader would and writes a screenshot of every tab
+npm test               # both suites
+npm run test:car       # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
+npm run test:breadify  # drives Breadify with both real exports and checks the sheets against the spec's figures
+npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
 ```
+`test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
+
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
 
 ## Build locally (Windows)
@@ -53,7 +68,16 @@ npx tauri build    # release exe
 ```
 
 ## Layout
-- `docs/` : the app (plain HTML/CSS/JS, no framework). GitHub Pages serves this folder.
+- `docs/` : Car Coordinator (plain HTML/CSS/JS, no framework). GitHub Pages serves this folder.
+- `docs/breadify/` : Breadify, same stack and no build step either.
+  - `xlsx.js` : reads the `.xlsx` in the browser — a zip reader over `DecompressionStream`, so there is no dependency to install
+  - `model.js` : the data spine — rows to orders to routes, the natural route sort, crate arithmetic, route totals
+  - `validate.js` : the seven checks from `excel-format.md` §6
+  - `layout.js` : builds a sheet and shares the blocks out between pages
+  - `sheet.css` : the printed A4 page, in millimetres and points
+  - `app.js` / `style.css` / `index.html` : the four-step window
+  - `fonts/` : Archivo, IBM Plex Mono and Space Grotesk, self-hosted so no printer falls back to a face with different metrics (all SIL OFL 1.1; licences beside them)
 - `src-tauri/` : Rust shell, exposes `print_page`
 - `scripts/make_icon.py` : generates the app icon at build time
-- `scripts/smoke.mjs` : the test suite, `scripts/screens.mjs` : the screenshot walkthrough, `scripts/serve.mjs` : the static server both use
+- `scripts/smoke.mjs` and `scripts/breadify.mjs` : the two test suites, `scripts/screens.mjs` : the screenshot walkthrough, `scripts/serve.mjs` : the static server they all use
+- `scripts/fixtures/` : the two anonymised sample exports the Breadify suite runs against

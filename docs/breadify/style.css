@@ -1,0 +1,749 @@
+/* The app window: the screen half of Breadify's design system.
+ *
+ * Dark, violet-tinted, out of src/app/theme.rs. The printed sheet lives in
+ * sheet.css and shares none of this — paper is black on white and always was.
+ */
+
+:root {
+  /* Backgrounds, from the window's ground up. */
+  --page: #0b0910;
+  --void: #07060b;
+  --raised: #0e0c14;
+  --card: #17141f;
+  --chip: #26222f;
+
+  /* Text, loudest to faintest. */
+  --strong: #f2eef8;
+  --body: #cdc6dd;
+  --muted: #8d87a0;
+  --faint: #5f5876;
+
+  /* The accent, and the tints built from it. */
+  --accent: #b48ef7;
+  --accent-hover: #cbb0ff;
+  --accent-press: #8f6fd8;
+  --accent-tint: #191422;
+  --accent-border: #51406f;
+
+  --border: #26222f;
+  --border-strong: #322c42;
+
+  --success: #4fd6a8;
+  --warning: #ffb570;
+  --danger: #f7768e;
+  --info: #7aa2f7;
+
+  /* The two list kinds, as the Check step's banner wears them (F10): bread a
+   * warm crust yellow, freezer an iced light blue. Bright on purpose, so
+   * everything set on them is dark. */
+  --bread: #f2c44d;
+  --freezer: #9ed3f2;
+
+  --radius-badge: 3px;
+  --radius-control: 5px;
+  --radius-card: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--body);
+  font: 400 15px/1.5 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+  padding-bottom: 88px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: Archivo, 'Segoe UI', system-ui, sans-serif;
+  font-weight: 800;
+  color: var(--strong);
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+
+h1 {
+  font-size: 28px;
+}
+h2 {
+  font-size: 19px;
+  margin-top: 28px;
+}
+h3 {
+  font-size: 15px;
+  margin-top: 20px;
+}
+
+code,
+.mono {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.92em;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.error {
+  color: var(--danger);
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--void);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-family: Archivo, sans-serif;
+  font-weight: 900;
+  font-size: 17px;
+  letter-spacing: -0.03em;
+  color: var(--strong);
+}
+
+.steps {
+  display: flex;
+  gap: 4px;
+}
+
+.steps button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.steps button:hover:not(:disabled) {
+  color: var(--body);
+  background: var(--raised);
+}
+
+.steps button[aria-current='step'] {
+  color: var(--strong);
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
+}
+
+.steps button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.steps .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
+.steps button[aria-current='step'] .num {
+  color: var(--accent);
+}
+
+/* The other half of the day. Car Coordinator plans the routes these sheets
+ * are picked for, so the two link to each other rather than being found. */
+.sibling {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.sibling::after {
+  content: ' \2192';
+}
+
+.sibling:hover {
+  color: var(--strong);
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 0;
+}
+
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.pane {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 18px 20px 22px;
+}
+
+.pane h2:first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 820px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+  }
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+
+button {
+  font-family: inherit;
+}
+
+.primary {
+  padding: 9px 18px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #150e22;
+  font: 600 15px/1 'Space Grotesk', sans-serif;
+  cursor: pointer;
+}
+
+.primary:hover {
+  background: var(--accent-hover);
+}
+
+.primary:active {
+  background: var(--accent-press);
+}
+
+.primary:disabled {
+  background: var(--chip);
+  color: var(--faint);
+  cursor: default;
+}
+
+/* ── The mascots ─────────────────────────────────────────────────────────
+ * Two jokes, sitting behind two steps at almost no opacity. They are jokes
+ * and nothing else — no state, no interaction, and nothing under them that a
+ * person needs to read through them.
+ *
+ * The numbers are the desktop app's: how much of the step each is allowed to
+ * cover, how far from invisible it is, and how far up the step it is nudged.
+ * `inset` is half the room the fill leaves over, and the lift is given as a
+ * share of the box rather than the step, so it is divided by the fill.
+ */
+.mascot {
+  position: relative;
+}
+
+.mascot::before {
+  content: '';
+  position: absolute;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.mascot > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── 01 Open ─────────────────────────────────────────────────────────── */
+
+/* The copy sits in the middle of a tall box rather than filling a short one,
+ * because the mascot behind it is square and sized by the box's height: in a
+ * short box the picture shrinks until its caption lands on the copy, which is
+ * the collision the lift below exists to avoid. */
+.drop {
+  min-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 2px dashed var(--border-strong);
+  border-radius: 14px;
+  padding: 56px 32px;
+  text-align: center;
+  background: var(--raised);
+  overflow: hidden;
+}
+
+/* Behind the Open step, and only while nothing has been opened — which is
+ * the one moment in the day when there is, in fact, no bread.
+ *
+ * Higher opacity than the bread guy: this one is a mid-grey photograph on a
+ * near-black panel, and at his 13 % the face disappears and only the caption
+ * survives, which is the half of the joke that needs the other. Centred, the
+ * eyes land squarely behind the heading; up a little puts them in the empty
+ * room above it and the caption below the button. */
+#step-open.empty-handed .drop::before {
+  inset: 4%;
+  transform: translateY(-10.9%);
+  background-image: url('assets/nobread.jpg');
+  opacity: 0.204;
+}
+
+.drop.over {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.drop p {
+  max-width: 54ch;
+  margin: 10px auto;
+}
+
+/* ── 02 Check ────────────────────────────────────────────────────────── */
+
+/* Behind the Check step: a bread roll at a computer in a Matvare Expressen
+ * cap, sweating. The step has a floor under it so he has room to be seen on
+ * a short findings list — the desktop window gives him the whole pane. */
+#step-check {
+  min-height: 60vh;
+}
+
+#step-check::before {
+  inset: 11%;
+  background-image: url('assets/breadmve.jpg');
+  opacity: 0.133;
+}
+
+/* F10: a full-width banner rather than a pill row, worn in the list's own
+ * colour, so the mode is impossible to miss. */
+.mode {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-radius: var(--radius-card);
+  background: var(--bread);
+  color: #1b1405;
+}
+
+.mode[data-kind='freezer'] {
+  background: var(--freezer);
+  color: #061722;
+}
+
+.mode-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.mode-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.mode-buttons button {
+  padding: 5px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: 600 14px/1 'Space Grotesk', sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.mode-buttons button[aria-pressed='true'] {
+  background: #14100b;
+  color: var(--bread);
+  border-color: #14100b;
+}
+
+.mode[data-kind='freezer'] .mode-buttons button[aria-pressed='true'] {
+  background: #071620;
+  color: var(--freezer);
+  border-color: #071620;
+}
+
+.mode-why {
+  margin-left: auto;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.stat {
+  flex: 1 1 130px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+}
+
+.stat b {
+  display: block;
+  font-family: Archivo, sans-serif;
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--strong);
+  letter-spacing: -0.02em;
+}
+
+.stat span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The finding cards are translucent for the bread guy's sake — he sits
+ * behind them and an opaque card would simply delete him. The text on them
+ * is drawn at full strength regardless. */
+.finding {
+  background: rgba(23, 20, 31, 0.55);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-card);
+  padding: 10px 16px;
+}
+
+.finding[data-severity='blocking'] {
+  border-left-color: var(--danger);
+}
+.finding[data-severity='warning'] {
+  border-left-color: var(--warning);
+}
+
+.finding summary {
+  cursor: pointer;
+  color: var(--strong);
+  font-weight: 500;
+}
+
+.finding .tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--info);
+  margin-right: 10px;
+}
+
+.finding[data-severity='blocking'] .tag {
+  color: var(--danger);
+}
+.finding[data-severity='warning'] .tag {
+  color: var(--warning);
+}
+
+.finding p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.finding .rows {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.clean {
+  color: var(--success);
+}
+
+/* ── 03 Configure ────────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.row b {
+  color: var(--strong);
+  font-weight: 600;
+  display: block;
+}
+
+.row em,
+.choices em {
+  display: block;
+  font-style: normal;
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.choices button {
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--body);
+  font: inherit;
+  cursor: pointer;
+}
+
+.choices button b {
+  color: var(--strong);
+}
+
+.choices button[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+}
+
+.capacities {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.capacities label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+input[type='number'] {
+  width: 68px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--void);
+  color: var(--strong);
+  font: 600 15px/1 'IBM Plex Mono', monospace;
+  margin: 0 4px;
+}
+
+.sizes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+}
+
+.size:hover {
+  background: var(--raised);
+}
+
+.size-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 46px;
+  text-align: right;
+}
+
+.size[data-custom='true'] .size-value {
+  color: var(--accent);
+}
+
+.size select {
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-badge);
+  background: var(--void);
+  color: var(--strong);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* ── 04 Print ────────────────────────────────────────────────────────── */
+
+.routes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.route:hover {
+  background: var(--raised);
+}
+
+.route-name {
+  flex: 1;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--strong);
+}
+
+.route-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.notice {
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.notice b {
+  color: var(--strong);
+}
+
+.notice em {
+  font-style: italic;
+  color: var(--body);
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 0 40px;
+}
+
+/* The sheets are laid out at true A4; the preview shows them whole by scaling
+ * the drawing, never by resizing the type — a preview that re-typeset would
+ * stop being a preview. */
+.preview .bf-sheet {
+  flex: none;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Action bar ──────────────────────────────────────────────────────── */
+
+.actionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  height: 64px;
+  padding: 0 24px;
+  background: var(--void);
+  border-top: 1px solid var(--border);
+}
+
+.actionbar button:not(.primary) {
+  padding: 9px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.actionbar button:not(.primary):hover {
+  color: var(--strong);
+}
+
+.blocked {
+  color: var(--danger);
+  font-size: 14px;
+}
+
+#sheets {
+  display: none;
+}
+
+/* ── Printing ────────────────────────────────────────────────────────── */
+
+@media print {
+  /* Only the sheets reach the paper. */
+  body > *:not(#sheets) {
+    display: none !important;
+  }
+
+  body {
+    padding: 0;
+    background: #fff;
+  }
+
+  #sheets {
+    display: block;
+  }
+}

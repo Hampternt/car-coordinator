@@ -7,7 +7,19 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../docs/', import.meta.url));
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  // Breadify self-hosts its faces; a wrong type here makes a browser refuse
+  // them and quietly resize the whole printed page.
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain',
+};
 
 export async function startServer(port = 0) {
   const server = createServer(async (req, res) => {
