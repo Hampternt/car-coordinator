@@ -14,6 +14,10 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '  ok  ' : ' FAIL '} ${name}${detail ? ' — ' + detail : ''}`);
   if (!ok) failures.push(name);
 };
+/* For the checks whose answer is a list: the failure reads better when it
+   prints what it got than when it prints `false`. */
+const same = (name, got, want) =>
+  check(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}`);
 
 // CI and this container ship Chromium at a fixed path; fall back to whatever
 // Playwright manages locally.
@@ -60,7 +64,7 @@ check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');
 await page.fill('#newCar', 'AA11111 BB22222 CC33333');
-await page.click('[data-act="add-car"]');
+await page.click('#tab-cars [data-act="add-car"]');
 check('adds three cars from one box', (await page.locator('#tab-cars tbody tr').count()) === 3);
 
 await page.click('[data-act="tab"][data-tab="plan"]');
@@ -95,7 +99,7 @@ await thirdRow.locator('[data-act="toggle"][data-field="highlight"]').click();  
 await page.click('[data-act="tab"][data-tab="drivers"]');
 check('the roster starts empty', await page.locator('#tab-drivers .empty').first().isVisible());
 await page.fill('#newDriver', 'Roster One, Roster Two');
-await page.click('[data-act="add-driver"]');
+await page.click('#tab-drivers [data-act="add-driver"]');
 check('one box adds several drivers, split on commas not spaces',
   (await page.locator('#tab-drivers tbody tr').count()) === 2
   && (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster One');
@@ -124,7 +128,16 @@ check('the rail matches a name however it was typed',
   (await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText()).includes('Route 2'),
   await page.locator('#tab-plan [data-panel="drivers"] li').first().innerText());
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="toggle"]').click();
-check('marking someone away takes them out of the rail', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+const crew = () => page.locator('#tab-plan [data-panel="drivers"] .rail-count').innerText();
+const inToday = () => page.locator('#tab-plan [data-panel="drivers"] li:not(.away)')
+  .evaluateAll((rows) => rows.map((r) => r.querySelector('.rail-name').value));
+check('marking someone away leaves them on the rail, marked away',
+  (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2
+  && (await page.locator('#tab-plan [data-panel="drivers"] li.away').count()) === 1
+  && (await crew()) === '1 in · 1 away', await crew());
+// The one worth seeing: away, and still written into route 2.
+check('and still shows the route they were written into',
+  (await page.locator('#tab-plan [data-panel="drivers"] li.away .assign').innerText()).includes('Route 2'));
 check('but leaves the route they were written into alone',
   (await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]').inputValue()) === 'roster three ');
 
@@ -144,7 +157,7 @@ await page.locator('#tab-plan tbody tr').nth(1).locator('[data-field="driver"]')
 // today". It says nothing about who drives which route.
 await page.click('[data-act="tab"][data-tab="drivers"]');
 await page.fill('#newDriver', 'Group One, Group Two');
-await page.click('[data-act="add-driver"]');          // roster: Roster One, Group One, Group Two
+await page.click('#tab-drivers [data-act="add-driver"]');          // roster: Roster One, Group One, Group Two
 await page.fill('#newGroup', 'Monday');
 await page.click('[data-act="add-group"]');
 await page.fill('#newGroup', 'Weekend');
@@ -159,19 +172,19 @@ check('a group holds the drivers ticked into it', (await group('Monday').locator
 
 await group('Monday').locator('[data-act="apply-group"]').click();
 await page.click('[data-act="tab"][data-tab="plan"]');
-check('applying a group sets who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
+check('applying a group sets who is in today', (await crew()) === '2 in · 1 away', await crew());
 check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in today, 1 away'),
   await page.locator('#notices .notice').last().innerText());
 
 // The one that matters: applying a second group must take the first group's
 // leftovers out, not simply add its own people in.
 await page.locator('#tab-plan [data-panel="drivers"] [data-act="apply-group"]', { hasText: 'Weekend' }).click();
-const inToday = () => page.locator('#tab-plan [data-panel="drivers"] li').allInnerTexts();
 check('applying another group replaces the crew rather than adding to it',
-  (await inToday()).length === 1 && (await inToday())[0].includes('Group Two'), JSON.stringify(await inToday()));
+  JSON.stringify(await inToday()) === JSON.stringify(['Group Two']), JSON.stringify(await inToday()));
 
 await page.reload({ waitUntil: 'networkidle' });
-check('the applied crew survives a reload', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 1);
+check('the applied crew survives a reload',
+  JSON.stringify(await inToday()) === JSON.stringify(['Group Two']), JSON.stringify(await inToday()));
 await page.click('[data-act="tab"][data-tab="drivers"]');
 check('and so do the groups and their members',
   (await page.locator('#tab-drivers .group').count()) === 2 && (await group('Monday').locator('.chip.on').count()) === 2);
@@ -201,9 +214,11 @@ await page.click('[data-act="tab"][data-tab="plan"]');
 
 // --- the left rail carries the fleet beside the plan ---
 check('the rail lists every car', (await page.locator('#tab-plan [data-panel="cars"] li').count()) === 3);
+const firstCar = page.locator('#tab-plan [data-panel="cars"] li').first();
 check('the rail says where the assigned one went',
-  (await page.locator('#tab-plan [data-panel="cars"] li').first().innerText()).replace(/\s+/g, ' ') === 'AA11111 Route 1',
-  await page.locator('#tab-plan [data-panel="cars"] li').first().innerText());
+  (await firstCar.locator('.rail-name').inputValue()) === 'AA11111'
+  && (await firstCar.locator('.assign').innerText()).trim() === 'Route 1',
+  await firstCar.innerText());
 check('the rail calls the others free', (await page.locator('#tab-plan [data-panel="cars"] .assign.none').count()) === 2);
 check('the pools below the table are gone', (await page.locator('#tab-plan .pool').count()) === 0);
 
@@ -243,7 +258,7 @@ await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 3 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 4 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -1126,6 +1141,109 @@ await page.click('[data-act="tab"][data-tab="data"]');
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(tplJson)) });
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('and importing it brings them in', (await page.locator('#tab-plan .tpl').count()) === 1);
+
+// ── the rail is where the day is assembled ────────────────────────────────
+//
+// It used to sit on the left and only report. On a wide screen the space to
+// the right of the table was empty and adding a name meant leaving the plan,
+// so it moved across, widened, and became editable. Everything here is also
+// doable from the Drivers and Cars tabs; this is the short way round.
+
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
+await page.setViewportSize({ width: 1680, height: 1000 });
+
+const railNames = (panel) =>
+  page.locator(`#tab-plan [data-panel="${panel}"] .rail-name`).evaluateAll((n) => n.map((x) => x.value));
+
+await page.fill('#railDriver', 'Ana Novak, Bo Dahl, Cato Lie');
+await page.click('[data-act="add-driver"][data-from]');
+await page.fill('#railCar', 'SD12345 SE67890');
+await page.click('[data-act="add-car"][data-from]');
+same('the rail adds drivers without leaving the plan', await railNames('drivers'),
+  ['Ana Novak', 'Bo Dahl', 'Cato Lie']);
+same('and the fleet too', await railNames('cars'), ['SD12345', 'SE67890']);
+
+check('the rail sits to the right of the table', await page.evaluate(() => {
+  const rail = document.querySelector('#tab-plan .rail').getBoundingClientRect();
+  const table = document.querySelector('#tab-plan .grid').getBoundingClientRect();
+  return rail.left >= table.right - 1;
+}));
+// A row that is wider than the rail puts its buttons off the edge, where they
+// cannot be pressed. The rail's inner grid column used to do exactly that.
+same('and nothing in it is pushed off the edge', await page.evaluate(() => {
+  const rail = document.querySelector('#tab-plan .rail').getBoundingClientRect();
+  return Array.from(document.querySelectorAll('#tab-plan .rail-row'))
+    .filter((r) => r.scrollWidth > r.clientWidth + 1 || r.getBoundingClientRect().right > rail.right + 1)
+    .map((r) => r.querySelector('.rail-name').value);
+}), []);
+
+// Carrying a name onto the route it drives.
+const carry = async (from, to) => {
+  await from.hover(); await page.mouse.down();
+  await to.hover(); await to.hover(); await page.mouse.up();
+};
+const planRow = (n) => page.locator('#tab-plan tbody tr').nth(n);
+await carry(page.locator('#tab-plan [data-panel="drivers"] li').first().locator('.grip'), planRow(2));
+check('a driver dragged onto a route is written into it',
+  (await planRow(2).locator('[data-field="driver"]').inputValue()) === 'Ana Novak',
+  await planRow(2).locator('[data-field="driver"]').inputValue());
+await carry(page.locator('#tab-plan [data-panel="cars"] li').first().locator('.grip'), planRow(0));
+check('and a car dragged onto one is selected on it',
+  (await planRow(0).locator('[data-field="carId"] option:checked').innerText()).includes('SD12345'),
+  await planRow(0).locator('[data-field="carId"] option:checked').innerText());
+check('the rail then says where that car went',
+  (await page.locator('#tab-plan [data-panel="cars"] li').first().locator('.assign').innerText()).includes('Route 1'));
+
+// Dragging inside the rail reorders the roster itself.
+const orderWas = await railNames('drivers');
+await carry(page.locator('#tab-plan [data-panel="drivers"] li').first().locator('.grip'),
+            page.locator('#tab-plan [data-panel="drivers"] li').nth(2));
+const orderNow = await railNames('drivers');
+check('dragging a driver within the rail reorders the roster',
+  JSON.stringify(orderNow) !== JSON.stringify(orderWas) && orderNow.length === 3
+  && orderNow.slice().sort().join() === orderWas.slice().sort().join(),
+  `${orderWas} -> ${orderNow}`);
+
+// A tag, made and applied without opening the Labels tab.
+await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="tag"]').click();
+check('the tag menu offers the tags that exist', (await page.locator('.tag-menu .tag-choice').count()) === 4);
+await page.fill('#newTagName', 'No fuel card');
+await page.click('[data-act="add-tag"]');
+check('a tag made in the rail is applied to the row it was made on',
+  (await page.locator('#tab-plan [data-panel="cars"] li').first().getAttribute('title')).includes('No fuel card'));
+await page.click('[data-act="tab"][data-tab="labels"]');
+check('and joins the labels every other list uses',
+  (await page.locator('#tab-labels tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)))
+    .includes('No fuel card'));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// Drivers carry a tag of their own now, which they did not before.
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
+await page.locator('.tag-menu .tag-choice', { hasText: 'Workshop' }).click();
+check('a driver can be tagged too',
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+
+await page.reload({ waitUntil: 'networkidle' });
+same('none of it disappears on a reload', await railNames('drivers'), orderNow);
+check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+
+// A template says what is in it, not only what it is called.
+await page.fill('#newTemplate', 'Monday');
+await page.click('[data-act="save-template"]');
+check('a template is closed on the shelf to begin with', (await page.locator('.tpl-body').count()) === 0);
+await page.locator('[data-act="peek-template"]').first().click();
+check('opening one lists the routes it would put on the plan',
+  (await page.locator('.tpl-body tbody tr').count()) === 15);
+check('with the driver and car each route was saved with',
+  (await page.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
+  await page.locator('.tpl-body tbody tr').nth(2).innerText());
+await page.locator('[data-act="peek-template"]').first().click();
+check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
+
+await page.setViewportSize({ width: 1280, height: 900 });
+await page.evaluate(() => localStorage.clear());
+await page.reload({ waitUntil: 'networkidle' });
 
 // --- app notices must not print on the sheet ---
 await page.evaluate(() => {

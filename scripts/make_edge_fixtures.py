@@ -183,3 +183,53 @@ for name, rows in S.items():
     path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-{name}.xlsx')
     write(path, rows)
     print(f'{name:26s} {len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')
+
+# A school kitchen's morning: the biggest order a real route carries. 400 of
+# one bread is a big day and must print without comment; the four-figure line
+# below is a decimal point in the wrong place and must not.
+SB, BH = 'Sandnes Bakeri', 'Bakehuset'
+BIG = [('Rundstykke', 400, SB), ('Grovbrød 750g', 250, SB), ('Kneippbrød', 180, SB),
+       ('Loff Oppskåret', 120, SB), ('Baguette', 96, BH), ('Rugbrød 12biter', 60, BH),
+       ('Horn', 48, BH)]
+busy = [line(5001, 100, '7', 'Storkjøkken Nord', p, q, s, 300 + i, dept='Hovedkjøkken')
+        for i, (p, q, s) in enumerate(BIG)]
+for stop in range(4):
+    for i, (p, q, s) in enumerate([('Rundstykke', 40, SB), ('Grovbrød 750g', 24, SB),
+                                   ('Baguette', 12, BH)]):
+        busy.append(line(5010 + stop, (stop + 2) * 100, '7', f'Kafé {stop + 1:02d}', p, q, s, 300 + i))
+
+for name, rows in [('busy-real-day', busy),
+                   ('four-figure-line', [line(1, 100, '7', 'Storkjøkken Nord', 'Rundstykke',
+                                              4000, SB, 300)])]:
+    path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-{name}.xlsx')
+    write(path, rows)
+    print(f'{name:26s} {len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')
+
+
+# ── More bakeries than the page was drawn for ──────────────────────────────
+#
+# The bread total was designed around two. Three or four is the change the
+# warehouse might actually make one day, so these are real-shaped: plausible
+# Norwegian bakery names, plausible breads, and enough stops to give the
+# total something to add up.
+
+BAKERS = [
+    ('Sandnes Bakeri', [('Rundstykke', 60), ('Grovbrød 750g', 48),
+                        ('Kneippbrød', 36), ('Loff Oppskåret', 24)]),
+    ('Bakehuset', [('Baguette', 40), ('Rugbrød 12biter', 30), ('Horn', 18)]),
+    ('Jæren Bakeri', [('Speltbrød 500g', 28), ('Solsikkebrød', 22), ('Byggbrød', 14)]),
+    ('Stavanger Steinovnsbakeri', [('Surdeigsbrød 1kg', 20), ('Focaccia', 16)]),
+    ('Ålgård Konditori', [('Skolebolle', 26), ('Wienerbrød', 12)]),
+]
+
+for many in (3, 4, 5):
+    rows = []
+    for stop in range(3):
+        for supplier, breads in BAKERS[:many]:
+            for product, quantity in breads:
+                rows.append(line(6000 + stop, (stop + 1) * 100, '3', f'Kafé {stop + 1:02d}',
+                                 product, max(4, quantity // (stop + 2)), supplier,
+                                 400 + abs(hash((supplier, product))) % 900))
+    path = os.path.join(OUT, f'PSR-BREAD-2026-03-04-to-2026-03-04-bakeries-{many}.xlsx')
+    write(path, rows)
+    print(f'bakeries-{many}{"":18s}{len(rows):6d} rows  {os.path.getsize(path)//1024:6d} KB')

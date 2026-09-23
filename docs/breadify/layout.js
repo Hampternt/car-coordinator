@@ -26,6 +26,18 @@ const Sheet = (() => {
   /** The gap every page keeps between its last content and the footer. */
   const FOOTER_CLEARANCE = 10;
 
+  /* The key is a convenience, and the page furniture is repeated on every
+     sheet, so it must never grow to the point where there is no sheet left to
+     put anything on. 24 mm is enough to spell out a dozen bakeries over two
+     lines, which is the most a real route draws from; past that the key gives
+     up the names, then the codes, rather than the page. */
+  const LEGEND_MAX_HEIGHT = 24;
+
+  /* Below this there is no honest way to lay a route out: a stop block alone
+     is taller. Reaching it means the furniture has eaten the page, and the
+     answer is a short sheet rather than hundreds of near-empty ones. */
+  const MIN_BODY_HEIGHT = 40;
+
   /** Crate glyph geometry, for working out whether a run will fit. */
   const CRATE_WIDTH = 7.1;
   const CRATE_GAP = 1.1;
@@ -451,6 +463,23 @@ const Sheet = (() => {
     return { columns };
   }
 
+  /**
+   * How many bakery columns go on a row.
+   *
+   * The page was drawn for two, and two is still what two bakeries get: half
+   * the measure each. Beyond that the rule is never more than three to a row,
+   * and the rows balanced — so four prints as two and two rather than three
+   * and a lone one stretched across the whole page, and five prints as three
+   * and two at the same width rather than three narrow and two wide.
+   *
+   * One bakery keeps two columns' worth of measure, because a single column
+   * set across 194 mm is a paragraph, not a list.
+   */
+  function columnsPerRow(count) {
+    if (count <= 1) return 2;
+    return Math.ceil(count / Math.ceil(count / 3));
+  }
+
   /** `Route 8 total`, or `Route 8 total · part 2 of 3`. */
   function totalTitle(route, part, parts) {
     const title = element('div', 'bf-total-title', `Route ${route.nickname} total`);
@@ -496,6 +525,7 @@ const Sheet = (() => {
     }
 
     const grid = element('div', 'bf-total-grid');
+    grid.style.setProperty('--cols', columnsPerRow(total.columns.length));
     for (const column of total.columns) {
       const holder = element('div', 'bf-total-col');
       const head = element('div', 'bf-total-head');
@@ -513,9 +543,6 @@ const Sheet = (() => {
       for (const line of column.lines) holder.appendChild(totalRow(line, true));
       grid.appendChild(holder);
     }
-    // A single-bakery route would otherwise stretch its one column across the
-    // whole page; the grid keeps two columns' worth of measure either way.
-    if (total.columns.length === 1) grid.appendChild(element('div', 'bf-total-col'));
     section.appendChild(grid);
     return section;
   }
@@ -544,6 +571,7 @@ const Sheet = (() => {
 
     const half = Math.ceil(lines.length / 2);
     const grid = element('div', 'bf-total-grid');
+    grid.style.setProperty('--cols', 2);
     for (const part of [lines.slice(0, half), lines.slice(half)]) {
       const holder = element('div', 'bf-total-col');
       for (const line of part) holder.appendChild(totalRow(line, false));
@@ -719,11 +747,27 @@ const Sheet = (() => {
     const suppliers = element('div', 'bf-legend-suppliers');
     band.appendChild(suppliers);
 
-    const spelled = supplierKey(route, settings, true);
-    suppliers.innerHTML = spelled;
-    // When the spelled-out names will not fit what the left of the band has
-    // left over, the codes stand alone.
-    if (measure.overflows(band)) suppliers.innerHTML = supplierKey(route, settings, false);
+    // Spelled out if it fits, codes alone if not — and if even the codes will
+    // not fit three lines, as many as will and a count of the rest.
+    //
+    // Measured by height as well as width. The band used to be `nowrap`, so
+    // too much in it ran off the end and `overflows` caught it; now that it
+    // wraps, too much in it grows downwards instead, and an unchecked key on
+    // every sheet is furniture that can starve the page it sits on.
+    const tooTall = () => measure.height(band) > LEGEND_MAX_HEIGHT;
+    suppliers.innerHTML = supplierKey(route, settings, true);
+    if (measure.overflows(band) || tooTall()) {
+      suppliers.innerHTML = supplierKey(route, settings, false);
+    }
+    if (tooTall()) {
+      const all = supplierKey(route, settings, false).split(' · ');
+      let keep = all.length;
+      while (keep > 1) {
+        keep = Math.floor(keep / 2);
+        suppliers.innerHTML = `${all.slice(0, keep).join(' · ')} · +${all.length - keep} more`;
+        if (!tooTall()) break;
+      }
+    }
     return band;
   }
 
@@ -871,8 +915,15 @@ const Sheet = (() => {
         measure.height(footer(route, tallest)),
       );
       const bodyMargin = 1.5;
-      const limit =
-        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+      // Floored, because furniture that has eaten the page must not turn into
+      // one sheet per piece: 250 bakeries on a route produced 500 near-empty
+      // pages, each still spilling, and said nothing about it. A floor makes
+      // the last sheet overfull instead — visibly wrong on one page rather
+      // than invisibly wrong across hundreds.
+      const limit = Math.max(
+        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE,
+        MIN_BODY_HEIGHT,
+      );
 
       // Every piece the route puts on paper, in order: its stops, the flag
       // above the unsequenced ones, and the total that closes it. The limit is

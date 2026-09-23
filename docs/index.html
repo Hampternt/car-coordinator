@@ -19,6 +19,10 @@
 <body>
   <header class="topbar">
     <div class="brand">Car Coordinator</div>
+    <!-- The other half of the day. These routes are the ones Breadify prints
+         picking lists for, so the two apps swap to each other from the same
+         place in the bar: beside the name of the one you are in. -->
+    <a class="sibling" href="breadify/" title="Turn the bread or freezer export into printed picking lists">Breadify</a>
     <nav class="tabs">
       <button data-act="tab" data-tab="plan">Day plan</button>
       <button data-act="tab" data-tab="drivers">Drivers</button>
@@ -28,9 +32,6 @@
       <button data-act="tab" data-tab="data">Data</button>
       <button data-act="tab" data-tab="preview">Print preview</button>
     </nav>
-    <!-- The other half of the day. These routes are the ones Breadify prints
-         picking lists for, so the two apps link to each other. -->
-    <a class="sibling" href="breadify/" title="Turn the bread or freezer export into printed picking lists">Breadify</a>
     <button class="primary" data-act="print">Print / save PDF</button>
   </header>
 

@@ -228,18 +228,22 @@
 
 /* ── Legend strip ────────────────────────────────────────────────────── */
 
+/* `nowrap` on the band meant the supplier key could only ever run off the
+ * right-hand end: with twelve bakeries it printed "… WJ · WK · W" and the
+ * rest was simply gone, which is the one thing a key must not do. The band
+ * wraps to a second line instead; each group inside it still holds together. */
 .bf-legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4mm;
+  gap: 1.5mm 4mm;
   margin-top: 1.5mm;
   padding: 0.9mm 1.3mm;
   background: var(--legend-band);
   border-top: 0.5pt solid var(--rule-foot);
   border-bottom: 0.5pt solid var(--rule-foot);
-  font: 400 8pt/1 'IBM Plex Mono', monospace;
+  font: 400 8pt/1.35 'IBM Plex Mono', monospace;
   color: var(--ink-quiet);
-  white-space: nowrap;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -266,6 +270,7 @@
 
 .bf-legend-suppliers {
   margin-left: auto;
+  min-width: 0;
 }
 
 .bf-legend-suppliers b {
@@ -524,9 +529,16 @@
   print-color-adjust: exact;
 }
 
+/* A fixed `width` was a promise the export does not keep. 10.1 mm holds the
+ * three digits a bread order actually has, and a bigger number used to be set
+ * straight through the product name beside it — "2147483648" and "Rundstykke"
+ * printing on top of one another. `min-width` keeps the column the same for
+ * every ordinary line and lets an extraordinary one push the name along
+ * instead of over it. */
 .bf-qty {
   flex: none;
-  width: 10.1mm;
+  min-width: 10.1mm;
+  padding-right: 1mm;
   text-align: right;
   font: 600 13.1pt/1 'IBM Plex Mono', monospace;
 }
@@ -535,10 +547,14 @@
  * what paid for the 11 pt body (D4). */
 /* Wide enough for the codes supplierCode() can now produce, and no wider:
  * a code that outgrew this slot used to print on top of the product name. */
+/* Wide enough for the codes supplierCode() produces, and no wider. `min-width`
+ * rather than `width` for the same reason as .bf-qty: a three-letter code on a
+ * derived supplier lines up with the two-letter house ones, and nothing is
+ * clipped or overprinted if one is wider still. */
 .bf-code {
   flex: none;
-  width: 8mm;
-  overflow: hidden;
+  min-width: 8mm;
+  padding-right: 1mm;
   white-space: nowrap;
   font: 700 10.7pt/1 'IBM Plex Mono', monospace;
   letter-spacing: 0.02em;
@@ -633,27 +649,35 @@
 /* One column per bakery, and the export decides how many bakeries there are.
  * Two share the measure comfortably; twelve used to be squeezed to 8.5 mm
  * each, where a product name wrapped one letter to a line and stood 70 mm
- * tall. Wrapping the grid keeps every column readable and costs rows of the
- * total instead — which the paginator can carry, where unreadable cannot. */
+ * tall.
+ *
+ * A grid rather than a wrapping flex row, because flex stretches whatever is
+ * on the last row to fill it: four bakeries came out as three at 59 mm and a
+ * fourth at 194 mm, and five as three narrow and two wide. Every column is a
+ * track of the same width now, and a short last row simply ends early.
+ * layout.js sets --cols; see columnsPerRow(). */
 .bf-total-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
   gap: 4.2mm 8.4mm;
   margin-top: 1.6mm;
-  align-items: flex-start;
+  align-items: start;
 }
 
-/* 42 mm is the narrowest a column stays readable at 9.2 pt; four fit the
- * 194 mm measure, and the fifth bakery starts a second row. */
 .bf-total-col {
-  flex: 1 1 42mm;
-  min-width: 42mm;
+  min-width: 0;
 }
 
+/* The export decides how many bakeries there are, so this heading has to hold
+ * a code, a name and a subtotal in whatever width is left. Unwrapped it did
+ * not: at four columns to a row "SB Sandnes Bakeri 1 type · 24 units" ran
+ * straight through the next column's heading and the two printed on top of
+ * each other. Wrapping drops the subtotal to its own line instead. */
 .bf-total-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 1.5mm;
+  gap: 0 1.5mm;
   padding-bottom: 0.5mm;
   border-bottom: 1.25pt solid var(--ink);
 }
@@ -664,8 +688,10 @@
 }
 
 .bf-total-name {
-  font: 800 10.4pt/1 Archivo, sans-serif;
+  min-width: 0;
+  font: 800 10.4pt/1.15 Archivo, sans-serif;
   letter-spacing: -0.02em;
+  overflow-wrap: break-word;
 }
 
 .bf-total-subtotal {
@@ -683,9 +709,10 @@
   border-bottom: 0.4pt solid var(--rule-line);
 }
 
+/* Same as .bf-qty above: a slot, not a cage. */
 .bf-total-qty {
   flex: none;
-  width: 8.4mm;
+  min-width: 8.4mm;
   text-align: right;
   font: 600 11pt/1.15 'IBM Plex Mono', monospace;
 }
@@ -693,12 +720,15 @@
 /* D23: the names wrap inside their column. Before that they were set from
  * the left edge with nothing bounding the right, and the longest freezer name
  * ran to 214 mm on a 210 mm page. */
+/* `anywhere` broke "Sandnes" into "Sandn" and "es". `break-word` wraps
+ * between words first and only splits one that could not fit a line by
+ * itself, which is how a person would have set it. */
 .bf-total-product {
   flex: 1;
   min-width: 0;
   font: 400 9.2pt/1.2 'Space Grotesk', sans-serif;
   color: var(--ink-soft);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 /* One dot per full ten *inside a single order* — how many trays can be

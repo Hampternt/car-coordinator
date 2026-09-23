@@ -86,6 +86,10 @@ function labelChips(kind, item) {
   ).join('');
 }
 
+/* Everything a driver is, minted in one place so the rail, the tab and an
+   applied group cannot drift apart on what a new one starts as. */
+const newDriver = (name) => ({ id: uid(), name, available: true, labelId: '', note: '' });
+
 /* ---------- the clash rule ----------
    Two routes can share a packing spot as long as they are packed in different
    rounds: the first car has gone by the time the second one arrives. So a
@@ -282,10 +286,67 @@ const liveSig = () => {
   return `${lines.join('|')}#${[...rows].sort().join(',')}#${atWheel}`;
 };
 
-/* ---------- the day plan's left rail ----------
-   The fleet as it stands, beside the plan being made: which car is out on
-   which route, which one is marked up. All of it is on the Cars tab too —
-   this is the version you can read without leaving the plan you are typing. */
+/* ---------- the day plan's working rail ----------
+   The roster and the fleet, beside the plan being made, and editable there.
+
+   It used to sit on the left and only report; on a wide screen the space to
+   the right of the table was empty and the leader had to leave the plan to
+   add a name. So it moved across, widened, and became the place the day is
+   actually assembled: add, rename, tag, and drag a name or a registration
+   straight onto the route it is driving.
+
+   The Drivers and Cars tabs are still the full editors — notes, day groups,
+   reordering by button, who is away. This is the short way round for the
+   things done while the plan is open, and nothing here is the only way to
+   do anything. */
+
+/* Which item is being dragged, and what it is over. Kept out of `state`
+   because it is a gesture, not data: it must never reach a save or a share
+   code. */
+let dragging = null;
+/* The tag menu, when one is open: { kind, id }. One at a time. */
+let tagFor = null;
+
+const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
+
+/* The tag menu: every label, the way off, and a box to make a new one.
+   Rendered inside the row it belongs to so it cannot drift away from it. */
+function tagMenu(kind, item) {
+  const choice = (id, name, color, on) =>
+    `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
+      <span class="dot" style="--c:${esc(color)}"></span>${esc(name)}</button>`;
+  return `<div class="tag-menu">
+    ${choice('', 'No tag', '#2e7d32', !item.labelId)}
+    ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+    <div class="tag-new">
+      <input id="newTagName" type="text" placeholder="New tag…" aria-label="Name for a new tag">
+      <input id="newTagColor" type="color" value="#1565c0" aria-label="Colour for the new tag">
+      <button class="btn" data-act="add-tag" data-kind="${kind}" data-id="${esc(item.id)}">Add</button>
+    </div>
+  </div>`;
+}
+
+/* One row of the rail: grip, status dot, the name as an editable box, where
+   it is today, and the two buttons that act on it. */
+function railRow(kind, item, label, where, extra = '', cls = '') {
+  const lab = byId(state.labels, item.labelId);
+  const field = kind === 'car' ? 'reg' : 'name';
+  const title = [item[field], lab && labelName(lab), item.note].filter(Boolean).join(' · ');
+  return `<li class="rail-row ${cls} ${armed === `del:${item.id}` ? 'arming' : ''}" draggable="true"
+      data-drag="${kind}" data-id="${esc(item.id)}" title="${esc(title)}">
+    <span class="grip" aria-hidden="true">⠿</span>
+    <span class="dot" style="--c:${esc(lab ? colour(lab.color) : '#2e7d32')}" title="${esc(lab ? labelName(lab) : 'No tag')}"></span>
+    <input class="rail-name" type="text" data-kind="${kind}" data-id="${esc(item.id)}" data-field="${field}"
+      value="${esc(item[field])}" aria-label="${label}">
+    ${where}
+    ${extra}
+    <button class="btn tag-btn ${tagOpenFor(kind, item.id) ? 'on' : ''}" data-act="tag" data-kind="${kind}" data-id="${esc(item.id)}"
+      title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}">🏷</button>
+    ${actBtn('del', kind, item.id, armed === `del:${item.id}` ? 'Sure?' : '✕', armed === `del:${item.id}` ? 'armed' : '', `title="Remove ${esc(item[field])}"`)}
+    ${tagOpenFor(kind, item.id) ? tagMenu(kind, item) : ''}
+  </li>`;
+}
+
 function railCars(use) {
   const rows = state.cars.map((c) => {
     const lab = byId(state.labels, c.labelId);
@@ -295,16 +356,19 @@ function railCars(use) {
     const where = on
       ? `<span class="assign yes">Route ${routeNames(on)}</span>`
       : `<span class="assign ${lab ? 'down' : 'none'}">${lab ? esc(labelName(lab)) : 'Free'}</span>`;
-    const full = [c.reg, lab && labelName(lab), c.note].filter(Boolean).join(' · ');
-    return `<li title="${esc(full)}"><span class="dot" style="--c:${esc(lab ? colour(lab.color) : '#2e7d32')}"></span><b>${esc(c.reg)}</b>${where}</li>`;
+    return railRow('car', c, 'Registration', where);
   }).join('');
   const out = state.cars.filter((c) => use.cars[c.id]).length;
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
   return `<section class="rail-panel" data-panel="cars">
     <h3>Cars <span class="rail-count">${out} out · ${free} free</span></h3>
+    <div class="rail-add">
+      <input id="railCar" type="text" placeholder="Registration(s)" aria-label="Add a registration">
+      <button class="btn" data-act="add-car" data-from="#railCar" title="Add to the fleet">+</button>
+    </div>
     ${state.cars.length
-      ? `<ul class="rail-list">${rows}</ul>`
-      : '<p class="rail-empty">No cars yet — add them on the Cars tab.</p>'}
+      ? `<ul class="rail-list" data-drop="car">${rows}</ul>`
+      : '<p class="rail-empty">No cars yet. Type a registration above — or paste the whole fleet at once, separated by spaces.</p>'}
   </section>`;
 }
 
@@ -322,15 +386,25 @@ function driverUsage() {
 
 /* Who is in today, and what they have been given. Availability is the day's,
    so it is what the rail shows; the roster itself lives on the Drivers tab. */
+/* The whole roster, not only who is in: the panel is where a driver is added
+   and tagged, and someone who is away has to be reachable to be brought back.
+   The away ones are dimmed and sorted under the ones who are in, so the day's
+   crew still reads first. */
 function railDrivers() {
   const assigned = driverUsage();
   const inToday = state.drivers.filter((d) => d.available);
-  const rows = inToday.map((d) => {
+  const ordered = [...state.drivers].sort((a, b) => Number(b.available) - Number(a.available));
+  const rows = ordered.map((d) => {
     const on = assigned[fold(d.name)];
     const where = on
       ? `<span class="assign yes">Route ${routeNames(on)}</span>`
-      : '<span class="assign none">Free</span>';
-    return `<li><b>${esc(d.name)}</b>${where}${actBtn('toggle', 'driver', d.id, '\u2715', '', 'data-field="available" title="Not in today"')}</li>`;
+      : `<span class="assign ${d.available ? 'none' : 'away'}">${d.available ? 'Free' : 'Away'}</span>`;
+    const inOut = actBtn('toggle', 'driver', d.id, d.available ? '\u2713' : '\u21ba', d.available ? 'on' : '',
+      `data-field="available" title="${d.available ? 'In today \u2014 click to set away' : 'Away \u2014 click to bring back in'}"`);
+    // Someone marked away who is still written into a route keeps the route
+    // badge — that is the fact worth seeing, and the one most likely to be a
+    // mistake — so the row itself carries the away state, not the badge.
+    return railRow('driver', d, 'Driver name', where, inOut, d.available ? '' : 'away');
   }).join('');
   const away = state.drivers.length - inToday.length;
   // Monday morning is one click: the groups are here, where the day is set up.
@@ -339,9 +413,13 @@ function railDrivers() {
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
     ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
+    <div class="rail-add">
+      <input id="railDriver" type="text" placeholder="Name(s), comma separated" aria-label="Add a driver">
+      <button class="btn" data-act="add-driver" data-from="#railDriver" title="Add to the roster">+</button>
+    </div>
     ${state.drivers.length
-      ? (inToday.length ? `<ul class="rail-list">${rows}</ul>` : '<p class="rail-empty">Nobody is in today. Bring someone back on the Drivers tab.</p>')
-      : '<p class="rail-empty">No drivers yet \u2014 add them on the Drivers tab.</p>'}
+      ? `<ul class="rail-list" data-drop="driver">${rows}</ul>`
+      : '<p class="rail-empty">Nobody on the roster yet. Add the names you plan with — they become suggestions in the table, and you can drag them onto a route.</p>'}
   </section>`;
 }
 
@@ -373,7 +451,7 @@ function renderPlan() {
       return `<option value="${esc(p.id)}" ${sel ? 'selected' : ''}>${esc(p.name + (bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : ''))}</option>`;
     }).join('');
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');
-    return `<tr class="${cls}">
+    return `<tr class="${cls}" data-route="${esc(r.id)}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
       <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-" list="driverNames"')}</td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
@@ -405,11 +483,13 @@ function renderPlan() {
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
     <div class="plan">
-      <aside class="rail">${railDrivers()}${railCars(use)}</aside>
       <table class="grid">
         <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      <aside class="rail">${railDrivers()}${railCars(use)}
+        <p class="rail-saved">Every change here is saved as you make it.</p>
+      </aside>
     </div>
     ${renderTemplates()}`;
 }
@@ -418,15 +498,46 @@ function renderPlan() {
    The plan that gets made again: Monday's routes, the weekend's. A template is
    the route list as it stands minus the date, kept on this PC — it travels
    between the two managers in the exported JSON file, never in a share code. */
+/* Which template is showing its contents. A name and a route count say what a
+   template is called; they do not say what is in it, and "load the Monday one"
+   is a question about the second. Opened one at a time, and closed by default,
+   because the shelf is a shelf. */
+let tplOpen = null;
+
+/* What a template would put on the plan, as the plan reads it: the route, who
+   drove it, what they drove, where it was packed. */
+function templateContents(t) {
+  const rows = t.routes.map((r) => {
+    const car = byId(state.cars, r.carId)?.reg;
+    const pos = byId(state.positions, r.positionId)?.name;
+    const spot = [pos, String(r.round || '').trim()].filter(Boolean).join('/');
+    return `<tr class="${r.highlight ? 'hl' : ''}">
+      <td class="rn">${dash(r.name)}</td><td>${dash(r.driver)}</td>
+      <td>${dash(car)}</td><td>${dash(spot)}</td></tr>`;
+  }).join('');
+  const gone = t.routes.filter((r) => (r.carId && !byId(state.cars, r.carId))
+    || (r.positionId && !byId(state.positions, r.positionId))).length;
+  return `<div class="tpl-body">
+    <table class="tpl-table">
+      <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Packing</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${gone ? `<p class="hint" style="margin:6px 0 0">${gone} route${gone === 1 ? '' : 's'} point at a car or a spot that is no longer on this PC — they load blank.</p>` : ''}
+  </div>`;
+}
+
 function renderTemplates() {
-  const shelf = state.templates.map((t) => `<div class="tpl">
+  const shelf = state.templates.map((t) => `<div class="tpl ${tplOpen === t.id ? 'open' : ''}">
+      <div class="tpl-head">
       ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
-      <span class="rail-count">${t.routes.length} route${t.routes.length === 1 ? '' : 's'}</span>
+      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}
       <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the app is opened on that day">
         <option value="">Never offer it</option>
         ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
       </select>
       ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
+      </div>
+      ${tplOpen === t.id ? templateContents(t) : ''}
     </div>`).join('');
   return `<section class="templates">
     <h3>Day templates</h3>
@@ -1136,6 +1247,13 @@ function applyImport(text, source) {
 
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]');
+  // A menu that only closes by pressing its own button is a menu you have to
+  // remember to shut. Any click that is not in it, or on the button that
+  // opened it, is an answer of "not that one".
+  if (tagFor && !e.target.closest('.tag-menu') && !e.target.closest('[data-act="tag"]')) {
+    tagFor = null;
+    if (!b) { render(); return; }
+  }
   if (!b) return;
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
@@ -1155,6 +1273,26 @@ document.addEventListener('click', (e) => {
     case 'down': if (i >= 0 && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]]; break;
     case 'toggle': list[i][b.dataset.field] = !list[i][b.dataset.field]; break;
     case 'setLabel': list[i].labelId = b.dataset.label; break;
+    // The rail's quick tag: the same labelId the Cars and Positions tabs set
+    // with their chips, reached without leaving the plan.
+    case 'tag':
+      tagFor = tagOpenFor(kind, id) ? null : { kind, id };
+      render();
+      return;
+    case 'set-tag':
+      list[i].labelId = b.dataset.label;
+      tagFor = null;
+      break;
+    case 'add-tag': {
+      const name = $('#newTagName').value.trim();
+      if (!name) { $('#newTagName').focus(); return; }
+      const label = { id: uid(), name, color: $('#newTagColor').value };
+      state.labels.push(label);
+      list[i].labelId = label.id;
+      tagFor = null;
+      note('info', `Tagged ${list[i].reg || list[i].name} ${name}. The tag is on the Labels tab now, for everything else.`);
+      break;
+    }
     case 'del':
       if (!confirmTwice(`del:${id}`)) return;
       // The backup list shows this label as written, so say it the way it
@@ -1187,7 +1325,7 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'add-car':
-      if (!addFromInput('#newCar', (v) => v.toUpperCase().split(/[\s,;]+/).filter(Boolean).forEach((reg) => {
+      if (!addFromInput(b.dataset.from || '#newCar', (v) => v.toUpperCase().split(/[\s,;]+/).filter(Boolean).forEach((reg) => {
         // Folded, like every other match in the app: a reg that came in from
         // a share code or an imported file in lower case is the same car, and
         // adding it again would put one lorry on the fleet twice.
@@ -1197,8 +1335,10 @@ document.addEventListener('click', (e) => {
     case 'add-driver':
       // Commas and newlines only: a driver's name has spaces in it, unlike a
       // registration, so splitting on whitespace would make two of everyone.
-      if (!addFromInput('#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
-        if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push({ id: uid(), name, available: true });
+      if (!addFromInput(b.dataset.from || '#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
+        if (!state.drivers.some((d) => fold(d.name) === fold(name))) {
+          state.drivers.push({ id: uid(), name, available: true, labelId: '', note: '' });
+        }
       }))) return;
       break;
     case 'add-group':
@@ -1213,6 +1353,10 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
+    case 'peek-template':
+      tplOpen = tplOpen === id ? null : id;
+      render();
+      return;
     case 'load-template': {
       const t = list[i];
       Store.snapshot(state, `Loading the ${t.name} template`);
@@ -1270,6 +1414,97 @@ document.addEventListener('click', (e) => {
   render();
 });
 
+/* ---------- dragging a name onto a route ----------
+   The roster and the fleet are lists of things that end up in the table, so
+   the shortest way to put one there is to carry it across. Everything here is
+   also doable by typing or picking, and a drop only ever sets the same field
+   the select and the text box set — a clash still warns rather than refusing,
+   because a leader sometimes means it.
+
+   Kept off `state`: what is being dragged is a gesture, and a gesture must
+   never reach a save or a share code. */
+
+const dragKindFits = (over) =>
+  dragging && (dragging.kind === 'driver' || dragging.kind === 'car') && over;
+
+function clearDropMarks() {
+  document.querySelectorAll('.drop-into, .drop-before, .drop-after')
+    .forEach((n) => n.classList.remove('drop-into', 'drop-before', 'drop-after'));
+}
+
+document.addEventListener('dragstart', (e) => {
+  const row = e.target.closest('[data-drag]');
+  if (!row) return;
+  dragging = { kind: row.dataset.drag, id: row.dataset.id };
+  row.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  // Firefox refuses to start a drag without something on the transfer, and a
+  // plain-text fallback is what a drop outside the app would paste.
+  const item = byId(listFor(dragging.kind) || [], dragging.id);
+  e.dataTransfer.setData('text/plain', item ? item.reg || item.name : '');
+});
+
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.dragging').forEach((n) => n.classList.remove('dragging'));
+  clearDropMarks();
+  dragging = null;
+});
+
+document.addEventListener('dragover', (e) => {
+  if (!dragging) return;
+  const route = e.target.closest('tr[data-route]');
+  const sibling = e.target.closest(`[data-drag="${dragging.kind}"]`);
+  if (!route && !sibling) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  clearDropMarks();
+  if (route) { route.classList.add('drop-into'); return; }
+  // Above or below, by which half of the row the pointer is in.
+  const box = sibling.getBoundingClientRect();
+  sibling.classList.add(e.clientY < box.top + box.height / 2 ? 'drop-before' : 'drop-after');
+});
+
+document.addEventListener('dragleave', (e) => {
+  if (e.target.closest && e.target.closest('.drop-into, .drop-before, .drop-after') === e.target) {
+    e.target.classList.remove('drop-into', 'drop-before', 'drop-after');
+  }
+});
+
+document.addEventListener('drop', (e) => {
+  if (!dragging) return;
+  const route = e.target.closest('tr[data-route]');
+  const sibling = e.target.closest(`[data-drag="${dragging.kind}"]`);
+  if (!route && !sibling) return;
+  e.preventDefault();
+
+  const list = listFor(dragging.kind) || [];
+  const item = byId(list, dragging.id);
+  const carried = dragging;
+  clearDropMarks();
+  dragging = null;
+  if (!item) { render(); return; }
+
+  if (route) {
+    const r = byId(state.routes, route.dataset.route);
+    if (!r) { render(); return; }
+    // A driver is free text on the route and always has been — the drop
+    // writes the name, exactly as typing it would. A car is a reference.
+    if (carried.kind === 'driver') r.driver = item.name;
+    else r.carId = item.id;
+  } else if (sibling.dataset.id !== carried.id) {
+    const from = list.findIndex((x) => x.id === carried.id);
+    const onto = list.findIndex((x) => x.id === sibling.dataset.id);
+    if (from < 0 || onto < 0) { render(); return; }
+    const after = sibling.classList.contains('drop-after')
+      || e.clientY >= sibling.getBoundingClientRect().top + sibling.getBoundingClientRect().height / 2;
+    const [moved] = list.splice(from, 1);
+    const at = list.findIndex((x) => x.id === sibling.dataset.id);
+    list.splice(after ? at + 1 : at, 0, moved);
+  }
+  save();
+  render();
+});
+
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
@@ -1285,13 +1520,17 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  // The rail's own boxes press their own buttons, not the tabs' — they add to
+  // the same lists, but from a different box.
+  const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];
+  if (here) { document.querySelector(here)?.click(); return; }
   const act = map[e.target.id];
   if (act) document.querySelector(`[data-act="${act}"]`)?.click();
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'group-member', 'apply-group']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'tag', 'set-tag', 'add-tag']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 async function start() {

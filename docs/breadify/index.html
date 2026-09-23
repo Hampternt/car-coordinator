@@ -13,13 +13,15 @@
 
 <header class="topbar">
   <div class="brand">Breadify</div>
+  <!-- The other half of the day, swapped to from the same place in the bar as
+       Car Coordinator swaps back: beside the name of the one you are in. -->
+  <a class="sibling" href="../" title="The other half of the day: routes, drivers and cars">Car Coordinator</a>
   <nav class="steps" id="steps">
     <button type="button" data-step="open"><span class="num">01</span> Open</button>
     <button type="button" data-step="check"><span class="num">02</span> Check</button>
     <button type="button" data-step="configure"><span class="num">03</span> Configure</button>
     <button type="button" data-step="print"><span class="num">04</span> Print</button>
   </nav>
-  <a class="sibling" href="../" title="The other half of the day: routes, drivers and cars">Car Coordinator</a>
 </header>
 
 <main>
@@ -148,6 +150,17 @@
     <p class="hint">This is exactly what gets printed, at actual size.</p>
     <div class="preview" id="preview"></div>
   </section>
+
+  <!-- The Rust binary answers `breadify licences`; this is the same answer.
+       The three faces are SIL OFL 1.1 and their licence texts ship beside
+       them, so the page that uses them says where they are. -->
+  <footer class="colophon">
+    Set in Archivo, Space Grotesk and IBM Plex Mono — all
+    <a href="fonts/Archivo-OFL.txt">SIL Open Font License 1.1</a>
+    (<a href="fonts/SpaceGrotesk-OFL.txt">Space Grotesk</a>,
+    <a href="fonts/IBMPlexMono-OFL.txt">IBM Plex Mono</a>).
+    Self-hosted: this page makes no network call once it has loaded.
+  </footer>
 
 </main>
 

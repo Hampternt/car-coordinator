@@ -496,19 +496,31 @@ check(
 // scripts/make_edge_fixtures.py regenerates them.
 
 const EDGE = [
-  ['suppliers-12', 'twelve bakeries on one route'],
-  ['supplier-code-collision', 'two bakeries deriving the same code'],
-  ['one-giant-stop', 'one order with 300 product lines'],
-  ['200-stops', 'two hundred stops on one route'],
-  ['long-customer', 'a customer name 200 characters long'],
-  ['long-department', 'a department spelled out in full'],
-  ['long-route-name', 'a route nicknamed in a sentence'],
-  ['long-supplier', 'a bakery with nine words in its name'],
+  ['edge', 'suppliers-12', 'twelve bakeries on one route'],
+  ['edge', 'supplier-code-collision', 'two bakeries deriving the same code'],
+  ['edge', 'one-giant-stop', 'one order with 300 product lines'],
+  ['edge', '200-stops', 'two hundred stops on one route'],
+  ['edge', 'long-customer', 'a customer name 200 characters long'],
+  ['edge', 'long-department', 'a department spelled out in full'],
+  ['edge', 'long-route-name', 'a route nicknamed in a sentence'],
+  ['edge', 'long-supplier', 'a bakery with nine words in its name'],
+  // Numbers wider than the slots that hold them. Nothing ran off the paper
+  // for these; the quantity simply printed on top of the product name.
+  ['edge', 'busy-real-day', 'a school kitchen ordering 400 of one bread'],
+  // The total was drawn for two bakeries. Three or four is the change the
+  // warehouse might really make; four used to print three columns at 59 mm
+  // and a fourth stretched across the whole 194 mm measure.
+  ['edge', 'bakeries-3', 'a third bakery'],
+  ['edge', 'bakeries-4', 'a fourth bakery'],
+  ['edge', 'bakeries-5', 'a fifth bakery'],
+  ['edge', 'four-figure-line', 'a four-figure quantity on one line'],
+  ['shape', 'quantity-2-billion', 'a quantity far past anything real'],
+  ['shape', 'quantity-beyond-float', 'a quantity past what a double holds'],
 ];
 
-for (const [fixture, what] of EDGE) {
+for (const [folder, fixture, what] of EDGE) {
   const bytes = Array.from(
-    await readFile(`scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-${fixture}.xlsx`),
+    await readFile(`scripts/fixtures/${folder}/PSR-BREAD-2026-03-04-to-2026-03-04-${fixture}.xlsx`),
   );
   const shape = await page.evaluate(async ([b]) => {
     const host = document.createElement('div');
@@ -565,12 +577,55 @@ for (const [fixture, what] of EDGE) {
       const codes = new Set(Array.from(host.querySelectorAll('.bf-code'), (n) => n.textContent));
       const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
       const unexplained = Array.from(codes).filter((code) => !key.includes(code));
+
+      // Staying inside the paper is not the same as being readable. Two things
+      // fit a sheet perfectly well and still make it useless: type set on top
+      // of other type, and type clipped away by the box holding it. Both
+      // happened — a quantity of 2147483648 printed through "Rundstykke", and
+      // the supplier key lost its last codes off the end of the band — and
+      // neither moved a single bounding box outside the page.
+      const collisions = [];
+      const clipped = [];
+      for (const sheet of pages) {
+        for (const line of sheet.querySelectorAll('.bf-row, .bf-total-row, .bf-total-head, .bf-head-line')) {
+          const kids = Array.from(line.children).map((node) => ({
+            name: node.className.split(' ')[0],
+            box: node.getBoundingClientRect(),
+          })).filter((k) => k.box.width > 0);
+          for (let i = 0; i < kids.length; i += 1) {
+            for (let j = i + 1; j < kids.length; j += 1) {
+              const a = kids[i].box;
+              const b = kids[j].box;
+              const sameLine = a.top < b.bottom - 1 && b.top < a.bottom - 1;
+              const over = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              if (sameLine && over > 1) collisions.push(`${kids[i].name}/${kids[j].name}`);
+            }
+          }
+        }
+        for (const node of sheet.querySelectorAll('.bf-legend-suppliers, .bf-code, .bf-qty, .bf-total-qty, .bf-name, .bf-total-name')) {
+          if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
+        }
+      }
+
+      // One bakery, one column — and every column the same width. A wrapping
+      // flex row stretched whatever landed on the last row to fill it, so a
+      // fourth bakery printed three columns at 59 mm and a fourth at 194.
+      const widths = new Set();
+      for (const sheet of pages) {
+        for (const col of sheet.querySelectorAll('.bf-total-col')) {
+          widths.add(Math.round(col.getBoundingClientRect().width * perPx));
+        }
+      }
+
       return {
         pages: pages.length,
         down: Math.round(down * 10) / 10,
         across: Math.round(across * 10) / 10,
         clearance: Math.round(clearance * 10) / 10,
         unexplained,
+        collisions: Array.from(new Set(collisions)),
+        clipped: Array.from(new Set(clipped)),
+        columnWidths: Array.from(widths).sort((a, b) => a - b),
       };
     } finally {
       host.remove();
@@ -588,7 +643,259 @@ for (const [fixture, what] of EDGE) {
     `${shape.clearance} mm`,
   );
   same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
+  same(`${what}: nothing is set on top of anything else`, shape.collisions, []);
+  same(`${what}: nothing is clipped away by the box holding it`, shape.clipped, []);
+  check(
+    `${what}: the bakery columns are all one width`,
+    shape.columnWidths.length <= 1,
+    `${shape.columnWidths.join(', ')} mm`,
+  );
 }
+
+// ── Changes to the export's own shape ──────────────────────────────────────
+//
+// The format is unlikely to change, which is why it is worth knowing what
+// happens if it does. Each of these is one change to the file's shape, or one
+// number at the edge of what a spreadsheet holds. The rule is the same for all
+// of them: REFUSED with a message naming the problem, or read correctly.
+// Never printed wrong, never a throw.
+//
+// scripts/make_shape_fixtures.py regenerates them.
+
+const REFUSED = 'refused';
+const SHAPES = [
+  // What the reader must not accept, and roughly what it must say about it.
+  ['extra-16th-column', REFUSED, /16/],
+  ['one-column-short', REFUSED, /14/],
+  ['header-renamed', REFUSED, /H1.*Customer/],
+  ['columns-reordered', REFUSED, /A1.*Order ID/],
+  ['header-on-column-O', REFUSED, /O1/],
+  ['sheet-renamed', REFUSED, /no sheet named/],
+  ['starts-at-row-2', REFUSED, /does not start at row 1/],
+  ['header-only-no-data', REFUSED, /no order lines/],
+  // What it must take in its stride.
+  ['baseline', 1, null],
+  ['blank-row-midway', 2, null],
+  ['formula-cell', 2, null],
+  ['quantity-as-text', 1, null],
+  ['whitespace-padded', 1, null],
+  ['unicode-everywhere', 1, null],
+  ['order-id-huge', 1, null],
+  ['product-id-zero', 1, null],
+  ['sequence-negative', 1, null],
+  ['quantity-2-billion', 1, null],
+  ['quantity-beyond-float', 1, null],
+  // What it must take, and say something about.
+  ['quantity-negative', 1, null],
+  ['quantity-zero', 1, null],
+  ['quantity-fractional', 1, null],
+  ['error-cell', 2, null],
+];
+
+for (const [fixture, expected, saying] of SHAPES) {
+  const bytes = Array.from(
+    await readFile(`scripts/fixtures/shape/PSR-BREAD-2026-03-04-to-2026-03-04-${fixture}.xlsx`),
+  );
+  const got = await page.evaluate(async ([b]) => {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-10000px';
+    document.body.append(host);
+    try {
+      const book = await Xlsx.open(new Uint8Array(b).buffer);
+      let rows;
+      try {
+        rows = Model.readRows(await book.sheet('Data'));
+      } catch (error) {
+        return { outcome: 'refused', why: String(error.message || error) };
+      }
+      const findings = Validate.run(rows, Model.BREAD);
+      const settings = { kind: Model.BREAD, showOrderId: true, marker: 'word-only',
+                         crates: Model.defaultCrateRules() };
+      let printed = '';
+      for (const route of Model.group(Model.fold(rows))) {
+        for (const sheet of Sheet.paginate(
+          route, settings,
+          { dates: null, source: 'shape', routeStops: route.stops.length,
+            routeLines: Model.lineCount(route) },
+          { host },
+        )) {
+          host.appendChild(sheet);
+          printed += ` ${sheet.textContent}`;
+        }
+      }
+      return {
+        outcome: 'read',
+        rows: rows.length,
+        said: findings.map((f) => f.kind),
+        // A number that went wrong shows up as one of these on the paper.
+        nonsense: ['NaN', 'Infinity', 'undefined', '[object'].filter((w) => printed.includes(w)),
+      };
+    } catch (error) {
+      return { outcome: 'threw', why: String((error && error.message) || error) };
+    } finally {
+      host.remove();
+    }
+  }, [bytes]);
+
+  if (expected === REFUSED) {
+    check(
+      `${fixture}: refused, and the message names the problem`,
+      got.outcome === 'refused' && saying.test(got.why),
+      got.why || got.outcome,
+    );
+  } else {
+    check(
+      `${fixture}: read as ${expected} row(s), nothing nonsensical printed`,
+      got.outcome === 'read' && got.rows === expected && got.nonsense.length === 0,
+      JSON.stringify(got),
+    );
+  }
+}
+
+// Nothing checked the quantity column at all, so these three printed as they
+// stood: a line reading -5, a line reading 0, and a 2.5 silently made a 2.
+const quantitySays = await page.evaluate(async ([neg, zero, half]) => {
+  const read = async (bytes) => {
+    const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+    const rows = Model.readRows(await book.sheet('Data'));
+    return Validate.run(rows, Model.BREAD)
+      .filter((f) => f.kind === 'impossible-quantity')
+      .map((f) => [f.severity, f.headline]);
+  };
+  return { negative: await read(neg), zero: await read(zero), fractional: await read(half) };
+}, await Promise.all(
+  ['quantity-negative', 'quantity-zero', 'quantity-fractional'].map(async (n) =>
+    Array.from(await readFile(`scripts/fixtures/shape/PSR-BREAD-2026-03-04-to-2026-03-04-${n}.xlsx`))),
+));
+
+same('a negative quantity blocks the print', quantitySays.negative,
+  [['blocking', '1 line(s) ask for a negative quantity']]);
+
+// 400 of one bread is a school kitchen and prints without comment. Four
+// figures is a decimal point in the wrong place — it still prints, because the
+// app cannot know, but it says the number out loud first.
+const scale = await page.evaluate(async ([busy, four]) => {
+  const said = async (bytes) => {
+    const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+    const rows = Model.readRows(await book.sheet('Data'));
+    return Validate.run(rows, Model.BREAD)
+      .filter((f) => f.kind === 'impossible-quantity')
+      .map((f) => f.headline);
+  };
+  return { busy: await said(busy), four: await said(four) };
+}, await Promise.all(['busy-real-day', 'four-figure-line'].map(async (n) =>
+  Array.from(await readFile(`scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-${n}.xlsx`)))));
+
+same('a 400-bread order is a big day, not a mistake', scale.busy, []);
+same('a four-figure line is called out before it prints', scale.four,
+  ['1 line(s) ask for 1000 or more of one bread']);
+same('a line asking for nothing is called out', quantitySays.zero,
+  [['warning', '1 line(s) ask for nothing']]);
+same('half a bread is not quietly made whole', quantitySays.fractional,
+  [['warning', '1 quantity(ies) are not whole breads']]);
+
+// ── More bakeries than the key can name ────────────────────────────────────
+//
+// The key is furniture: it prints on every sheet, so whatever it costs, it
+// costs once per page. Unbounded, it eats the page it sits on — 250 bakeries
+// on one route grew the band to 228 mm, left 15 mm of body, and emitted 500
+// near-empty sheets that still spilled, saying nothing. The key gives up the
+// names first, then the codes, rather than the page.
+
+const crowded = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px';
+  document.body.append(host);
+  const ruler = document.createElement('div');
+  ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+  document.body.append(ruler);
+  const perPx = 100 / ruler.getBoundingClientRect().width;
+  ruler.remove();
+
+  const measure = (count) => {
+    const route = {
+      nickname: '3',
+      stops: [{
+        id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
+        route: '3', sequence: 100, acceptAlternatives: true, comment: null,
+        lines: Array.from({ length: count }, (_, i) => ({
+          quantity: 12,
+          product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
+                     supplier: `Bakeri Nummer ${i + 1}` },
+        })),
+      }],
+    };
+    const pages = Sheet.paginate(
+      route,
+      { kind: Model.BREAD, showOrderId: true, marker: 'word-only', crates: Model.defaultCrateRules() },
+      { dates: null, source: 'crowded', routeStops: 1, routeLines: count },
+      { host },
+    );
+    for (const sheet of pages) host.appendChild(sheet);
+    let spill = 0;
+    let clearance = Infinity;
+    for (const sheet of pages) {
+      spill = Math.max(spill, (sheet.scrollHeight - sheet.clientHeight) * perPx);
+      const body = sheet.querySelector('.bf-body');
+      const foot = sheet.querySelector('.bf-footer');
+      const last = body.lastElementChild;
+      const bottom = last ? last.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
+      clearance = Math.min(clearance, (foot.getBoundingClientRect().top - bottom) * perPx);
+    }
+    const legend = Math.round(pages[0].querySelector('.bf-legend').getBoundingClientRect().height * perPx);
+    const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
+    host.innerHTML = '';
+    return { pages: pages.length, legend, spill: Math.round(spill),
+             clearance: Math.round(clearance), spelled: /Bakeri Nummer/.test(key),
+             saysMore: /\+\d+ more/.test(key) };
+  };
+
+  try {
+    return { twelve: measure(12), many: measure(250) };
+  } finally {
+    host.remove();
+  }
+});
+
+check('a dozen bakeries are still spelled out in the key',
+  crowded.twelve.spelled && crowded.twelve.legend <= 24,
+  JSON.stringify(crowded.twelve));
+check('far more bakeries than the key can name does not eat the page',
+  crowded.many.legend <= 24 && crowded.many.spill === 0 && crowded.many.clearance >= 10,
+  JSON.stringify(crowded.many));
+check('and the sheet count stays sane rather than one page per line',
+  crowded.many.pages < 40,
+  `${crowded.many.pages} sheets for 250 lines`);
+check('the key says how many it could not name', crowded.many.saysMore,
+  JSON.stringify(crowded.many));
+
+// A file that is not this file at all still fails with a sentence, not a stack.
+for (const [what, bytes] of [
+  ['an empty file', []],
+  ['a CSV someone renamed', Array.from(Buffer.from('a,b,c\n1,2,3\n'))],
+]) {
+  const said = await page.evaluate(async ([b]) => {
+    try {
+      await Xlsx.open(new Uint8Array(b).buffer);
+      return 'opened it, which it should not have';
+    } catch (error) {
+      return String((error && error.message) || error);
+    }
+  }, [bytes]);
+  check(`${what} is refused in words`, /not a zip file|not a workbook/.test(said), said);
+}
+
+// The Rust binary answers `breadify licences`; the page owes the same answer.
+const colophon = await page.evaluate(() => {
+  const foot = document.querySelector('.colophon');
+  if (!foot) return null;
+  return Array.from(foot.querySelectorAll('a'), (a) => a.getAttribute('href'));
+});
+same('the three typefaces ship their licences, and the page links them', colophon, [
+  'fonts/Archivo-OFL.txt',
+  'fonts/SpaceGrotesk-OFL.txt',
+  'fonts/IBMPlexMono-OFL.txt',
+]);
 
 same('no console errors', errors.slice(0, 5), []);
 

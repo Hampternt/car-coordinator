@@ -6,7 +6,7 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 3;
+  const SCHEMA = 4;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
@@ -62,7 +62,15 @@ const Store = (() => {
     // from the rail.
     const drivers = arr(raw.drivers, 'drivers')
       .filter((d) => d && typeof d === 'object')
-      .map((d) => ({ id: str(d.id) || uid(), name: str(d.name), available: d.available === undefined ? true : bool(d.available) }))
+      .map((d) => ({
+        id: str(d.id) || uid(), name: str(d.name),
+        available: d.available === undefined ? true : bool(d.available),
+        // A driver carries a status the same way a car does — on holiday, on
+        // a course, new and not yet cleared for the long routes. The labels
+        // are the same list, because a warehouse has one vocabulary for
+        // "why is this not usable today" and it should not fork by kind.
+        labelId: str(d.labelId), note: str(d.note),
+      }))
       .filter((d) => d.name);
 
     // A group is a named set of drivers ("Monday"), nothing more: it holds
@@ -102,6 +110,7 @@ const Store = (() => {
     const has = (list, id) => !id || list.some((x) => x.id === id);
     for (const c of cars) if (!has(labels, c.labelId)) { c.labelId = ''; repaired.push(`${c.reg} pointed at a missing label`); }
     for (const p of positions) if (!has(labels, p.labelId)) { p.labelId = ''; repaired.push(`${p.name} pointed at a missing label`); }
+    for (const d of drivers) if (!has(labels, d.labelId)) { d.labelId = ''; repaired.push(`${d.name} pointed at a missing label`); }
     for (const r of routes) {
       if (!has(cars, r.carId)) { r.carId = ''; repaired.push(`route ${r.name} pointed at a missing car`); }
       if (!has(positions, r.positionId)) { r.positionId = ''; repaired.push(`route ${r.name} pointed at a missing position`); }
@@ -152,6 +161,10 @@ const Store = (() => {
     // managers swap JSON files, so a build from before templates will meet one
     // that has them. Without the bump it drops them on the first change and
     // says nothing; with it, the v > SCHEMA branch above speaks up first.
+    //
+    // v4 is a driver's own status and note, and it is the same argument: a
+    // build without them meeting a roster that has them would drop what the
+    // other manager typed without a word.
     return normalise(raw, defaults);
   }
 

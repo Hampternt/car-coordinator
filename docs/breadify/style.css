@@ -169,23 +169,32 @@ code,
 
 /* The other half of the day. Car Coordinator plans the routes these sheets
  * are picked for, so the two link to each other rather than being found. */
+/* Beside the brand, and legible: it was --muted on --void, which is about
+   where the disabled step buttons sit, and it is not disabled — it is the way
+   out of this app. The accent edge matches the one Car Coordinator uses for
+   the same button, so the pair read as one control in two liveries. */
 .sibling {
-  margin-left: auto;
+  flex: none;
   padding: 6px 12px;
   border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-control);
-  color: var(--muted);
+  color: var(--strong);
   text-decoration: none;
   font-size: 13px;
+  font-weight: 600;
 }
 
 .sibling::after {
   content: ' \2192';
+  color: var(--accent);
 }
 
-.sibling:hover {
+.sibling:hover,
+.sibling:focus-visible {
   color: var(--strong);
-  border-color: var(--accent-border);
+  border-color: var(--accent);
+  border-left-color: var(--accent);
   background: var(--accent-tint);
 }
 
@@ -245,9 +254,6 @@ main {
   .steps button {
     flex: none;
     white-space: nowrap;
-  }
-  .sibling {
-    margin-left: 0;
   }
 }
 
@@ -770,5 +776,26 @@ input[type='number'] {
 
   #sheets {
     display: block;
+  }
+}
+
+/* The colophon. Quiet — it is a legal courtesy and a statement of fact, not
+   something anyone came here to read. */
+.colophon {
+  margin: 28px auto 0;
+  max-width: 900px;
+  padding: 0 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.colophon a {
+  color: inherit;
+}
+
+@media print {
+  .colophon {
+    display: none;
   }
 }
