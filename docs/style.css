@@ -29,11 +29,19 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .tabs button { background: none; border: 0; padding: 8px 14px; color: #cfd3d6; cursor: pointer; font-family: var(--head); font-size: 16px; }
 .tabs button.active { color: var(--ink); background: var(--hivis); }
 button.primary { background: var(--hivis); color: var(--ink); border: 0; padding: 9px 16px; font: 700 15px var(--head); cursor: pointer; }
-/* The link across to Breadify. Quieter than the print button: it leaves this
-   app rather than doing anything in it. */
-.sibling { padding: 8px 14px; border: 1px solid #4a5157; color: #cfd3d6; text-decoration: none; font: 600 14px var(--head); white-space: nowrap; }
-.sibling::after { content: ' \2192'; }
-.sibling:hover { color: var(--ink); background: var(--hivis); border-color: var(--hivis); }
+/* The swap across to Breadify, beside the brand. It was set in the same grey
+   as the inactive tabs and read as one of them; it is the way out of this app,
+   so it wants to be found. Hi-vis edge and white type carry it against the ink
+   bar without taking the print button's job, which is the one thing here that
+   is solid hi-vis. */
+.sibling {
+  padding: 7px 13px; border: 1px solid #6b747b; border-left: 4px solid var(--hivis);
+  color: #fff; text-decoration: none; font: 700 14px var(--head);
+  white-space: nowrap; flex: none;
+}
+.sibling::after { content: ' \2192'; color: var(--hivis); }
+.sibling:hover, .sibling:focus-visible { color: var(--ink); background: var(--hivis); border-color: var(--hivis); }
+.sibling:hover::after, .sibling:focus-visible::after { color: var(--ink); }
 
 main { padding: 20px; max-width: 1200px; }
 .tab { display: none; }
