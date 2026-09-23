@@ -16,6 +16,11 @@ const fold = (s) => String(s || '').trim().toUpperCase();
    colour picker, and store.js and share.js both check them on the way in —
    this is the same check at the last moment, so no path into the page skips it. */
 const colour = (c, fallback = '#c62828') => (/^#[0-9a-f]{6}$/i.test(String(c || '')) ? String(c) : fallback);
+// Names and registrations in the order a person hunts for them: the alphabet
+// of whoever is at the keyboard (so Æ Ø Å come after Z on a Norwegian PC),
+// with runs of digits read as numbers, so "Car 2" comes before "Car 10". Only
+// the pickers use it: the rail and the tabs keep the order the leader chose.
+const collate = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' }).compare;
 
 // Indexed by Date.getDay(), which is how a weekday is stored: Sunday is 0.
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -429,7 +434,7 @@ function renderPlan() {
     const warns = [];
     // Options stay pickable even when they clash; the note says what you are
     // walking into and the row flags it afterwards.
-    const carOpts = state.cars.map((c) => {
+    const carOpts = [...state.cars].sort((a, b) => collate(a.reg, b.reg)).map((c) => {
       const lab = byId(state.labels, c.labelId);
       const others = elsewhere(use.cars[c.id], at);
       const bits = [lab && labelName(lab), others.length && `on route ${routeNames(others)}`].filter(Boolean);
@@ -453,7 +458,7 @@ function renderPlan() {
     const cls = [r.highlight && 'hl', r.gapBefore && 'gap', flagged.has(at) && 'warn'].filter(Boolean).join(' ');
     return `<tr class="${cls}" data-route="${esc(r.id)}">
       <td>${field('route', r.id, 'name', r.name, 'class="short"')}</td>
-      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-" list="driverNames"')}</td>
+      <td>${field('route', r.id, 'driver', r.driver, 'placeholder="-" autocomplete="off" aria-haspopup="true"')}</td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="carId"><option value="">-</option>${carOpts}</select></td>
       <td><select data-kind="route" data-id="${esc(r.id)}" data-field="positionId"><option value="">-</option>${posOpts}</select></td>
       <td>${field('route', r.id, 'round', r.round, 'class="short" placeholder="-"')}</td>
@@ -629,12 +634,6 @@ function driverGroups() {
       <button class="btn" data-act="add-group">+ Add group</button>
     </div>
     ${cards || '<p class="empty">No groups yet. Make one for the crew you plan with most \u2014 it takes one click to put them all in.</p>'}`;
-}
-
-/* The roster as suggestions, never as a rulebook: the day plan's driver box
-   stays free text, so everyone is offered, away or not. */
-function renderDriverList() {
-  $('#driverNames').innerHTML = state.drivers.map((d) => `<option value="${esc(d.name)}"></option>`).join('');
 }
 
 function renderCars() {
@@ -853,9 +852,10 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderDrivers(); renderDriverList(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
   queueQr();
   renderNotices();
+  renderPicker();
 }
 
 /* ---------- events ---------- */
@@ -864,6 +864,13 @@ document.addEventListener('input', (e) => {
   const el = e.target;
   const { kind, id, field: name } = el.dataset;
   if (!kind || !name) return;
+  // Typing a driver narrows the grid of roster names — and opens it, for
+  // someone who reached the box with Tab rather than a click, the way the
+  // browser's own suggestions used to appear under it.
+  if (kind === 'route' && name === 'driver' && el.closest('#tab-plan')) {
+    if (!pickingFor(el)) picking = { field: 'driver', routeId: id, filter: '' };
+    picking.filter = el.value;
+  }
   const value = el.type === 'checkbox' ? el.checked : el.value;
   // A round feeds the clash rule, so one keystroke in it can turn a warning on
   // or off; a driver's name is what the rail matches a roster entry against,
@@ -880,7 +887,7 @@ document.addEventListener('input', (e) => {
   save();
   if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
-  else renderSheet();
+  else { renderSheet(); renderPicker(); }
 });
 
 /* Redraw the lot without interrupting the typing that caused it: render()
@@ -1504,6 +1511,218 @@ document.addEventListener('drop', (e) => {
   save();
   render();
 });
+
+/* ---------- the grid a route's driver and car are picked from ----------
+   The browser's own lists are one long column, in the order the roster was
+   typed in, showing a handful of names at a time. Picking who drives route 7
+   is scanning for a name, so the choices open as a grid instead: alphabetical,
+   four across, a dozen and more in view at once, each saying whether it is
+   already out, away or marked.
+
+   The text box and the select underneath stay the real controls. The grid
+   writes the same field they do, so the keyboard, the warnings and the tests
+   all work as they did, a driver is still free text — typing narrows the grid
+   rather than being refused by it — and a clash still only warns.
+
+   Kept off `state`, like a drag: which picker is open is a gesture. */
+let picking = null;   // { field: 'driver' | 'carId', routeId, filter }
+
+const pickingFor = (el) => picking && picking.field === el.dataset.field && picking.routeId === el.dataset.id;
+// Found again on every use: render() replaces the whole table, so the box that
+// opened the grid a moment ago may be a different element now.
+const pickAnchor = () => picking
+  && document.querySelector(`#tab-plan [data-kind="route"][data-id="${CSS.escape(picking.routeId)}"][data-field="${picking.field}"]`);
+
+function openPicker(el) {
+  picking = { field: el.dataset.field, routeId: el.dataset.id, filter: '' };
+  renderPicker();
+}
+
+function closePicker(refocus = false) {
+  if (!picking) return;
+  const anchor = pickAnchor();
+  picking = null;
+  renderPicker();
+  if (refocus && anchor) anchor.focus();
+}
+
+// The one that is on, or the first: where the keyboard lands on opening.
+function focusPick() {
+  const box = $('#picker');
+  (box.querySelector('.pick.on') || box.querySelector('.pick'))?.focus();
+}
+
+/* Every choice, alphabetical, with what a leader would want to know before
+   picking it. Notes are built as markup: routeNames() already escapes. */
+function pickChoices(r, at) {
+  if (picking.field === 'carId') {
+    const { cars } = usage();
+    return [...state.cars].sort((a, b) => collate(a.reg, b.reg)).map((c) => {
+      const lab = byId(state.labels, c.labelId);
+      const others = elsewhere(cars[c.id], at);
+      const on = c.id === r.carId;
+      const notes = [lab && esc(labelName(lab)), others.length && `Route ${routeNames(others)}`].filter(Boolean);
+      return { value: c.id, text: c.reg, on, flag: notes.length > 0, dot: lab && colour(lab.color),
+        note: notes.join(' · ') || (on ? 'This route' : 'Free') };
+    });
+  }
+  const by = driverUsage();
+  const want = fold(picking.filter);
+  return state.drivers
+    .filter((d) => !want || fold(d.name).includes(want))
+    .sort((a, b) => collate(a.name, b.name))
+    .map((d) => {
+      const lab = byId(state.labels, d.labelId);
+      const others = elsewhere(by[fold(d.name)], at);
+      const on = !!fold(r.driver) && fold(d.name) === fold(r.driver);
+      const notes = [!d.available && 'Away', lab && esc(labelName(lab)), others.length && `Route ${routeNames(others)}`].filter(Boolean);
+      return { value: d.name, text: d.name, on, away: !d.available, flag: !d.available || others.length > 0,
+        dot: lab && colour(lab.color), note: notes.join(' · ') || (on ? 'This route' : 'Free') };
+    });
+}
+
+function renderPicker() {
+  const box = $('#picker');
+  const anchor = pickAnchor();
+  const at = picking ? state.routes.findIndex((r) => r.id === picking.routeId) : -1;
+  if (!picking || !anchor || at < 0 || tab !== 'plan') {
+    picking = null;
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  const r = state.routes[at];
+  const car = picking.field === 'carId';
+  const choices = pickChoices(r, at);
+  // A driver's box is free text, so the grid only earns its space while it
+  // has something to suggest: not for an empty roster, not for a name that
+  // matches nobody, and not once what is typed is the one name it matches.
+  const settled = choices.length === 1 && fold(choices[0].value) === fold(picking.filter);
+  if (!car && (!choices.length || settled)) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  const kept = box.contains(document.activeElement) ? document.activeElement.dataset.pick : undefined;
+  const cells = choices.map((c) => `<button type="button" class="pick${c.on ? ' on' : ''}${c.flag ? ' flag' : ''}${c.away ? ' away' : ''}"
+      data-pick="${esc(c.value)}" aria-pressed="${c.on}" title="${esc(c.text)}">
+      <span class="pick-name">${esc(c.text)}</span>
+      <span class="pick-note">${c.dot ? `<span class="dot" style="--c:${esc(c.dot)}"></span>` : ''}${c.note}</span>
+    </button>`).join('');
+  const set = car ? r.carId : r.driver;
+  box.innerHTML = `<div class="picker-head">
+      <span>${car ? 'Car' : 'Driver'} for route ${dash(r.name)}</span>
+      ${set ? `<button type="button" class="btn" data-pick="">${car ? 'No car' : 'Clear'}</button>` : ''}
+    </div>
+    ${cells
+      ? `<div class="picker-grid" role="group" aria-label="${car ? 'Cars' : 'Drivers'}, A to Z">${cells}</div>`
+      : '<p class="picker-empty">No cars yet. Add registrations in the panel on the right, or on the Cars tab.</p>'}`;
+  box.hidden = false;
+  placePicker();
+  if (kept !== undefined) box.querySelector(`[data-pick="${CSS.escape(kept)}"]`)?.focus();
+}
+
+/* Under the box it belongs to, or over it when the page has more room above —
+   the last routes of the day would otherwise open off the bottom of the
+   screen — and never past either edge. */
+function placePicker() {
+  const box = $('#picker');
+  const anchor = pickAnchor();
+  if (!anchor || box.hidden) return;
+  const a = anchor.getBoundingClientRect();
+  const w = box.offsetWidth, h = box.offsetHeight;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const up = a.bottom + 2 + h > vh && a.top > vh - a.bottom;
+  const left = Math.max(8, Math.min(a.left, vw - w - 8));
+  const top = up ? Math.max(8, a.top - h - 2) : a.bottom + 2;
+  box.style.left = `${left + window.scrollX}px`;
+  box.style.top = `${top + window.scrollY}px`;
+}
+
+/* A finger on a phone gets the phone's own list for a car — full screen, and
+   alphabetical now like the grid. What the grid is for is a desk and a mouse. */
+let lastPointer = 'mouse';
+document.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; }, true);
+
+document.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  // Inside the grid, keep the focus where it is — in the driver box, being
+  // typed into — or the click that picks would first close what it picks from.
+  if (e.target.closest('#picker')) { e.preventDefault(); return; }
+  const sel = e.target.closest('#tab-plan select[data-kind="route"][data-field="carId"]');
+  if (sel && lastPointer === 'mouse') {
+    // The native list would open on this very press; the grid opens instead.
+    // The select still takes the focus, so it is plain which box is being
+    // filled, and ArrowDown steps from it into the grid as from a driver box.
+    e.preventDefault();
+    if (pickingFor(sel)) closePicker(); else { openPicker(sel); sel.focus({ preventScroll: true }); }
+    return;
+  }
+  const box = e.target.closest('#tab-plan input[data-kind="route"][data-field="driver"]');
+  if (box) { if (!pickingFor(box)) openPicker(box); return; }
+  closePicker();
+});
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#picker [data-pick]');
+  const r = b && picking && byId(state.routes, picking.routeId);
+  if (!r) return;
+  const { field, routeId } = picking;
+  if (field === 'carId') r.carId = b.dataset.pick; else r.driver = b.dataset.pick;
+  picking = null;
+  save();
+  render();
+  // Chosen from the keyboard (a click with no pointer behind it): hand the
+  // focus back to the box, so Tab carries on along the row.
+  if (e.detail === 0) {
+    document.querySelector(`#tab-plan [data-kind="route"][data-id="${CSS.escape(routeId)}"][data-field="${field}"]`)?.focus();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  const grid = $('#picker');
+  // Into the grid from the box: the keys that would open a select's native
+  // list open the grid instead, and ArrowDown steps down into it — from a car
+  // whose grid is open, or from a driver's box, where a grid that had hidden
+  // itself behind a finished name comes back whole. The arrows alone still
+  // step through a closed select the way they always did.
+  const sel = t.closest?.('#tab-plan select[data-kind="route"][data-field="carId"]');
+  const box = t.closest?.('#tab-plan input[data-kind="route"][data-field="driver"]');
+  const opens = e.key === ' ' || e.key === 'Enter' || e.key === 'F4' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'));
+  const into = sel ? opens || (pickingFor(sel) && e.key === 'ArrowDown') : box && e.key === 'ArrowDown';
+  if (into) {
+    e.preventDefault();
+    const el = sel || box;
+    if (!pickingFor(el) || grid.hidden) openPicker(el);
+    focusPick();
+    return;
+  }
+  if (!picking) return;
+  const anchor = pickAnchor();
+  if (e.key === 'Escape') { e.preventDefault(); closePicker(true); return; }
+  if (t === anchor) { if (e.key === 'Tab') closePicker(); return; }
+  if (!grid.contains(t)) return;
+  if (e.key === 'Tab') { e.preventDefault(); closePicker(true); return; }
+  const items = [...grid.querySelectorAll('.pick')];
+  const i = items.indexOf(t);
+  if (i < 0) return;
+  const cols = getComputedStyle(grid.querySelector('.picker-grid')).gridTemplateColumns.split(' ').length;
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, ArrowDown: i + cols, ArrowUp: i - cols, Home: 0, End: items.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  // Up off the top row goes back to the box, which for a driver is where the
+  // typing was.
+  if (to < 0 && e.key === 'ArrowUp') { anchor?.focus(); return; }
+  items[Math.max(0, Math.min(items.length - 1, to))].focus();
+});
+
+// The page scrolling carries the grid with it; a table scrolling sideways in
+// its own box (a phone) or the window changing size does not, so follow those.
+document.addEventListener('scroll', (e) => {
+  if (picking && e.target !== document && !$('#picker').contains(e.target)) placePicker();
+}, true);
+window.addEventListener('resize', () => { if (picking) placePicker(); });
 
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
