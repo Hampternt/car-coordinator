@@ -39,7 +39,7 @@ await shot('01-first-run');
 console.log('cars');
 await tab('cars');
 await page.fill('#newCar', 'AA11111 AA22222 AA33333 AA44444 AA55555 AA66666');
-await page.click('[data-act="add-car"]');
+await page.click('#tab-cars [data-act="add-car"]');
 
 // a car goes to the workshop, with a note — this is the "tags on a car" path
 const row = (reg) => page.locator('#tab-cars tbody tr', { has: page.locator(`[data-field="reg"][value="${reg}"]`) });
@@ -78,7 +78,7 @@ await shot('06-positions');
 console.log('drivers and day groups');
 await tab('drivers');
 await page.fill('#newDriver', 'Ana Ruiz, Bo Lind, Cai Mensah, Dee Okafor, Efe Yilmaz, Fia Berg, Gus Hald, Hana Sol, Ida Ngo');
-await page.click('[data-act="add-driver"]');
+await page.click('#tab-drivers [data-act="add-driver"]');
 await page.fill('#newGroup', 'Monday');
 await page.click('[data-act="add-group"]');
 const monday = page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') });
@@ -152,7 +152,11 @@ if (missing.length || extra.length) {
   console.log(`\nwarnings did not match.\n  missing: ${missing.join(' | ') || 'none'}\n  unexpected: ${extra.join(' | ') || 'none'}`);
   process.exit(1);
 }
-if ((await page.locator('#tab-plan [data-panel="drivers"] li').count()) !== 8
+// The rail is the editor now, so it lists the whole roster — the one who is
+// away is dimmed rather than dropped, because someone away has to be
+// reachable to be brought back.
+if ((await page.locator('#tab-plan [data-panel="drivers"] li').count()) !== 9
+  || (await page.locator('#tab-plan [data-panel="drivers"] li.away').count()) !== 1
   || (await page.locator('#tab-plan [data-panel="cars"] li').count()) !== 6) {
   console.log('\nthe rail beside the plan is not showing the crew and the fleet');
   process.exit(1);
