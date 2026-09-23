@@ -111,9 +111,10 @@ await page.click('[data-act="tab"][data-tab="drivers"]');
 check('roster edits survive a reload', (await page.locator('#tab-drivers tbody tr').first().locator('[data-field="name"]').inputValue()) === 'Roster Three');
 
 await page.click('[data-act="tab"][data-tab="plan"]');
-check('the roster reaches the day plan as suggestions',
-  (await page.locator('#driverNames option').count()) === 2
-  && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').getAttribute('list')) === 'driverNames');
+await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').click();
+same('the roster reaches the day plan, as a grid to pick from',
+  await page.locator('#picker .pick-name').allInnerTexts(), ['Roster One', 'Roster Three']);
+await page.keyboard.press('Escape');
 check('the rail shows who is in today', (await page.locator('#tab-plan [data-panel="drivers"] li').count()) === 2);
 // The driver typed into row 1 earlier is not on the roster, which is allowed:
 // put a roster name on row 2 and the rail should find it.
@@ -1423,6 +1424,83 @@ await f.click('[data-act="tab"][data-tab="plan"]');
 check('and restoring it works', (await f.locator('#tab-plan tbody tr').count()) === 1);
 check('no crash when a backup is only half there', fErrors.length === 0, fErrors.join(' | '));
 await pcFull.close();
+
+// --- the grid a route's driver and car are picked from ---
+// Typed in out of order on purpose, and more than a dozen of them: what is
+// under test is the alphabet, and how many can be seen at once. No Æ Ø Å here —
+// where those sort depends on the PC's language, which is the point of them.
+const pickNames = ['Zara Moe', 'Bo Lind', 'Hana Sol', 'Ana Ruiz', 'Ida Ngo', 'Cai Mensah', 'Efe Yilmaz',
+  'Dee Okafor', 'Gus Hald', 'Fia Berg', 'Jon Kvam', 'Kai Lund', 'Liv Dahl'];
+await page.evaluate((names) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-23', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#c62828' }],
+  cars: [['c1', 'EL10002'], ['c2', 'AB12345'], ['c3', 'CD55555'], ['c4', 'AA11111']]
+    .map(([id, reg]) => ({ id, reg, labelId: id === 'c3' ? 'L1' : '', note: '' })),
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
+  routes: [
+    { id: 'r1', name: '1', driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false },
+    { id: 'r2', name: '2', driver: 'Bo Lind', carId: 'c4', positionId: '', round: '', highlight: false, gapBefore: false },
+  ],
+  drivers: names.map((name, i) => ({ id: `d${i}`, name, available: name !== 'Gus Hald', labelId: '', note: '' })),
+  driverGroups: [], templates: [],
+})), pickNames);
+await page.reload({ waitUntil: 'networkidle' });
+const pickRow = page.locator('#tab-plan tbody tr').first();
+const picker = page.locator('#picker');
+const shown = () => picker.locator('.pick-name').allInnerTexts();
+
+await pickRow.locator('[data-field="driver"]').click();
+same("clicking a route's driver opens the whole roster, A to Z", await shown(), [...pickNames].sort());
+const inView = await picker.locator('.picker-grid').evaluate((g) => {
+  const box = g.getBoundingClientRect();
+  const seen = [...g.querySelectorAll('.pick')].filter((b) => {
+    const r = b.getBoundingClientRect();
+    return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+  });
+  return { across: getComputedStyle(g).gridTemplateColumns.split(' ').length, seen: seen.length };
+});
+check('four across, with at least a dozen in view before any scrolling', inView.across === 4 && inView.seen >= 12, JSON.stringify(inView));
+check('each name says where it stands: out on another route, or away',
+  (await picker.locator('.pick', { hasText: 'Bo Lind' }).innerText()).includes('Route 2')
+  && (await picker.locator('.pick', { hasText: 'Gus Hald' }).innerText()).includes('Away'));
+
+await pickRow.locator('[data-field="driver"]').pressSequentially('li');
+same('typing narrows it', await shown(), ['Bo Lind', 'Liv Dahl']);
+await picker.locator('.pick', { hasText: 'Liv Dahl' }).click();
+check('picking a name writes it on the route and closes the grid',
+  (await pickRow.locator('[data-field="driver"]').inputValue()) === 'Liv Dahl' && await picker.isHidden());
+await pickRow.locator('[data-field="driver"]').fill('Somebody New');
+check('a name nobody on the roster has is kept as typed, with no grid in the way',
+  (await pickRow.locator('[data-field="driver"]').inputValue()) === 'Somebody New' && await picker.isHidden());
+
+await pickRow.locator('[data-field="driver"]').fill('');
+await pickRow.locator('[data-field="driver"]').press('ArrowDown');
+await page.keyboard.press('ArrowRight');
+await page.keyboard.press('Enter');
+check('the keyboard does it too: down into the grid, across, Enter — and back in the box',
+  (await pickRow.locator('[data-field="driver"]').inputValue()) === 'Bo Lind'
+  && await page.evaluate(() => document.activeElement?.dataset.field === 'driver'),
+  await pickRow.locator('[data-field="driver"]').inputValue());
+
+await pickRow.locator('[data-field="carId"]').click();
+same('the cars open as the same grid, A to Z', await shown(), ['AA11111', 'AB12345', 'CD55555', 'EL10002']);
+check('and say which is out and which is marked',
+  (await picker.locator('.pick', { hasText: 'AA11111' }).innerText()).includes('Route 2')
+  && (await picker.locator('.pick', { hasText: 'CD55555' }).innerText()).includes('Workshop'));
+same('the dropdown underneath is in the same order, for the arrow keys',
+  await pickRow.locator('[data-field="carId"] option').allInnerTexts(),
+  ['-', 'AA11111 · on route 2', 'AB12345', 'CD55555 · Workshop', 'EL10002']);
+await picker.locator('.pick', { hasText: 'AB12345' }).click();
+check('picking a car puts it on the route', (await pickRow.locator('[data-field="carId"]').inputValue()) === 'c2' && await picker.isHidden());
+await pickRow.locator('[data-field="carId"]').click();
+await picker.locator('[data-pick=""]').click();
+check('and No car takes it off again', (await pickRow.locator('[data-field="carId"]').inputValue()) === '');
+await pickRow.locator('[data-field="carId"]').click();
+await page.keyboard.press('Escape');
+check('Escape closes the grid', await picker.isHidden());
+await pickRow.locator('[data-field="carId"]').click();
+await page.click('#tab-plan thead');
+check('and so does a click anywhere else', await picker.isHidden());
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and

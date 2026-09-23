@@ -222,6 +222,31 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .group .bar { margin-bottom: 6px; }
 .group .chips { display: flex; flex-wrap: wrap; }
 
+/* The grid a route's driver or car is picked from. Four across is what makes
+   a dozen names readable at a glance; 6.5 rows tall, so a longer roster shows
+   the top of the next row and says there is more below without a word. */
+#picker {
+  position: absolute; z-index: 7; width: min(620px, calc(100vw - 16px));
+  background: #fff; border: 1px solid var(--ink); border-top: 4px solid var(--hivis);
+  box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 6px 8px 8px;
+}
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; margin-bottom: 6px; font: 600 13px var(--head); color: #555; }
+.picker-head .btn { padding: 2px 9px; font-size: 13px; }
+.picker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; max-height: 306px; overflow-y: auto; }
+.pick { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); background: var(--panel); text-align: left; cursor: pointer; }
+.pick:hover { background: #fff; border-color: var(--ink); }
+.pick.on { background: var(--hivis); border-color: var(--ink); }
+/* A name wraps rather than hides: the whole of it is what is being looked for. */
+.pick-name { font-weight: 600; line-height: 1.25; overflow-wrap: break-word; max-width: 100%; }
+.pick-note { display: flex; align-items: center; gap: 5px; max-width: 100%; font-size: 12px; line-height: 1.3; color: #6b6e70; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-note .dot { width: 8px; height: 8px; }
+/* Out elsewhere, away or marked: still pickable, because a leader sometimes
+   means it, but it reads as a second thought. */
+.pick.flag .pick-note { color: var(--caution); font-weight: 600; }
+.pick.away .pick-name { opacity: .6; }
+.picker-empty { margin: 4px 2px; color: #555; }
+@media (max-width: 560px) { .picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 /* a laptop in the warehouse office is not always wide: stack rather than squeeze */
 /* A laptop in the warehouse office is not always wide: the rail goes back
    above the table rather than squeezing it. Dragging still works — it is just
@@ -270,7 +295,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: #fff; }
-  .topbar, main, #notices { display: none !important; }
+  .topbar, main, #notices, #picker { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 
