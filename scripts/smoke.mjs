@@ -1662,12 +1662,35 @@ check('holding Enter on Clear does not confirm it by repeat', (await page.evalua
 await page.evaluate(() => { armed = null; render(); });
 
 await page.setViewportSize({ width: 390, height: 844 });
-const boxAt = await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.getBoundingClientRect().top + scrollY);
+const boxAt = await planRowN(20).locator('[data-act="del"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
 await page.evaluate((y) => window.scrollTo(0, y - 60), boxAt);
-await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.focus({ preventScroll: true }));
+await planRowN(21).locator('[data-field="name"]').evaluate((i) => i.focus({ preventScroll: true }));
+await page.keyboard.press('Shift+Tab');
 await page.waitForTimeout(100);
-check('focus that lands under the top bar is scrolled clear of it',
-  await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+check('Shift+Tab onto something under the top bar scrolls it clear of the bar',
+  await planRowN(20).locator('[data-act="del"]').evaluate((b) => document.activeElement === b
+    && b.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+
+// But not for the mouse, and not for the app putting the focus back: a press
+// on a button half under the bar lands, and a disarm leaves the page where the
+// user scrolled it.
+await page.setViewportSize({ width: 1600, height: 940 });
+const markAt = await planRowN(12).locator('[data-act="toggle"][data-field="highlight"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 55), markAt);
+const markBox = await planRowN(12).locator('[data-act="toggle"][data-field="highlight"]').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.bottom - 4]; });
+await page.mouse.move(markBox[0], markBox[1]);
+await page.mouse.down();
+await page.waitForTimeout(100);
+await page.mouse.up();
+check('a mouse press on a button half under the top bar lands', await page.evaluate(() => state.routes[12].highlight === true));
+await page.evaluate(() => window.scrollTo(0, 0));
+await planRowN(3).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.evaluate(() => window.scrollTo(0, 900));
+await page.waitForTimeout(3300);
+check('a disarm leaves the page where the user scrolled it', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.setViewportSize({ width: 390, height: 844 });
 
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.locator('#tab-plan [data-panel="drivers"] li').nth(7).locator('[data-act="tag"]').click();

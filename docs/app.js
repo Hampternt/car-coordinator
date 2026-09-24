@@ -420,7 +420,7 @@ function renderTagMenu() {
   const where = again && layer.contains(f)
     ? (f.id ? `#${f.id}` : f.dataset.act === 'set-tag' ? `[data-act="set-tag"][data-label="${CSS.escape(f.dataset.label)}"]` : `[data-act="${f.dataset.act}"]`)
     : null;
-  const typed = again ? { name: $('#newTagName')?.value, color: $('#newTagColor')?.value, caret: f?.id === 'newTagName' ? f.selectionStart : null } : null;
+  const typed = again ? { name: $('#newTagName')?.value, color: $('#newTagColor')?.value, sel: f?.id === 'newTagName' ? [f.selectionStart, f.selectionEnd, f.selectionDirection] : null } : null;
   layer.innerHTML = tagMenu(tagFor.kind, item);
   layer.dataset.for = key;
   layer.setAttribute('aria-label', `Tag ${item.reg || item.name}`);
@@ -430,7 +430,7 @@ function renderTagMenu() {
   }
   if (where) {
     layer.querySelector(where)?.focus();
-    if (typed?.caret != null) $('#newTagName').setSelectionRange(typed.caret, typed.caret);
+    if (typed?.sel) $('#newTagName').setSelectionRange(...typed.sel);
   }
   layer.hidden = false;
   placeTagMenu();
@@ -1166,7 +1166,13 @@ function confirmTwice(key, fromKeyboard = false) {
   // Armed from the keyboard, the focus has to stay on the button, or the
   // second press — the one that deletes — can never be made. Armed with the
   // mouse it must not: a Space pressed later to page down would press it.
-  if (fromKeyboard) renderKeepingFocus(); else render();
+  if (fromKeyboard) renderKeepingFocus();
+  else {
+    // Put back, then let go: a Space pressed later cannot press it, and the
+    // next Tab still starts from here rather than from the top of the page.
+    renderKeepingFocus();
+    if (document.activeElement?.classList.contains('armed')) document.activeElement.blur();
+  }
   // The disarm three seconds later must not pull the focus out of whatever
   // has been typed into or moved to since.
   setTimeout(() => { if (armed === key) { armed = null; renderKeepingFocus(); } }, 3000);
@@ -2222,12 +2228,21 @@ const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-f
 const clearTheBar = () => { document.documentElement.style.setProperty('--bar', `${$('.topbar').offsetHeight + 8}px`); };
 window.addEventListener('resize', clearTheBar);
 
-/* Focus moved onto something the sticky top bar covers — Shift+Tab walks up
-   into it — is scrolled out from under the bar. The browser's own focus
-   scrolling does not know the bar is there, and ignores scroll-margin. */
+/* Focus moved by Tab onto something the sticky top bar covers — Shift+Tab
+   walks up into it — is scrolled out from under the bar. The browser's own
+   focus scrolling does not know the bar is there, and ignores scroll-margin.
+   Only for Tab: a mouse press on a button half under the bar must not have
+   the button moved out from under the pointer before the release, and the
+   app's own refocus after a redraw must not pull the page back to a control
+   the user has since scrolled away from. */
+let tabbed = false;
+document.addEventListener('keydown', (e) => { if (e.key === 'Tab') tabbed = true; }, true);
+document.addEventListener('pointerdown', () => { tabbed = false; }, true);
 document.addEventListener('focusin', (e) => {
   const el = e.target;
-  if (!el.closest || el.closest('.topbar') || !el.closest('main')) return;
+  const fromTab = tabbed;
+  tabbed = false;
+  if (!fromTab || !el.closest || el.closest('.topbar') || !el.closest('main')) return;
   requestAnimationFrame(() => {
     if (document.activeElement !== el) return;
     const top = $('.topbar').getBoundingClientRect().bottom + 8;
