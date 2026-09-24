@@ -95,10 +95,12 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 #notices:not(:empty) { padding-top: 14px; }
 .notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
-.notice .btn { margin-left: auto; flex: none; }
 /* a notice that offers something carries two buttons: the offer, then the
-   dismiss beside it, not spread across the width */
-.notice .btn + .btn { margin-left: 0; }
+   dismiss beside it. They sit in one box so they wrap as a pair, kept to the
+   right, rather than the ✕ being left alone under the text; a long offer
+   wraps its own words rather than pushing the page sideways. */
+.notice .acts { display: flex; gap: 8px; margin-left: auto; min-width: 0; max-width: 100%; }
+.notice .acts .btn { flex: 0 1 auto; min-width: 0; }
 /* a notice that is about to rewrite saved data says every line of what it
    would do, so it needs a list inside it rather than one long sentence */
 /* The sentence keeps a readable width; on a phone the buttons drop under it
@@ -210,6 +212,17 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .day-add .btn { padding: 2px 8px; font-size: 13px; }
 .rail-groups { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
 .rail-groups .btn { flex: none; padding: 2px 8px; font-size: 12px; color: inherit; }
+/* The other crews say the same things the days do: lit when in force, dashed
+   when there is nobody in them to bring in. */
+.rail-groups .btn.on { background: var(--hivis); border-color: var(--ink); font-weight: 700; }
+.rail-groups .btn.quiet { background: none; border-style: dashed; border-color: #8a8d88; color: #6b6e70; }
+/* The question a quiet day asks, under the week it came from. */
+.day.asking { border-style: solid; border-color: var(--ink); color: var(--ink); }
+.day-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 8px; padding: 6px 8px; background: #fff; border: 1px solid var(--ink); border-left: 4px solid var(--hivis); font-size: 13px; }
+.day-ask > span:first-child { flex: 1 1 12em; min-width: 0; }
+.day-ask .acts { display: flex; gap: 4px; margin-left: auto; }
+.day-ask .btn { padding: 2px 8px; font-size: 13px; }
+.day-ask.done { border-left-color: #2e7d32; }
 
 /* ---------- day templates, at the foot of the plan ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf

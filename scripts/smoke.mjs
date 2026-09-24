@@ -1372,8 +1372,8 @@ same('All puts everyone in', await inToday(), ['Ana', 'Bo', 'Cai', 'Dee', 'Efe']
 await dayBtn('Mon').click();
 await dayBtn('Wed').click();
 check('a day with no crew yet only asks', (await page.evaluate(() => state.driverGroups.length)) === 4
-  && (await page.locator('#notices [data-act="save-day-crew"]').innerText()) === 'Save as Wednesday');
-await page.click('#notices [data-act="save-day-crew"]');
+  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').innerText()) === 'Save as Wednesday');
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
 check('and saving makes a Wednesday group of who is in',
   await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Wednesday' && g.driverIds.join() === 'd0,d1')));
 same('which is the Wed button from then on, lit because it is in force', await week(), ['All', 'Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
@@ -1406,9 +1406,9 @@ await page.reload({ waitUntil: 'networkidle' });
 same('an empty crew is as quiet as a missing one, and not lit', await week(), ['All*', 'Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
 await dayBtn('Thu').click();
 check('pressing it asks rather than sending everyone away',
-  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#notices [data-act="save-day-crew"]').count()) === 1);
+  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
 await page.evaluate(() => { state.drivers[5].available = false; render(); });
-await page.click('#notices [data-act="save-day-crew"]');
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
 check('the offer counts who is in when it is pressed, and fills the empty crew rather than making a second',
   await page.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1
     && state.driverGroups.find((g) => g.id === 'g2').driverIds.length === 29));
@@ -1416,7 +1416,7 @@ check('the offer counts who is in when it is pressed, and fills the empty crew r
 await page.evaluate(() => { note('warn', 'A question about the data', { act: 'split-rounds', kind: '', id: '', text: 'Answer it' }); render(); });
 await dayBtn('Sat').click();
 check('a question about a day leaves every other question up',
-  (await page.locator('#notices [data-act="split-rounds"]').count()) === 1 && (await page.locator('#notices [data-act="save-day-crew"]').count()) === 1);
+  (await page.locator('#notices [data-act="split-rounds"]').count()) === 1 && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
 await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
 
 const rowWas = await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top);
@@ -1437,7 +1437,7 @@ check('but pressing a day shows the crew it brought in, at the top', (await rail
 
 await dayBtn('Tue').focus();
 await page.keyboard.press('Enter');
-await page.locator('#notices [data-act="save-day-crew"]').waitFor();
+await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').waitFor();
 check('a day with no crew pressed from the keyboard takes the focus to its question',
   await page.evaluate(() => document.activeElement?.dataset.act === 'save-day-crew'));
 await dayBtn('Mon').focus();
@@ -1449,9 +1449,9 @@ await page.evaluate(() => { notices = []; render(); });
 // The offer is in view, not under the top bar, even from the bottom of a long plan.
 await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 await dayBtn('Fri').click();
-check('the question a day raises comes into view clear of the top bar',
+check('the question a day raises is in view, clear of the top bar',
   await page.evaluate(() => {
-    const b = document.querySelector('#notices [data-act="save-day-crew"]').getBoundingClientRect();
+    const b = document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]').getBoundingClientRect();
     return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.dataset.act === 'save-day-crew';
   }));
 await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
@@ -1498,8 +1498,99 @@ check('on a phone every day of the week is on screen',
   })));
 await dayBtn('Sat').click();
 check("and a day's question reads as a sentence, not a word per line",
-  (await page.locator('#notices .notice .say').last().evaluate((s) => s.getBoundingClientRect().width)) > 200);
+  (await page.locator('#tab-plan .day-ask span').first().evaluate((s) => s.getBoundingClientRect().width)) > 200);
 await page.evaluate(() => { notices = []; render(); });
+
+// --- what a second check of those fixes found ---
+same('Norwegian writes the crew into the day, and has its own short forms',
+  await page.evaluate(() => ['Mandagsgjeng', 'Fredagsvakta', 'Tirsdagslaget', 'Man', 'Ons', 'Lør', 'Tor'].map((n) => groupWeekday(n))),
+  [1, 5, 2, 1, 3, 6, -1]);
+await page.setViewportSize({ width: 1600, height: 940 });
+await weekFixture({ labels: [{ id: 'L1', name: 'Course', color: '#1565c0' }],
+  cars: Array.from({ length: 40 }, (_, i) => ({ id: `c${i}`, reg: `EL${10000 + i}`, labelId: '', note: '' })),
+  driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
+await page.reload({ waitUntil: 'networkidle' });
+
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(3).locator('[data-act="tag"]').click();
+await page.click('#newTagName');
+await page.keyboard.type('Nights');
+await page.keyboard.press('Enter');
+check('Enter in the new-tag box adds the tag and the menu stays shut, with the focus back on its button',
+  await page.locator('#tagMenu').isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].labelId === state.labels.find((l) => l.name === 'Nights')?.id));
+
+await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
+check('an empty group under the week sends nobody away, and says why',
+  await page.evaluate(() => state.drivers.every((d) => d.available))
+  && (await page.locator('#tab-plan .day-ask').innerText()).includes('Weekend has nobody in it yet'));
+
+// (The tag just made raised a notice of its own; clear it, so what follows
+// counts only what setting up the week adds.)
+await page.evaluate(() => { notices = []; render(); });
+await dayBtn('Tue').click();
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+await dayBtn('Wed').click();
+await page.evaluate(() => { state.drivers.slice(10).forEach((d) => { d.available = false; }); render(); });
+check('the question counts who is in as it stands', (await page.locator('#tab-plan .day-ask').innerText()).includes('Save the 10 in now'));
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+check('setting up the week from the row piles nothing up above the plan: one line, the latest answer',
+  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#tab-plan .day-ask').count()) === 1
+  && (await page.locator('#tab-plan .day-ask').innerText()).startsWith("Saved: Wednesday's crew is the 10"));
+await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+
+// A list emptied and filled again starts at its top, not at a place the old
+// list had been scrolled to.
+await railList('cars').evaluate((l) => { l.scrollTop = l.scrollHeight; });
+await page.waitForTimeout(50);
+await page.evaluate(() => { state.cars = []; render(); state.cars = Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, reg: `ZZ${100 + i}`, labelId: '', note: '' })); render(); });
+check('a list emptied and filled again opens at its top', (await railList('cars').evaluate((l) => l.scrollTop)) === 0);
+
+// Notices keep their offer and their ✕ together at any width.
+await page.setViewportSize({ width: 560, height: 900 });
+await page.evaluate(() => { note('warn', 'A question with a long sentence that has to wrap onto more than one line at this width, the way the spot-names question does', { act: 'split-rounds', kind: '', id: '', text: 'Split the rounds out' }); render(); });
+check("a notice's offer and its ✕ stay side by side",
+  await page.locator('#notices .notice').last().evaluate((n) => {
+    const o = n.querySelector('[data-act="split-rounds"]').getBoundingClientRect(), x = n.querySelector('[data-act="dismiss"]').getBoundingClientRect();
+    return Math.abs(o.top - x.top) < 2 && x.left > o.right;
+  }));
+await page.evaluate(() => { notices = []; render(); });
+
+// Phone.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => window.scrollTo(0, 0));
+const tueAt = await dayBtn('Tue').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+await dayBtn('Thu').click();
+check('on a phone a quiet day asks under the week, and nothing moves under the next tap',
+  await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.textContent.trim() === 'Tue', tueAt));
+await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+
+const tableBox = page.locator('#tab-plan .plan-table');
+await tableBox.evaluate((b) => { b.scrollLeft = 300; });
+await page.waitForTimeout(50);
+await page.evaluate(() => { state.routes[0].highlight = !state.routes[0].highlight; render(); });
+check('on a phone the route table keeps its sideways place across a redraw', (await tableBox.evaluate((b) => b.scrollLeft)) === 300,
+  String(await tableBox.evaluate((b) => b.scrollLeft)));
+
+const tagAt = await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 60), tagAt);
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').evaluate((b) => b.focus({ preventScroll: true }));
+await page.keyboard.press('Enter');
+check('a tag button reached under the top bar still opens its menu, in sight', await page.locator('#tagMenu').isVisible() && (await cutOff('#tagMenu')).length === 0);
+await page.click('#newTagName');
+await page.keyboard.type('Half');
+await page.setViewportSize({ width: 390, height: 520 });
+await page.waitForTimeout(100);
+check("a phone's keyboard shortening the screen keeps the menu and what was typed",
+  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Half');
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 1600, height: 940 });
+
+// The second press of a delete can be made from the keyboard.
+const carsBefore = await page.evaluate(() => state.cars.length);
+await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.keyboard.press('Enter');
+check('a delete confirmed from the keyboard deletes', (await page.evaluate(() => state.cars.length)) === carsBefore - 1);
 
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
