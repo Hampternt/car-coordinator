@@ -159,21 +159,26 @@ const Validate = (() => {
   }
 
   /**
-   * The address is the most reliable identity a stop has, and the printed
-   * order of a route depends on it belonging to exactly one route.
+   * One address on two routes, said so the leader knows it will be on both
+   * sheets — and no more than that. It was blocking, on the idea that an
+   * address belongs to one route; in the warehouse it does not have to (two
+   * departments at one school on two vans, say). Nothing here depends on it
+   * either: each order prints on the route its own rows give it, and the
+   * address only breaks ties inside a route.
    */
   function addressesOnTwoRoutes(rows) {
     const findings = [];
     for (const [address, lines] of groupBy(rows, (row) => row.deliveryStreet)) {
       const routes = new Set(lines.map((row) => row.routeNickname));
       if (routes.size < 2) continue;
+      const names = Array.from(routes).sort((a, b) => Model.compare([a], [b])).join(', ');
       findings.push({
-        severity: BLOCKING,
+        severity: NOTICE,
         kind: 'address-on-two-routes',
         headline: `${address} is on more than one route`,
         detail:
-          `${address} appears on routes ${Array.from(routes).sort().join(', ')}. ` +
-          'One address belongs to one route.',
+          `${address} appears on routes ${names}. ` +
+          "Each order prints on its own route, so it is on each of those routes' sheets.",
         rows: rowNumbers(lines),
       });
     }

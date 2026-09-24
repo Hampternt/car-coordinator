@@ -771,6 +771,29 @@ const quantitySays = await page.evaluate(async ([neg, zero, half]) => {
 same('a negative quantity blocks the print', quantitySays.negative,
   [['blocking', '1 line(s) ask for a negative quantity']]);
 
+// One address on two routes is allowed — two departments at one school on
+// two vans — so it is said, not blocked, and the address prints on both.
+const twoRoutes = await page.evaluate(() => {
+  const row = (excelRow, orderId, route, department) => ({
+    excelRow, orderId, quantity: 4, quantityExact: 4, productId: 10, productName: 'Grovbrød',
+    supplierSku: 'SB-10', position: null, supplier: 'Sandnes Bakeri', customer: 'Hinna skole',
+    department, deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: route,
+    routeOrdering: 1, acceptAlternatives: false, region: 'Stavanger',
+  });
+  const rows = [row(2, 501, '3', 'Kantine'), row(3, 502, '7', 'SFO')];
+  const findings = Validate.run(rows, Model.BREAD);
+  return {
+    said: findings.filter((f) => f.kind === 'address-on-two-routes').map((f) => [f.severity, f.headline]),
+    blocks: Validate.blocks(findings),
+    printedOn: Model.group(Model.fold(rows))
+      .filter((r) => r.stops.some((s) => s.deliveryStreet === 'Hinnavegen 1')).map((r) => r.nickname),
+  };
+});
+same('one address on two routes is a notice, not a block', twoRoutes.said,
+  [['notice', 'Hinnavegen 1 is on more than one route']]);
+check('and does not stop the print', twoRoutes.blocks === false);
+same('and the address prints on both routes', twoRoutes.printedOn, ['3', '7']);
+
 // 400 of one bread is a school kitchen and prints without comment. Four
 // figures is a decimal point in the wrong place — it still prints, because the
 // app cannot know, but it says the number out loud first.
