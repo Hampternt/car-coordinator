@@ -315,20 +315,71 @@ let tagFor = null;
 const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
 
 /* The tag menu: every label, the way off, and a box to make a new one.
-   Rendered inside the row it belongs to so it cannot drift away from it. */
+
+   It used to be drawn inside the row it belongs to, and the rows sit in a
+   list that scrolls — and a scrolling box cuts off whatever crosses its edge.
+   So the menu showed its first choice and the rest was only reachable by
+   scrolling the list, on a two-driver roster as much as a long one. It is
+   drawn in a layer of its own over the page now (#tagMenu), placed against the
+   button that opened it, and nothing it sits inside can crop it. */
 function tagMenu(kind, item) {
   const choice = (id, name, color, on) =>
     `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
       <span class="dot" style="--c:${esc(color)}"></span>${esc(name)}</button>`;
-  return `<div class="tag-menu">
-    ${choice('', 'No tag', '#2e7d32', !item.labelId)}
-    ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+  return `<div class="tag-choices">
+      ${choice('', 'No tag', '#2e7d32', !item.labelId)}
+      ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+    </div>
     <div class="tag-new">
       <input id="newTagName" type="text" placeholder="New tag…" aria-label="Name for a new tag">
       <input id="newTagColor" type="color" value="#1565c0" aria-label="Colour for the new tag">
       <button class="btn" data-act="add-tag" data-kind="${kind}" data-id="${esc(item.id)}">Add</button>
-    </div>
-  </div>`;
+    </div>`;
+}
+
+const tagAnchor = () => tagFor
+  && document.querySelector(`#tab-plan [data-act="tag"][data-kind="${tagFor.kind}"][data-id="${CSS.escape(tagFor.id)}"]`);
+
+function renderTagMenu() {
+  const layer = $('#tagMenu');
+  const item = tagFor && byId(listFor(tagFor.kind) || [], tagFor.id);
+  const anchor = tagAnchor();
+  if (!item || !anchor || tab !== 'plan') {
+    layer.hidden = true;
+    layer.innerHTML = '';
+    delete layer.dataset.for;
+    return;
+  }
+  // A redraw while a new tag is half typed keeps what was typed, and where.
+  const key = `${tagFor.kind}:${tagFor.id}`;
+  const again = layer.dataset.for === key;
+  const typed = again ? { name: $('#newTagName')?.value, color: $('#newTagColor')?.value, focus: layer.contains(document.activeElement) && document.activeElement.id } : null;
+  layer.innerHTML = tagMenu(tagFor.kind, item);
+  layer.dataset.for = key;
+  layer.setAttribute('aria-label', `Tag ${item.reg || item.name}`);
+  if (typed) {
+    if (typed.name) $('#newTagName').value = typed.name;
+    if (typed.color) $('#newTagColor').value = typed.color;
+    if (typed.focus) document.getElementById(typed.focus)?.focus();
+  }
+  layer.hidden = false;
+  placeTagMenu();
+}
+
+function placeTagMenu() {
+  const layer = $('#tagMenu');
+  const anchor = tagAnchor();
+  if (!anchor || layer.hidden) return;
+  const a = anchor.getBoundingClientRect();
+  // Its row scrolled out of the list: a menu pointing at nothing is worse
+  // than none, so it goes with the row.
+  const list = anchor.closest('.rail-list')?.getBoundingClientRect();
+  if (list && (a.bottom <= list.top || a.top >= list.bottom)) { tagFor = null; render(); return; }
+  layer.style.maxHeight = '';
+  const { left, top, tall } = besideAnchor(a, layer.offsetWidth, layer.offsetHeight, true);
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
 }
 
 /* One row of the rail: grip, status dot, the name as an editable box, where
@@ -346,9 +397,8 @@ function railRow(kind, item, label, where, extra = '', cls = '') {
     ${where}
     ${extra}
     <button class="btn tag-btn ${tagOpenFor(kind, item.id) ? 'on' : ''}" data-act="tag" data-kind="${kind}" data-id="${esc(item.id)}"
-      title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}">🏷</button>
+      title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}" aria-haspopup="true" aria-expanded="${!!tagOpenFor(kind, item.id)}">🏷</button>
     ${actBtn('del', kind, item.id, armed === `del:${item.id}` ? 'Sure?' : '✕', armed === `del:${item.id}` ? 'armed' : '', `title="Remove ${esc(item[field])}"`)}
-    ${tagOpenFor(kind, item.id) ? tagMenu(kind, item) : ''}
   </li>`;
 }
 
@@ -372,7 +422,7 @@ function railCars(use) {
       <button class="btn" data-act="add-car" data-from="#railCar" title="Add to the fleet">+</button>
     </div>
     ${state.cars.length
-      ? `<ul class="rail-list" data-drop="car">${rows}</ul>`
+      ? `<ul class="rail-list" data-drop="car" data-keep-scroll="cars">${rows}</ul>`
       : '<p class="rail-empty">No cars yet. Type a registration above — or paste the whole fleet at once, separated by spaces.</p>'}
   </section>`;
 }
@@ -423,12 +473,16 @@ function railDrivers() {
       <button class="btn" data-act="add-driver" data-from="#railDriver" title="Add to the roster">+</button>
     </div>
     ${state.drivers.length
-      ? `<ul class="rail-list" data-drop="driver">${rows}</ul>`
+      ? `<ul class="rail-list" data-drop="driver" data-keep-scroll="drivers">${rows}</ul>`
       : '<p class="rail-empty">Nobody on the roster yet. Add the names you plan with — they become suggestions in the table, and you can drag them onto a route.</p>'}
   </section>`;
 }
 
 function renderPlan() {
+  // The rail's lists scroll, and this redraw replaces them. Without carrying
+  // the scroll across, every click in a long roster — tag, in or away, remove
+  // — threw the list back to the top and the row just clicked out of sight.
+  const scrolled = [...document.querySelectorAll('#tab-plan [data-keep-scroll]')].map((el) => [el.dataset.keepScroll, el.scrollTop]);
   const { lines: found, rows: flagged, use } = problems();
   const rows = state.routes.map((r, at) => {
     const warns = [];
@@ -497,6 +551,10 @@ function renderPlan() {
       </aside>
     </div>
     ${renderTemplates()}`;
+  for (const [key, top] of scrolled) {
+    const el = document.querySelector(`#tab-plan [data-keep-scroll="${key}"]`);
+    if (el) el.scrollTop = top;
+  }
 }
 
 /* ---------- day templates ----------
@@ -522,7 +580,7 @@ function templateContents(t) {
   }).join('');
   const gone = t.routes.filter((r) => (r.carId && !byId(state.cars, r.carId))
     || (r.positionId && !byId(state.positions, r.positionId))).length;
-  return `<div class="tpl-body">
+  return `<div class="tpl-body" data-keep-scroll="template">
     <table class="tpl-table">
       <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Packing</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -856,6 +914,7 @@ function render() {
   queueQr();
   renderNotices();
   renderPicker();
+  renderTagMenu();
 }
 
 /* ---------- events ---------- */
@@ -1285,6 +1344,9 @@ document.addEventListener('click', (e) => {
     case 'tag':
       tagFor = tagOpenFor(kind, id) ? null : { kind, id };
       render();
+      // The menu is drawn at the end of the page, not after its button, so
+      // the keyboard is taken to it rather than left to Tab the whole way.
+      if (tagFor) ($('#tagMenu .tag-choice.on') || $('#tagMenu .tag-choice'))?.focus();
       return;
     case 'set-tag':
       list[i].labelId = b.dataset.label;
@@ -1622,19 +1684,29 @@ function renderPicker() {
   if (kept !== undefined) box.querySelector(`[data-pick="${CSS.escape(kept)}"]`)?.focus();
 }
 
-/* Under the box it belongs to, or over it when the page has more room above —
-   the last routes of the day would otherwise open off the bottom of the
-   screen — and never past either edge. */
+/* Where a floating box goes, in screen coordinates: under the thing that
+   opened it, or over it when the screen has more room above — the last rows
+   would otherwise open off the bottom — and never past any edge. `tall` is
+   the height it gets: its own, or less when even the roomier side is short,
+   and then it scrolls inside itself rather than being cut off. Lined up with
+   the opener's left edge, or its right for a menu opened from a row's end. */
+function besideAnchor(a, w, h, alignRight = false) {
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const below = vh - a.bottom - 10, above = a.top - 10;
+  const up = h > below && above > below;
+  const tall = Math.max(0, Math.min(h, up ? above : below));
+  const left = Math.max(8, Math.min(alignRight ? a.right - w : a.left, vw - w - 8));
+  const top = up ? a.top - 2 - tall : a.bottom + 2;
+  return { left, top, tall };
+}
+
 function placePicker() {
   const box = $('#picker');
   const anchor = pickAnchor();
   if (!anchor || box.hidden) return;
-  const a = anchor.getBoundingClientRect();
-  const w = box.offsetWidth, h = box.offsetHeight;
-  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
-  const up = a.bottom + 2 + h > vh && a.top > vh - a.bottom;
-  const left = Math.max(8, Math.min(a.left, vw - w - 8));
-  const top = up ? Math.max(8, a.top - h - 2) : a.bottom + 2;
+  box.style.maxHeight = '';
+  const { left, top, tall } = besideAnchor(anchor.getBoundingClientRect(), box.offsetWidth, box.offsetHeight);
+  box.style.maxHeight = `${tall}px`;
   box.style.left = `${left + window.scrollX}px`;
   box.style.top = `${top + window.scrollY}px`;
 }
@@ -1719,10 +1791,37 @@ document.addEventListener('keydown', (e) => {
 
 // The page scrolling carries the grid with it; a table scrolling sideways in
 // its own box (a phone) or the window changing size does not, so follow those.
+// In the tag menu: up and down through the choices, Escape to leave, and Tab
+// off either end hands the focus back to the button it came from rather than
+// dropping it at the bottom of the page.
+document.addEventListener('keydown', (e) => {
+  const menu = $('#tagMenu');
+  if (!tagFor || menu.hidden || !menu.contains(e.target)) return;
+  const back = () => {
+    const { kind, id } = tagFor;
+    tagFor = null;
+    render();
+    document.querySelector(`#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`)?.focus();
+  };
+  const stops = [...menu.querySelectorAll('button, input')];
+  if (e.key === 'Escape') { e.preventDefault(); back(); return; }
+  if (e.key === 'Tab' && (e.shiftKey ? e.target === stops[0] : e.target === stops[stops.length - 1])) { e.preventDefault(); back(); return; }
+  const choices = [...menu.querySelectorAll('.tag-choice')];
+  const i = choices.indexOf(e.target);
+  if (i < 0 || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+  e.preventDefault();
+  (e.key === 'ArrowDown' ? choices[i + 1] || $('#newTagName') : choices[i - 1])?.focus();
+});
+
+// The tag menu's button is in a rail that sticks while the page scrolls under
+// it, so the menu follows every scroll, the page's own included. (Absolute,
+// not fixed, like the picker: the app itself never uses position: fixed, and
+// a test relies on that to catch CSS smuggled in through a share code.)
 document.addEventListener('scroll', (e) => {
   if (picking && e.target !== document && !$('#picker').contains(e.target)) placePicker();
+  if (tagFor && !$('#tagMenu').contains(e.target)) placeTagMenu();
 }, true);
-window.addEventListener('resize', () => { if (picking) placePicker(); });
+window.addEventListener('resize', () => { if (picking) placePicker(); if (tagFor) placeTagMenu(); });
 
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }

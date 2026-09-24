@@ -1242,6 +1242,95 @@ check('with the driver and car each route was saved with',
 await page.locator('[data-act="peek-template"]').first().click();
 check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
 
+// --- the tag menu is never cut off ---
+// It was drawn inside its row, and the rows sit in a list that scrolls, so the
+// list cut it off after its first choice: the rest was there only by
+// scrolling. On a roster of two, which is where it was reported.
+const cutOff = (sel) => page.locator(sel).evaluate((box) => {
+  const m = box.getBoundingClientRect();
+  const out = [];
+  if (m.top < 0 || m.left < 0 || m.bottom > innerHeight + 0.5 || m.right > document.documentElement.clientWidth + 0.5) out.push('the screen');
+  for (let el = box.parentElement; el; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+    const b = el.getBoundingClientRect();
+    if (m.top < b.top - 0.5 || m.bottom > b.bottom + 0.5 || m.left < b.left - 0.5 || m.right > b.right + 0.5) out.push(el.className || el.tagName);
+  }
+  return out;
+});
+const railFixture = (drivers, labels) => page.evaluate(([drivers, labels]) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false,
+  labels: labels.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }], positions: [],
+  routes: [{ id: 'r1', name: '1', driver: drivers[0], carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
+  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  driverGroups: [], templates: [],
+})), [drivers, labels]);
+const tagButton = (n) => page.locator('#tab-plan [data-panel="drivers"] li').nth(n).locator('[data-act="tag"]');
+
+await page.setViewportSize({ width: 1600, height: 940 });
+await railFixture(['jesper', 'je lo'], ['Course', 'New']);
+await page.reload({ waitUntil: 'networkidle' });
+await tagButton(0).click();
+same('the tag menu opens whole, cut off by nothing', await cutOff('#tagMenu'), []);
+check('every choice and the new-tag box are on show, not behind a scroll',
+  await page.locator('#tagMenu').evaluate((m) => {
+    const box = m.getBoundingClientRect();
+    return [...m.querySelectorAll('.tag-choice, #newTagName, [data-act="add-tag"]')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+    });
+  }));
+check('the keyboard is taken to it', await page.evaluate(() => document.activeElement?.classList.contains('tag-choice')));
+await page.keyboard.press('ArrowDown');
+check('and moves through it with the arrows', (await page.evaluate(() => document.activeElement?.textContent.trim())) === 'Course');
+await page.keyboard.press('Escape');
+check('Escape shuts it and hands the focus back to its button',
+  await page.locator('#tagMenu').isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && document.activeElement?.dataset.id === 'd0'));
+
+// A long roster, scrolled down to its end: tagging a name near the bottom
+// used to throw the list back to the top, and the row clicked out of sight.
+await railFixture(Array.from({ length: 30 }, (_, i) => `Driver ${String(i + 1).padStart(2, '0')}`), ['Course']);
+await page.reload({ waitUntil: 'networkidle' });
+const driverList = page.locator('#tab-plan [data-panel="drivers"] .rail-list');
+await driverList.evaluate((l) => { l.scrollTop = l.scrollHeight; });
+const listWas = await driverList.evaluate((l) => l.scrollTop);
+await tagButton(28).click();
+const listNow = await page.locator('#tab-plan [data-panel="drivers"] .rail-list').evaluate((l) => l.scrollTop);
+check('tagging near the bottom of a long roster leaves the list where it was', listWas > 0 && listNow === listWas, `${listWas} -> ${listNow}`);
+same('and that menu is whole too', await cutOff('#tagMenu'), []);
+check('beside the button it came from',
+  await page.evaluate(() => {
+    const b = document.querySelector('#tab-plan [data-act="tag"][data-id="d28"]').getBoundingClientRect();
+    const m = document.querySelector('#tagMenu').getBoundingClientRect();
+    return Math.abs(m.top - b.bottom) <= 4 || Math.abs(m.bottom - b.top) <= 4;
+  }));
+await page.click('#tab-plan thead');
+check('a click anywhere else shuts it', await page.locator('#tagMenu').isHidden());
+
+// Forty tags on a short screen: the choices scroll inside the menu, and the
+// box for a new one stays in sight below them.
+await page.setViewportSize({ width: 1280, height: 600 });
+await railFixture(['jesper', 'je lo'], Array.from({ length: 40 }, (_, i) => `Tag ${i + 1}`));
+await page.reload({ waitUntil: 'networkidle' });
+await tagButton(0).click();
+same('forty tags on a short screen still fit it', await cutOff('#tagMenu'), []);
+check('with the choices scrolling inside and the new-tag box in sight',
+  await page.locator('#tagMenu').evaluate((m) => {
+    const c = m.querySelector('.tag-choices');
+    const box = m.getBoundingClientRect(), input = m.querySelector('#newTagName').getBoundingClientRect();
+    return c.scrollHeight > c.clientHeight && input.bottom <= box.bottom + 0.5 && input.top >= box.top;
+  }));
+await page.keyboard.press('Escape');
+
+// The route picker lives by the same rule on a short screen.
+await railFixture(Array.from({ length: 30 }, (_, i) => `Driver ${String(i + 1).padStart(2, '0')}`), []);
+await page.reload({ waitUntil: 'networkidle' });
+await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').click();
+same('the driver grid fits a short screen rather than running off it', await cutOff('#picker'), []);
+await page.keyboard.press('Escape');
+
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
