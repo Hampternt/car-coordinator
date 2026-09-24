@@ -93,7 +93,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* notices: things the app needs to tell you, dismissable */
 #notices { padding: 0 20px; }
 #notices:not(:empty) { padding-top: 14px; }
-.notice { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
+.notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
 .notice .btn { margin-left: auto; flex: none; }
 /* a notice that offers something carries two buttons: the offer, then the
@@ -101,7 +101,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .notice .btn + .btn { margin-left: 0; }
 /* a notice that is about to rewrite saved data says every line of what it
    would do, so it needs a list inside it rather than one long sentence */
-.notice .say { min-width: 0; }
+/* The sentence keeps a readable width; on a phone the buttons drop under it
+   rather than squeezing it to a word per line. */
+.notice .say { flex: 1 1 16em; min-width: 0; }
 .notice .say ul { margin: 6px 0 0; padding-left: 20px; }
 .notice .say li { margin: 2px 0; }
 
@@ -125,6 +127,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* The table takes what it needs; the rail is a fixed working width beside it.
    320 holds a name, where it is today and its two buttons without wrapping. */
 .plan { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+/* The route table scrolls sideways in a box of its own when the screen is
+   narrower than it, so the rail beside or above it keeps the screen's width. */
+.plan-table { min-width: 0; overflow-x: auto; }
 /* `minmax(0, 1fr)`, not the implicit `auto`: an auto column is sized from its
    content's minimum, and a row of grip, name box, badge and three buttons has
    a minimum wider than the rail. The column grew to 387 inside a 320 aside and
@@ -197,7 +202,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .day:hover { border-color: var(--ink); }
 .day.on { background: var(--hivis); border-color: var(--ink); }
 .day.today { box-shadow: inset 0 -3px var(--steel); }
-.day.none { background: none; border-style: dashed; color: #8a8d88; font-weight: 600; }
+.day.none { background: none; border-style: dashed; border-color: #8a8d88; color: #6b6e70; font-weight: 600; }
 .day.none:hover { color: var(--ink); }
 .day-badge { padding: 2px 8px; background: var(--steel); color: #fff; font: 600 12px var(--head); white-space: nowrap; }
 .day-badge.twice { background: none; color: var(--caution); border: 1px solid var(--caution); }
@@ -271,7 +276,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    above the table rather than squeezing it. Dragging still works — it is just
    a longer reach. */
 @media (max-width: 1180px) {
-  .plan { grid-template-columns: 1fr; }
+  /* minmax, not 1fr: a bare 1fr column is as wide as its widest content, so
+     on a phone the 700px route table stretched the rail above it to 700px and
+     pushed Thursday to Sunday off the side of the screen. */
+  .plan { grid-template-columns: minmax(0, 1fr); }
   .rail { position: static; order: -1; }
   .rail-list { max-height: 30vh; }
 }
