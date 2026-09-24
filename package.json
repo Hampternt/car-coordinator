@@ -1,6 +1,6 @@
 {
   "name": "car-coordinator",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "scripts": {
     "dev": "node scripts/serve.mjs 5173",

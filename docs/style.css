@@ -13,6 +13,11 @@
 }
 
 * { box-sizing: border-box; }
+/* A notice brought into view clears the sticky top bar; --bar is its height,
+   measured by the app. (Only here: on everything in the page it also applied
+   inside the rail's scrolling lists and clipped the row being tabbed to.
+   Focus that lands under the bar is scrolled clear by the app instead.) */
+#notices > * { scroll-margin-top: var(--bar, 80px); }
 body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
 button, input, select { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
@@ -93,15 +98,19 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* notices: things the app needs to tell you, dismissable */
 #notices { padding: 0 20px; }
 #notices:not(:empty) { padding-top: 14px; }
-.notice { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
+.notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
-.notice .btn { margin-left: auto; flex: none; }
 /* a notice that offers something carries two buttons: the offer, then the
-   dismiss beside it, not spread across the width */
-.notice .btn + .btn { margin-left: 0; }
+   dismiss beside it. They sit in one box so they wrap as a pair, kept to the
+   right, rather than the ✕ being left alone under the text; a long offer
+   wraps its own words rather than pushing the page sideways. */
+.notice .acts { display: flex; gap: 8px; margin-left: auto; min-width: 0; max-width: 100%; }
+.notice .acts .btn { flex: 0 1 auto; min-width: 0; }
 /* a notice that is about to rewrite saved data says every line of what it
    would do, so it needs a list inside it rather than one long sentence */
-.notice .say { min-width: 0; }
+/* The sentence keeps a readable width; on a phone the buttons drop under it
+   rather than squeezing it to a word per line. */
+.notice .say { flex: 1 1 16em; min-width: 0; }
 .notice .say ul { margin: 6px 0 0; padding-left: 20px; }
 .notice .say li { margin: 2px 0; }
 
@@ -125,6 +134,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* The table takes what it needs; the rail is a fixed working width beside it.
    320 holds a name, where it is today and its two buttons without wrapping. */
 .plan { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+/* The route table scrolls sideways in a box of its own when the screen is
+   narrower than it, so the rail beside or above it keeps the screen's width. */
+.plan-table { min-width: 0; overflow-x: auto; }
 /* `minmax(0, 1fr)`, not the implicit `auto`: an auto column is sized from its
    content's minimum, and a row of grip, name box, badge and three buttons has
    a minimum wider than the rail. The column grew to 387 inside a 320 aside and
@@ -167,11 +179,14 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .drop-after { box-shadow: inset 0 -3px var(--steel); }
 
 /* The quick tag menu, under the row it tags. */
-.tag-menu { position: absolute; z-index: 6; top: 100%; right: 0; width: 230px; background: #fff; border: 1px solid var(--ink); box-shadow: 0 6px 20px rgba(0,0,0,.2); padding: 6px; }
+.tag-menu { position: absolute; z-index: 7; width: 230px; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--ink); box-shadow: 0 6px 20px rgba(0,0,0,.2); padding: 6px; }
+.tag-menu[hidden] { display: none; }
+/* A long label list scrolls inside the menu; the box for a new tag stays put. */
+.tag-choices { min-height: 0; overflow-y: auto; }
 .tag-choice { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: none; padding: 5px 6px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .tag-choice:hover { background: var(--concrete); }
 .tag-choice.on { background: var(--hivis); font-weight: 700; }
-.tag-new { display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.tag-new { flex: none; display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .tag-new input[type=text] { flex: 1; min-width: 0; border: 1px solid var(--line); padding: 4px 5px; font: inherit; font-size: 13px; }
 .tag-new input[type=color] { flex: none; width: 30px; padding: 0; border: 1px solid var(--line); }
 
@@ -186,8 +201,36 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-list .btn { flex: none; padding: 0 5px; font-size: 11px; color: #555; }
 /* someone off the day's crew: still on the roster, just quieter */
 .grid tr.away td { color: #6b6e70; }
+/* The week, as one row: All, then Monday to Sunday. The one in force is lit;
+   today has a steel line under it; a day with no crew yet is there but
+   dashed and quiet, and clicking it offers to make one. */
+.day-bar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; margin: 0 0 8px; }
+.day { min-width: 0; padding: 6px 0; border: 1px solid var(--line); background: #fff; font: 700 13px var(--head); color: var(--ink); cursor: pointer; text-align: center; }
+.day:hover { border-color: var(--ink); }
+.day.on { background: var(--hivis); border-color: var(--ink); }
+.day.today { box-shadow: inset 0 -3px var(--steel); }
+.day.none { background: none; border-style: dashed; border-color: #8a8d88; color: #6b6e70; font-weight: 600; }
+.day.none:hover { color: var(--ink); }
+.day-badge { padding: 2px 8px; background: var(--steel); color: #fff; font: 600 12px var(--head); white-space: nowrap; }
+.day-badge.twice { background: none; color: var(--caution); border: 1px solid var(--caution); }
+.day-add { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: 8px; color: #555; font-size: 13px; }
+.day-add .btn { padding: 2px 8px; font-size: 13px; }
 .rail-groups { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
 .rail-groups .btn { flex: none; padding: 2px 8px; font-size: 12px; color: inherit; }
+/* The other crews say the same things the days do: lit when in force, dashed
+   when there is nobody in them to bring in. */
+.rail-groups .btn.on { background: var(--hivis); border-color: var(--ink); font-weight: 700; }
+.rail-groups .btn.quiet { background: none; border-style: dashed; border-color: #8a8d88; color: #6b6e70; }
+/* The question a quiet day asks, under the week it came from. */
+/* The day being asked about keeps its dashes — it still has no crew — and
+   gains a ring, so it cannot be mistaken for a day that has one. */
+.day.asking { color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.day.asking.today { box-shadow: inset 0 -3px var(--steel), 0 0 0 2px var(--ink); }
+.day-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 8px; padding: 6px 8px; background: #fff; border: 1px solid var(--ink); border-left: 4px solid var(--hivis); font-size: 13px; }
+.day-ask > span:first-child { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
+.day-ask .acts { display: flex; gap: 4px; margin-left: auto; }
+.day-ask .btn { padding: 2px 8px; font-size: 13px; }
+.day-ask.done { border-left-color: #2e7d32; }
 
 /* ---------- day templates, at the foot of the plan ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf
@@ -227,12 +270,14 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    the top of the next row and says there is more below without a word. */
 #picker {
   position: absolute; z-index: 7; width: min(620px, calc(100vw - 16px));
+  display: flex; flex-direction: column;
   background: #fff; border: 1px solid var(--ink); border-top: 4px solid var(--hivis);
   box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 6px 8px 8px;
 }
-.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; margin-bottom: 6px; font: 600 13px var(--head); color: #555; }
+#picker[hidden] { display: none; }
+.picker-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; margin-bottom: 6px; font: 600 13px var(--head); color: #555; }
 .picker-head .btn { padding: 2px 9px; font-size: 13px; }
-.picker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; max-height: 306px; overflow-y: auto; }
+.picker-grid { min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; max-height: 306px; overflow-y: auto; }
 .pick { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); background: var(--panel); text-align: left; cursor: pointer; }
 .pick:hover { background: #fff; border-color: var(--ink); }
 .pick.on { background: var(--hivis); border-color: var(--ink); }
@@ -252,7 +297,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    above the table rather than squeezing it. Dragging still works — it is just
    a longer reach. */
 @media (max-width: 1180px) {
-  .plan { grid-template-columns: 1fr; }
+  /* minmax, not 1fr: a bare 1fr column is as wide as its widest content, so
+     on a phone the 700px route table stretched the rail above it to 700px and
+     pushed Thursday to Sunday off the side of the screen. */
+  .plan { grid-template-columns: minmax(0, 1fr); }
   .rail { position: static; order: -1; }
   .rail-list { max-height: 30vh; }
 }
@@ -295,7 +343,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: #fff; }
-  .topbar, main, #notices, #picker { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 

@@ -24,6 +24,56 @@ const collate = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base
 
 // Indexed by Date.getDay(), which is how a weekday is stored: Sunday is 0.
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// The week the way the warehouse reads it: Monday first.
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+
+/* A day group named for a day of the week is that day's crew, and is the
+   button for that day beside the plan. Named the way people name them: in
+   English or Norwegian, whole or short, with a plural or a "crew" after it —
+   "Monday", "Mon", "Mondays", "Monday crew", "Mandag", "Mandagsgjeng", "Man".
+   Thursday's Norwegian short form is left out on purpose: "Tor" is a name
+   before it is Thursday. */
+const DAY_NAMES = [
+  ['SUNDAY', 'SUN', 'SØNDAG', 'SONDAG', 'SØN'],
+  ['MONDAY', 'MON', 'MANDAG', 'MAN'],
+  ['TUESDAY', 'TUE', 'TUES', 'TIRSDAG', 'TIR'],
+  ['WEDNESDAY', 'WED', 'WEDS', 'ONSDAG', 'ONS'],
+  ['THURSDAY', 'THU', 'THUR', 'THURS', 'TORSDAG'],
+  ['FRIDAY', 'FRI', 'FREDAG', 'FRE'],
+  ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG', 'LØR'],
+];
+function groupWeekday(name) {
+  let n = fold(name)
+    .replace(/[.!]+$/, '')                                            // "Mondays."
+    .replace(/['’]S\b/, '')                                           // "Monday's crew"
+    .replace(/[\s.-]+(CREWS?|GROUPS?|GANG|TEAM|GJENG|LAG|MANNSKAP)$/, '') // "Monday crew", "Mandag gjeng"
+    .replace(/DAYS$/, 'DAY').replace(/DAGER$/, 'DAG');                // "Mondays", "Mandager"
+  // Norwegian writes the crew into the day as one word: "Mandagsgjeng",
+  // "Fredagsvakta", "Tirsdagslaget".
+  const joined = n.match(/^(MANDAG|TIRSDAG|ONSDAG|TORSDAG|FREDAG|L[ØO]RDAG|S[ØO]NDAG)S?(GJENGEN|GJENG|LAGET|LAG|TEAM|VAKTA|VAKTEN|VAKT|MANNSKAPET|MANNSKAP)$/);
+  if (joined) n = joined[1];
+  return DAY_NAMES.findIndex((names) => names.includes(n));
+}
+/* Who a crew really holds: drivers still on the roster, each once. */
+const crewIds = (g) => new Set(g.driverIds.filter((id) => byId(state.drivers, id)));
+/* In force: the drivers in today are exactly that crew. An empty crew is
+   never in force — it would light up the moment nobody was in. */
+function crewInForce(ids) {
+  const inIds = new Set(state.drivers.filter((d) => d.available).map((d) => d.id));
+  return ids.size > 0 && ids.size === inIds.size && [...ids].every((id) => inIds.has(id));
+}
+
+/* Each day's crew: the first group named for it. A second group named for
+   the same day is not lost — it is offered beside the others. */
+function dayCrews() {
+  const byDay = new Map();
+  const others = [];
+  for (const g of state.driverGroups) {
+    const day = groupWeekday(g.name);
+    if (day >= 0 && !byDay.has(day)) byDay.set(day, g); else others.push(g);
+  }
+  return { byDay, others };
+}
 
 function today() {
   const d = new Date();
@@ -311,24 +361,100 @@ const liveSig = () => {
 let dragging = null;
 /* The tag menu, when one is open: { kind, id }. One at a time. */
 let tagFor = null;
+/* True for the moment the app itself is scrolling to keep an open tag menu in
+   view, so that scroll is not read as the user scrolling its row away. */
+let tagSettling = false;
 
 const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
 
 /* The tag menu: every label, the way off, and a box to make a new one.
-   Rendered inside the row it belongs to so it cannot drift away from it. */
+
+   It used to be drawn inside the row it belongs to, and the rows sit in a
+   list that scrolls — and a scrolling box cuts off whatever crosses its edge.
+   So the menu showed its first choice and the rest was only reachable by
+   scrolling the list, on a two-driver roster as much as a long one. It is
+   drawn in a layer of its own over the page now (#tagMenu), placed against the
+   button that opened it, and nothing it sits inside can crop it. */
 function tagMenu(kind, item) {
   const choice = (id, name, color, on) =>
     `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
       <span class="dot" style="--c:${esc(color)}"></span>${esc(name)}</button>`;
-  return `<div class="tag-menu">
-    ${choice('', 'No tag', '#2e7d32', !item.labelId)}
-    ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+  return `<div class="tag-choices">
+      ${choice('', 'No tag', '#2e7d32', !item.labelId)}
+      ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+    </div>
     <div class="tag-new">
       <input id="newTagName" type="text" placeholder="New tag…" aria-label="Name for a new tag">
       <input id="newTagColor" type="color" value="#1565c0" aria-label="Colour for the new tag">
       <button class="btn" data-act="add-tag" data-kind="${kind}" data-id="${esc(item.id)}">Add</button>
-    </div>
-  </div>`;
+    </div>`;
+}
+
+const tagAnchor = () => tagFor
+  && document.querySelector(`#tab-plan [data-act="tag"][data-kind="${tagFor.kind}"][data-id="${CSS.escape(tagFor.id)}"]`);
+
+/* Shut the menu without redrawing the plan: a redraw replaces the box the
+   click that shut it has just put the caret in, and the typing is lost. */
+function closeTagMenu() {
+  if (!tagFor) return;
+  const button = tagAnchor();
+  tagFor = null;
+  renderTagMenu();
+  if (button) { button.classList.remove('on'); button.setAttribute('aria-expanded', 'false'); }
+}
+
+function renderTagMenu() {
+  const layer = $('#tagMenu');
+  const item = tagFor && byId(listFor(tagFor.kind) || [], tagFor.id);
+  const anchor = tagAnchor();
+  if (!item || !anchor || tab !== 'plan') {
+    layer.hidden = true;
+    layer.innerHTML = '';
+    delete layer.dataset.for;
+    return;
+  }
+  // A redraw while a new tag is half typed keeps what was typed, and where.
+  const key = `${tagFor.kind}:${tagFor.id}`;
+  const again = layer.dataset.for === key;
+  const f = document.activeElement;
+  const where = again && layer.contains(f)
+    ? (f.id ? `#${f.id}` : f.dataset.act === 'set-tag' ? `[data-act="set-tag"][data-label="${CSS.escape(f.dataset.label)}"]` : `[data-act="${f.dataset.act}"]`)
+    : null;
+  const typed = again ? { name: $('#newTagName')?.value, color: $('#newTagColor')?.value, sel: f?.id === 'newTagName' ? [f.selectionStart, f.selectionEnd, f.selectionDirection] : null } : null;
+  layer.innerHTML = tagMenu(tagFor.kind, item);
+  layer.dataset.for = key;
+  layer.setAttribute('aria-label', `Tag ${item.reg || item.name}`);
+  if (typed) {
+    if (typed.name) $('#newTagName').value = typed.name;
+    if (typed.color) $('#newTagColor').value = typed.color;
+  }
+  if (where) {
+    layer.querySelector(where)?.focus();
+    if (typed?.sel) $('#newTagName').setSelectionRange(...typed.sel);
+  }
+  layer.hidden = false;
+  placeTagMenu();
+}
+
+function placeTagMenu(scrolled = false) {
+  const layer = $('#tagMenu');
+  const anchor = tagAnchor();
+  if (!anchor || layer.hidden) return;
+  const a = anchor.getBoundingClientRect();
+  // Scrolled out of its list, or up under the top bar or off the screen: a
+  // menu pointing at nothing is worse than none, so it goes with its row. Only
+  // for a scroll — a window growing shorter (a phone's keyboard coming up)
+  // must not throw away a tag being typed.
+  if (scrolled) {
+    const list = anchor.closest('.rail-list')?.getBoundingClientRect();
+    const bar = $('.topbar').getBoundingClientRect().bottom;
+    if ((list && (a.bottom <= list.top || a.top >= list.bottom)) || a.bottom <= bar || a.top >= window.innerHeight) { closeTagMenu(); return; }
+  }
+  layer.style.maxHeight = '';
+  const { left, top, tall } = besideAnchor(a, layer.offsetWidth, layer.offsetHeight, true);
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
 }
 
 /* One row of the rail: grip, status dot, the name as an editable box, where
@@ -346,9 +472,8 @@ function railRow(kind, item, label, where, extra = '', cls = '') {
     ${where}
     ${extra}
     <button class="btn tag-btn ${tagOpenFor(kind, item.id) ? 'on' : ''}" data-act="tag" data-kind="${kind}" data-id="${esc(item.id)}"
-      title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}">🏷</button>
+      title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}" aria-haspopup="true" aria-expanded="${!!tagOpenFor(kind, item.id)}">🏷</button>
     ${actBtn('del', kind, item.id, armed === `del:${item.id}` ? 'Sure?' : '✕', armed === `del:${item.id}` ? 'armed' : '', `title="Remove ${esc(item[field])}"`)}
-    ${tagOpenFor(kind, item.id) ? tagMenu(kind, item) : ''}
   </li>`;
 }
 
@@ -372,7 +497,7 @@ function railCars(use) {
       <button class="btn" data-act="add-car" data-from="#railCar" title="Add to the fleet">+</button>
     </div>
     ${state.cars.length
-      ? `<ul class="rail-list" data-drop="car">${rows}</ul>`
+      ? `<ul class="rail-list" data-drop="car" data-keep-scroll="cars">${rows}</ul>`
       : '<p class="rail-empty">No cars yet. Type a registration above — or paste the whole fleet at once, separated by spaces.</p>'}
   </section>`;
 }
@@ -412,21 +537,115 @@ function railDrivers() {
     return railRow('driver', d, 'Driver name', where, inOut, d.available ? '' : 'away');
   }).join('');
   const away = state.drivers.length - inToday.length;
-  // Monday morning is one click: the groups are here, where the day is set up.
-  const groups = state.driverGroups.map((g) =>
-    actBtn('apply-group', 'driverGroup', g.id, esc(g.name), '', 'title="Everyone in this group is in today"')).join('');
+  const { others } = dayCrews();
+  // Groups that are not a day of the week — a weekend crew, a Monday named
+  // twice — keep their own buttons under the week.
+  const groups = others.map((g) => {
+    const ids = crewIds(g);
+    if (!ids.size) {
+      return actBtn('group-empty', 'driverGroup', g.id, esc(g.name), 'quiet', 'title="Nobody in this group yet"');
+    }
+    const on = crewInForce(ids);
+    return actBtn('apply-group', 'driverGroup', g.id, esc(g.name), on ? 'on' : '',
+      `aria-pressed="${on}" title="${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in today"`);
+  }).join('');
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    ${state.drivers.length ? dayBar(inToday) : ''}
     ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
+    ${dayQuestion()}
     <div class="rail-add">
       <input id="railDriver" type="text" placeholder="Name(s), comma separated" aria-label="Add a driver">
       <button class="btn" data-act="add-driver" data-from="#railDriver" title="Add to the roster">+</button>
     </div>
     ${state.drivers.length
-      ? `<ul class="rail-list" data-drop="driver">${rows}</ul>`
+      ? `<ul class="rail-list" data-drop="driver" data-keep-scroll="drivers">${rows}</ul>`
       : '<p class="rail-empty">Nobody on the roster yet. Add the names you plan with — they become suggestions in the table, and you can drag them onto a route.</p>'}
   </section>`;
 }
+
+/* The question a quiet day asks, and what it says once answered. Asked in
+   the Drivers panel, under the week, rather than as a notice above the page:
+   a notice pushed the week down under the finger that had just pressed it, so
+   on a phone the next tap landed on "Save" instead of the next day, and a
+   week set up day by day piled a notice up for every one. Here nothing above
+   the row moves, the count is who is in right now, and each answer replaces
+   the last. Kept off `state`: it is a conversation, not data. */
+let dayAsk = null;   // { day } | { day, saved: [driver ids] } | { groupId }
+
+/* Drawn from what is true now, every time: the Drivers tab can fill, rename
+   or delete a crew while the question is up, and a line that went on saying
+   "Wednesday's crew is empty" beside a Wed that had since got a crew was
+   worse than no line. A question overtaken like that turns into the answer,
+   or goes. */
+function dayQuestion() {
+  if (!dayAsk || !state.drivers.length) return '';
+  const close = '<button class="btn" data-act="day-ask-close" aria-label="Close" title="Close">✕</button>';
+  const line = (text, acts = '', cls = '') => `<div class="day-ask ${cls}" role="status"><span>${text}</span><span class="acts">${acts}${close}</span></div>`;
+  if (dayAsk.groupId) {
+    const g = byId(state.driverGroups, dayAsk.groupId);
+    if (!g || crewIds(g).size) return '';
+    return line(`${esc(g.name.trim() || 'That group')} has nobody in it yet. Tick names into it on the Drivers tab.`);
+  }
+  const name = WEEKDAYS[dayAsk.day];
+  const crew = dayCrews().byDay.get(dayAsk.day);
+  const has = crew ? crewIds(crew).size : 0;
+  if (dayAsk.saved) {
+    // Only while the crew is still the one saved: edited on the Drivers tab
+    // since, "Saved: the 6" would be claiming someone else's work.
+    const ids = crew ? crewIds(crew) : new Set();
+    const same = ids.size === dayAsk.saved.length && dayAsk.saved.every((x) => ids.has(x));
+    return same ? line(`Saved: ${name}'s crew is the ${ids.size} who were in. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done') : '';
+  }
+  if (has) return line(`${name} has a crew now. Press ${name.slice(0, 3)} to use it.`);
+  const what = crew ? `${name}'s crew is empty.` : `No ${name} crew yet.`;
+  const n = state.drivers.filter((d) => d.available).length;
+  if (!n) return line(`${what} Nobody is in to save as one — set who is in first, or tick names into it on the Drivers tab.`);
+  const all = n === state.drivers.length && n > 1 ? ' That is everyone: set anyone who is off to away first, if the crew is smaller.' : '';
+  return line(`${what} Save the ${n} in now as ${name}'s?${all}`,
+    `<button class="btn primary-ish" data-act="save-day-crew" data-day="${dayAsk.day}">Save as ${name}</button>`);
+}
+
+/* Monday morning is one click, and the week is where it is found: All, then
+   Monday to Sunday, as one row. The one in force is lit — the crew in today
+   is exactly that day's, or everyone — and today has a line under it. A day
+   with no crew yet is there but quiet, and clicking it offers to save who is
+   in now as that day's. */
+function dayBar(inToday) {
+  const { byDay } = dayCrews();
+  const inIds = new Set(inToday.map((d) => d.id));
+  const today = new Date().getDay();
+  // A crew left empty — made with no names ticked, or whose names all left —
+  // is not a crew to send everyone away with, so it looks and acts like a day
+  // that has none, and never lights up.
+  const everyone = inIds.size === state.drivers.length;
+  const days = WEEK.map((day) => {
+    const g = byDay.get(day);
+    const ids = g ? crewIds(g) : new Set();
+    const on = crewInForce(ids);
+    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && !dayAsk.saved && 'asking'].filter(Boolean).join(' ');
+    const when = `${WEEKDAYS[day]}${day === today ? ' (today)' : ''}`;
+    if (!ids.size) {
+      return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
+        title="${when}: ${g ? 'the crew is empty' : 'no crew yet'} — click to save who is in now as ${WEEKDAYS[day]}'s">${WEEKDAYS[day].slice(0, 3)}</button>`;
+    }
+    return `<button class="${cls}" data-act="apply-group" data-kind="driverGroup" data-id="${esc(g.id)}" data-day="${day}" aria-pressed="${on}"
+      title="${esc(when)}: ${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in today">${WEEKDAYS[day].slice(0, 3)}</button>`;
+  }).join('');
+  return `<div class="day-bar" role="group" aria-label="Who is in today">
+    <button class="day all${everyone ? ' on' : ''}" data-act="all-in" aria-pressed="${everyone}" title="Everyone on the roster is in today">All</button>${days}
+  </div>`;
+}
+
+/* Where each of the plan's scrolling lists was left. Taken from the lists'
+   own scroll events, not read at redraw time: a redraw made while another tab
+   is showing reads a hidden list, and a hidden list always says 0 — which is
+   how a trip to the Drivers tab used to send both rail lists back to the top. */
+const planScroll = Object.create(null);
+document.addEventListener('scroll', (e) => {
+  const key = e.target?.dataset?.keepScroll;
+  if (key) planScroll[key] = { top: e.target.scrollTop, left: e.target.scrollLeft };
+}, true);
 
 function renderPlan() {
   const { lines: found, rows: flagged, use } = problems();
@@ -488,15 +707,33 @@ function renderPlan() {
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
     <div class="plan">
-      <table class="grid">
+      <div class="plan-table" data-keep-scroll="table"><table class="grid">
         <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
-      </table>
+      </table></div>
       <aside class="rail">${railDrivers()}${railCars(use)}
         <p class="rail-saved">Every change here is saved as you make it.</p>
       </aside>
     </div>
     ${renderTemplates()}`;
+  // The rail's lists scroll, and this redraw replaces them: without putting
+  // the scroll back, every click in a long roster — tag, in or away, remove —
+  // threw the list to the top and the row just clicked out of sight.
+  // Put back, then write down what the list actually took: one that has
+  // grown shorter cannot scroll as far, and an old position replayed into a
+  // freshly pasted fleet opened it halfway down. A list not drawn at all this
+  // time — emptied, or a template closed — is forgotten. Nothing is written
+  // while the plan is hidden, when every list reads 0.
+  const shown = tab === 'plan';
+  const drawn = new Set();
+  for (const el of document.querySelectorAll('#tab-plan [data-keep-scroll]')) {
+    const key = el.dataset.keepScroll;
+    drawn.add(key);
+    const at = planScroll[key];
+    if (at) { el.scrollTop = at.top; el.scrollLeft = at.left; }
+    if (shown && at) planScroll[key] = { top: el.scrollTop, left: el.scrollLeft };
+  }
+  for (const key of Object.keys(planScroll)) if (!drawn.has(key)) delete planScroll[key];
 }
 
 /* ---------- day templates ----------
@@ -522,7 +759,7 @@ function templateContents(t) {
   }).join('');
   const gone = t.routes.filter((r) => (r.carId && !byId(state.cars, r.carId))
     || (r.positionId && !byId(state.positions, r.positionId))).length;
-  return `<div class="tpl-body">
+  return `<div class="tpl-body" data-keep-scroll="template:${esc(t.id)}">
     <table class="tpl-table">
       <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Packing</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -615,12 +852,19 @@ function renderDrivers() {
    nothing more. Applying one answers "who is in today", which is what the rail
    shows; it says nothing about which route anyone drives. */
 function driverGroups() {
+  const { byDay } = dayCrews();
+  const missing = WEEK.filter((day) => !byDay.has(day));
   const cards = state.driverGroups.map((g) => {
     const members = state.drivers.map((d) =>
       `<button class="chip ${g.driverIds.includes(d.id) ? 'on' : ''}" style="--c:var(--steel)" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
+    const day = groupWeekday(g.name);
+    const used = day >= 0 && byDay.get(day) === g;
+    const badge = day < 0 ? ''
+      : used ? `<span class="day-badge" title="This group is the ${WEEKDAYS[day].slice(0, 3)} button beside the day plan">${WEEKDAYS[day].slice(0, 3)} button</span>`
+        : `<span class="day-badge twice" title="Another group is ${WEEKDAYS[day]} already, so this one has a button of its own under the week">${WEEKDAYS[day]} twice</span>`;
     return `<div class="group">
       <div class="bar">
-        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}
+        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}${badge}
         ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Set who is in today to this group"')}
         ${moveDel('driverGroup', g.id)}
       </div>
@@ -628,10 +872,12 @@ function driverGroups() {
     </div>`;
   }).join('');
   return `<h2 style="margin-top:22px">Day groups</h2>
-    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a day of the week and it becomes that day's button beside the day plan. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
       <button class="btn" data-act="add-group">+ Add group</button>
+      ${missing.length ? `<span class="day-add">Add a crew for ${missing.map((day) =>
+        `<button class="btn" data-act="add-day-group" data-day="${day}" title="Make a ${WEEKDAYS[day]} group">${WEEKDAYS[day].slice(0, 3)}</button>`).join('')}</span>` : ''}
     </div>
     ${cards || '<p class="empty">No groups yet. Make one for the crew you plan with most \u2014 it takes one click to put them all in.</p>'}`;
 }
@@ -791,16 +1037,17 @@ function renderNotices() {
   // the sentence alone, exactly as before.
   $('#notices').innerHTML = notices.map((n, i) =>
     `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
-      ? `<ul>${n.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>${n.offer
+      ? `<ul>${n.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
-      : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div>`).join('');
+      : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`).join('');
 
-  const asking = notices.findIndex((n) => n.offer);
-  if (offerRaised && asking >= 0) {
-    offerRaised = false;
-    // 'nearest' so a question already on screen does not scroll the plan away.
-    $('#notices').children[asking]?.scrollIntoView({ block: 'nearest' });
-  }
+  // The question just asked, not the first one on screen: with an older
+  // question still up, scrolling to the first left the new one out of sight.
+  const asking = notices.indexOf(offerRaised);
+  offerRaised = null;
+  // 'nearest' so a question already on screen does not scroll the plan away;
+  // the page's scroll-padding keeps it clear of the sticky top bar.
+  if (asking >= 0) $('#notices').children[asking]?.scrollIntoView({ block: 'nearest' });
 }
 
 /* The paper list on the pillar has four columns and has to keep them, so the
@@ -856,6 +1103,7 @@ function render() {
   queueQr();
   renderNotices();
   renderPicker();
+  renderTagMenu();
 }
 
 /* ---------- events ---------- */
@@ -878,6 +1126,11 @@ document.addEventListener('input', (e) => {
   // Remember how both read before the change, to spot either.
   const watched = kind === 'route' && (name === 'round' || name === 'driver');
   const before = watched ? liveSig() : null;
+  // Renaming a group can make it a day's crew, or stop it being one, and the
+  // badges and the week have to follow while the name is still being typed.
+  const weekSig = () => state.driverGroups.map((g) => groupWeekday(g.name)).join();
+  const regroup = kind === 'driverGroup' && name === 'name';
+  const weekWas = regroup ? weekSig() : null;
   if (kind === 'meta') state[name] = value;
   else {
     const item = byId(listFor(kind) || [], id);
@@ -887,6 +1140,7 @@ document.addEventListener('input', (e) => {
   save();
   if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
+  else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
   else { renderSheet(); renderPicker(); }
 });
 
@@ -898,20 +1152,71 @@ document.addEventListener('input', (e) => {
    and the click that ended the edit is swallowed — measured, not guessed. */
 function redrawKeepingCaret(el) {
   const { kind, id, field: name } = el.dataset;
-  const at = el.selectionStart;
+  const sel = [el.selectionStart, el.selectionEnd, el.selectionDirection];
   render();
   const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
   if (!again) return;
   again.focus();
-  again.setSelectionRange(at, at);
+  again.setSelectionRange(...sel);
 }
 
-function confirmTwice(key) {
+function confirmTwice(key, fromKeyboard = false) {
   if (armed === key) { armed = null; return true; }
   armed = key;
-  render();
-  setTimeout(() => { if (armed === key) { armed = null; render(); } }, 3000);
+  // Armed from the keyboard, the focus has to stay on the button, or the
+  // second press — the one that deletes — can never be made. Armed with the
+  // mouse it must not: a Space pressed later to page down would press it.
+  if (fromKeyboard) renderKeepingFocus();
+  else {
+    // Put back, then let go: a Space pressed later cannot press it, and the
+    // next Tab still starts from here rather than from the top of the page.
+    renderKeepingFocus();
+    if (document.activeElement?.classList.contains('armed')) document.activeElement.blur();
+  }
+  // The disarm three seconds later must not pull the focus out of whatever
+  // has been typed into or moved to since.
+  setTimeout(() => { if (armed === key) { armed = null; renderKeepingFocus(); } }, 3000);
   return false;
+}
+
+/* A full redraw that puts the focus (and the caret) back on the same control,
+   found by what it is rather than which element it was — the redraw replaces
+   them all. Looked for in the same part of the page it was in: the rail and
+   the Drivers tab both have a ✕ for driver d3, and only one is showing. */
+function renderKeepingFocus() {
+  const el = document.activeElement;
+  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, dialog');
+  // The tag menu and the route picker put their own focus back, by the very
+  // choice it was on; a second guess here could only be worse.
+  const own = area && (area.id === 'tagMenu' || area.id === 'picker');
+  // Every data-* attribute, not a chosen few: the rail's Mark and Gap share
+  // an act, kind and id and differ only in data-field, the tag choices only in
+  // data-label, the day buttons in data-day — and a near match puts the focus
+  // on the wrong one, where the next key press changes the wrong thing.
+  const d = el?.dataset || {};
+  const attrs = Object.entries(d).map(([k, v]) => `[data-${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}="${CSS.escape(v)}"]`).join('');
+  const what = !area || own ? null : el.id ? `#${CSS.escape(el.id)}` : attrs || null;
+  // The whole selection, not only where it starts: a box reached with Tab has
+  // all its text selected, and collapsing that to a caret made the next key
+  // add to the name ("72") instead of replacing it.
+  const sel = el && typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd, el.selectionDirection] : null;
+  // A box that is not a field of the data — "add a driver", a new tag's
+  // name — holds what is typed in it until it is added, and the redraw
+  // rebuilds it empty. Carry the words across along with the focus.
+  const loose = el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !d.field ? el.value : null;
+  render();
+  if (!what) return;
+  const again = el.id ? document.querySelector(what) : document.querySelector(`#${area.id} ${what}`);
+  if (!again) return;
+  if (loose != null && again.value !== loose) again.value = loose;
+  if (again !== document.activeElement) {
+    // preventScroll is not always honoured — Chromium scrolls to a date box
+    // regardless — so the page is put back where it was as well.
+    const x = window.scrollX, y = window.scrollY;
+    again.focus({ preventScroll: true });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+  }
+  if (sel) { try { again.setSelectionRange(...sel); } catch { /* not a text box */ } }
 }
 
 function addFromInput(sel, make) {
@@ -1068,7 +1373,7 @@ function openShare(share) {
 
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
    the synchronous switch below. */
-async function dataAction(act, b) {
+async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'link-file': await Store.linkFile(state); break;
     case 'reconnect-file': await Store.reconnect(state); break;
@@ -1083,7 +1388,7 @@ async function dataAction(act, b) {
     case 'import': $('#importFile').click(); return;
     case 'restore': {
       const i = Number(b.dataset.id);
-      if (!confirmTwice(`restore:${i}`)) return;
+      if (!confirmTwice(`restore:${i}`, fromKeyboard)) return;
       const entry = Store.backups()[i];
       if (!entry) break;
       Store.snapshot(state, 'Restoring a backup');
@@ -1108,12 +1413,16 @@ async function dataAction(act, b) {
    click reads as having done nothing at all. Scroll it into view once, as it is
    raised — not on every render, or the page would yank itself about while the
    question just sits there waiting. */
-let offerRaised = false;
+let offerRaised = null;
 
 const note = (kind, text, offer = null, lines = []) => {
   notices = notices.filter((n) => n.text !== text);
-  notices.push({ kind, text, offer, lines });
-  if (offer) offerRaised = true;
+  const n = { kind, text, offer, lines };
+  notices.push(n);
+  // The first question raised since the last draw is the one brought into
+  // view: at start-up that is the one about the data, which comes first on
+  // purpose; any question asked later is raised on its own and wins.
+  if (offer && !offerRaised) offerRaised = n;
 };
 
 /* One live offer at a time: asking about Tuesday takes Monday's question away
@@ -1258,13 +1567,13 @@ document.addEventListener('click', (e) => {
   // remember to shut. Any click that is not in it, or on the button that
   // opened it, is an answer of "not that one".
   if (tagFor && !e.target.closest('.tag-menu') && !e.target.closest('[data-act="tag"]')) {
-    tagFor = null;
-    if (!b) { render(); return; }
+    closeTagMenu();
+    if (!b) return;
   }
   if (!b) return;
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
-  if (DATA_ACTS.has(act)) { dataAction(act, b); return; }
+  if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
   // Every act below that reads list[i] needs there to be an i. There should
@@ -1272,6 +1581,9 @@ document.addEventListener('click', (e) => {
   // button is cheap to survive and expensive not to: list[-1] throws, and
   // splice(-1, 1) quietly deletes the last row instead of the one clicked.
   if (ITEM_ACTS.has(act) && i < 0) return;
+  // A button pressed from the keyboard is replaced by the redraw it causes;
+  // the acts that know where the focus belongs next say so here.
+  let refocus = null;
 
   switch (act) {
     case 'tab': tab = b.dataset.tab; break;
@@ -1285,10 +1597,17 @@ document.addEventListener('click', (e) => {
     case 'tag':
       tagFor = tagOpenFor(kind, id) ? null : { kind, id };
       render();
+      // A button reached by Shift+Tab can sit under the sticky top bar; bring
+      // it clear first, or its menu opens under the bar too.
+      if (tagFor) clearOfBar(tagAnchor());
+      // The menu is drawn at the end of the page, not after its button, so
+      // the keyboard is taken to it rather than left to Tab the whole way.
+      if (tagFor) ($('#tagMenu .tag-choice.on') || $('#tagMenu .tag-choice'))?.focus();
       return;
     case 'set-tag':
       list[i].labelId = b.dataset.label;
       tagFor = null;
+      if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
       break;
     case 'add-tag': {
       const name = $('#newTagName').value.trim();
@@ -1297,11 +1616,12 @@ document.addEventListener('click', (e) => {
       state.labels.push(label);
       list[i].labelId = label.id;
       tagFor = null;
+      if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
       note('info', `Tagged ${list[i].reg || list[i].name} ${name}. The tag is on the Labels tab now, for everything else.`);
       break;
     }
     case 'del':
-      if (!confirmTwice(`del:${id}`)) return;
+      if (!confirmTwice(`del:${id}`, e.detail === 0)) return;
       // The backup list shows this label as written, so say it the way it
       // reads on screen rather than the way the code spells it.
       Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
@@ -1321,7 +1641,7 @@ document.addEventListener('click', (e) => {
       }
       break;
     case 'clear-day':
-      if (!confirmTwice('clear')) return;
+      if (!confirmTwice('clear', e.detail === 0)) return;
       Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = today();
@@ -1382,12 +1702,85 @@ document.addEventListener('click', (e) => {
       if (at >= 0) g.driverIds.splice(at, 1); else g.driverIds.push(b.dataset.driver);
       break;
     }
+    // No notice from the week beside the plan: the lit day and the count in
+    // the heading already say what happened, and a notice arriving above the
+    // plan pushed the row down, so the next day was no longer under the
+    // pointer that was about to press it.
+    case 'all-in':
+      state.drivers.forEach((d) => { d.available = true; });
+      dayAsk = null;
+      delete planScroll.drivers;
+      if (e.detail === 0) refocus = '#tab-plan .day-bar [data-act="all-in"]';
+      break;
+    // A day with no crew, or an empty one. It only ever asks — under the week,
+    // with the count as it stands — and the button in the question is what
+    // saves, the same two steps as loading a template.
+    case 'day-missing':
+      dayAsk = { day: Number(b.dataset.day) };
+      render();
+      if (e.detail === 0) {
+        (document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]')
+          || document.querySelector(`#tab-plan .day-bar [data-day="${Number(b.dataset.day)}"]`))?.focus();
+      }
+      return;
+    case 'day-ask-close': {
+      const was = dayAsk;
+      dayAsk = null;
+      render();
+      // From the keyboard, back to what asked: the day, or the crew.
+      if (e.detail === 0 && was) {
+        document.querySelector(was.groupId
+          ? `#tab-plan .rail-groups [data-id="${CSS.escape(was.groupId)}"]`
+          : `#tab-plan .day-bar [data-day="${was.day}"]`)?.focus();
+      }
+      return;
+    }
+    case 'group-empty':
+      dayAsk = { groupId: id };
+      render();
+      if (e.detail === 0) document.querySelector(`#tab-plan .rail-groups [data-id="${CSS.escape(id)}"]`)?.focus();
+      return;
+    // Counted when pressed, not when asked: who is in may have changed since.
+    case 'save-day-crew': {
+      const day = Number(b.dataset.day);
+      if (!WEEKDAYS[day]) break;
+      const driverIds = state.drivers.filter((d) => d.available).map((d) => d.id);
+      const crew = dayCrews().byDay.get(day);
+      // Nobody in, or a crew made on the Drivers tab while the question was
+      // up: the question redraws itself saying so, and nothing is saved.
+      // A crew made on the Drivers tab meanwhile, or nobody in: the question
+      // redraws itself saying so, and nothing is saved.
+      if ((crew && crewIds(crew).size) || !driverIds.length) {
+        dayAsk = { day };
+        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
+        break;
+      }
+      if (crew) crew.driverIds = driverIds;
+      else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
+      dayAsk = { day, saved: driverIds };
+      if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
+      break;
+    }
+    case 'add-day-group': {
+      const day = Number(b.dataset.day);
+      if (!WEEKDAYS[day] || dayCrews().byDay.has(day)) break;
+      state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds: [] });
+      break;
+    }
     case 'apply-group': {
       const g = list[i];
       // A write across the whole roster, not an addition: picking Monday has
       // to take yesterday's leftovers out, or "who is in today" is a lie by
       // the end of the week.
       state.drivers.forEach((d) => { d.available = g.driverIds.includes(d.id); });
+      dayAsk = null;
+      // The crew just brought in sorts to the top of the list: show it there,
+      // rather than keep the list scrolled down among the ones now away.
+      delete planScroll.drivers;
+      if (b.closest('#tab-plan')) {
+        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-act="apply-group"][data-id="${CSS.escape(id)}"], #tab-plan .rail-groups [data-act="apply-group"][data-id="${CSS.escape(id)}"]`;
+        break;
+      }
       const inToday = state.drivers.filter((d) => d.available).length;
       note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
       break;
@@ -1419,6 +1812,7 @@ document.addEventListener('click', (e) => {
   }
   save();
   render();
+  if (refocus) document.querySelector(refocus)?.focus();
 });
 
 /* ---------- dragging a name onto a route ----------
@@ -1622,19 +2016,36 @@ function renderPicker() {
   if (kept !== undefined) box.querySelector(`[data-pick="${CSS.escape(kept)}"]`)?.focus();
 }
 
-/* Under the box it belongs to, or over it when the page has more room above —
-   the last routes of the day would otherwise open off the bottom of the
-   screen — and never past either edge. */
+/* Where a floating box goes, in screen coordinates: under the thing that
+   opened it, or over it when the screen has more room above — the last rows
+   would otherwise open off the bottom — and never past any edge. `tall` is
+   the height it gets: its own, or less when even the roomier side is short,
+   and then it scrolls inside itself rather than being cut off. Lined up with
+   the opener's left edge, or its right for a menu opened from a row's end. */
+function besideAnchor(a, w, h, alignRight = false, keep = null) {
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  // The top bar sticks to the top of the screen, so the room above ends there.
+  const ceiling = Math.max(0, $('.topbar').getBoundingClientRect().bottom);
+  const below = vh - a.bottom - 10, above = a.top - ceiling - 10;
+  let up = h > below && above > below;
+  // Once open on one side it stays there while it still fits, rather than
+  // jumping across the box every time typing shortens the list.
+  if (keep === 'up' && h <= above) up = true;
+  if (keep === 'down' && h <= below) up = false;
+  const tall = Math.max(0, Math.min(h, up ? above : below));
+  const left = Math.max(8, Math.min(alignRight ? a.right - w : a.left, vw - w - 8));
+  const top = up ? a.top - 2 - tall : a.bottom + 2;
+  return { left, top, tall, up };
+}
+
 function placePicker() {
   const box = $('#picker');
   const anchor = pickAnchor();
   if (!anchor || box.hidden) return;
-  const a = anchor.getBoundingClientRect();
-  const w = box.offsetWidth, h = box.offsetHeight;
-  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
-  const up = a.bottom + 2 + h > vh && a.top > vh - a.bottom;
-  const left = Math.max(8, Math.min(a.left, vw - w - 8));
-  const top = up ? Math.max(8, a.top - h - 2) : a.bottom + 2;
+  box.style.maxHeight = '';
+  const { left, top, tall, up } = besideAnchor(anchor.getBoundingClientRect(), box.offsetWidth, box.offsetHeight, false, picking.side);
+  picking.side = up ? 'up' : 'down';
+  box.style.maxHeight = `${tall}px`;
   box.style.left = `${left + window.scrollX}px`;
   box.style.top = `${top + window.scrollY}px`;
 }
@@ -1719,10 +2130,66 @@ document.addEventListener('keydown', (e) => {
 
 // The page scrolling carries the grid with it; a table scrolling sideways in
 // its own box (a phone) or the window changing size does not, so follow those.
+// A held Enter repeats, and on an armed button the repeat was taken as the
+// second press: holding Enter on Clear cleared the day. Only a fresh press
+// confirms.
+document.addEventListener('keydown', (e) => {
+  if (e.repeat && (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('.armed')) e.preventDefault();
+}, true);
+
+// In the tag menu: up and down through the choices, Escape to leave, and Tab
+// off either end hands the focus back to the button it came from rather than
+// dropping it at the bottom of the page.
+document.addEventListener('keydown', (e) => {
+  const menu = $('#tagMenu');
+  if (!tagFor || menu.hidden) return;
+  if (e.key === 'Escape' && e.target === document.body) { e.preventDefault(); closeTagMenu(); return; }
+  if (!menu.contains(e.target)) return;
+  const back = () => {
+    const { kind, id } = tagFor;
+    tagFor = null;
+    render();
+    document.querySelector(`#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`)?.focus();
+  };
+  const stops = [...menu.querySelectorAll('button, input')];
+  if (e.key === 'Escape') { e.preventDefault(); back(); return; }
+  if (e.key === 'Tab' && (e.shiftKey ? e.target === stops[0] : e.target === stops[stops.length - 1])) { e.preventDefault(); back(); return; }
+  const choices = [...menu.querySelectorAll('.tag-choice')];
+  const i = choices.indexOf(e.target);
+  if (i < 0 || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+  e.preventDefault();
+  (e.key === 'ArrowDown' ? choices[i + 1] || $('#newTagName') : choices[i - 1])?.focus();
+});
+
+// The tag menu's button is in a rail that sticks while the page scrolls under
+// it, so the menu follows every scroll, the page's own included. (Absolute,
+// not fixed, like the picker: the app itself never uses position: fixed, and
+// a test relies on that to catch CSS smuggled in through a share code.)
 document.addEventListener('scroll', (e) => {
   if (picking && e.target !== document && !$('#picker').contains(e.target)) placePicker();
+  if (tagFor && !$('#tagMenu').contains(e.target)) placeTagMenu(!tagSettling);
 }, true);
-window.addEventListener('resize', () => { if (picking) placePicker(); });
+window.addEventListener('resize', () => {
+  if (picking) placePicker();
+  if (tagFor && tagAnchor()) {
+    // Shortened under it (a phone's keyboard coming up for the new-tag box):
+    // bring its row back into its list, which shrank with the window, and its
+    // button back onto the screen, so the menu and the box being typed in are
+    // placed where they can be seen. The scrolling this does is ours, and must
+    // not be taken for the user scrolling the row away.
+    const anchor = tagAnchor();
+    const list = anchor.closest('.rail-list');
+    tagSettling = true;
+    if (list) {
+      const a = anchor.getBoundingClientRect(), l = list.getBoundingClientRect();
+      if (a.top < l.top) list.scrollTop -= l.top - a.top;
+      else if (a.bottom > l.bottom) list.scrollTop += a.bottom - l.bottom;
+    }
+    clearOfBar(anchor);
+    placeTagMenu();
+    requestAnimationFrame(() => requestAnimationFrame(() => { tagSettling = false; placeTagMenu(); }));
+  }
+});
 
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
@@ -1742,17 +2209,68 @@ document.addEventListener('keydown', (e) => {
   // The rail's own boxes press their own buttons, not the tabs' — they add to
   // the same lists, but from a different box.
   const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];
-  if (here) { document.querySelector(here)?.click(); return; }
+  // preventDefault first: pressing the button can move the focus (adding a
+  // tag hands it back to the row's tag button), and the same Enter's keypress
+  // would then press that one as well — reopening the menu just shut.
+  if (here) { e.preventDefault(); document.querySelector(here)?.click(); return; }
+  // The tab's own button: the rail has an add-driver and an add-car of its
+  // own, earlier in the page, which read the rail's boxes — so Enter on the
+  // Drivers or Cars tab pressed a hidden button and added nothing.
   const act = map[e.target.id];
-  if (act) document.querySelector(`[data-act="${act}"]`)?.click();
+  if (act) { e.preventDefault(); (e.target.closest('section.tab') || document).querySelector(`[data-act="${act}"]`)?.click(); }
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'tag', 'set-tag', 'add-tag']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
+/* The top bar sticks, and anything the browser scrolls into view — a field
+   reached with Tab, a question just asked — would otherwise land under it.
+   Its height goes into --bar, which the page's content uses as a scroll
+   margin. Not as scroll-padding on the page itself: that also moved the page
+   for focus in the top bar, hundreds of pixels a Tab, and changed how a
+   phone's page settles when its keyboard shortens the window. */
+const clearTheBar = () => { document.documentElement.style.setProperty('--bar', `${$('.topbar').offsetHeight + 8}px`); };
+window.addEventListener('resize', clearTheBar);
+
+/* Focus moved by a key onto something the sticky top bar covers — Shift+Tab
+   walking up into it, or Escape handing it back from the route picker to a
+   box scrolled under the bar — is scrolled out from under the bar. The
+   browser's own focus scrolling does not know the bar is there, and ignores
+   scroll-margin. Only for focus a key press moved, while that press is being
+   handled: a mouse press on a button half under the bar must not have the
+   button moved out from under the pointer before the release, and the app's
+   own refocus three seconds after a delete was armed must not pull the page
+   back to a control the user has since scrolled away from. */
+let keyed = false;
+const byKey = () => { keyed = true; setTimeout(() => { keyed = false; }); };
+document.addEventListener('keydown', byKey, true);
+document.addEventListener('keyup', byKey, true);   // Space presses a button on its release
+document.addEventListener('focusin', (e) => {
+  const el = e.target;
+  if (!keyed || !el.closest || el.closest('.topbar') || !el.closest('main')) return;
+  requestAnimationFrame(() => {
+    if (document.activeElement !== el) return;
+    const top = $('.topbar').getBoundingClientRect().bottom + 8;
+    const a = el.getBoundingClientRect();
+    if (a.top < top) window.scrollBy(0, a.top - top);
+  });
+});
+
+/* The same, for one element, by scrolling the page just as far as it takes:
+   out from under the top bar, or up from below the bottom of the screen.
+   By hand, because scrollIntoView ignores scroll-margin for an element inside
+   a scrolling list such as the rail's, and leaves it under the bar. */
+function clearOfBar(el) {
+  const a = el.getBoundingClientRect();
+  const top = $('.topbar').getBoundingClientRect().bottom + 8;
+  if (a.top < top) window.scrollBy(0, a.top - top);
+  else if (a.bottom > window.innerHeight - 8) window.scrollBy(0, a.bottom - window.innerHeight + 8);
+}
+
 async function start() {
+  clearTheBar();
   state = await Store.init(defaults, render);
   // A browser with no data of its own but a linked file (new PC, cleared
   // profile, different Windows user) should come back to what is in the file.

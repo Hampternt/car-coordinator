@@ -1242,6 +1242,488 @@ check('with the driver and car each route was saved with',
 await page.locator('[data-act="peek-template"]').first().click();
 check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
 
+// --- the tag menu is never cut off ---
+// It was drawn inside its row, and the rows sit in a list that scrolls, so the
+// list cut it off after its first choice: the rest was there only by
+// scrolling. On a roster of two, which is where it was reported.
+const cutOff = (sel) => page.locator(sel).evaluate((box) => {
+  const m = box.getBoundingClientRect();
+  const out = [];
+  if (m.top < 0 || m.left < 0 || m.bottom > innerHeight + 0.5 || m.right > document.documentElement.clientWidth + 0.5) out.push('the screen');
+  for (let el = box.parentElement; el; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+    const b = el.getBoundingClientRect();
+    if (m.top < b.top - 0.5 || m.bottom > b.bottom + 0.5 || m.left < b.left - 0.5 || m.right > b.right + 0.5) out.push(el.className || el.tagName);
+  }
+  return out;
+});
+const railFixture = (drivers, labels) => page.evaluate(([drivers, labels]) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false,
+  labels: labels.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }], positions: [],
+  routes: [{ id: 'r1', name: '1', driver: drivers[0], carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
+  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  driverGroups: [], templates: [],
+})), [drivers, labels]);
+const tagButton = (n) => page.locator('#tab-plan [data-panel="drivers"] li').nth(n).locator('[data-act="tag"]');
+
+await page.setViewportSize({ width: 1600, height: 940 });
+await railFixture(['jesper', 'je lo'], ['Course', 'New']);
+await page.reload({ waitUntil: 'networkidle' });
+await tagButton(0).click();
+same('the tag menu opens whole, cut off by nothing', await cutOff('#tagMenu'), []);
+check('every choice and the new-tag box are on show, not behind a scroll',
+  await page.locator('#tagMenu').evaluate((m) => {
+    const box = m.getBoundingClientRect();
+    return [...m.querySelectorAll('.tag-choice, #newTagName, [data-act="add-tag"]')].every((el) => {
+      const r = el.getBoundingClientRect();
+      return r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+    });
+  }));
+check('the keyboard is taken to it', await page.evaluate(() => document.activeElement?.classList.contains('tag-choice')));
+await page.keyboard.press('ArrowDown');
+check('and moves through it with the arrows', (await page.evaluate(() => document.activeElement?.textContent.trim())) === 'Course');
+await page.keyboard.press('Escape');
+check('Escape shuts it and hands the focus back to its button',
+  await page.locator('#tagMenu').isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && document.activeElement?.dataset.id === 'd0'));
+
+// A long roster, scrolled down to its end: tagging a name near the bottom
+// used to throw the list back to the top, and the row clicked out of sight.
+await railFixture(Array.from({ length: 30 }, (_, i) => `Driver ${String(i + 1).padStart(2, '0')}`), ['Course']);
+await page.reload({ waitUntil: 'networkidle' });
+const driverList = page.locator('#tab-plan [data-panel="drivers"] .rail-list');
+await driverList.evaluate((l) => { l.scrollTop = l.scrollHeight; });
+const listWas = await driverList.evaluate((l) => l.scrollTop);
+await tagButton(28).click();
+const listNow = await page.locator('#tab-plan [data-panel="drivers"] .rail-list').evaluate((l) => l.scrollTop);
+check('tagging near the bottom of a long roster leaves the list where it was', listWas > 0 && listNow === listWas, `${listWas} -> ${listNow}`);
+same('and that menu is whole too', await cutOff('#tagMenu'), []);
+check('beside the button it came from',
+  await page.evaluate(() => {
+    const b = document.querySelector('#tab-plan [data-act="tag"][data-id="d28"]').getBoundingClientRect();
+    const m = document.querySelector('#tagMenu').getBoundingClientRect();
+    return Math.abs(m.top - b.bottom) <= 4 || Math.abs(m.bottom - b.top) <= 4;
+  }));
+await page.click('#tab-plan thead');
+check('a click anywhere else shuts it', await page.locator('#tagMenu').isHidden());
+
+// Forty tags on a short screen: the choices scroll inside the menu, and the
+// box for a new one stays in sight below them.
+await page.setViewportSize({ width: 1280, height: 600 });
+await railFixture(['jesper', 'je lo'], Array.from({ length: 40 }, (_, i) => `Tag ${i + 1}`));
+await page.reload({ waitUntil: 'networkidle' });
+await tagButton(0).click();
+same('forty tags on a short screen still fit it', await cutOff('#tagMenu'), []);
+check('with the choices scrolling inside and the new-tag box in sight',
+  await page.locator('#tagMenu').evaluate((m) => {
+    const c = m.querySelector('.tag-choices');
+    const box = m.getBoundingClientRect(), input = m.querySelector('#newTagName').getBoundingClientRect();
+    return c.scrollHeight > c.clientHeight && input.bottom <= box.bottom + 0.5 && input.top >= box.top;
+  }));
+await page.keyboard.press('Escape');
+
+// The route picker lives by the same rule on a short screen.
+await railFixture(Array.from({ length: 30 }, (_, i) => `Driver ${String(i + 1).padStart(2, '0')}`), []);
+await page.reload({ waitUntil: 'networkidle' });
+await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').click();
+same('the driver grid fits a short screen rather than running off it', await cutOff('#picker'), []);
+await page.keyboard.press('Escape');
+
+// --- the week, as a row of days beside the plan ---
+// All, then Monday to Sunday. A group named for a day is that day's button,
+// however it was written; a group that is not a day keeps a button of its own.
+same('a group is matched to its day the way people write them',
+  await page.evaluate(() => ['Monday', 'mon', 'Mondays', 'Monday crew', 'Mandag', ' tirsdag ', 'Weds', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri']
+    .map((n) => groupWeekday(n))),
+  [1, 1, 1, 1, 1, 2, 3, 6, 0, -1, -1, -1]);
+await page.setViewportSize({ width: 1600, height: 940 });
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
+  drivers: ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  driverGroups: [
+    { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
+    { id: 'g2', name: 'Tuesdays', driverIds: ['d2'] },
+    { id: 'g3', name: 'Weekend crew', driverIds: ['d3'] },
+    { id: 'g4', name: 'Mon', driverIds: ['d4'] },
+  ],
+  templates: [],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+const week = () => page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.map((b) =>
+  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('none') ? '-' : '')));
+const dayBtn = (text) => page.locator('#tab-plan .day-bar .day', { hasText: text });
+same('the drivers panel shows the week: All, then Monday to Sunday, the days with no crew quiet',
+  await week(), ['All*', 'Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+check("today's day is marked", await page.evaluate(() =>
+  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]));
+same('a group that is not a day, or is a day twice over, keeps a button of its own',
+  await page.locator('#tab-plan .rail-groups .btn').allInnerTexts(), ['Weekend crew', 'Mon']);
+
+await dayBtn('Mon').click();
+same('Mon makes exactly the Monday crew the ones in', await inToday(), ['Ana', 'Bo']);
+same('and is lit, with All no longer lit', await week(), ['All', 'Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+await dayBtn('Tue').click();
+same('Tue then replaces them rather than adding to them', await inToday(), ['Cai']);
+await dayBtn('All').click();
+same('All puts everyone in', await inToday(), ['Ana', 'Bo', 'Cai', 'Dee', 'Efe']);
+
+await dayBtn('Mon').click();
+await dayBtn('Wed').click();
+check('a day with no crew yet only asks', (await page.evaluate(() => state.driverGroups.length)) === 4
+  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').innerText()) === 'Save as Wednesday');
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+check('and saving makes a Wednesday group of who is in',
+  await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Wednesday' && g.driverIds.join() === 'd0,d1')));
+same('which is the Wed button from then on, lit because it is in force', await week(), ['All', 'Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('the Drivers tab says which button each group is',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon button'
+  && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Mon"]') }).locator('.day-badge').innerText()) === 'Monday twice');
+same('and offers the days that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri', 'Sat', 'Sun']);
+await page.locator('#tab-drivers .day-add .btn', { hasText: 'Fri' }).click();
+check('one click makes that day its group', await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Friday' && g.driverIds.length === 0)));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// --- what an independent check of the tag menu and the week found ---
+same('more of the ways a day gets written are read as that day',
+  await page.evaluate(() => ['Mondays.', "Monday's crew", 'Monday team', 'Monday-crew', 'Mandager', 'Søndager'].map((n) => groupWeekday(n))),
+  [1, 1, 1, 1, 1, 0]);
+const weekFixture = (extra = {}) => page.evaluate((extra) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [],
+  routes: Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, name: String(i + 1), driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
+  drivers: Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, name: `Driver ${String(i + 1).padStart(2, '0')}`, available: true, labelId: '', note: '' })),
+  driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1', 'd2'] }],
+  templates: [], ...extra,
+})), extra);
+const railList = (panel) => page.locator(`#tab-plan [data-panel="${panel}"] .rail-list`);
+
+await page.setViewportSize({ width: 1600, height: 940 });
+await weekFixture({ driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] }, { id: 'g2', name: 'Thursday', driverIds: [] }] });
+await page.reload({ waitUntil: 'networkidle' });
+same('an empty crew is as quiet as a missing one, and not lit', await week(), ['All*', 'Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+await dayBtn('Thu').click();
+check('pressing it asks rather than sending everyone away',
+  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+await page.evaluate(() => { state.drivers[5].available = false; render(); });
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+check('the offer counts who is in when it is pressed, and fills the empty crew rather than making a second',
+  await page.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1
+    && state.driverGroups.find((g) => g.id === 'g2').driverIds.length === 29));
+
+await page.evaluate(() => { note('warn', 'A question about the data', { act: 'split-rounds', kind: '', id: '', text: 'Answer it' }); render(); });
+await dayBtn('Sat').click();
+check('a question about a day leaves every other question up',
+  (await page.locator('#notices [data-act="split-rounds"]').count()) === 1 && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
+
+const rowWas = await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top);
+await dayBtn('Mon').click();
+check('pressing a day adds no notice, so the row stays under the pointer',
+  (await page.locator('#notices .notice').count()) === 0
+  && Math.abs((await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top)) - rowWas) < 1);
+await dayBtn('All').click();
+
+await railList('drivers').evaluate((l) => { l.scrollTop = 400; });
+await page.waitForTimeout(50);
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.click('[data-act="tab"][data-tab="plan"]');
+check('a trip to another tab leaves the rail lists where they were', (await railList('drivers').evaluate((l) => l.scrollTop)) === 400,
+  String(await railList('drivers').evaluate((l) => l.scrollTop)));
+await dayBtn('Mon').click();
+check('but pressing a day shows the crew it brought in, at the top', (await railList('drivers').evaluate((l) => l.scrollTop)) === 0);
+
+await dayBtn('Tue').focus();
+await page.keyboard.press('Enter');
+await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').waitFor();
+check('a day with no crew pressed from the keyboard takes the focus to its question',
+  await page.evaluate(() => document.activeElement?.dataset.act === 'save-day-crew'));
+await dayBtn('Mon').focus();
+await page.keyboard.press('Enter');
+check('and a day pressed from the keyboard keeps the focus on itself',
+  await page.evaluate(() => document.activeElement?.closest('.day-bar') && document.activeElement.textContent.trim() === 'Mon'));
+await page.evaluate(() => { notices = []; render(); });
+
+// The offer is in view, not under the top bar, even from the bottom of a long plan.
+await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+await dayBtn('Fri').click();
+check('the question a day raises is in view, clear of the top bar',
+  await page.evaluate(() => {
+    const b = document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]').getBoundingClientRect();
+    return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.dataset.act === 'save-day-crew';
+  }));
+await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
+
+// A click into a box while a tag menu is open lands in the box.
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').click();
+await page.keyboard.type('X');
+check('a click into a text box with a tag menu open is not lost',
+  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).endsWith('X'));
+
+// Templates: each keeps its own place in its list.
+await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
+  routes: Array.from({ length: 30 }, (_, i) => ({ name: String(i + 1), driver: `${name} ${i}`, carId: '', positionId: '', round: '', highlight: false, gapBefore: false })) })) });
+await page.reload({ waitUntil: 'networkidle' });
+await page.locator('[data-act="peek-template"]').first().click();
+await page.locator('.tpl-body').evaluate((b) => { b.scrollTop = 300; });
+await page.waitForTimeout(50);
+await page.locator('[data-act="peek-template"]').nth(1).click();
+check('a second template opens at its own top, not where the first was left', (await page.locator('.tpl-body').evaluate((b) => b.scrollTop)) === 0);
+
+// A group renamed into a day is badged as it is typed.
+await page.click('[data-act="tab"][data-tab="drivers"]');
+await page.locator('#tab-drivers .group [data-field="name"]').first().fill('Thursday');
+check('renaming a group into a day changes its badge there and then',
+  (await page.locator('#tab-drivers .group').first().locator('.day-badge').innerText()) === 'Thu button');
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// On a stacked screen, a tag menu whose row scrolls up under the top bar goes with it.
+await page.setViewportSize({ width: 1100, height: 800 });
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(2).locator('[data-act="tag"]').click();
+await page.evaluate(() => window.scrollTo(0, 600));
+await page.waitForTimeout(100);
+check('a tag menu whose row scrolls up under the top bar shuts', await page.locator('#tagMenu').isHidden());
+
+// A phone: the whole week on screen, and a question that can be read.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => window.scrollTo(0, 0));
+check('on a phone every day of the week is on screen',
+  await page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.length === 8 && bs.every((b) => {
+    const r = b.getBoundingClientRect();
+    return r.left >= 0 && r.right <= document.documentElement.clientWidth;
+  })));
+await dayBtn('Sat').click();
+check("and a day's question reads as a sentence, not a word per line",
+  (await page.locator('#tab-plan .day-ask span').first().evaluate((s) => s.getBoundingClientRect().width)) > 200);
+await page.evaluate(() => { notices = []; render(); });
+
+// --- what a second check of those fixes found ---
+same('Norwegian writes the crew into the day, and has its own short forms',
+  await page.evaluate(() => ['Mandagsgjeng', 'Fredagsvakta', 'Tirsdagslaget', 'Man', 'Ons', 'Lør', 'Tor'].map((n) => groupWeekday(n))),
+  [1, 5, 2, 1, 3, 6, -1]);
+await page.setViewportSize({ width: 1600, height: 940 });
+await weekFixture({ labels: [{ id: 'L1', name: 'Course', color: '#1565c0' }],
+  cars: Array.from({ length: 40 }, (_, i) => ({ id: `c${i}`, reg: `EL${10000 + i}`, labelId: '', note: '' })),
+  driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
+await page.reload({ waitUntil: 'networkidle' });
+
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(3).locator('[data-act="tag"]').click();
+await page.click('#newTagName');
+await page.keyboard.type('Nights');
+await page.keyboard.press('Enter');
+check('Enter in the new-tag box adds the tag and the menu stays shut, with the focus back on its button',
+  await page.locator('#tagMenu').isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].labelId === state.labels.find((l) => l.name === 'Nights')?.id));
+
+await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
+check('an empty group under the week sends nobody away, and says why',
+  await page.evaluate(() => state.drivers.every((d) => d.available))
+  && (await page.locator('#tab-plan .day-ask').innerText()).includes('Weekend has nobody in it yet'));
+
+// (The tag just made raised a notice of its own; clear it, so what follows
+// counts only what setting up the week adds.)
+await page.evaluate(() => { notices = []; render(); });
+await dayBtn('Tue').click();
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+await dayBtn('Wed').click();
+await page.evaluate(() => { state.drivers.slice(10).forEach((d) => { d.available = false; }); render(); });
+check('the question counts who is in as it stands', (await page.locator('#tab-plan .day-ask').innerText()).includes('Save the 10 in now'));
+await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
+check('setting up the week from the row piles nothing up above the plan: one line, the latest answer',
+  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#tab-plan .day-ask').count()) === 1
+  && (await page.locator('#tab-plan .day-ask').innerText()).startsWith("Saved: Wednesday's crew is the 10"));
+await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+
+// A list emptied and filled again starts at its top, not at a place the old
+// list had been scrolled to.
+await railList('cars').evaluate((l) => { l.scrollTop = l.scrollHeight; });
+await page.waitForTimeout(50);
+await page.evaluate(() => { state.cars = []; render(); state.cars = Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, reg: `ZZ${100 + i}`, labelId: '', note: '' })); render(); });
+check('a list emptied and filled again opens at its top', (await railList('cars').evaluate((l) => l.scrollTop)) === 0);
+
+// Notices keep their offer and their ✕ together at any width.
+await page.setViewportSize({ width: 560, height: 900 });
+await page.evaluate(() => { note('warn', 'A question with a long sentence that has to wrap onto more than one line at this width, the way the spot-names question does', { act: 'split-rounds', kind: '', id: '', text: 'Split the rounds out' }); render(); });
+check("a notice's offer and its ✕ stay side by side",
+  await page.locator('#notices .notice').last().evaluate((n) => {
+    const o = n.querySelector('[data-act="split-rounds"]').getBoundingClientRect(), x = n.querySelector('[data-act="dismiss"]').getBoundingClientRect();
+    return Math.abs(o.top - x.top) < 2 && x.left > o.right;
+  }));
+await page.evaluate(() => { notices = []; render(); });
+
+// Phone.
+await page.setViewportSize({ width: 390, height: 844 });
+await page.evaluate(() => window.scrollTo(0, 0));
+const tueAt = await dayBtn('Tue').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+await dayBtn('Thu').click();
+check('on a phone a quiet day asks under the week, and nothing moves under the next tap',
+  await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.textContent.trim() === 'Tue', tueAt));
+await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+
+const tableBox = page.locator('#tab-plan .plan-table');
+await tableBox.evaluate((b) => { b.scrollLeft = 300; });
+await page.waitForTimeout(50);
+await page.evaluate(() => { state.routes[0].highlight = !state.routes[0].highlight; render(); });
+check('on a phone the route table keeps its sideways place across a redraw', (await tableBox.evaluate((b) => b.scrollLeft)) === 300,
+  String(await tableBox.evaluate((b) => b.scrollLeft)));
+
+const tagAt = await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 60), tagAt);
+await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').evaluate((b) => b.focus({ preventScroll: true }));
+await page.keyboard.press('Enter');
+check('a tag button reached under the top bar still opens its menu, in sight', await page.locator('#tagMenu').isVisible() && (await cutOff('#tagMenu')).length === 0);
+await page.click('#newTagName');
+await page.keyboard.type('Half');
+await page.setViewportSize({ width: 390, height: 520 });
+await page.waitForTimeout(100);
+check("a phone's keyboard shortening the screen keeps the menu, what was typed, and the box on screen",
+  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Half'
+  && await page.locator('#newTagName').evaluate((i) => { const r = i.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 1600, height: 940 });
+
+// The second press of a delete can be made from the keyboard.
+const carsBefore = await page.evaluate(() => state.cars.length);
+await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.keyboard.press('Enter');
+check('a delete confirmed from the keyboard deletes', (await page.evaluate(() => state.cars.length)) === carsBefore - 1);
+
+// --- and what a third check found ---
+await weekFixture({ driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
+await page.reload({ waitUntil: 'networkidle' });
+await dayBtn('Wed').click();
+await page.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d3', 'd4'] }); render(); });
+check('a question overtaken on the Drivers tab turns into the answer, with no Save left in it',
+  (await page.locator('#tab-plan .day-ask').innerText()).includes('Wednesday has a crew now')
+  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 0);
+await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
+await page.evaluate(() => { state.driverGroups.find((g) => g.id === 'g1').driverIds.push('d5'); render(); });
+check('and a line about an empty crew goes once names are ticked into it', (await page.locator('#tab-plan .day-ask').count()) === 0);
+
+await page.evaluate(() => window.scrollTo(0, 800));
+await page.evaluate(() => document.querySelector('.tabs button').focus());
+check('focus in the top bar does not move the page', (await page.evaluate(() => scrollY)) === 800);
+await page.evaluate(() => window.scrollTo(0, 0));
+
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const rosterWas = await page.evaluate(() => state.drivers.length);
+await page.fill('#newDriver', 'Enter Kari');
+await page.press('#newDriver', 'Enter');
+check('Enter in the Drivers tab box adds to the roster', (await page.evaluate(() => state.drivers.length)) === rosterWas + 1);
+await page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.keyboard.press('Enter');
+check('a delete confirmed from the keyboard works on the Drivers tab too', (await page.evaluate(() => state.drivers.length)) === rosterWas);
+await page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.focus('#newDriver');
+await page.keyboard.type('A');
+await page.waitForTimeout(3300);
+await page.keyboard.type('B');
+check('the disarm three seconds later leaves the focus, and the typing, where they were', (await page.inputValue('#newDriver')) === 'AB');
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// --- and a fourth ---
+await page.setViewportSize({ width: 1600, height: 940 });
+await weekFixture();
+await page.reload({ waitUntil: 'networkidle' });
+const planRowN = (n) => page.locator('#tab-plan tbody tr').nth(n);
+
+await planRowN(0).locator('[data-act="del"]').click();
+check('a delete armed with the mouse does not keep the focus on it', await page.evaluate(() => !document.activeElement?.classList.contains('armed')));
+await page.evaluate(() => { armed = null; render(); });
+
+await planRowN(0).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await planRowN(1).locator('[data-act="toggle"][data-field="gapBefore"]').focus();
+await page.waitForTimeout(3300);
+check('the disarm puts the focus back on the very button it was on, not its neighbour',
+  await page.evaluate(() => document.activeElement?.dataset.field === 'gapBefore' && document.activeElement?.closest('tr')?.dataset.route === 'r1'));
+
+await planRowN(0).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await planRowN(1).locator('[data-field="name"]').evaluate((i) => { i.focus(); i.select(); });
+await page.waitForTimeout(3300);
+await page.keyboard.type('7');
+check('and keeps the whole selection, so typing replaces rather than adds', (await page.evaluate(() => state.routes[1].name)) === '7',
+  await page.evaluate(() => state.routes[1].name));
+
+const dayWas = await page.evaluate(() => state.routes[1].name);
+await page.locator('[data-act="clear-day"]').focus();
+await page.keyboard.down('Enter');
+await page.keyboard.down('Enter');
+await page.keyboard.up('Enter');
+check('holding Enter on Clear does not confirm it by repeat', (await page.evaluate(() => state.routes[1].name)) === dayWas);
+await page.evaluate(() => { armed = null; render(); });
+
+await page.setViewportSize({ width: 390, height: 844 });
+const boxAt = await planRowN(20).locator('[data-act="del"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 60), boxAt);
+await planRowN(21).locator('[data-field="name"]').evaluate((i) => i.focus({ preventScroll: true }));
+await page.keyboard.press('Shift+Tab');
+await page.waitForTimeout(100);
+check('Shift+Tab onto something under the top bar scrolls it clear of the bar',
+  await planRowN(20).locator('[data-act="del"]').evaluate((b) => document.activeElement === b
+    && b.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+
+// But not for the mouse, and not for the app putting the focus back: a press
+// on a button half under the bar lands, and a disarm leaves the page where the
+// user scrolled it.
+await page.setViewportSize({ width: 1600, height: 940 });
+const markAt = await planRowN(12).locator('[data-act="toggle"][data-field="highlight"]').evaluate((b) => b.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 55), markAt);
+const markBox = await planRowN(12).locator('[data-act="toggle"][data-field="highlight"]').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.bottom - 4]; });
+await page.mouse.move(markBox[0], markBox[1]);
+await page.mouse.down();
+await page.waitForTimeout(100);
+await page.mouse.up();
+check('a mouse press on a button half under the top bar lands', await page.evaluate(() => state.routes[12].highlight === true));
+await page.evaluate(() => window.scrollTo(0, 0));
+await planRowN(3).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.evaluate(() => window.scrollTo(0, 900));
+await page.waitForTimeout(3300);
+check('a disarm leaves the page where the user scrolled it', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
+// Even with the focus in the Date box, which Chromium scrolls to whatever it is told.
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.locator('[data-act="clear-day"]').click();
+await page.click('#date');
+await page.evaluate(() => window.scrollTo(0, 900));
+await page.waitForTimeout(3300);
+check('a disarm leaves the page where it is with the focus in the Date box too', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
+// Escape from the route picker hands the focus back to a box scrolled under
+// the top bar meanwhile: it comes out from under the bar.
+await page.evaluate(() => window.scrollTo(0, 0));
+const drvAt = await planRowN(12).locator('[data-field="driver"]').evaluate((i) => i.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 150), drvAt);
+await planRowN(12).locator('[data-field="driver"]').click();
+await page.keyboard.press('ArrowDown');
+await page.evaluate((y) => window.scrollTo(0, y - 30), drvAt);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(100);
+check('Escape from the picker brings its box out from under the top bar',
+  await planRowN(12).locator('[data-field="driver"]').evaluate((i) => document.activeElement === i
+    && i.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.setViewportSize({ width: 390, height: 844 });
+
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(7).locator('[data-act="tag"]').click();
+await page.click('#newTagName');
+await page.keyboard.type('Flat');
+await page.setViewportSize({ width: 390, height: 450 });
+await page.waitForTimeout(150);
+check('a window shortened under a menu opened low in the list keeps it, its words, and its box in view',
+  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Flat'
+  && await page.locator('#newTagName').evaluate((i) => { const r = i.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 1600, height: 940 });
+
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
