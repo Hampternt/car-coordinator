@@ -568,17 +568,30 @@ function railDrivers() {
    week set up day by day piled a notice up for every one. Here nothing above
    the row moves, the count is who is in right now, and each answer replaces
    the last. Kept off `state`: it is a conversation, not data. */
-let dayAsk = null;   // { day } | { day, saved: n } | { day, taken: true } | { group: name }
+let dayAsk = null;   // { day } | { day, saved: n } | { groupId }
 
+/* Drawn from what is true now, every time: the Drivers tab can fill, rename
+   or delete a crew while the question is up, and a line that went on saying
+   "Wednesday's crew is empty" beside a Wed that had since got a crew was
+   worse than no line. A question overtaken like that turns into the answer,
+   or goes. */
 function dayQuestion() {
-  if (!dayAsk) return '';
+  if (!dayAsk || !state.drivers.length) return '';
   const close = '<button class="btn" data-act="day-ask-close" aria-label="Close" title="Close">✕</button>';
   const line = (text, acts = '', cls = '') => `<div class="day-ask ${cls}" role="status"><span>${text}</span><span class="acts">${acts}${close}</span></div>`;
-  if (dayAsk.group) return line(`${esc(dayAsk.group)} has nobody in it yet. Tick names into it on the Drivers tab.`);
+  if (dayAsk.groupId) {
+    const g = byId(state.driverGroups, dayAsk.groupId);
+    if (!g || crewIds(g).size) return '';
+    return line(`${esc(g.name.trim() || 'That group')} has nobody in it yet. Tick names into it on the Drivers tab.`);
+  }
   const name = WEEKDAYS[dayAsk.day];
-  if (dayAsk.saved != null) return line(`Saved: ${name}'s crew is the ${dayAsk.saved} in now. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done');
-  if (dayAsk.taken) return line(`${name} got a crew on the Drivers tab in the meantime, so nothing was changed. Press ${name.slice(0, 3)} to use it.`);
-  const what = dayCrews().byDay.has(dayAsk.day) ? `${name}'s crew is empty.` : `No ${name} crew yet.`;
+  const crew = dayCrews().byDay.get(dayAsk.day);
+  const has = crew ? crewIds(crew).size : 0;
+  if (dayAsk.saved != null) {
+    return has ? line(`Saved: ${name}'s crew is the ${has} in it. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done') : '';
+  }
+  if (has) return line(`${name} has a crew now, made on the Drivers tab. Press ${name.slice(0, 3)} to use it.`);
+  const what = crew ? `${name}'s crew is empty.` : `No ${name} crew yet.`;
   const n = state.drivers.filter((d) => d.available).length;
   if (!n) return line(`${what} Nobody is in to save as one — set who is in first, or tick names into it on the Drivers tab.`);
   const all = n === state.drivers.length && n > 1 ? ' That is everyone: set anyone who is off to away first, if the crew is smaller.' : '';
@@ -603,7 +616,7 @@ function dayBar(inToday) {
     const g = byDay.get(day);
     const ids = g ? crewIds(g) : new Set();
     const on = crewInForce(ids);
-    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && 'asking'].filter(Boolean).join(' ');
+    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && dayAsk.saved == null && 'asking'].filter(Boolean).join(' ');
     const when = `${WEEKDAYS[day]}${day === today ? ' (today)' : ''}`;
     if (!ids.size) {
       return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
@@ -1143,9 +1156,39 @@ function redrawKeepingCaret(el) {
 function confirmTwice(key) {
   if (armed === key) { armed = null; return true; }
   armed = key;
-  render();
-  setTimeout(() => { if (armed === key) { armed = null; render(); } }, 3000);
+  // Both redraws keep the focus where it is. Armed from the keyboard, the
+  // focus has to stay on the button, or the second press — the one that
+  // deletes — can never be made; and the disarm three seconds later must not
+  // pull the focus out of whatever box has been typed into since.
+  renderKeepingFocus();
+  setTimeout(() => { if (armed === key) { armed = null; renderKeepingFocus(); } }, 3000);
   return false;
+}
+
+/* A full redraw that puts the focus (and the caret) back on the same control,
+   found by what it is rather than which element it was — the redraw replaces
+   them all. Looked for in the same part of the page it was in: the rail and
+   the Drivers tab both have a ✕ for driver d3, and only one is showing. */
+function renderKeepingFocus() {
+  const el = document.activeElement;
+  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, dialog');
+  const d = el?.dataset || {};
+  const what = !area ? null
+    : el.id ? `#${CSS.escape(el.id)}`
+      : d.act ? `[data-act="${d.act}"]${d.kind ? `[data-kind="${d.kind}"]` : ''}${d.id ? `[data-id="${CSS.escape(d.id)}"]` : ''}`
+        : d.field ? `[data-kind="${d.kind}"][data-id="${CSS.escape(d.id || '')}"][data-field="${d.field}"]` : null;
+  const caret = typeof el?.selectionStart === 'number' ? el.selectionStart : null;
+  // A box that is not a field of the data — "add a driver", a new tag's
+  // name — holds what is typed in it until it is added, and the redraw
+  // rebuilds it empty. Carry the words across along with the focus.
+  const loose = el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !d.field ? el.value : null;
+  render();
+  if (!what) return;
+  const again = el.id ? document.querySelector(what) : document.querySelector(`#${area.id} ${what}`);
+  if (!again) return;
+  if (loose != null && again.value !== loose) again.value = loose;
+  if (again !== document.activeElement) again.focus({ preventScroll: true });
+  if (caret != null) { try { again.setSelectionRange(caret, caret); } catch { /* not a text box */ } }
 }
 
 function addFromInput(sel, make) {
@@ -1348,7 +1391,10 @@ const note = (kind, text, offer = null, lines = []) => {
   notices = notices.filter((n) => n.text !== text);
   const n = { kind, text, offer, lines };
   notices.push(n);
-  if (offer) offerRaised = n;
+  // The first question raised since the last draw is the one brought into
+  // view: at start-up that is the one about the data, which comes first on
+  // purpose; any question asked later is raised on its own and wins.
+  if (offer && !offerRaised) offerRaised = n;
 };
 
 /* One live offer at a time: asking about Tuesday takes Monday's question away
@@ -1525,9 +1571,7 @@ document.addEventListener('click', (e) => {
       render();
       // A button reached by Shift+Tab can sit under the sticky top bar; bring
       // it clear first, or its menu opens under the bar too.
-      if (tagFor && tagAnchor().getBoundingClientRect().top < $('.topbar').getBoundingClientRect().bottom) {
-        tagAnchor().scrollIntoView({ block: 'nearest' });
-      }
+      if (tagFor) clearOfBar(tagAnchor());
       // The menu is drawn at the end of the page, not after its button, so
       // the keyboard is taken to it rather than left to Tab the whole way.
       if (tagFor) ($('#tagMenu .tag-choice.on') || $('#tagMenu .tag-choice'))?.focus();
@@ -1549,12 +1593,7 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'del':
-      if (!confirmTwice(`del:${id}`)) {
-        // Armed from the keyboard: stay on the button, so the second press —
-        // the one that deletes — can be made at all.
-        if (e.detail === 0) document.querySelector(`[data-act="del"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`)?.focus();
-        return;
-      }
+      if (!confirmTwice(`del:${id}`)) return;
       // The backup list shows this label as written, so say it the way it
       // reads on screen rather than the way the code spells it.
       Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
@@ -1656,13 +1695,22 @@ document.addEventListener('click', (e) => {
           || document.querySelector(`#tab-plan .day-bar [data-day="${Number(b.dataset.day)}"]`))?.focus();
       }
       return;
-    case 'day-ask-close':
+    case 'day-ask-close': {
+      const was = dayAsk;
       dayAsk = null;
       render();
+      // From the keyboard, back to what asked: the day, or the crew.
+      if (e.detail === 0 && was) {
+        document.querySelector(was.groupId
+          ? `#tab-plan .rail-groups [data-id="${CSS.escape(was.groupId)}"]`
+          : `#tab-plan .day-bar [data-day="${was.day}"]`)?.focus();
+      }
       return;
+    }
     case 'group-empty':
-      dayAsk = { group: list[i].name.trim() || 'That group' };
+      dayAsk = { groupId: id };
       render();
+      if (e.detail === 0) document.querySelector(`#tab-plan .rail-groups [data-id="${CSS.escape(id)}"]`)?.focus();
       return;
     // Counted when pressed, not when asked: who is in may have changed since.
     case 'save-day-crew': {
@@ -1672,8 +1720,13 @@ document.addEventListener('click', (e) => {
       const crew = dayCrews().byDay.get(day);
       // Nobody in, or a crew made on the Drivers tab while the question was
       // up: the question redraws itself saying so, and nothing is saved.
-      if (crew && crewIds(crew).size) { dayAsk = { day, taken: true }; break; }
-      if (!driverIds.length) { dayAsk = { day }; break; }
+      // A crew made on the Drivers tab meanwhile, or nobody in: the question
+      // redraws itself saying so, and nothing is saved.
+      if ((crew && crewIds(crew).size) || !driverIds.length) {
+        dayAsk = { day };
+        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
+        break;
+      }
       if (crew) crew.driverIds = driverIds;
       else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
       dayAsk = { day, saved: driverIds.length };
@@ -2081,7 +2134,16 @@ document.addEventListener('scroll', (e) => {
   if (picking && e.target !== document && !$('#picker').contains(e.target)) placePicker();
   if (tagFor && !$('#tagMenu').contains(e.target)) placeTagMenu(true);
 }, true);
-window.addEventListener('resize', () => { if (picking) placePicker(); if (tagFor) placeTagMenu(); });
+window.addEventListener('resize', () => {
+  if (picking) placePicker();
+  if (tagFor) {
+    // Shortened under it (a phone's keyboard coming up for the new-tag box):
+    // bring its button back into view, so the menu and the box being typed
+    // in are placed on the screen rather than kept open below it.
+    if (tagAnchor()) clearOfBar(tagAnchor());
+    placeTagMenu();
+  }
+});
 
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
@@ -2105,8 +2167,11 @@ document.addEventListener('keydown', (e) => {
   // tag hands it back to the row's tag button), and the same Enter's keypress
   // would then press that one as well — reopening the menu just shut.
   if (here) { e.preventDefault(); document.querySelector(here)?.click(); return; }
+  // The tab's own button: the rail has an add-driver and an add-car of its
+  // own, earlier in the page, which read the rail's boxes — so Enter on the
+  // Drivers or Cars tab pressed a hidden button and added nothing.
   const act = map[e.target.id];
-  if (act) { e.preventDefault(); document.querySelector(`[data-act="${act}"]`)?.click(); }
+  if (act) { e.preventDefault(); (e.target.closest('section.tab') || document).querySelector(`[data-act="${act}"]`)?.click(); }
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
@@ -2115,9 +2180,24 @@ const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-templ
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
-   reached with Tab, a question just asked — would otherwise land under it. */
-const clearTheBar = () => { document.documentElement.style.scrollPaddingTop = `${$('.topbar').offsetHeight + 8}px`; };
+   reached with Tab, a question just asked — would otherwise land under it.
+   Its height goes into --bar, which the page's content uses as a scroll
+   margin. Not as scroll-padding on the page itself: that also moved the page
+   for focus in the top bar, hundreds of pixels a Tab, and changed how a
+   phone's page settles when its keyboard shortens the window. */
+const clearTheBar = () => { document.documentElement.style.setProperty('--bar', `${$('.topbar').offsetHeight + 8}px`); };
 window.addEventListener('resize', clearTheBar);
+
+/* The same, for one element, by scrolling the page just as far as it takes:
+   out from under the top bar, or up from below the bottom of the screen.
+   By hand, because scrollIntoView ignores scroll-margin for an element inside
+   a scrolling list such as the rail's, and leaves it under the bar. */
+function clearOfBar(el) {
+  const a = el.getBoundingClientRect();
+  const top = $('.topbar').getBoundingClientRect().bottom + 8;
+  if (a.top < top) window.scrollBy(0, a.top - top);
+  else if (a.bottom > window.innerHeight - 8) window.scrollBy(0, a.bottom - window.innerHeight + 8);
+}
 
 async function start() {
   clearTheBar();

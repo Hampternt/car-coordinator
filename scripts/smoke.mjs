@@ -1580,8 +1580,9 @@ await page.click('#newTagName');
 await page.keyboard.type('Half');
 await page.setViewportSize({ width: 390, height: 520 });
 await page.waitForTimeout(100);
-check("a phone's keyboard shortening the screen keeps the menu and what was typed",
-  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Half');
+check("a phone's keyboard shortening the screen keeps the menu, what was typed, and the box on screen",
+  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Half'
+  && await page.locator('#newTagName').evaluate((i) => { const r = i.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
 await page.keyboard.press('Escape');
 await page.setViewportSize({ width: 1600, height: 940 });
 
@@ -1591,6 +1592,41 @@ await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-ac
 await page.keyboard.press('Enter');
 await page.keyboard.press('Enter');
 check('a delete confirmed from the keyboard deletes', (await page.evaluate(() => state.cars.length)) === carsBefore - 1);
+
+// --- and what a third check found ---
+await weekFixture({ driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
+await page.reload({ waitUntil: 'networkidle' });
+await dayBtn('Wed').click();
+await page.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d3', 'd4'] }); render(); });
+check('a question overtaken on the Drivers tab turns into the answer, with no Save left in it',
+  (await page.locator('#tab-plan .day-ask').innerText()).includes('Wednesday has a crew now')
+  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 0);
+await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
+await page.evaluate(() => { state.driverGroups.find((g) => g.id === 'g1').driverIds.push('d5'); render(); });
+check('and a line about an empty crew goes once names are ticked into it', (await page.locator('#tab-plan .day-ask').count()) === 0);
+
+await page.evaluate(() => window.scrollTo(0, 800));
+await page.evaluate(() => document.querySelector('.tabs button').focus());
+check('focus in the top bar does not move the page', (await page.evaluate(() => scrollY)) === 800);
+await page.evaluate(() => window.scrollTo(0, 0));
+
+await page.click('[data-act="tab"][data-tab="drivers"]');
+const rosterWas = await page.evaluate(() => state.drivers.length);
+await page.fill('#newDriver', 'Enter Kari');
+await page.press('#newDriver', 'Enter');
+check('Enter in the Drivers tab box adds to the roster', (await page.evaluate(() => state.drivers.length)) === rosterWas + 1);
+await page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.keyboard.press('Enter');
+check('a delete confirmed from the keyboard works on the Drivers tab too', (await page.evaluate(() => state.drivers.length)) === rosterWas);
+await page.locator('#tab-drivers tbody tr').first().locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await page.focus('#newDriver');
+await page.keyboard.type('A');
+await page.waitForTimeout(3300);
+await page.keyboard.type('B');
+check('the disarm three seconds later leaves the focus, and the typing, where they were', (await page.inputValue('#newDriver')) === 'AB');
+await page.click('[data-act="tab"][data-tab="plan"]');
 
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());

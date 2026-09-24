@@ -13,6 +13,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Whatever the browser scrolls into view clears the sticky top bar; --bar is
+   its height, measured by the app. */
+main *, #notices > * { scroll-margin-top: var(--bar, 80px); }
 body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
 button, input, select { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
@@ -217,9 +220,12 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-groups .btn.on { background: var(--hivis); border-color: var(--ink); font-weight: 700; }
 .rail-groups .btn.quiet { background: none; border-style: dashed; border-color: #8a8d88; color: #6b6e70; }
 /* The question a quiet day asks, under the week it came from. */
-.day.asking { border-style: solid; border-color: var(--ink); color: var(--ink); }
+/* The day being asked about keeps its dashes — it still has no crew — and
+   gains a ring, so it cannot be mistaken for a day that has one. */
+.day.asking { color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.day.asking.today { box-shadow: inset 0 -3px var(--steel), 0 0 0 2px var(--ink); }
 .day-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 8px; padding: 6px 8px; background: #fff; border: 1px solid var(--ink); border-left: 4px solid var(--hivis); font-size: 13px; }
-.day-ask > span:first-child { flex: 1 1 12em; min-width: 0; }
+.day-ask > span:first-child { flex: 1 1 12em; min-width: 0; overflow-wrap: anywhere; }
 .day-ask .acts { display: flex; gap: 4px; margin-left: auto; }
 .day-ask .btn { padding: 2px 8px; font-size: 13px; }
 .day-ask.done { border-left-color: #2e7d32; }
