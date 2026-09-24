@@ -1689,6 +1689,26 @@ await page.keyboard.press('Enter');
 await page.evaluate(() => window.scrollTo(0, 900));
 await page.waitForTimeout(3300);
 check('a disarm leaves the page where the user scrolled it', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
+// Even with the focus in the Date box, which Chromium scrolls to whatever it is told.
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.locator('[data-act="clear-day"]').click();
+await page.click('#date');
+await page.evaluate(() => window.scrollTo(0, 900));
+await page.waitForTimeout(3300);
+check('a disarm leaves the page where it is with the focus in the Date box too', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
+// Escape from the route picker hands the focus back to a box scrolled under
+// the top bar meanwhile: it comes out from under the bar.
+await page.evaluate(() => window.scrollTo(0, 0));
+const drvAt = await planRowN(12).locator('[data-field="driver"]').evaluate((i) => i.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 150), drvAt);
+await planRowN(12).locator('[data-field="driver"]').click();
+await page.keyboard.press('ArrowDown');
+await page.evaluate((y) => window.scrollTo(0, y - 30), drvAt);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(100);
+check('Escape from the picker brings its box out from under the top bar',
+  await planRowN(12).locator('[data-field="driver"]').evaluate((i) => document.activeElement === i
+    && i.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.setViewportSize({ width: 390, height: 844 });
 

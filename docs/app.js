@@ -1209,7 +1209,13 @@ function renderKeepingFocus() {
   const again = el.id ? document.querySelector(what) : document.querySelector(`#${area.id} ${what}`);
   if (!again) return;
   if (loose != null && again.value !== loose) again.value = loose;
-  if (again !== document.activeElement) again.focus({ preventScroll: true });
+  if (again !== document.activeElement) {
+    // preventScroll is not always honoured — Chromium scrolls to a date box
+    // regardless — so the page is put back where it was as well.
+    const x = window.scrollX, y = window.scrollY;
+    again.focus({ preventScroll: true });
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+  }
   if (sel) { try { again.setSelectionRange(...sel); } catch { /* not a text box */ } }
 }
 
@@ -2228,21 +2234,22 @@ const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-f
 const clearTheBar = () => { document.documentElement.style.setProperty('--bar', `${$('.topbar').offsetHeight + 8}px`); };
 window.addEventListener('resize', clearTheBar);
 
-/* Focus moved by Tab onto something the sticky top bar covers — Shift+Tab
-   walks up into it — is scrolled out from under the bar. The browser's own
-   focus scrolling does not know the bar is there, and ignores scroll-margin.
-   Only for Tab: a mouse press on a button half under the bar must not have
-   the button moved out from under the pointer before the release, and the
-   app's own refocus after a redraw must not pull the page back to a control
-   the user has since scrolled away from. */
-let tabbed = false;
-document.addEventListener('keydown', (e) => { if (e.key === 'Tab') tabbed = true; }, true);
-document.addEventListener('pointerdown', () => { tabbed = false; }, true);
+/* Focus moved by a key onto something the sticky top bar covers — Shift+Tab
+   walking up into it, or Escape handing it back from the route picker to a
+   box scrolled under the bar — is scrolled out from under the bar. The
+   browser's own focus scrolling does not know the bar is there, and ignores
+   scroll-margin. Only for focus a key press moved, while that press is being
+   handled: a mouse press on a button half under the bar must not have the
+   button moved out from under the pointer before the release, and the app's
+   own refocus three seconds after a delete was armed must not pull the page
+   back to a control the user has since scrolled away from. */
+let keyed = false;
+const byKey = () => { keyed = true; setTimeout(() => { keyed = false; }); };
+document.addEventListener('keydown', byKey, true);
+document.addEventListener('keyup', byKey, true);   // Space presses a button on its release
 document.addEventListener('focusin', (e) => {
   const el = e.target;
-  const fromTab = tabbed;
-  tabbed = false;
-  if (!fromTab || !el.closest || el.closest('.topbar') || !el.closest('main')) return;
+  if (!keyed || !el.closest || el.closest('.topbar') || !el.closest('main')) return;
   requestAnimationFrame(() => {
     if (document.activeElement !== el) return;
     const top = $('.topbar').getBoundingClientRect().bottom + 8;
