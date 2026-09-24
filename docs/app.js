@@ -361,6 +361,9 @@ const liveSig = () => {
 let dragging = null;
 /* The tag menu, when one is open: { kind, id }. One at a time. */
 let tagFor = null;
+/* True for the moment the app itself is scrolling to keep an open tag menu in
+   view, so that scroll is not read as the user scrolling its row away. */
+let tagSettling = false;
 
 const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
 
@@ -568,7 +571,7 @@ function railDrivers() {
    week set up day by day piled a notice up for every one. Here nothing above
    the row moves, the count is who is in right now, and each answer replaces
    the last. Kept off `state`: it is a conversation, not data. */
-let dayAsk = null;   // { day } | { day, saved: n } | { groupId }
+let dayAsk = null;   // { day } | { day, saved: [driver ids] } | { groupId }
 
 /* Drawn from what is true now, every time: the Drivers tab can fill, rename
    or delete a crew while the question is up, and a line that went on saying
@@ -587,10 +590,14 @@ function dayQuestion() {
   const name = WEEKDAYS[dayAsk.day];
   const crew = dayCrews().byDay.get(dayAsk.day);
   const has = crew ? crewIds(crew).size : 0;
-  if (dayAsk.saved != null) {
-    return has ? line(`Saved: ${name}'s crew is the ${has} in it. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done') : '';
+  if (dayAsk.saved) {
+    // Only while the crew is still the one saved: edited on the Drivers tab
+    // since, "Saved: the 6" would be claiming someone else's work.
+    const ids = crew ? crewIds(crew) : new Set();
+    const same = ids.size === dayAsk.saved.length && dayAsk.saved.every((x) => ids.has(x));
+    return same ? line(`Saved: ${name}'s crew is the ${ids.size} who were in. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done') : '';
   }
-  if (has) return line(`${name} has a crew now, made on the Drivers tab. Press ${name.slice(0, 3)} to use it.`);
+  if (has) return line(`${name} has a crew now. Press ${name.slice(0, 3)} to use it.`);
   const what = crew ? `${name}'s crew is empty.` : `No ${name} crew yet.`;
   const n = state.drivers.filter((d) => d.available).length;
   if (!n) return line(`${what} Nobody is in to save as one — set who is in first, or tick names into it on the Drivers tab.`);
@@ -616,7 +623,7 @@ function dayBar(inToday) {
     const g = byDay.get(day);
     const ids = g ? crewIds(g) : new Set();
     const on = crewInForce(ids);
-    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && dayAsk.saved == null && 'asking'].filter(Boolean).join(' ');
+    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && !dayAsk.saved && 'asking'].filter(Boolean).join(' ');
     const when = `${WEEKDAYS[day]}${day === today ? ' (today)' : ''}`;
     if (!ids.size) {
       return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
@@ -1145,22 +1152,23 @@ document.addEventListener('input', (e) => {
    and the click that ended the edit is swallowed — measured, not guessed. */
 function redrawKeepingCaret(el) {
   const { kind, id, field: name } = el.dataset;
-  const at = el.selectionStart;
+  const sel = [el.selectionStart, el.selectionEnd, el.selectionDirection];
   render();
   const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
   if (!again) return;
   again.focus();
-  again.setSelectionRange(at, at);
+  again.setSelectionRange(...sel);
 }
 
-function confirmTwice(key) {
+function confirmTwice(key, fromKeyboard = false) {
   if (armed === key) { armed = null; return true; }
   armed = key;
-  // Both redraws keep the focus where it is. Armed from the keyboard, the
-  // focus has to stay on the button, or the second press — the one that
-  // deletes — can never be made; and the disarm three seconds later must not
-  // pull the focus out of whatever box has been typed into since.
-  renderKeepingFocus();
+  // Armed from the keyboard, the focus has to stay on the button, or the
+  // second press — the one that deletes — can never be made. Armed with the
+  // mouse it must not: a Space pressed later to page down would press it.
+  if (fromKeyboard) renderKeepingFocus(); else render();
+  // The disarm three seconds later must not pull the focus out of whatever
+  // has been typed into or moved to since.
   setTimeout(() => { if (armed === key) { armed = null; renderKeepingFocus(); } }, 3000);
   return false;
 }
@@ -1172,12 +1180,20 @@ function confirmTwice(key) {
 function renderKeepingFocus() {
   const el = document.activeElement;
   const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, dialog');
+  // The tag menu and the route picker put their own focus back, by the very
+  // choice it was on; a second guess here could only be worse.
+  const own = area && (area.id === 'tagMenu' || area.id === 'picker');
+  // Every data-* attribute, not a chosen few: the rail's Mark and Gap share
+  // an act, kind and id and differ only in data-field, the tag choices only in
+  // data-label, the day buttons in data-day — and a near match puts the focus
+  // on the wrong one, where the next key press changes the wrong thing.
   const d = el?.dataset || {};
-  const what = !area ? null
-    : el.id ? `#${CSS.escape(el.id)}`
-      : d.act ? `[data-act="${d.act}"]${d.kind ? `[data-kind="${d.kind}"]` : ''}${d.id ? `[data-id="${CSS.escape(d.id)}"]` : ''}`
-        : d.field ? `[data-kind="${d.kind}"][data-id="${CSS.escape(d.id || '')}"][data-field="${d.field}"]` : null;
-  const caret = typeof el?.selectionStart === 'number' ? el.selectionStart : null;
+  const attrs = Object.entries(d).map(([k, v]) => `[data-${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}="${CSS.escape(v)}"]`).join('');
+  const what = !area || own ? null : el.id ? `#${CSS.escape(el.id)}` : attrs || null;
+  // The whole selection, not only where it starts: a box reached with Tab has
+  // all its text selected, and collapsing that to a caret made the next key
+  // add to the name ("72") instead of replacing it.
+  const sel = el && typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd, el.selectionDirection] : null;
   // A box that is not a field of the data — "add a driver", a new tag's
   // name — holds what is typed in it until it is added, and the redraw
   // rebuilds it empty. Carry the words across along with the focus.
@@ -1188,7 +1204,7 @@ function renderKeepingFocus() {
   if (!again) return;
   if (loose != null && again.value !== loose) again.value = loose;
   if (again !== document.activeElement) again.focus({ preventScroll: true });
-  if (caret != null) { try { again.setSelectionRange(caret, caret); } catch { /* not a text box */ } }
+  if (sel) { try { again.setSelectionRange(...sel); } catch { /* not a text box */ } }
 }
 
 function addFromInput(sel, make) {
@@ -1345,7 +1361,7 @@ function openShare(share) {
 
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
    the synchronous switch below. */
-async function dataAction(act, b) {
+async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'link-file': await Store.linkFile(state); break;
     case 'reconnect-file': await Store.reconnect(state); break;
@@ -1360,7 +1376,7 @@ async function dataAction(act, b) {
     case 'import': $('#importFile').click(); return;
     case 'restore': {
       const i = Number(b.dataset.id);
-      if (!confirmTwice(`restore:${i}`)) return;
+      if (!confirmTwice(`restore:${i}`, fromKeyboard)) return;
       const entry = Store.backups()[i];
       if (!entry) break;
       Store.snapshot(state, 'Restoring a backup');
@@ -1545,7 +1561,7 @@ document.addEventListener('click', (e) => {
   if (!b) return;
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
-  if (DATA_ACTS.has(act)) { dataAction(act, b); return; }
+  if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
   // Every act below that reads list[i] needs there to be an i. There should
@@ -1593,7 +1609,7 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'del':
-      if (!confirmTwice(`del:${id}`)) return;
+      if (!confirmTwice(`del:${id}`, e.detail === 0)) return;
       // The backup list shows this label as written, so say it the way it
       // reads on screen rather than the way the code spells it.
       Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
@@ -1613,7 +1629,7 @@ document.addEventListener('click', (e) => {
       }
       break;
     case 'clear-day':
-      if (!confirmTwice('clear')) return;
+      if (!confirmTwice('clear', e.detail === 0)) return;
       Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = today();
@@ -1729,7 +1745,7 @@ document.addEventListener('click', (e) => {
       }
       if (crew) crew.driverIds = driverIds;
       else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
-      dayAsk = { day, saved: driverIds.length };
+      dayAsk = { day, saved: driverIds };
       if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
       break;
     }
@@ -2102,6 +2118,13 @@ document.addEventListener('keydown', (e) => {
 
 // The page scrolling carries the grid with it; a table scrolling sideways in
 // its own box (a phone) or the window changing size does not, so follow those.
+// A held Enter repeats, and on an armed button the repeat was taken as the
+// second press: holding Enter on Clear cleared the day. Only a fresh press
+// confirms.
+document.addEventListener('keydown', (e) => {
+  if (e.repeat && (e.key === 'Enter' || e.key === ' ') && e.target.closest?.('.armed')) e.preventDefault();
+}, true);
+
 // In the tag menu: up and down through the choices, Escape to leave, and Tab
 // off either end hands the focus back to the button it came from rather than
 // dropping it at the bottom of the page.
@@ -2132,16 +2155,27 @@ document.addEventListener('keydown', (e) => {
 // a test relies on that to catch CSS smuggled in through a share code.)
 document.addEventListener('scroll', (e) => {
   if (picking && e.target !== document && !$('#picker').contains(e.target)) placePicker();
-  if (tagFor && !$('#tagMenu').contains(e.target)) placeTagMenu(true);
+  if (tagFor && !$('#tagMenu').contains(e.target)) placeTagMenu(!tagSettling);
 }, true);
 window.addEventListener('resize', () => {
   if (picking) placePicker();
-  if (tagFor) {
+  if (tagFor && tagAnchor()) {
     // Shortened under it (a phone's keyboard coming up for the new-tag box):
-    // bring its button back into view, so the menu and the box being typed
-    // in are placed on the screen rather than kept open below it.
-    if (tagAnchor()) clearOfBar(tagAnchor());
+    // bring its row back into its list, which shrank with the window, and its
+    // button back onto the screen, so the menu and the box being typed in are
+    // placed where they can be seen. The scrolling this does is ours, and must
+    // not be taken for the user scrolling the row away.
+    const anchor = tagAnchor();
+    const list = anchor.closest('.rail-list');
+    tagSettling = true;
+    if (list) {
+      const a = anchor.getBoundingClientRect(), l = list.getBoundingClientRect();
+      if (a.top < l.top) list.scrollTop -= l.top - a.top;
+      else if (a.bottom > l.bottom) list.scrollTop += a.bottom - l.bottom;
+    }
+    clearOfBar(anchor);
     placeTagMenu();
+    requestAnimationFrame(() => requestAnimationFrame(() => { tagSettling = false; placeTagMenu(); }));
   }
 });
 
@@ -2187,6 +2221,20 @@ const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-f
    phone's page settles when its keyboard shortens the window. */
 const clearTheBar = () => { document.documentElement.style.setProperty('--bar', `${$('.topbar').offsetHeight + 8}px`); };
 window.addEventListener('resize', clearTheBar);
+
+/* Focus moved onto something the sticky top bar covers — Shift+Tab walks up
+   into it — is scrolled out from under the bar. The browser's own focus
+   scrolling does not know the bar is there, and ignores scroll-margin. */
+document.addEventListener('focusin', (e) => {
+  const el = e.target;
+  if (!el.closest || el.closest('.topbar') || !el.closest('main')) return;
+  requestAnimationFrame(() => {
+    if (document.activeElement !== el) return;
+    const top = $('.topbar').getBoundingClientRect().bottom + 8;
+    const a = el.getBoundingClientRect();
+    if (a.top < top) window.scrollBy(0, a.top - top);
+  });
+});
 
 /* The same, for one element, by scrolling the page just as far as it takes:
    out from under the top bar, or up from below the bottom of the screen.

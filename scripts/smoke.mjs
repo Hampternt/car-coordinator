@@ -1628,6 +1628,59 @@ await page.keyboard.type('B');
 check('the disarm three seconds later leaves the focus, and the typing, where they were', (await page.inputValue('#newDriver')) === 'AB');
 await page.click('[data-act="tab"][data-tab="plan"]');
 
+// --- and a fourth ---
+await page.setViewportSize({ width: 1600, height: 940 });
+await weekFixture();
+await page.reload({ waitUntil: 'networkidle' });
+const planRowN = (n) => page.locator('#tab-plan tbody tr').nth(n);
+
+await planRowN(0).locator('[data-act="del"]').click();
+check('a delete armed with the mouse does not keep the focus on it', await page.evaluate(() => !document.activeElement?.classList.contains('armed')));
+await page.evaluate(() => { armed = null; render(); });
+
+await planRowN(0).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await planRowN(1).locator('[data-act="toggle"][data-field="gapBefore"]').focus();
+await page.waitForTimeout(3300);
+check('the disarm puts the focus back on the very button it was on, not its neighbour',
+  await page.evaluate(() => document.activeElement?.dataset.field === 'gapBefore' && document.activeElement?.closest('tr')?.dataset.route === 'r1'));
+
+await planRowN(0).locator('[data-act="del"]').focus();
+await page.keyboard.press('Enter');
+await planRowN(1).locator('[data-field="name"]').evaluate((i) => { i.focus(); i.select(); });
+await page.waitForTimeout(3300);
+await page.keyboard.type('7');
+check('and keeps the whole selection, so typing replaces rather than adds', (await page.evaluate(() => state.routes[1].name)) === '7',
+  await page.evaluate(() => state.routes[1].name));
+
+const dayWas = await page.evaluate(() => state.routes[1].name);
+await page.locator('[data-act="clear-day"]').focus();
+await page.keyboard.down('Enter');
+await page.keyboard.down('Enter');
+await page.keyboard.up('Enter');
+check('holding Enter on Clear does not confirm it by repeat', (await page.evaluate(() => state.routes[1].name)) === dayWas);
+await page.evaluate(() => { armed = null; render(); });
+
+await page.setViewportSize({ width: 390, height: 844 });
+const boxAt = await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.getBoundingClientRect().top + scrollY);
+await page.evaluate((y) => window.scrollTo(0, y - 60), boxAt);
+await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.focus({ preventScroll: true }));
+await page.waitForTimeout(100);
+check('focus that lands under the top bar is scrolled clear of it',
+  await planRowN(20).locator('[data-field="name"]').evaluate((i) => i.getBoundingClientRect().top >= document.querySelector('.topbar').getBoundingClientRect().bottom));
+
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(7).locator('[data-act="tag"]').click();
+await page.click('#newTagName');
+await page.keyboard.type('Flat');
+await page.setViewportSize({ width: 390, height: 450 });
+await page.waitForTimeout(150);
+check('a window shortened under a menu opened low in the list keeps it, its words, and its box in view',
+  await page.locator('#tagMenu').isVisible() && (await page.locator('#newTagName').inputValue()) === 'Flat'
+  && await page.locator('#newTagName').evaluate((i) => { const r = i.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }));
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 1600, height: 940 });
+
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });

@@ -13,9 +13,11 @@
 }
 
 * { box-sizing: border-box; }
-/* Whatever the browser scrolls into view clears the sticky top bar; --bar is
-   its height, measured by the app. */
-main *, #notices > * { scroll-margin-top: var(--bar, 80px); }
+/* A notice brought into view clears the sticky top bar; --bar is its height,
+   measured by the app. (Only here: on everything in the page it also applied
+   inside the rail's scrolling lists and clipped the row being tabbed to.
+   Focus that lands under the bar is scrolled clear by the app instead.) */
+#notices > * { scroll-margin-top: var(--bar, 80px); }
 body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
 button, input, select { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
