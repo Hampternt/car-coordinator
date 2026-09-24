@@ -1331,6 +1331,62 @@ await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]'
 same('the driver grid fits a short screen rather than running off it', await cutOff('#picker'), []);
 await page.keyboard.press('Escape');
 
+// --- the week, as a row of days beside the plan ---
+// All, then Monday to Sunday. A group named for a day is that day's button,
+// however it was written; a group that is not a day keeps a button of its own.
+same('a group is matched to its day the way people write them',
+  await page.evaluate(() => ['Monday', 'mon', 'Mondays', 'Monday crew', 'Mandag', ' tirsdag ', 'Weds', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri']
+    .map((n) => groupWeekday(n))),
+  [1, 1, 1, 1, 1, 2, 3, 6, 0, -1, -1, -1]);
+await page.setViewportSize({ width: 1600, height: 940 });
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
+  drivers: ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  driverGroups: [
+    { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
+    { id: 'g2', name: 'Tuesdays', driverIds: ['d2'] },
+    { id: 'g3', name: 'Weekend crew', driverIds: ['d3'] },
+    { id: 'g4', name: 'Mon', driverIds: ['d4'] },
+  ],
+  templates: [],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+const week = () => page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.map((b) =>
+  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('none') ? '-' : '')));
+const dayBtn = (text) => page.locator('#tab-plan .day-bar .day', { hasText: text });
+same('the drivers panel shows the week: All, then Monday to Sunday, the days with no crew quiet',
+  await week(), ['All*', 'Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+check("today's day is marked", await page.evaluate(() =>
+  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]));
+same('a group that is not a day, or is a day twice over, keeps a button of its own',
+  await page.locator('#tab-plan .rail-groups .btn').allInnerTexts(), ['Weekend crew', 'Mon']);
+
+await dayBtn('Mon').click();
+same('Mon makes exactly the Monday crew the ones in', await inToday(), ['Ana', 'Bo']);
+same('and is lit, with All no longer lit', await week(), ['All', 'Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+await dayBtn('Tue').click();
+same('Tue then replaces them rather than adding to them', await inToday(), ['Cai']);
+await dayBtn('All').click();
+same('All puts everyone in', await inToday(), ['Ana', 'Bo', 'Cai', 'Dee', 'Efe']);
+
+await dayBtn('Mon').click();
+await dayBtn('Wed').click();
+check('a day with no crew yet only asks', (await page.evaluate(() => state.driverGroups.length)) === 4
+  && (await page.locator('#notices [data-act="save-day-crew"]').innerText()) === 'Save these 2 as Wednesday');
+await page.click('#notices [data-act="save-day-crew"]');
+check('and saving makes a Wednesday group of who is in',
+  await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Wednesday' && g.driverIds.join() === 'd0,d1')));
+same('which is the Wed button from then on, lit because it is in force', await week(), ['All', 'Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check('the Drivers tab says which button each group is',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon button'
+  && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Mon"]') }).locator('.day-badge').innerText()) === 'Monday twice');
+same('and offers the days that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri', 'Sat', 'Sun']);
+await page.locator('#tab-drivers .day-add .btn', { hasText: 'Fri' }).click();
+check('one click makes that day its group', await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Friday' && g.driverIds.length === 0)));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });

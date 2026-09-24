@@ -24,6 +24,38 @@ const collate = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base
 
 // Indexed by Date.getDay(), which is how a weekday is stored: Sunday is 0.
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// The week the way the warehouse reads it: Monday first.
+const WEEK = [1, 2, 3, 4, 5, 6, 0];
+
+/* A day group named for a day of the week is that day's crew, and is the
+   button for that day beside the plan. Named the way people name them: in
+   English or Norwegian, whole or short, with a plural or a "crew" after it —
+   "Monday", "Mon", "Mondays", "Monday crew", "Mandag". Norway's three-letter
+   forms are left out on purpose: "Tor" is a name before it is Thursday. */
+const DAY_NAMES = [
+  ['SUNDAY', 'SUN', 'SØNDAG', 'SONDAG'],
+  ['MONDAY', 'MON', 'MANDAG'],
+  ['TUESDAY', 'TUE', 'TUES', 'TIRSDAG'],
+  ['WEDNESDAY', 'WED', 'WEDS', 'ONSDAG'],
+  ['THURSDAY', 'THU', 'THUR', 'THURS', 'TORSDAG'],
+  ['FRIDAY', 'FRI', 'FREDAG'],
+  ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG'],
+];
+function groupWeekday(name) {
+  const n = fold(name).replace(/[\s.]+(CREW|GROUP|GANG)$/, '').replace(/DAYS$/, 'DAY').replace(/\.$/, '');
+  return DAY_NAMES.findIndex((names) => names.includes(n));
+}
+/* Each day's crew: the first group named for it. A second group named for
+   the same day is not lost — it is offered beside the others. */
+function dayCrews() {
+  const byDay = new Map();
+  const others = [];
+  for (const g of state.driverGroups) {
+    const day = groupWeekday(g.name);
+    if (day >= 0 && !byDay.has(day)) byDay.set(day, g); else others.push(g);
+  }
+  return { byDay, others };
+}
 
 function today() {
   const d = new Date();
@@ -462,11 +494,14 @@ function railDrivers() {
     return railRow('driver', d, 'Driver name', where, inOut, d.available ? '' : 'away');
   }).join('');
   const away = state.drivers.length - inToday.length;
-  // Monday morning is one click: the groups are here, where the day is set up.
-  const groups = state.driverGroups.map((g) =>
+  const { others } = dayCrews();
+  // Groups that are not a day of the week — a weekend crew, a Monday named
+  // twice — keep their own buttons under the week.
+  const groups = others.map((g) =>
     actBtn('apply-group', 'driverGroup', g.id, esc(g.name), '', 'title="Everyone in this group is in today"')).join('');
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    ${state.drivers.length ? dayBar(inToday) : ''}
     ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
     <div class="rail-add">
       <input id="railDriver" type="text" placeholder="Name(s), comma separated" aria-label="Add a driver">
@@ -476,6 +511,37 @@ function railDrivers() {
       ? `<ul class="rail-list" data-drop="driver" data-keep-scroll="drivers">${rows}</ul>`
       : '<p class="rail-empty">Nobody on the roster yet. Add the names you plan with — they become suggestions in the table, and you can drag them onto a route.</p>'}
   </section>`;
+}
+
+/* Monday morning is one click, and the week is where it is found: All, then
+   Monday to Sunday, as one row. The one in force is lit — the crew in today
+   is exactly that day's, or everyone — and today has a line under it. A day
+   with no crew yet is there but quiet, and clicking it offers to save who is
+   in now as that day's. */
+function dayBar(inToday) {
+  const { byDay } = dayCrews();
+  const inIds = new Set(inToday.map((d) => d.id));
+  const today = new Date().getDay();
+  const exactly = (g) => {
+    const ids = new Set(g.driverIds.filter((id) => byId(state.drivers, id)));
+    return ids.size === inIds.size && [...ids].every((id) => inIds.has(id));
+  };
+  const everyone = inIds.size === state.drivers.length;
+  const days = WEEK.map((day) => {
+    const g = byDay.get(day);
+    const cls = ['day', day === today && 'today', !g && 'none', g && exactly(g) && 'on'].filter(Boolean).join(' ');
+    const when = `${WEEKDAYS[day]}${day === today ? ' (today)' : ''}`;
+    if (!g) {
+      return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
+        title="${when}: no crew yet — click to save who is in now as ${WEEKDAYS[day]}'s">${WEEKDAYS[day].slice(0, 3)}</button>`;
+    }
+    const n = g.driverIds.filter((id) => byId(state.drivers, id)).length;
+    return `<button class="${cls}" data-act="apply-group" data-kind="driverGroup" data-id="${esc(g.id)}" aria-pressed="${cls.includes(' on')}"
+      title="${esc(when)}: ${n} driver${n === 1 ? '' : 's'} — click to make them the ones in today">${WEEKDAYS[day].slice(0, 3)}</button>`;
+  }).join('');
+  return `<div class="day-bar" role="group" aria-label="Who is in today">
+    <button class="day all${everyone ? ' on' : ''}" data-act="all-in" aria-pressed="${everyone}" title="Everyone on the roster is in today">All</button>${days}
+  </div>`;
 }
 
 function renderPlan() {
@@ -673,12 +739,19 @@ function renderDrivers() {
    nothing more. Applying one answers "who is in today", which is what the rail
    shows; it says nothing about which route anyone drives. */
 function driverGroups() {
+  const { byDay } = dayCrews();
+  const missing = WEEK.filter((day) => !byDay.has(day));
   const cards = state.driverGroups.map((g) => {
     const members = state.drivers.map((d) =>
       `<button class="chip ${g.driverIds.includes(d.id) ? 'on' : ''}" style="--c:var(--steel)" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
+    const day = groupWeekday(g.name);
+    const used = day >= 0 && byDay.get(day) === g;
+    const badge = day < 0 ? ''
+      : used ? `<span class="day-badge" title="This group is the ${WEEKDAYS[day].slice(0, 3)} button beside the day plan">${WEEKDAYS[day].slice(0, 3)} button</span>`
+        : `<span class="day-badge twice" title="Another group is ${WEEKDAYS[day]} already, so this one has a button of its own under the week">${WEEKDAYS[day]} twice</span>`;
     return `<div class="group">
       <div class="bar">
-        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}
+        ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}${badge}
         ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Set who is in today to this group"')}
         ${moveDel('driverGroup', g.id)}
       </div>
@@ -686,10 +759,12 @@ function driverGroups() {
     </div>`;
   }).join('');
   return `<h2 style="margin-top:22px">Day groups</h2>
-    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a day of the week and it becomes that day's button beside the day plan. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
       <button class="btn" data-act="add-group">+ Add group</button>
+      ${missing.length ? `<span class="day-add">Add a crew for ${missing.map((day) =>
+        `<button class="btn" data-act="add-day-group" data-day="${day}" title="Make a ${WEEKDAYS[day]} group">${WEEKDAYS[day].slice(0, 3)}</button>`).join('')}</span>` : ''}
     </div>
     ${cards || '<p class="empty">No groups yet. Make one for the crew you plan with most \u2014 it takes one click to put them all in.</p>'}`;
 }
@@ -1442,6 +1517,41 @@ document.addEventListener('click', (e) => {
       const g = list[i];
       const at = g.driverIds.indexOf(b.dataset.driver);
       if (at >= 0) g.driverIds.splice(at, 1); else g.driverIds.push(b.dataset.driver);
+      break;
+    }
+    case 'all-in':
+      state.drivers.forEach((d) => { d.available = true; });
+      note('info', `Everyone in today: ${state.drivers.length} driver${state.drivers.length === 1 ? '' : 's'}.`);
+      break;
+    // A day with no crew yet. It only ever asks: the button in the question is
+    // what saves, the same two steps as loading a template.
+    case 'day-missing': {
+      const day = Number(b.dataset.day);
+      const n = state.drivers.filter((d) => d.available).length;
+      dropOffers();
+      if (!n) note('info', `There is no ${WEEKDAYS[day]} crew yet. Make one on the Drivers tab and tick the names into it.`);
+      else {
+        note('info', `There is no ${WEEKDAYS[day]} crew yet. Save the ${n} who are in now as ${WEEKDAYS[day]}'s? You can tick names in or out of it on the Drivers tab afterwards.`,
+          { act: 'save-day-crew', kind: '', id: String(day), text: `Save these ${n} as ${WEEKDAYS[day]}` });
+      }
+      render();
+      return;
+    }
+    case 'save-day-crew': {
+      const day = Number(id);
+      dropOffers();
+      // Asked twice, or made on the Drivers tab in the meantime: the day has
+      // its crew already, and this must not quietly make a second one.
+      if (!WEEKDAYS[day] || dayCrews().byDay.has(day)) break;
+      const driverIds = state.drivers.filter((d) => d.available).map((d) => d.id);
+      state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
+      note('info', `Saved: ${WEEKDAYS[day]}'s crew is the ${driverIds.length} in now. Click ${WEEKDAYS[day].slice(0, 3)} to bring them back any ${WEEKDAYS[day]}.`);
+      break;
+    }
+    case 'add-day-group': {
+      const day = Number(b.dataset.day);
+      if (!WEEKDAYS[day] || dayCrews().byDay.has(day)) break;
+      state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds: [] });
       break;
     }
     case 'apply-group': {
