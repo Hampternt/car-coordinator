@@ -2,7 +2,7 @@
 
 **Status:** 💭 planned — pack order approved and every question answered (2026-09-28); the Reconnect fix is the first work. No pack has started.
 **Date:** 2026-09-28
-**Branch:** none yet. Each pack cuts its own branch from `main` when it starts, after the previous pack has merged. Before pack 1: merge `dev-test-data`, which holds the dev fixture, a README line and these plans. It changes nothing under `docs/` or `src-tauri/`, so the v0.2.4 rebuild it triggers ships the same app.
+**Branch:** `dev` is where everything is combined (owner, 2026-09-28). Each pack cuts its branch from `dev` and comes back through a PR into `dev`, and CI runs the tests on those PRs. `main` only receives `dev`, when the owner decides; that push is what publishes Pages and builds the Windows release. `dev` starts at 0.2.5, with the save-file fix and the dev fixture.
 
 ## Goal
 
@@ -88,15 +88,15 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 <details>
 <summary><b>Releasing a pack</b> — version, note entry, upgrade check</summary>
 
-- **Version cut.** Merging a pack includes cutting a version. That means five places: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, as commit 87714d7 did for 0.2.4. Pack 1 adds a sixth: a version constant in `docs/` that the update note keys on. Pack 1 also adds a line to `scripts/check.sh` that fails when these places disagree. Without the cut, every merge would re-upload the v0.2.4 release in place.
+- **Version cut.** Merging a pack into `dev` includes cutting a version, so every note entry has its own version. What reaches users is whichever version `dev` holds when it is merged to `main`, and the note shows them every entry they haven't seen. That means five places: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, as commit 87714d7 did for 0.2.4. Pack 1 adds a sixth: a version constant in `docs/` that the update note keys on. Pack 1 also adds a line to `scripts/check.sh` that fails when these places disagree. Without the cut, every merge would re-upload the v0.2.4 release in place.
 - **Note entry.** Every pack adds its own entry to the update note in plain words: what changed, what it affects, and what happened to your data.
-- **Upgrade check in the pack gate.** Required for packs 1, 2 and 4, and cheap for the rest. A profile saved by the previous `main` build is opened in the pack's build, and all of the following must hold:
+- **Upgrade check in the pack gate.** Required for packs 1, 2 and 4, and cheap for the rest. A profile saved by the previous `dev` build is opened in the pack's build. **Before every `dev` → `main` merge, it runs again from the build live on `main`**, because that's the one users are upgrading from. All of the following must hold:
   - The state is identical apart from the changes the pack names.
   - Every backup is still there, and the profile is seeded under the cap of 12.
   - The update backup exists, or the note names the identical newest backup that already holds the same plan.
   - The note shows the newest three entries it hasn't shown in this browser and counts the rest; What's new on the Data tab lists them all.
 
-  This matters because Pages goes live the moment a pack merges, so a container-end check alone would catch problems too late.
+  This matters because Pages goes live the moment `dev` reaches `main`, and users skip every version in between.
 </details>
 
 <details>
