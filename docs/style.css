@@ -321,7 +321,9 @@ body.show-sheet .sheet {
   background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.2);
 }
 .sheet { font-family: Arial, Helvetica, sans-serif; color: #000; padding: 18mm 16mm; }
-.sheet .date { text-align: right; font-size: 22pt; font-weight: 700; text-decoration: underline; margin-bottom: 6mm; }
+.sheet .date { text-align: center; font-weight: 700; margin-bottom: 6mm; }
+.sheet .date .num { font-size: 22pt; text-decoration: underline; }
+.sheet .date .weekday { font-size: 16pt; margin-top: 1mm; }
 .sheet table { width: 100%; border-collapse: collapse; font-size: 20pt; font-weight: 700; }
 .sheet th { text-align: left; font-style: italic; padding: 0 0 3mm; }
 .sheet td { padding: .6mm 2mm; }

@@ -24,7 +24,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Labels** — custom status labels with colours.
 
 ## Printing
-- ✅ **A4 route sheet** — mirrors the paper list on the pillar: date top right, Route / Driver / Car / Packing round, pink rows, gap lines.
+- ✅ **A4 route sheet** — mirrors the paper list on the pillar: date centred with the weekday in words under it, Route / Driver / Car / Packing round, pink rows, gap lines.
 - ✅ **Check before posting** — unresolved clashes repeated on the sheet.
 - ✅ **Unavailable and free cars** listed under the plan.
 - ✅ **QR on the sheet** (browser build) — links the day plan so a phone can read it off the paper. Switchable off.

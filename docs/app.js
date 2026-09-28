@@ -1102,8 +1102,12 @@ function renderSheet() {
   const downCars = marked(state.cars, 'reg');
   const downPos = marked(state.positions, 'name');
 
+  // The weekday in words under the date, from the plan's own date: the sheet
+  // on the pillar is read by people checking it is the right day's list.
+  const weekday = WEEKDAYS[new Date(Number(y), Number(m) - 1, Number(d)).getDay()] || '';
+
   $('#sheet').innerHTML = `
-    <div class="date">${d}/${m}/${y}</div>
+    <div class="date"><div class="num">${d}/${m}/${y}</div>${weekday ? `<div class="weekday">${weekday}</div>` : ''}</div>
     <table>
       <thead><tr><th style="text-align:right;padding-right:6mm">Route</th><th>Driver</th><th>Car</th><th>Packing round</th></tr></thead>
       <tbody>${rows}</tbody>
