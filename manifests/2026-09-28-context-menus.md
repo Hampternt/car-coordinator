@@ -2,7 +2,7 @@
 
 **Status:** 💭 planned — item list awaiting the owner's approval; nothing built
 **Date:** 2026-09-28
-**Branch:** cut when execution starts: `context-menus`, from `main`, after pack 7 has merged. Not from `dev-test-data`, because that branch holds the dev fixture and the INVENTORY notes and is unmerged. The container merges it before pack 1 (`manifests/2026-09-28-review-round.md:5`).
+**Branch:** cut when execution starts: `context-menus`, from `main`, after pack 7 has merged. Not from `dev-test-data`, because that branch holds the dev fixture and the INVENTORY notes and is unmerged. The container merges it before pack 1 (the container's Branch line).
 
 ## Goal
 
@@ -17,7 +17,7 @@ Right-click a route, a driver, a car, a position, a label or a template. A short
 ## Agent brief
 
 Read first, in this order:
-- This manifest. Then the container, `manifests/2026-09-28-review-round.md`: pack 8 (190-198), the release rules (51-63) and the gates (216-230).
+- This manifest. Then the container, `manifests/2026-09-28-review-round.md`: Packs → **8. Right-click menus**, Rules every pack follows → **Releasing a pack**, and **Gates**.
 - `docs/app.js`. The anchors below are against `dev-test-data` at 28c96b5. Re-verify them at start, because packs 1-7 will have moved them.
   - The dispatcher: 1564-1816. The ITEM_ACTS guard is at 1583, save/render/refocus at 1813-1815, and `ITEM_ACTS` itself at 2225.
   - `confirmTwice` (1163-1180) and `renderKeepingFocus` (1186-1220). This pack must not weaken the arm and focus rules in them.
@@ -44,7 +44,7 @@ Read first, in this order:
 - `note()` (1418).
 - `Store.snapshot` (store.js:210).
 
-**Dependencies:** this runs as pack 8, after pack 7 merges (review-round.md:26, 45-46). It uses:
+**Dependencies:** this runs as pack 8, after pack 7 merges (the container's pack order). It uses:
 - pack 1's update note and version constant;
 - pack 2's label tick;
 - pack 3's colour tokens;
@@ -52,7 +52,7 @@ Read first, in this order:
 - pack 5's template position;
 - pack 7's Drivers-tab row.
 
-**No worktree.** Packs run one at a time, and every item writes `docs/app.js` (review-round.md:29-32).
+**No worktree.** Packs run one at a time, and every item writes `docs/app.js` (the container's one-pack-at-a-time rule).
 
 <details>
 <summary><b>How the menu works</b> (the mechanism, for the implementer)</summary>
@@ -188,7 +188,7 @@ Read first, in this order:
 | Menus under 3 entries | Kept. The label row has 1 entry, and a Drivers-tab driver who is on no route has 2. A right-click that does nothing on one tab would read as broken. |
 | Words | "Delete <kind>" everywhere, and the rail ✕'s title changes from "Remove <name>" to "Delete <name>" (app.js:476). "Position", never "spot" (707, 711). Toggles say what they will do: "Mark pink on the printout" / "Remove the pink mark". Route names go through dash(), so a blank name reads "Route -" (285-287). |
 | Saved data | **No change of shape.** The open menu is kept off `state`, like tagFor (app.js:363), and opening or closing it never saves. Store, share.js and SCHEMA (store.js:9) are untouched. |
-| Slots for earlier packs | A slot is filled only when its feature has shipped and is a single one-click act. Pack 2's label print tick goes above Delete label. Pack 7's note and days stay out. Pack 7's tag goes in only if it is not shown as chips in the row. At start, the Drivers-tab menu is redrawn against the row pack 7 shipped, and "today" follows pack 4's wording (review-round.md:139). |
+| Slots for earlier packs | A slot is filled only when its feature has shipped and is a single one-click act. Pack 2's label print tick goes above Delete label. Pack 7's note and days stay out. Pack 7's tag goes in only if it is not shown as chips in the row. At start, the Drivers-tab menu is redrawn against the row pack 7 shipped, and "today" follows pack 4's wording (the container's pack 4). |
 
 ## Menus
 
@@ -342,7 +342,7 @@ The same item gets the same entries, in the same order, on every surface. A surf
       *Done when:* `CHROMIUM_PATH=/usr/bin/google-chrome npm run screens` writes the four new captures with no console errors.
 - [ ] **14. Update-note entry and version cut.**
   - This pack's entry in pack 1's update note: right-click a row for its actions; text boxes keep copy and paste; your data is untouched.
-  - The version cut in the five places plus pack 1's constant (review-round.md:54), with check.sh's agreement line green.
+  - The version cut in the five places plus pack 1's constant (the container's Releasing a pack), with check.sh's agreement line green.
       *Done when:* the upgrade check from the previous `main` build shows the menus entry, and the loaded state deep-equals that build's.
 
 ## Owner questions
@@ -381,7 +381,7 @@ The same item gets the same entries, in the same order, on every surface. A surf
 ## Gates
 
 - **Item gate:** `scripts/check.sh`, plus the item's targeted smoke case when it touches logic: `CHROMIUM_PATH=/usr/bin/google-chrome npm run test:car`. That is every item except 13 and 14.
-- **Pack gate:** `npm test` and `npm run screens`, plus the upgrade check (review-round.md:56-60). The pinned Playwright Chromium is not installed here. `CHROMIUM_PATH=/usr/bin/google-chrome` works, but it means the suite has not run on the browser CI uses; say so in the report.
+- **Pack gate:** `npm test` and `npm run screens`, plus the upgrade check (the container's Releasing a pack). The pinned Playwright Chromium is not installed here. `CHROMIUM_PATH=/usr/bin/google-chrome` works, but it means the suite has not run on the browser CI uses; say so in the report.
 - **Test layout:**
   - Menu cases run in their own `browser.newContext()`, seeded from `dev-data.json` and reloaded (smoke.mjs:608, 666, 1812).
   - Backups are asserted by label and contents, not by index 0, because Store skips a snapshot identical to the newest one (store.js:214).

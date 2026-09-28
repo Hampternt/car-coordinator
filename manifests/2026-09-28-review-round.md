@@ -22,8 +22,12 @@ Found while planning pack 9, and checked against the code:
 
 Someone missing their data is exactly the person likely to press Reconnect, hoping to get it back.
 
-- [ ] **⚠️ Reconnect reads before it writes.** When this browser has no usable plan of its own, Reconnect loads the plan from the file instead of writing over it. When it does have one, it keeps today's behaviour. **Risky — review individually.**
-  *Done when:* a smoke case shows two things. With a linked file holding the dev fixture, an emptied local plan and permission "prompt", pressing Reconnect brings the fixture back and leaves the file byte-identical. With usable local data, Reconnect still writes it to the file as today.
+- [ ] **⚠️ Reconnect asks before it overwrites.** When this session did not start from a usable plan of its own (a cleared or unreadable save, or a plan recovered from the file) and the file holds something different from the screen, Reconnect first shows both and asks: **Load the file** or **Write this screen to the file**. A backup is taken of whichever is about to be replaced. When the session started from a usable plan, Reconnect keeps today's behaviour. This follows the app's preview-before-replace rule. Loading the file blindly isn't safe either: `hasUsableLocalData()` is set only at load (`docs/store.js:179`), so a session recovered from the file and then edited would lose its edits. **Risky — review individually.**
+  *Done when:* smoke cases show all of these:
+  - With a linked file holding the dev fixture, an emptied local plan and permission "prompt", Reconnect asks. **Load the file** brings the fixture back and leaves the file byte-identical.
+  - A plan recovered from the file, then edited, then reconnected after a write fails, asks. **Write this screen** keeps the edits and puts the file's old contents in Backups.
+  - Typing into a fresh plan after the "unreadable save" warning, then reconnecting, asks the same way.
+  - With usable local data from the start, Reconnect writes to the file with no question, as today.
 
 ## Packs, in order
 
@@ -61,12 +65,7 @@ built as a separate module (`docs/map.js`, with its own smoke case) while pack
 
 ## Rules every pack follows
 
-Pack 1's manifest works these rules out in detail and refines several of them:
-- per-browser keys go through `Store.pref` as `carcoord:pref:⟨name⟩`;
-- a load that couldn't be read, or came from a newer version, is held back: no note and no tour until the next clean open;
-- the note shows the newest three entries and counts the rest.
-
-Its item 11 rewrites the lines below to match. Until then, **where the two differ, pack 1's manifest wins.** One point is still the owner's to decide (pack 1, question 1): whether an identical newest backup is named as it is, or relabelled.
+Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still open; if relabelling wins, startup step 2 changes to match.
 
 <details>
 <summary><b>Releasing a pack</b> — version, note entry, upgrade check</summary>
@@ -76,8 +75,8 @@ Its item 11 rewrites the lines below to match. Until then, **where the two diffe
 - **Upgrade check in the pack gate.** Required for packs 1, 2 and 4, and cheap for the rest. A profile saved by the previous `main` build is opened in the pack's build, and all of the following must hold:
   - The state is identical apart from the changes the pack names.
   - Every backup is still there, and the profile is seeded under the cap of 12.
-  - The update backup exists.
-  - The note lists every entry newer than what this PC last saw.
+  - The update backup exists, or the note names the identical newest backup that already holds the same plan.
+  - The note shows the newest three entries it hasn't shown in this browser and counts the rest; What's new on the Data tab lists them all.
 
   This matters because Pages goes live the moment a pack merges, so a container-end check alone would catch problems too late.
 </details>
@@ -87,13 +86,13 @@ Its item 11 rewrites the lines below to match. Until then, **where the two diffe
 
 - **Startup order**, which packs 1 and 4 both follow:
   1. Load, then recover from the save file.
-  2. Take the update backup. It must not be skipped as identical to the newest backup (`docs/store.js:214`); relabel that entry instead.
+  2. Write the per-browser marker, then take the update backup of the raw saved text. If the newest backup already holds the same plan (`docs/store.js:214` skips duplicates), the note names that entry instead. It isn't relabelled, pending pack 1's question 1.
   3. `dailySnapshot`.
   4. Move the date (pack 4).
   5. Template and other offers.
   6. The update note.
-- **First-ever open** means no usable saved data: `carcoord:v1` is absent or unusable, and nothing was recovered from the save file. It never means "no note key". Every v0.2.4 user has usable data and no note key, and they must see the note. The tour (pack 9) uses the same test. Existing users reach the tour from its entry in the update note.
-- **Per-PC keys** (`carcoord:seenNote`, `carcoord:theme`, `carcoord:tour`) are read and written directly, wrapped in try/catch. Never go through a `data-kind="meta"` control or a field on `state` (`docs/app.js:1134`). Everything on `state` travels into Export, the save file and backups.
+- **First-ever open** means no usable saved data: `carcoord:v1` is absent or unusable, and nothing was recovered from the save file. It never means "no note key". Every v0.2.4 user has usable data and no note key, and they must see the note. A save that could not be read, or that came from a newer version, is **held**: no note and no tour until the next clean open. Pack 1 sets one `firstRun` value in `start()`, and the tour (pack 9) reads it. Existing users reach the tour from its entry in the update note.
+- **Per-browser keys** go through pack 1's `Store.pref` / `Store.setPref` as `carcoord:pref:⟨name⟩`: `seenUpdate` (pack 1), `theme` (pack 3), `tour` (pack 9). Every access is wrapped in try/catch. Never go through a `data-kind="meta"` control or a field on `state` (`docs/app.js:1134`). Everything on `state` travels into Export, the save file and backups.
 </details>
 
 ## Packs
@@ -245,7 +244,7 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
 Answer whenever suits; each pack only needs its own answers when it starts. The ⭐ answers are my recommendations.
 
 **Now**
-- [ ] Go for the Reconnect fix, ahead of everything?
+- [ ] Go for the Reconnect fix (it asks before overwriting), ahead of everything?
 - [ ] Approve the pack order above?
 
 **Pack 1: Update note**
@@ -307,7 +306,7 @@ Answer whenever suits; each pack only needs its own answers when it starts. The 
   - Seed the profile with `scripts/fixtures/dev-data.json` and at most ten backups.
   - Deep-compare the whole state. The only differences allowed are the ones the packs name: the date moved, `qrOnSheet` fixed to `false`, and labels gaining the tick at its default.
   - Every earlier backup is present, plus the update backup.
-  - The note lists all nine entries.
+  - What's new lists all nine entries, and the note shows the newest three and counts the rest.
 
   This check covers the web build only. The exe gets a hand check on install.
 

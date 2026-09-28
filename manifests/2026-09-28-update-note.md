@@ -2,7 +2,7 @@
 
 **Status:** 💭 planned — item list awaiting the owner's approval; nothing built
 **Date:** 2026-09-28
-**Branch:** to be cut when execution starts: `update-note`, from `main`. First, `dev-test-data` has to be merged into `main` (container `manifests/2026-09-28-review-round.md:5`). `dev-test-data` holds the dev fixture, the INVENTORY notes and these plans, and it is not merged yet.
+**Branch:** to be cut when execution starts: `update-note`, from `main`. First, `dev-test-data` has to be merged into `main` (the container's Branch line). `dev-test-data` holds the dev fixture, the INVENTORY notes and these plans, and it is not merged yet.
 
 ## Goal
 
@@ -24,11 +24,11 @@ There is no `CLAUDE.md` at the repo root. Conventions come from `HANDOFF.md`, th
 
 Read first, in order:
 - **This manifest.** Then the container `manifests/2026-09-28-review-round.md`:
-  - release rules (:49-63)
-  - startup order and the meaning of "first-ever open" (:65-77)
-  - pack 1 (:81-90)
+  - Rules every pack follows → **Releasing a pack**
+  - Rules every pack follows → **Opening the app** (startup order, "first-ever open", per-browser keys)
+  - Packs → **1. Update note**
 
-  Item 11 amends several container lines. Where the two documents differ, this manifest wins.
+  The container's rules were reconciled with this manifest on 2026-09-28. Question 1 below is still open; if the owner picks relabelling, update the container's startup step 2 to match.
 - **`docs/store.js`:**
   - `readLocal` (:174-186) and the two load warnings it can queue: newer version (:153) and unreadable (:181)
   - `snapshot` (:210-226): identical-skip (:214), cap of 12 (:8, :216), full-storage trim (:222-225)
@@ -67,7 +67,7 @@ Dependency edges:
 - **Pack 4 (plan for tomorrow):**
   - It also writes `start()`. Its date move goes after the update backup and `dailySnapshot` (container step 4).
   - Its Keep notice is raised before the update note.
-  - Its switch of `dailySnapshot` to the local date (container :140) must keep this pack's rule that today's `Updating to …` entry counts as the day's start.
+  - Its switch of `dailySnapshot` to the local date (container, pack 4) must keep this pack's rule that today's `Updating to …` entry counts as the day's start.
 - **Pack 8 (right-click menus):** shares nothing with this pack, because the note is a notice, not a floating layer or dialog. Its manifest still needs its own **Announce and cut** item.
 - **Pack 9 (tour):**
   - Reads the single `firstRun` boolean this pack sets in `start()`. It never treats "marker absent" as a first run, because the first-run rule writes the marker.
@@ -82,20 +82,20 @@ Dependency edges:
 |---|---|
 | How the note is shown | A notice of a new kind, `update`, in `#notices`. It has no offer button, only ✕. It is not a `<dialog>`, which would stack on the share dialog a `#d=` link opens at boot (app.js:2291-2296). `#notices` is already hidden in print (style.css:346). With no offer, `dropOffers` (app.js:1430) cannot sweep it away, and the existing `.notice.info` and `.notice.warn` assertions are untouched. |
 | Where the notes live | `docs/updates.js` holds `const UPDATES = [...]`, newest first. It contains only data, with the wording rules in its header comment. It loads between store.js and share.js (index.html:63-64). The CSP allows only same-origin script (index.html:14), and Pages and the exe serve the same `docs/` (tauri.conf.json:7). |
-| The running version | One line in `docs/app.js`: `const APP_VERSION = '0.3.0';`. This is the sixth version place the container asks for (:54). The note's logic keys on it, and the text is shown only when `UPDATES[0].version` equals it. A new app.js paired with a stale cached updates.js therefore still takes the backup (mixed-cache critique). |
-| Release cadence | Each pack takes the next minor version: 0.3.0, 0.4.0 … and pack 8 is 0.10.0 if no fixes land in between. A user-visible fix between packs takes the next patch version and gets its own entry. Tests-only, docs-only and `docs/breadify/` changes get neither. Entries are never removed or renumbered; a revert gets a new, higher entry. The plan's owner question about batching releases was dropped, because the container already settles release-per-pack (:54). |
-| Per-browser marker | `carcoord:pref:seenUpdate` holds the newest version already shown, read and written through new `Store.pref` and `Store.setPref`. Export and share codes carry `state` only (store.js:387-396), and `normalise` whitelists fields (store.js:141), so the marker never travels. The `carcoord:` prefix keeps it apart from Breadify's key on the same origin (docs/breadify/app.js:16). This replaces the container's `carcoord:seenNote`, which was to be read directly (:76, amended in item 11). |
+| The running version | One line in `docs/app.js`: `const APP_VERSION = '0.3.0';`. This is the sixth version place the container asks for (Releasing a pack). The note's logic keys on it, and the text is shown only when `UPDATES[0].version` equals it. A new app.js paired with a stale cached updates.js therefore still takes the backup (mixed-cache critique). |
+| Release cadence | Each pack takes the next minor version: 0.3.0, 0.4.0 … and pack 8 is 0.10.0 if no fixes land in between. A user-visible fix between packs takes the next patch version and gets its own entry. Tests-only, docs-only and `docs/breadify/` changes get neither. Entries are never removed or renumbered; a revert gets a new, higher entry. The plan's owner question about batching releases was dropped, because the container already settles release-per-pack (Releasing a pack). |
+| Per-browser marker | `carcoord:pref:seenUpdate` holds the newest version already shown, read and written through new `Store.pref` and `Store.setPref`. Export and share codes carry `state` only (store.js:387-396), and `normalise` whitelists fields (store.js:141), so the marker never travels. The `carcoord:` prefix keeps it apart from Breadify's key on the same origin (docs/breadify/app.js:16). This replaces the container's `carcoord:seenNote`, which was to be read directly; the container's Opening the app rule now says the same. |
 | When a note counts as seen | When it is shown, not when it is dismissed. The marker is written at boot, before the backup. Tying it to ✕ would show the note on every open to a leader who never presses ✕. |
-| Who is held back | **First-ever open:** the marker is written silently, nothing is shown and no backup is taken. **Held:** nothing is shown or written, and the note comes on the next clean open. A load is held when it could not be read, was saved by a newer version, or arrives by a `#d=` link. The first two are detected by a flag set in `readLocal` (`Store.loadTrouble()`), not by notice kinds. `render` is Store's `onChange` (app.js:2274), and `askPersist` fires it during `init` (store.js:383, :412), so the warnings are already drained (app.js:1098) before app.js:2281 runs. That was the blocker. Holding `#d=` loads spares phones that have saved once, since a tab click saves (app.js:1589→1813). Container :75 is amended to match. |
+| Who is held back | **First-ever open:** the marker is written silently, nothing is shown and no backup is taken. **Held:** nothing is shown or written, and the note comes on the next clean open. A load is held when it could not be read, was saved by a newer version, or arrives by a `#d=` link. The first two are detected by a flag set in `readLocal` (`Store.loadTrouble()`), not by notice kinds. `render` is Store's `onChange` (app.js:2274), and `askPersist` fires it during `init` (store.js:383, :412), so the warnings are already drained (app.js:1098) before app.js:2281 runs. That was the blocker. Holding `#d=` loads spares phones that have saved once, since a tab click saves (app.js:1589→1813). The container's Opening the app rule says the same. |
 | What the update backup holds | The raw `carcoord:v1` text as this build read it, not the normalised state (data-safety critique). The ux critique offered neutral wording instead; the raw copy was chosen because later packs change what `normalise` returns. Opening never saves (app.js:2272-2297), so the text is still the pre-update copy, and `restore` migrates it back (store.js:238). If the plan came from the save file, or the text lacks `routes`/`cars` lists (which app.js:991 would show as unreadable), the loaded state is stored instead and the note words it differently. |
 | One backup per version | If Backups already holds an entry labelled `Updating to ⟨v⟩`, the note names that entry and no new copy is taken. A failed marker or a stale notes file therefore cannot pile up copies or trim older ones. |
-| Identical newest backup | The critiques split. Data-safety said keep naming the existing entry and ask the owner; ux said pick one approach and write it into both documents. Chosen: keep the skip (store.js:214) and name the entry that holds the same plan, under its own label. The container's rule to relabel it (:70) is not followed, because relabelling today's `Start of day` defeats `dailySnapshot`'s label test (store.js:230) and rewrites what an entry says it was taken before. Container :59, :70 and :227 are amended; the owner can flip this (question 1). |
-| Backups pushed out | `snapshot` reports which entries it dropped (cap at store.js:216, trim at :222-224), and the note names them (container :85). |
+| Identical newest backup | The critiques split. Data-safety said keep naming the existing entry and ask the owner; ux said pick one approach and write it into both documents. Chosen: keep the skip (store.js:214) and name the entry that holds the same plan, under its own label. The container's first draft said to relabel it; that is not followed, because relabelling today's `Start of day` defeats `dailySnapshot`'s label test (store.js:230) and rewrites what an entry says it was taken before. The container now says the same, pending the owner's question 1. |
+| Backups pushed out | `snapshot` reports which entries it dropped (cap at store.js:216, trim at :222-224), and the note names them (container, pack 1). |
 | Order at boot | The container's order is kept. The marker and then the backup come at step 2, before `dailySnapshot`. The note is raised at step 6, after the offers (app.js:2287-2288), so the spot-round offer `renderNotices` scrolls to (app.js:1050) is not pushed down by a tall note. |
 | When no copy was taken | The critiques split: drop the note's sentence, or point at the store's warning. Chosen: when `snapshot` returns null, the store's own warning (store.js:225) is drained before the note is raised, so it sits above the note, and the note says only that the warning above explains why. When the marker cannot be written, no backup is attempted at all (so nothing is trimmed), and the note says storage is full and points at Export. |
-| Several missed updates | The note shows the newest three entries in full and counts the rest. A browser with saved data but no marker counts every entry as unseen. Container :60 and :228 are amended to "newest three and a count; What's new lists all". |
+| Several missed updates | The note shows the newest three entries in full and counts the rest. A browser with saved data but no marker counts every entry as unseen. The container says the same. |
 | Where notes can be read again | A **What's new** card on the Data tab, directly above Backups. The newest three are shown in full; older ones get one line each, including their data line. The ux critique offered trimming or moving it below Backups; trimming was chosen, because below Backups it would become the `.card:last-child` that smoke.mjs:1894 reads. The card holds no `<table>` (smoke.mjs:964 and :1040 read the Data tab's first table). The owner may prefer a top-bar button (question 2). |
-| Save-file sentence | One sentence, in three variants depending on the file's state (Design E). All are hidden in the exe (`window.__TAURI__`, withGlobalTauri at tauri.conf.json:10) until the owner confirms the picker works there. The sentence never implies automatic recovery, which needs a file handle already stored in this browser (store.js:414-418). The fuller description the container asks for (:86) stays on the Data tab's file card (app.js:958-959), and :86 is amended. |
+| Save-file sentence | One sentence, in three variants depending on the file's state (Design E). All are hidden in the exe (`window.__TAURI__`, withGlobalTauri at tauri.conf.json:10) until the owner confirms the picker works there. The sentence never implies automatic recovery, which needs a file handle already stored in this browser (store.js:414-418). The fuller description the container asks for (pack 1) stays on the Data tab's file card (app.js:958-959). The container says the same. |
 | Entry wording | Each field is at most about 25 words. The opening sentence is only "Car Coordinator has been updated to ⟨v⟩." The note says "this browser", never "this PC", because the marker is kept per browser profile. No entry names a backup entry; the note's own sentence names the real one. The critiques split over the draft's "a copy goes into Backups" line (drop it, or reword it). Chosen: a reworded, true version moves into the 0.3.0 `data` field. |
 | Version guard | `scripts/versions.mjs` runs first in `npm test` and inside `scripts/check.sh`. It compares versions number by number, so 0.10.0 sorts above 0.9.0. It also pins the exe identifier `no.m.carcoordinator` (tauri.conf.json:5) and refuses any webview scheme setting; either change would likely open the Windows app on empty storage. Nothing checks the versions agree today: check.sh only runs `node --check` (:37-57), and build.yml has no Pages step, so the item gate is where a mismatch is caught. |
 | Boot safety | The whole update path in `start()` is wrapped in try/catch and logs with `console.warn`, because smoke fails on console errors (smoke.mjs:42). Any failure falls through to `render()`, so a stale cached store.js can never leave a blank page. |
@@ -338,23 +338,15 @@ This is illustrative: pack 8's menu contents are not settled yet. It assumes a r
   - Run (c): twelve seeded entries. The note names the one dropped.
   - In every run, the first assertion is that `APP_VERSION` equals package.json's version: serve.mjs sends no cache headers, and nothing else proves which build is running. Then `carcoord:v1` must be byte-identical, there must be exactly one `.notice.update`, the marker must be set, and a reload must show no note.
       *Done when:* all three runs pass against `git worktree add ⟨scratch⟩/cc-v0.2.4 v0.2.4`, and pointing it at a checkout of the current build fails on the version assertion.
-- [ ] **11. Write the process rule down, and reconcile the container.**
+- [ ] **11. Write the process rule down.**
   - Replace README.md:40 with the Design H rule, and add "and when the app has been updated" to README.md:31.
-  - Amend the container `manifests/2026-09-28-review-round.md`, line by line:
-    - :54 — the sixth place is `APP_VERSION` in `docs/app.js`, and the guard is `scripts/versions.mjs` in check.sh and `npm test`
-    - :59 and :227 — "the update backup exists, or the note names the identical newest entry holding the same plan"
-    - :60 and :228 — "the note shows the newest three and counts the rest; What's new lists them all"
-    - :70 — step 2 is "marker, then the update backup of the raw saved text; an identical newest entry is named, not relabelled"
-    - :75 — "first-ever open: `carcoord:v1` absent and nothing recovered; a save that could not be read or came from a newer version is held — neither tour nor note"
-    - :76 — "per-browser keys go through `Store.pref`: `carcoord:pref:seenUpdate`, `…:theme`, `…:tour`"
-    - :85 — "the note names the backups it pushed out"
-    - :86 — "one sentence in the note; the file card on the Data tab carries the rest; hidden in the exe until confirmed"
-    - the Gates line gains the announce-and-cut step
-      *Done when:* README, the container's Gates and the updates.js header state the same rule word for word, and each listed container line reads as above.
+  - Put the same rule in the container's Gates.
+  - Check that the container's **Opening the app** and **Releasing a pack** rules still match what this pack built, including the owner's answer to question 1. Update them if not.
+      *Done when:* README, the container's Gates and the updates.js header state the same rule word for word, and the container's two rule sections describe what shipped.
 
 ## Owner questions
 
-1. When the newest backup already holds exactly the plan being opened, should the note name that entry under its own label (recommended; it keeps `Start of day` meaning start of day), or relabel it `Updating to ⟨v⟩` as the container's startup rule says (:70)?
+1. When the newest backup already holds exactly the plan being opened, should the note name that entry under its own label (recommended; it keeps `Start of day` meaning start of day), or relabel it `Updating to ⟨v⟩` which was the container's first draft?
 2. Where should the notes be readable after ✕? A **What's new** card on the Data tab directly above Backups (recommended: it sits next to the copy the note points at, and the top bar stays as it is), or a **What's new** button in the top bar?
 3. On a Windows PC, in the exe: does Data → **Choose save file…** open a picker, and does the chosen file get written after a change? Until you confirm, the note says nothing about the save file in the Windows app.
 
@@ -377,7 +369,7 @@ This is illustrative: pack 8's menu contents are not settled yet. It assumes a r
 - **Item gate:** `scripts/check.sh`, which from item 1 on also runs `versions.mjs`. When logic is touched, also run the targeted smoke case: `CHROMIUM_PATH=/usr/bin/google-chrome npm run test:car`. Item 5 edits src-tauri/Cargo.toml, so it also runs `cargo check --manifest-path src-tauri/Cargo.toml` (scripts/check.sh:19-21); cargo is on PATH here.
 - **Pack gate:**
   - `CHROMIUM_PATH=/usr/bin/google-chrome npm test` and `CHROMIUM_PATH=/usr/bin/google-chrome npm run screens`. The pinned Playwright Chromium is not installed here and `/usr/bin/google-chrome` works; say so in the report, because the suite will not have run on the browser CI uses.
-  - The upgrade check (container :56 requires it for pack 1): `git worktree add ⟨scratch⟩/cc-v0.2.4 v0.2.4`, then `CHROMIUM_PATH=/usr/bin/google-chrome node scripts/upgrade.mjs ⟨scratch⟩/cc-v0.2.4`.
+  - The upgrade check (the container's release rules require it for pack 1): `git worktree add ⟨scratch⟩/cc-v0.2.4 v0.2.4`, then `CHROMIUM_PATH=/usr/bin/google-chrome node scripts/upgrade.mjs ⟨scratch⟩/cc-v0.2.4`.
 - **Review:** items 3 and 7 are reviewed individually, plus one review pass for the rest of the pack.
 - **Browser walkthrough before merging:**
   1. Import `scripts/fixtures/dev-data.json` and change one thing.
@@ -385,6 +377,6 @@ This is illustrative: pack 8's menu contents are not settled yet. It assumes a r
   3. On the Data tab, find that entry, with What's new directly above Backups. Restore it; a backup is taken first (app.js:1394).
   4. Reload: no note. A fresh profile: no note. A `#d=` link: no note, and the share dialog opens.
   5. At a 900px window (the exe's minimum width, tauri.conf.json:17) and in print preview, the note does not print.
-- **At pack close:** `INVENTORY.md` gains `✅ Update note` under Data, and the 🚧 container line is updated. The exe gets a hand check on install (container :230).
+- **At pack close:** `INVENTORY.md` gains `✅ Update note` under Data, and the 🚧 container line is updated. The exe gets a hand check on install (container Gates).
 
 ## Ledger
