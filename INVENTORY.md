@@ -80,3 +80,5 @@ this list that you did not ask for.
 - 💭 **No warnings on the printed sheet** — they are for before printing. Drop "Check before posting" and "Positions not available", keep Free cars, and list a car as not available only when its label is ticked to show on the printout.
 - 💭 **Plan for tomorrow by default** — the date moves to tomorrow when the app opens, and the day plan warns when the date on it is not tomorrow.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
+- 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
+- 💭 **Dark mode.**
