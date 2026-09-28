@@ -36,7 +36,7 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 | 5 | Day plan layout | created when it starts | None; a Load that includes a template takes the existing backup |
 | 6 | Parking map | created when it starts | None, if spots match positions by name |
 | 7 | Drivers tab | created when it starts | None: uses existing fields and crews |
-| 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` (drafting) | None |
+| 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` | None |
 | 9 | First-use tour | `manifests/2026-09-28-tour.md` | New per-PC key |
 
 **One pack at a time.** Every pack writes `docs/app.js`, and packs 1, 4 and 9
@@ -214,7 +214,7 @@ Decided by the owner in the review threads:
 - Each entry reuses an existing action, and destructive entries keep their two-click confirm and backup.
 - Right-clicking inside text boxes keeps the browser's own copy/paste menu.
 
-Full plan: `manifests/2026-09-28-context-menus.md` (being drafted by a planning run).
+Full plan: `manifests/2026-09-28-context-menus.md` (14 items, 1 owner question).
 </details>
 
 <details>
@@ -232,6 +232,63 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
 
 - **The top bar overflows at the Windows app's smallest window.** The page scrolls sideways 30px at 900 wide, and tab names wrap below about 1145. Pack 9's item 5 fixes this if the Tour button goes in the top bar; pack 3 fixes it if its theme switch does. Otherwise it needs an item of its own.
 - **Choose save file… writes the on-screen plan over whichever file is picked** (`docs/store.js:338-339`). The browser's own "replace?" prompt is the only guard. Pack 9's step 8 steers users to Open an existing file… instead, but the code stays as it is.
+
+- **Found while planning pack 8** (each worth an item of its own; details in that manifest's Out of scope):
+  - Dragging a name onto a route probably fails in the Windows app. `dragDropEnabled` is left at its default in `src-tauri/tauri.conf.json`, and Tauri says it must be off for HTML drag and drop on Windows. Unverified on Windows; the fix is one line.
+  - Restore picks its backup by list position (`docs/app.js:1390`). A backup taken between the two clicks would restore the neighbouring entry.
+  - Deleting a label clears it from cars and positions but not from drivers, so the next load shows a repair notice.
+  - "Use for today" on an empty day group sends everyone away.
+  - Saving a template under an existing name overwrites the first match, and imported templates can share a name.
+
+## Questions for you
+
+Answer whenever suits; each pack only needs its own answers when it starts. The ⭐ answers are my recommendations.
+
+**Now**
+- [ ] Go for the Reconnect fix, ahead of everything?
+- [ ] Approve the pack order above?
+
+**Pack 1: Update note**
+- [ ] If the newest backup already holds exactly your plan, should the note name it as it is ⭐, or relabel it "Updating to …"?
+- [ ] After ✕, where can notes be read again: a What's new card on the Data tab above Backups ⭐, or a button in the top bar?
+- [ ] On a Windows PC, in the exe: does Data → Choose save file… open a picker, and does the file get written after a change? (A hand check only you can do.)
+
+**Pack 2: Printed sheet cleanup**
+- [ ] Should existing labels start with Show on printout ticked ⭐ (nobody's sheet changes until they untick) or unticked?
+- [ ] Also drop the "!" marks and dotted underlines on the printed sheet? (My proposal; the screen keeps its warnings.)
+- [ ] Should the tick travel in "Copy everything" share codes, or stay on this PC?
+
+**Pack 3: Dark mode**
+- [ ] Follow the computer's light/dark setting, a switch in the app, or both ⭐?
+
+**Pack 4: Plan for tomorrow**
+- [ ] A plan dated today: only warn, with Set to tomorrow ⭐, or move it too?
+- [ ] Does the warehouse plan Sundays?
+- [ ] Should template offers and the lit week button follow the plan's date ⭐?
+- [ ] Keep the Mon–Sun button row in the Drivers panel?
+
+**Pack 5: Day plan layout**
+- [ ] Should Load only set who is in, or also load that day's template (asking first)?
+- [ ] Where should the week columns go? (My proposal: under the route list, after templates.)
+- [ ] Should drivers who are away today show greyed in their column?
+
+**Pack 6: Parking map**
+- [ ] Is the gate one port or two?
+- [ ] What do the hatched areas mean: building or dock nobody parks in, and do spots 1–3 differ?
+- [ ] Each spot listing its routes by round: is that what you want?
+- [ ] Nothing for the garage, or a one-line count under the map?
+
+**Pack 7: Drivers tab**
+- [ ] Should a tag like "Sick" also set the driver to Away?
+- [ ] Keep the crew cards under the table?
+- [ ] Should driver tags and notes travel in "Copy everything" share codes, or stay on this PC?
+
+**Pack 8: Right-click menus**
+- [ ] When a route isn't running tomorrow, do you blank its row ⭐ (the menu gets "Clear driver, car, position and round") or delete it?
+
+**Pack 9: First-use tour**
+- [ ] Where does the Tour button go: top bar ⭐ (the tabs move to their own row below about 1245px wide), the Day plan, or the Data tab?
+- [ ] Should newer parts (templates, week, map, menus) get steps of their own, or a sentence in the nearest step ⭐?
 
 ## Not in this container
 
@@ -271,5 +328,5 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
   - The exact QR removal list.
 
   Rejected one finding: "most i would guess would be obvious" is the owner's own chat message. It is now quoted verbatim.
-- Packs 1 and 9 planned in detail (d582585). Both follow this container's rules; pack 1 refines them, as noted under the rules. Pack 9's planning found the Reconnect data-loss path, now the first item. Pack 8's plan is still being drafted.
+- Packs 1 and 9 planned in detail (d582585). Both follow this container's rules; pack 1 refines them, as noted under the rules. Pack 9's planning found the Reconnect data-loss path, now the first item. Pack 8 planned too (14 items); it found five more pre-existing issues, listed above. All open questions collected under Questions for you.
 </details>
