@@ -119,7 +119,8 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 <summary><b>1. Update note</b> — tell users what changed, and that their data is safe</summary>
 
 - A note shown once, the next time the app is opened after an update. It says what changed, what that affects, and what happened to the data. It can be dismissed and opened again later.
-- A backup named for the update is taken the first time a new version opens, before `dailySnapshot`, so the note can point at a real copy on the Data tab. Where the cap of 12 rotates an older backup out, the note says so honestly.
+- A backup named for the update is taken the first time a new version opens, before `dailySnapshot`, so the note can point at a real copy on the Data tab.
+- **Fail-safe (items 12–15, added 2026-09-28 at the owner's ask):** a byte-for-byte archive of the saved text from before each update, kept outside the rolling Backups (last three versions); Restore and Download for each on the Data tab; a stand-alone `recover.html` that works even if the app won't start; and versioned script tags so a browser never mixes old and new files after a deploy. Where the cap of 12 rotates an older backup out, the note says so honestly.
 - The note mentions keeping a save file on your own PC (Data tab → Choose save file). Every change is also written to that file: routes, templates, fleet, roster and labels. This PC's own choices, like the theme, are not in it. It's the copy to recover from on a new or cleared PC, not a sync between PCs. Before the note says this, the pack checks whether the file picker works in the Windows app and not only in Edge and Chrome.
 - Owns the version constant and the `check.sh` version line described under the release rules above.
 
@@ -246,6 +247,8 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items).
 ## Found while planning, not yet scheduled
 
 - **The top bar overflows at the Windows app's smallest window.** The page scrolls sideways 30px at 900 wide, and tab names wrap below about 1145. Pack 9's item 5 fixes this if the Tour button goes in the top bar; pack 3 fixes it if its theme switch does. Otherwise it needs an item of its own.
+- **A push to `main` without a version bump replaces the current release's downloads** (`overwrite_files: true` in the build workflow). It has already happened once to v0.2.4. Pack 1's version guard makes a bump part of every merge; the workflow could also refuse to overwrite an existing tag.
+- **Typing during a slow start-up is dropped.** While the file is read at start-up, the plan on screen is a placeholder, and keystrokes typed into it are lost. Saved data isn't affected. This predates 0.2.5.
 - **Another PC writing the same save file isn't noticed.** Two managers linking one OneDrive file will overwrite each other's changes, as they always have. The new check reads the file only after a loss, not before every write. Noting what this browser last wrote to the file, and checking that before each write, would close the gap.
 - **Choose save file… writes the on-screen plan over whichever file is picked** (`docs/store.js:338-339`). The browser's own "replace?" prompt is the only guard. Pack 9's step 8 steers users to Open an existing file… instead, but the code stays as it is.
 
@@ -309,4 +312,24 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   - **Proof the tests catch it:** the new cases were run against 784e251 in a scratch worktree, and 13 fail there. All pass on 7dc3cb2.
   - Behaviour change, deliberate: a plan recovered from the file and then edited now reconnects without asking, because it descends from the file.
   - Item gate: `scripts/check.sh` OK. The car suite (`CHROMIUM_PATH=/usr/bin/google-chrome node scripts/smoke.mjs`) passes: "all checks passed".
+- 2026-09-28: **Upgrade check, v0.2.4 → 0.2.5, web first.** A workflow of three checks (a real browser upgrade, the exe's data location, and a code audit, each finding put to a refuter) ran against 63d534a. The scenarios:
+  - a full setup;
+  - an unreadable save;
+  - a first run;
+  - restoring an old backup;
+  - export and import;
+  - share codes both ways;
+  - a linked save file;
+  - mixed cached files.
+
+  No saved data was lost, changed or hidden. The confirmed gaps are all fixed in 7d1893b, with smoke cases:
+  - a write during a slow file read;
+  - an empty plan when cached files mix;
+  - a start-up hold that was silent;
+  - tab clicks overwriting an unreadable save;
+  - Choose save file replacing the old file unread.
+
+  The browser upgrade was then re-run against the final build, 7d1893b. Every saved key was byte-identical on open, including templates, drivers, crews, cars, positions, labels, backups and Breadify's settings. The mixed-cache case now draws the plan with no errors, and there were no console errors.
+  - Windows exe: the identifier and the way the app loads its pages are unchanged, so its data stays. The one trap is the old uninstaller's unticked "Delete the application data" box; the README now warns about it. Nothing was run on Windows.
+  - Full suite: `npm test` passed, "all checks passed" for the car app and "all passed" for Breadify.
 </details>

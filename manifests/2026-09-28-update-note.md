@@ -344,6 +344,16 @@ This is illustrative: pack 8's menu contents are not settled yet. It assumes a r
   - Check that the container's **Opening the app** and **Releasing a pack** rules still match what this pack built, including the owner's answer to question 1. Update them if not.
       *Done when:* README, the container's Gates and the updates.js header state the same rule word for word, and the container's two rule sections describe what shipped.
 
+- [ ] **12. ⚠️ Version archive: an untouched copy from before every update.** The first time a new version opens, the saved plan's text is copied byte for byte to `carcoord:archive:⟨previous version⟩`, before anything else at start-up. That's the exact text the old version wrote: plan, templates, drivers, crews, cars, positions, labels, everything. It sits outside the rolling 12 Backups, so everyday backups can't push it out. The last three versions are kept. An unreadable saved plan is archived too, as raw text, since it can't be restored as a backup. Added 2026-09-28 at the owner's ask for a fail-safe: "it is important that the setups do not get lost".
+      *Done when:* the upgrade check shows the archive byte-identical to the old build's `carcoord:v1`. Twelve later backups leave it in place. A fourth update drops only the oldest archive. A full storage keeps the archive and skips a backup instead, and says so.
+      **Risky — review individually.** It runs on every returning leader's first open of a version.
+- [ ] **13. Archives on the Data tab.** A card lists each archive with the version and date. **Restore** asks first and takes a backup, like Restore today. **Download** saves it as a `.json` file that Import reads, even from an unreadable archive, so the text can be kept outside the browser.
+      *Done when:* smoke restores an archive written by the upgrade check and gets the old plan back, and a downloaded archive imports to the same plan.
+- [ ] **14. Emergency page: `docs/recover.html`.** A tiny page of its own, sharing no code with the app, that shows every `carcoord:` key this browser holds and offers each as a download. It is linked from the unreadable-save warning and from the README. It still works if a new version of the app ever fails to start.
+      *Done when:* with `app.js` made to throw at load, `recover.html` still lists and downloads the plan, the backups and the archives.
+- [ ] **15. Script tags carry the version.** `index.html` loads its scripts and stylesheet as `…?v=⟨APP_VERSION⟩`, and `versions.mjs` checks it. Then a browser can't pair a new `app.js` with a cached older `store.js` for the minutes after a deploy. 0.2.5 guards the one call that broke. This stops the whole class.
+      *Done when:* `versions.mjs` fails when an index.html tag's version disagrees, and the upgrade check's mixed-cache case can no longer happen with the new tags.
+
 ## Owner questions
 
 **Answered 2026-09-28:** 1, name the identical backup as it is; 2, a What's new card on the Data tab above Backups; 3, not checked yet, so the save-file sentence stays hidden in the exe until the owner confirms.
