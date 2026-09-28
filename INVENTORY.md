@@ -6,7 +6,7 @@ What this repo's two apps are, at feature altitude. Implementation lives in
 State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## In flight
-- 🚧 **The review round** — everything raised on 2026-09-28 plus an update note, right-click menus and a first-use tour, as nine packs. Pack order awaiting approval: `manifests/2026-09-28-review-round.md`. Its entries stay under Considered until each pack starts.
+- 🚧 **The review round** — everything raised on 2026-09-28, in review comments and in chat, as nine packs. Pack order awaiting approval: `manifests/2026-09-28-review-round.md`. Its entries stay under Considered until each pack starts.
 
 ## Day plan
 - ✅ **Route rows** — route name, driver, car, packing **position** and **round** as separate fields, with reorder and two-click delete.
@@ -85,7 +85,10 @@ this list that you did not ask for.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
 - 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
 - 💭 **Dark mode.**
-- 💭 **The week under the route list** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
+- 💭 **The week on the day plan** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
 - 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
+- 💭 **An update note** on the next open after an update — what changed, what it affects, that your data is safe, and the option of a save file on your own PC.
+- 💭 **Right-click menus** across the page.
+- 💭 **A first-use tour** for a new user.
