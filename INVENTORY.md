@@ -76,4 +76,4 @@ stays where it is and stays the source of truth for the printed page.
 Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
-*(empty)*
+- 💭 **Drop the QR code from the printed sheet**, and the Data tab switch that turns it off.
