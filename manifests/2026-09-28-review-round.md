@@ -12,11 +12,24 @@ menus and a first-use tour. Each pack ships on its own. Each one is announced
 in the update note the next time the app is opened. None loses a user's saved
 data.
 
+## First: a data-loss fix (one item, before pack 1)
+
+Found while planning pack 9, and checked against the code:
+1. This browser opens with no usable plan (a cleared or unreadable save) while a save file is still linked.
+2. After a restart the file's permission is "prompt", so the app can't read the file back (`docs/store.js:426`) and opens on empty defaults.
+3. The Data tab says "Saving is paused, Reconnect".
+4. **Reconnect** then writes the empty on-screen plan over the good file (`docs/store.js:359-361`).
+
+Someone missing their data is exactly the person likely to press Reconnect, hoping to get it back.
+
+- [ ] **⚠️ Reconnect reads before it writes.** When this browser has no usable plan of its own, Reconnect loads the plan from the file instead of writing over it. When it does have one, it keeps today's behaviour. **Risky — review individually.**
+  *Done when:* a smoke case shows two things. With a linked file holding the dev fixture, an emptied local plan and permission "prompt", pressing Reconnect brings the fixture back and leaves the file byte-identical. With usable local data, Reconnect still writes it to the file as today.
+
 ## Packs, in order
 
 | # | Pack | Manifest | Saved data |
 |---|---|---|---|
-| 1 | Update note | `manifests/2026-09-28-update-note.md` (drafting) | New per-PC key; a named backup before each update |
+| 1 | Update note | `manifests/2026-09-28-update-note.md` | New per-PC key; a named backup before each update |
 | 2 | Printed sheet cleanup | created when it starts | **Schema v5**: a print tick on each label |
 | 3 | Dark mode | created when it starts | New per-PC key |
 | 4 | Plan for tomorrow | created when it starts | The date moves forward on open (not saved until you change something) |
@@ -24,7 +37,7 @@ data.
 | 6 | Parking map | created when it starts | None, if spots match positions by name |
 | 7 | Drivers tab | created when it starts | None: uses existing fields and crews |
 | 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` (drafting) | None |
-| 9 | First-use tour | `manifests/2026-09-28-tour.md` (drafting) | New per-PC key |
+| 9 | First-use tour | `manifests/2026-09-28-tour.md` | New per-PC key |
 
 **One pack at a time.** Every pack writes `docs/app.js`, and packs 1, 4 and 9
 all add to `start()`. The only safe parallel work: pack 6's map logic can be
@@ -47,6 +60,13 @@ built as a separate module (`docs/map.js`, with its own smoke case) while pack
 - **Tour last:** it describes the finished app.
 
 ## Rules every pack follows
+
+Pack 1's manifest works these rules out in detail and refines several of them:
+- per-browser keys go through `Store.pref` as `carcoord:pref:⟨name⟩`;
+- a load that couldn't be read, or came from a newer version, is held back: no note and no tour until the next clean open;
+- the note shows the newest three entries and counts the rest.
+
+Its item 11 rewrites the lines below to match. Until then, **where the two differ, pack 1's manifest wins.** One point is still the owner's to decide (pack 1, question 1): whether an identical newest backup is named as it is, or relabelled.
 
 <details>
 <summary><b>Releasing a pack</b> — version, note entry, upgrade check</summary>
@@ -86,7 +106,7 @@ built as a separate module (`docs/map.js`, with its own smoke case) while pack
 - The note mentions keeping a save file on your own PC (Data tab → Choose save file). Every change is also written to that file: routes, templates, fleet, roster and labels. This PC's own choices, like the theme, are not in it. It's the copy to recover from on a new or cleared PC, not a sync between PCs. Before the note says this, the pack checks whether the file picker works in the Windows app and not only in Edge and Chrome.
 - Owns the version constant and the `check.sh` version line described under the release rules above.
 
-Full plan: `manifests/2026-09-28-update-note.md` (being drafted by a planning run).
+Full plan: `manifests/2026-09-28-update-note.md` (11 items, 3 owner questions).
 </details>
 
 <details>
@@ -205,8 +225,13 @@ Full plan: `manifests/2026-09-28-context-menus.md` (being drafted by a planning 
 - Its "where your data lives" step shows the save-file option.
 - A smoke test checks that every step's target still exists, so later changes to the app can't silently break the tour.
 
-Full plan: `manifests/2026-09-28-tour.md` (being drafted by a planning run).
+Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
 </details>
+
+## Found while planning, not yet scheduled
+
+- **The top bar overflows at the Windows app's smallest window.** The page scrolls sideways 30px at 900 wide, and tab names wrap below about 1145. Pack 9's item 5 fixes this if the Tour button goes in the top bar; pack 3 fixes it if its theme switch does. Otherwise it needs an item of its own.
+- **Choose save file… writes the on-screen plan over whichever file is picked** (`docs/store.js:338-339`). The browser's own "replace?" prompt is the only guard. Pack 9's step 8 steers users to Open an existing file… instead, but the code stays as it is.
 
 ## Not in this container
 
@@ -246,5 +271,5 @@ Full plan: `manifests/2026-09-28-tour.md` (being drafted by a planning run).
   - The exact QR removal list.
 
   Rejected one finding: "most i would guess would be obvious" is the owner's own chat message. It is now quoted verbatim.
-- Packs 1, 8 and 9 are being planned in detail by two planning runs. Their manifests land next to this one and are reconciled with the rules above.
+- Packs 1 and 9 planned in detail (d582585). Both follow this container's rules; pack 1 refines them, as noted under the rules. Pack 9's planning found the Reconnect data-loss path, now the first item. Pack 8's plan is still being drafted.
 </details>
