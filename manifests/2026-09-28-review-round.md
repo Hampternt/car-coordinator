@@ -22,12 +22,28 @@ Found while planning pack 9, and checked against the code:
 
 Someone missing their data is exactly the person likely to press Reconnect, hoping to get it back.
 
-- [ ] **⚠️ Reconnect asks before it overwrites.** *(Go given 2026-09-28.)* When this session did not start from a usable plan of its own (a cleared or unreadable save, or a plan recovered from the file) and the file holds something different from the screen, Reconnect first shows both and asks: **Load the file** or **Write this screen to the file**. A backup is taken of whichever is about to be replaced. When the session started from a usable plan, Reconnect keeps today's behaviour. This follows the app's preview-before-replace rule. Loading the file blindly isn't safe either: `hasUsableLocalData()` is set only at load (`docs/store.js:179`), so a session recovered from the file and then edited would lose its edits. **Risky — review individually.**
-  *Done when:* smoke cases show all of these:
-  - With a linked file holding the dev fixture, an emptied local plan and permission "prompt", Reconnect asks. **Load the file** brings the fixture back and leaves the file byte-identical.
-  - A plan recovered from the file, then edited, then reconnected after a write fails, asks. **Write this screen** keeps the edits and puts the file's old contents in Backups.
-  - Typing into a fresh plan after the "unreadable save" warning, then reconnecting, asks the same way.
-  - With usable local data from the start, Reconnect writes to the file with no question, as today.
+- [x] **⚠️ The save file is never written over unread.** *(Go given 2026-09-28; 784e251, reworked in 7dc3cb2 on `reconnect-asks`.)*
+  - **Marker:** every load that finds no usable plan of this browser's own sets `carcoord:pref:fileNeedsCheck`. It survives reloads and is cleared only once the file and the screen are reconciled.
+  - **Reading first:** while the marker is set, the file is read before anything is written to it. An empty file, or one holding the same plan, is fine.
+  - **Holds:** a different plan raises the question **Load the file** / **Write this screen to the file**. A file that can't be read, or isn't a plan, is held, offering **Try again**, **Write this screen over it** (two clicks) and **Stop using this file**.
+  - **Backups:** whatever is replaced goes into Backups first, or nothing happens.
+  - **Unchanged:** a browser that started from its own plan reconnects as before.
+
+  **Risky: reviewed individually.** An independent review found the first version insufficient; see the Ledger.
+  *Done when:* smoke (`scripts/smoke.mjs`, "the save file is never written over unread") covers all of these:
+  - an empty browser;
+  - typing after an unreadable save, **then a reload**;
+  - an unreadable file, and Try again;
+  - a truncated file and the two-click overwrite;
+  - Backups full;
+  - the same plan under other ids;
+  - a write queued just before Reconnect;
+  - start-up recovery, both good and not a plan;
+  - a plan recovered then edited, which writes without asking because it descends from the file;
+  - an unchecked file that is already writable at start-up;
+  - the unchanged normal path.
+
+  All of these pass. Run against 784e251, 13 of them fail.
 
 ## Packs, in order
 
@@ -228,6 +244,7 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items).
 ## Found while planning, not yet scheduled
 
 - **The top bar overflows at the Windows app's smallest window.** The page scrolls sideways 30px at 900 wide, and tab names wrap below about 1145. Pack 9's item 5 fixes this if the Tour button goes in the top bar; pack 3 fixes it if its theme switch does. Otherwise it needs an item of its own.
+- **Another PC writing the same save file isn't noticed.** Two managers linking one OneDrive file will overwrite each other's changes, as they always have. The new check reads the file only after a loss, not before every write. Noting what this browser last wrote to the file, and checking that before each write, would close the gap.
 - **Choose save file… writes the on-screen plan over whichever file is picked** (`docs/store.js:338-339`). The browser's own "replace?" prompt is the only guard. Pack 9's step 8 steers users to Open an existing file… instead, but the code stays as it is.
 
 - **Found while planning pack 8** (each worth an item of its own; details in that manifest's Out of scope):
@@ -281,4 +298,13 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   Rejected one finding: "most i would guess would be obvious" is the owner's own chat message. It is now quoted verbatim.
 - Packs 1 and 9 planned in detail (d582585). Both follow this container's rules; pack 1 refines them, as noted under the rules. Pack 9's planning found the Reconnect data-loss path, now the first item. Pack 8 planned too (14 items); it found five more pre-existing issues, listed above. All open questions collected under Questions for you.
 - 2026-09-28: the owner approved the pack order and answered every question; the answers are in each pack under **Decided**. The one that changes shipped behaviour most: labels start unticked, so "Cars not available" empties on update until labels are ticked, and pack 2's note must say so. Go given for the Reconnect fix.
+- 2026-09-28: Reconnect fix, first version 784e251. The walkthrough and 12 smoke checks were green, and I reported it as working. **That was wrong.**
+  - An independent review (three lenses, each finding put to a refuter) confirmed two blockers and three majors, with repros.
+  - **Blockers:** the guard keyed on `localUsable`, which is decided afresh on every load, so typing after an unreadable save and then reloading got past it.
+  - **Majors:** an unreadable file, or one that isn't a plan, was treated as empty and written over. A failed backup didn't stop the choice. Start-up recovery had the same hole.
+  - **Minors:** a queued write could race the read; the newer-version handling and the success note were wrong.
+  - Reworked in 7dc3cb2 with a persistent marker, a single hold on writes and a three-way read. The smoke cases were rewritten one per finding.
+  - **Proof the tests catch it:** the new cases were run against 784e251 in a scratch worktree, and 13 fail there. All pass on 7dc3cb2.
+  - Behaviour change, deliberate: a plan recovered from the file and then edited now reconnects without asking, because it descends from the file.
+  - Item gate: `scripts/check.sh` OK. The car suite (`CHROMIUM_PATH=/usr/bin/google-chrome node scripts/smoke.mjs`) passes: "all checks passed".
 </details>
