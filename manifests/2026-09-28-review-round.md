@@ -59,6 +59,8 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 | 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` | None |
 | 9 | First-use tour | `manifests/2026-09-28-tour.md` | New per-PC key |
 
+**The web version comes first.** The owner primarily uses the GitHub Pages version (2026-09-28), as HANDOFF.md's first decision says. Every pack's upgrade check and walkthrough centre on the browser. Checks of the Windows app are best-effort, and nothing is held back for them.
+
 **One pack at a time.** Every pack writes `docs/app.js`, and packs 1, 4 and 9
 all add to `start()`. The only safe parallel work: pack 6's map logic can be
 built as a separate module (`docs/map.js`, with its own smoke case) while pack
