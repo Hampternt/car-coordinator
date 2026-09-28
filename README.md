@@ -44,6 +44,7 @@ Every push to `main` runs the tests and then builds and publishes the release. B
 npm run dev        # serves docs/ on http://localhost:5173 — no npm install needed
 npm run tauri:dev  # the Windows desktop shell instead; needs the Rust toolchain
 ```
+A fresh checkout starts empty. For a full plan to work against, open the Data tab, press Import and pick `scripts/fixtures/dev-data.json`: 20 drivers, 17 cars, 8 positions, 5 crews and 2 templates, with one of each warning (a car on two routes, a spot twice in a round, a Workshop car in use) and some of each status. The names and registrations are made up.
 
 ## Tests
 ```
