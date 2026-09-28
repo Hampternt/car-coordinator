@@ -58,7 +58,7 @@ Reuse, don't rebuild:
 - the Data tab's card pattern for What's new
 
 Dependency edges:
-- **Before this pack:** `dev-test-data` is merged into `main`.
+- **Before this pack:** nothing. `dev` already holds the dev fixture and the 0.2.5 save-file fix this pack builds on (`Store.snapshot` returning true or false, the `carcoord:pref:` marker).
 - **Owner, on a Windows PC:** confirm that Data → **Choose save file…** works in the exe (question 3). Until then, the note's save-file sentence is hidden in the exe.
 - **Pack 2 (sheet cleanup, schema v5):** the update backup is the raw saved v4 text, so restoring it goes through `migrate` (store.js:238) like any old import. Pack 2's entry must say what an older copy of the app does with v5 data.
 - **Pack 3 (dark mode):**
@@ -244,7 +244,7 @@ This rule is written identically in the updates.js header, README.md:40 and the 
 - Numbering follows the release-cadence decision above.
 - `versions.mjs` enforces the numbering and fails the item gate.
 - The pack's browser walkthrough re-reads its entry against what shipped.
-- The merge to `main` publishes Pages and builds release `v⟨version⟩` (build.yml:54-60), instead of rebuilding the current release in place.
+- The `dev` → `main` merge publishes Pages and builds release `v⟨version⟩` (build.yml:54-60), instead of rebuilding the current release in place.
 
 ### I. Sample: pack 8's entry as the team leader would see it
 
