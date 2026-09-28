@@ -85,3 +85,4 @@ this list that you did not ask for.
 - 💭 **The week under the route list** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
 - 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
+- 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
