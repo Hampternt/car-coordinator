@@ -49,7 +49,7 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 
 | # | Pack | Manifest | Saved data |
 |---|---|---|---|
-| 1 | Update note | `manifests/2026-09-28-update-note.md` | New per-PC key; a named backup before each update |
+| 1 | Update note and fail-safe | `manifests/2026-09-28-update-note.md` | New per-browser keys; an untouched archive of the saved text before each update |
 | 2 | Printed sheet cleanup | created when it starts | **Schema v5**: a print tick on each label |
 | 3 | Dark mode | created when it starts | New per-PC key |
 | 4 | Plan for tomorrow | created when it starts | The date moves forward on open (not saved until you change something) |
@@ -83,7 +83,7 @@ built as a separate module (`docs/map.js`, with its own smoke case) while pack
 
 ## Rules every pack follows
 
-Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still open; if relabelling wins, startup step 2 changes to match.
+Reconciled with pack 1's reworked manifest on 2026-09-28. The pre-update copy is an **archive** outside the rolling Backups, so the old question about naming or relabelling a backup no longer arises.
 
 <details>
 <summary><b>Releasing a pack</b> — version, note entry, upgrade check</summary>
@@ -93,7 +93,7 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 - **Upgrade check in the pack gate.** Required for packs 1, 2 and 4, and cheap for the rest. A profile saved by the previous `dev` build is opened in the pack's build. **Before every `dev` → `main` merge, it runs again from the build live on `main`**, because that's the one users are upgrading from. All of the following must hold:
   - The state is identical apart from the changes the pack names.
   - Every backup is still there, and the profile is seeded under the cap of 12.
-  - The update backup exists, or the note names the identical newest backup that already holds the same plan.
+  - An archive holds the old build's `carcoord:v1` byte for byte.
   - The note shows the newest three entries it hasn't shown in this browser and counts the rest; What's new on the Data tab lists them all.
 
   This matters because Pages goes live the moment `dev` reaches `main`, and users skip every version in between.
@@ -103,12 +103,15 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 <summary><b>Opening the app</b> — one startup order, one meaning of "first open"</summary>
 
 - **Startup order**, which packs 1 and 4 both follow:
-  1. Load, then recover from the save file.
-  2. Write the per-browser marker, then take the update backup of the raw saved text. If the newest backup already holds the same plan (`docs/store.js:214` skips duplicates), the note names that entry instead. It isn't relabelled, pending pack 1's question 1.
-  3. `dailySnapshot`.
-  4. Move the date (pack 4).
-  5. Template and other offers.
-  6. The update note.
+  1. Load. Saved text that can't be read is rescued into an archive at once.
+  2. Archive the saved text, byte for byte, if this is the first open of a new version. This is the first write at boot.
+  3. Recover from the save file, or check it (0.2.5), and say so if a save-file hold is up.
+  4. `dailySnapshot`.
+  5. Move the date (pack 4).
+  6. Template and other offers.
+  7. The update note, last.
+
+  `carcoord:v1` itself is never written at boot.
 - **First-ever open** means no usable saved data: `carcoord:v1` is absent or unusable, and nothing was recovered from the save file. It never means "no note key". Every v0.2.4 user has usable data and no note key, and they must see the note. A save that could not be read, or that came from a newer version, is **held**: no note and no tour until the next clean open. Pack 1 sets one `firstRun` value in `start()`, and the tour (pack 9) reads it. Existing users reach the tour from its entry in the update note.
 - **Per-browser keys** go through pack 1's `Store.pref` / `Store.setPref` as `carcoord:pref:⟨name⟩`: `seenUpdate` (pack 1), `theme` (pack 3), `tour` (pack 9). Every access is wrapped in try/catch. Never go through a `data-kind="meta"` control or a field on `state` (`docs/app.js:1134`). Everything on `state` travels into Export, the save file and backups.
 </details>
@@ -119,14 +122,17 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 <summary><b>1. Update note</b> — tell users what changed, and that their data is safe</summary>
 
 - A note shown once, the next time the app is opened after an update. It says what changed, what that affects, and what happened to the data. It can be dismissed and opened again later.
-- A backup named for the update is taken the first time a new version opens, before `dailySnapshot`, so the note can point at a real copy on the Data tab.
-- **Fail-safe (items 12–15, added 2026-09-28 at the owner's ask):** a byte-for-byte archive of the saved text from before each update, kept outside the rolling Backups (last three versions); Restore and Download for each on the Data tab; a stand-alone `recover.html` that works even if the app won't start; and versioned script tags so a browser never mixes old and new files after a deploy. Where the cap of 12 rotates an older backup out, the note says so honestly.
+- **Fail-safe, at the owner's ask:**
+  - Before anything else at start-up, the saved text is copied byte for byte into an **Archive**, kept outside the rolling Backups. It holds the last three updates, plus a rescue copy of any save that couldn't be read.
+  - The Data tab offers Restore and Download for each archive.
+  - A stand-alone `recover.html` works even if the app won't start.
+  - Versioned script tags stop a browser mixing old and new files after a deploy.
 - The note mentions keeping a save file on your own PC (Data tab → Choose save file). Every change is also written to that file: routes, templates, fleet, roster and labels. This PC's own choices, like the theme, are not in it. It's the copy to recover from on a new or cleared PC, not a sync between PCs. Before the note says this, the pack checks whether the file picker works in the Windows app and not only in Edge and Chrome.
 - Owns the version constant and the `check.sh` version line described under the release rules above.
 
-**Decided:** an identical newest backup is named as it is; past notes live in a What's new card on the Data tab above Backups; the exe's save-file check is still to do, so the note's save-file sentence stays hidden in the Windows app until the owner confirms it.
+**Decided:** past notes live in a What's new card on the Data tab, above Archives and Backups. The exe's save-file check is still to do, so the note's save-file sentence stays hidden in the Windows app until the owner confirms it.
 
-Full plan: `manifests/2026-09-28-update-note.md` (11 items).
+Full plan: `manifests/2026-09-28-update-note.md` (12 items, reworked 2026-09-28 against `dev`).
 </details>
 
 <details>
@@ -279,7 +285,7 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   - Serve both builds on the same fixed port in one persistent browser profile, or carry the storage across. localStorage is per origin, so a random port starts empty.
   - Seed the profile with `scripts/fixtures/dev-data.json` and at most ten backups.
   - Deep-compare the whole state. The only differences allowed are the ones the packs name: the date moved, `qrOnSheet` fixed to `false`, and labels gaining the tick at its default.
-  - Every earlier backup is present, plus the update backup.
+  - Every earlier backup is present, and an archive holds the v0.2.4 text byte for byte.
   - What's new lists all nine entries, and the note shows the newest three and counts the rest.
 
   This check covers the web build only. The exe gets a hand check on install.
