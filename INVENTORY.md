@@ -82,3 +82,4 @@ this list that you did not ask for.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
 - 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
 - 💭 **Dark mode.**
+- 💭 **The week under the route list** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
