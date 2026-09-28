@@ -359,7 +359,7 @@ const Store = (() => {
     return s ? writeFile(s) : Promise.resolve();
   }
 
-  async function linkFile(state) {
+  async function linkFile(state, defaults) {
     if (!fileSupported()) return false;
     try {
       const handle = await window.showSaveFilePicker({
@@ -369,10 +369,13 @@ const Store = (() => {
       file.handle = handle;
       file.name = handle.name;
       file.hold = null;
-      clearCheck();
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
-      await writeFile(state);
+      // The picker also offers files that already exist, and choosing one
+      // replaces it: after a loss, that can be the only good copy. So it is
+      // read first, as Reconnect reads, and a different plan in it raises the
+      // same question. A new or empty file is simply written.
+      if (file.permission === 'granted' && await reconcile(state, defaults, true)) await writeFile(state);
       return true;
     } catch { return false; } // user cancelled the picker
   }
@@ -407,9 +410,13 @@ const Store = (() => {
     clearTimeout(timer);
     timer = null;
     pending = null;
-    file.hold = null;
+    // Held from the start, not cleared: an edit typed while the file is
+    // being read must not reach it before the answer is known (Try again
+    // runs this with the permission already granted).
+    file.hold = { kind: 'checking' };
     const permission = await permissionFor(file.handle, true);
     const write = permission === 'granted' ? await reconcile(state, defaults) : false;
+    if (permission !== 'granted') file.hold = null;
     file.permission = permission;
     if (write) await writeFile(state);
     onChange();
@@ -417,13 +424,16 @@ const Store = (() => {
   }
 
   // Whether the screen may now be written to the file; raises a hold when not.
-  async function reconcile(state, defaults) {
-    if (!needsCheck()) return true;
+  // A 'checking' hold covers the read itself, so nothing is written to the
+  // file while its contents are still unknown.
+  async function reconcile(state, defaults, always = false) {
+    if (!always && !needsCheck()) { file.hold = null; return true; }
+    file.hold = { kind: 'checking' };
     const found = await readFileState(defaults);
-    if (found.empty) { clearCheck(); return true; }
+    if (found.empty) { file.hold = null; clearCheck(); return true; }
     if (found.kind) { file.hold = { kind: found.kind }; return false; }
     const onScreen = migrate(JSON.parse(JSON.stringify(state)), defaults).state;
-    if (samePlan(found.state, onScreen)) { clearCheck(); return false; }
+    if (samePlan(found.state, onScreen)) { file.hold = null; clearCheck(); return false; }
     file.hold = { kind: 'differs', ...found, differ: routesDiffering(found.state, onScreen) };
     return false;
   }
@@ -502,11 +512,11 @@ const Store = (() => {
      is held, not written over: the plan on screen is only the defaults. */
   async function recoverFromFile(defaults) {
     if (!file.handle || file.permission !== 'granted') return null;
+    file.hold = { kind: 'checking' };   // nothing typed meanwhile reaches it
     const found = await readFileState(defaults);
-    if (found.state) { clearCheck(); return found.state; }
-    if (found.kind) file.hold = { kind: found.kind };
-    else clearCheck();
-    return null;
+    file.hold = found.kind ? { kind: found.kind } : null;
+    if (found.state || !found.kind) clearCheck();
+    return found.state || null;
   }
 
   // At start-up, when this browser has a plan again but the marker says the
@@ -530,9 +540,8 @@ const Store = (() => {
       text = await f.text();
     } catch { return { kind: 'unreadable' }; }
     if (!text.trim()) return { empty: true };
-    let raw;
-    try { raw = JSON.parse(text); } catch { return { kind: 'notPlan' }; }
-    const { state } = parseImport(text, defaults);
+    let raw, state;
+    try { raw = JSON.parse(text); ({ state } = parseImport(text, defaults)); } catch { return { kind: 'notPlan' }; }
     return state ? { state, raw, modified: f.lastModified } : { kind: 'notPlan' };
   }
 

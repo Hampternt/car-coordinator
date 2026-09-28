@@ -963,6 +963,7 @@ function fileStatus() {
   // A hold: the file was not written because it may hold the only good copy,
   // or could not be looked at. Nothing reaches it until one of these is used.
   if (f.hold) {
+    if (f.hold.kind === 'checking') return `<p class="status">Checking <b>${esc(f.name)}</b> against the screen\u2026</p>`;
     const stop = '<button class="btn" data-act="unlink-file">Stop using this file</button>';
     if (f.hold.kind === 'differs') {
       const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
@@ -1411,11 +1412,19 @@ async function writeScreenToFile() {
   else note('info', `Wrote this screen to ${Store.file.name}.`);
 }
 
+// A hold raised at start-up would otherwise only show on the Data tab, and
+// saving to the file stays paused until it is answered.
+function noteFileHold() {
+  if (!Store.file.hold || Store.file.hold.kind === 'checking') return;
+  note('warn', `Saving to ${Store.file.name} is paused: it may hold a plan you want to keep, so nothing has been written to it. Nothing is lost. Choose what to keep on the Data tab.`,
+    { act: 'show-data', kind: '', id: '', text: 'Open the Data tab' });
+}
+
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
    the synchronous switch below. */
 async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
-    case 'link-file': await Store.linkFile(state); break;
+    case 'link-file': await Store.linkFile(state, defaults); break;
     case 'reconnect-file': await Store.reconnect(state, defaults); break;
     // The answers to the hold Reconnect puts up. Whatever is given up goes
     // into Backups first, and if that cannot be done nothing happens at all.
@@ -1654,7 +1663,12 @@ document.addEventListener('click', (e) => {
   let refocus = null;
 
   switch (act) {
-    case 'tab': tab = b.dataset.tab; break;
+    // Switching tabs changes nothing that is saved, so it saves nothing. It
+    // used to, which put the empty on-screen plan over a saved plan this
+    // browser could not read, on the very click (the Data tab) the warning
+    // sends you to.
+    case 'tab': tab = b.dataset.tab; render(); return;
+    case 'show-data': tab = 'data'; render(); return;
     case 'print': doPrint(); return;
     case 'up': if (i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]]; break;
     case 'down': if (i >= 0 && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]]; break;
@@ -2345,7 +2359,11 @@ async function start() {
   if (!Store.hasUsableLocalData()) {
     const fromFile = await Store.recoverFromFile(defaults);
     if (fromFile) { state = fromFile; note('info', `Loaded your data from ${Store.file.name}.`); }
-  } else await Store.checkFileAtStart(state, defaults);
+  // Guarded: for a few minutes after a deploy a browser can pair this app.js
+  // with a cached store.js from before, and a missing function here would
+  // stop start() before it ever draws the saved plan.
+  } else if (typeof Store.checkFileAtStart === 'function') await Store.checkFileAtStart(state, defaults);
+  noteFileHold();
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
   // Offers, never applications: these only ever add a notice with a button in

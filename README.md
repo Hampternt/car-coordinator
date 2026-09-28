@@ -37,6 +37,8 @@ Optional Windows app — grab the latest from **Releases**:
 - `car-coordinator.exe` (portable, no install)
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
 
+Updating the Windows app: run the new installer over the old one. If it offers to uninstall the old version first, **never tick "Delete the application data"**: that folder is where the app keeps your plan, templates, drivers, cars and labels. The web version needs nothing: an update keeps everything saved in your browser.
+
 Every push to `main` runs the tests and then builds and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
 
 ## Run it from a checkout

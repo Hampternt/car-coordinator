@@ -2167,7 +2167,73 @@ await settle(fp);
 const atStart = await disk(fp);
 check('an unchecked file writable at start-up is checked before the first save', atStart.hold === 'differs' && atStart.writes === 0);
 
-// 11. A browser that started from a plan of its own keeps it up to date, as before.
+// 11. Try again reads the file with the permission already granted: an edit
+// typed during that read must still not reach the file.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { throwRead: true });
+await reconnect(fp);
+await fp.evaluate(() => { window.__disk.throwRead = false; });
+await fp.evaluate(() => {   // a slow read from here on, like an online-only OneDrive file
+  const h = Store.file.handle, get = h.getFile;
+  h.getFile = async () => { await new Promise((r) => setTimeout(r, 1500)); return get(); };
+});
+await fp.click('[data-act="reconnect-file"]');
+await fp.evaluate(() => { state.routes[0].driver = 'Typed during Try again'; save(); });
+await fp.waitForTimeout(1100);
+check('an edit typed while Try again reads the file does not reach it', (await disk(fp)).writes === 0);
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind === 'differs', null, { timeout: 4000 }).catch(() => {});
+check('and the question still comes', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+
+// 12. The same during start-up recovery, which reads the file too.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted', delay: 1500 });
+await fp.evaluate(() => { window.__recovering = Store.recoverFromFile(defaults); state.routes[0].driver = 'Typed during recovery'; save(); });
+await fp.waitForTimeout(1100);
+check('an edit typed while start-up recovery reads the file does not reach it', (await disk(fp)).writes === 0);
+check('and recovery still brings the plan back', await fp.evaluate(async () => (await window.__recovering).cars.length === 17));
+
+// 13. A hold raised at start-up is said on the day plan, not only on the Data tab.
+await fp.evaluate((text) => {
+  const s = Store.parseImport(text, defaults).state;
+  s.routes[0].driver = 'Saved since the loss';
+  localStorage.setItem('carcoord:v1', JSON.stringify(s));
+  localStorage.setItem('carcoord:pref:fileNeedsCheck', '1');
+}, devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(async () => { tab = 'plan'; await Store.checkFileAtStart(state, defaults); noteFileHold(); render(); });
+const v1BeforeOffer = await fp.evaluate(() => localStorage.getItem('carcoord:v1'));
+check('a hold raised at start-up is named on the day plan', (await fp.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'));
+await fp.click('#notices [data-act="show-data"]');
+check('and its button opens the question without saving anything',
+  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await fp.evaluate(() => localStorage.getItem('carcoord:v1'))) === v1BeforeOffer);
+
+// 14. The unreadable-save warning sends you to Backups on the Data tab; going
+// there must not put the empty screen over the plan it could not read.
+await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await fp.reload({ waitUntil: 'networkidle' });
+await fp.click('[data-act="tab"][data-tab="data"]');
+await fp.click('[data-act="tab"][data-tab="plan"]');
+check('switching tabs after an unreadable save leaves it as it was', (await fp.evaluate(() => localStorage.getItem('carcoord:v1'))) === '{not json at all');
+
+// 15. Choose save file… offers existing files too. Picking the old save file
+// after a loss must not replace it unread; a new, empty file is just written.
+await fresh(fp);
+await linkStandIn(fp, devPlan);
+await fp.evaluate(() => { const h = Store.file.handle; Store.file.handle = null; Store.file.permission = 'none'; window.showSaveFilePicker = async () => h; render(); });
+await onData(fp);
+await fp.click('[data-act="link-file"]');
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 3000 }).catch(() => {});
+check('choosing an existing save file that holds another plan asks first', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+await fresh(fp);
+await linkStandIn(fp, '');
+await fp.evaluate(() => { const h = Store.file.handle; Store.file.handle = null; Store.file.permission = 'none'; window.showSaveFilePicker = async () => h; render(); });
+await onData(fp);
+await fp.click('[data-act="link-file"]');
+await fp.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
+check('a new, empty save file is written straight away', (await disk(fp)).writes === 1 && (await disk(fp)).hold === null);
+
+// 16. A browser that started from a plan of its own keeps it up to date, as before.
 await fp.evaluate((text) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify(Store.parseImport(text, defaults).state)); }, devPlan);
 await fp.reload({ waitUntil: 'networkidle' });
 await linkStandIn(fp, JSON.stringify({ schemaVersion: 4, date: '2026-01-01', cars: [], routes: [] }));
