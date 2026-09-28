@@ -960,20 +960,32 @@ function fileStatus() {
       <button class="btn primary-ish" data-act="link-file">Choose save file\u2026</button>
       <button class="btn" data-act="open-file">Open an existing file\u2026</button>`;
   }
-  // Reconnect found the file holding a different plan from the screen, on a
-  // browser that did not start from a plan of its own. Neither is written
-  // over until the leader has seen both and picked one.
-  if (f.choice) {
-    const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
-    const sum = (s) => {
-      const [y, m, d] = String(s.date || '').split('-');
-      return `${n(s.routes.length, 'route')}, ${n(s.cars.length, 'car')}, ${n(s.drivers.length, 'driver')}, dated ${d}/${m}/${y}`;
-    };
-    return `<p class="status warn-status"><b>${esc(f.name)}</b> holds a different plan from the one on screen. Nothing has been written to it: choose which one to keep.</p>
-      <p class="hint">In the file${f.choice.modified ? ` (last changed ${esc(when(f.choice.modified))})` : ''}: ${esc(sum(f.choice.state))}.<br>On screen: ${esc(sum(state))}.</p>
-      <button class="btn" data-act="file-keep-file">Load the file</button>
-      <button class="btn" data-act="file-keep-screen">Write this screen to the file</button>
-      <p class="hint">Whichever one you replace is put in Backups first, so either choice can be undone there.</p>`;
+  // A hold: the file was not written because it may hold the only good copy,
+  // or could not be looked at. Nothing reaches it until one of these is used.
+  if (f.hold) {
+    const stop = '<button class="btn" data-act="unlink-file">Stop using this file</button>';
+    if (f.hold.kind === 'differs') {
+      const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+      const sum = (s) => {
+        const [y, m, d] = String(s.date || '').split('-');
+        return `${n(s.routes.length, 'route')}, ${n(s.cars.length, 'car')}, ${n(s.drivers.length, 'driver')}, dated ${d}/${m}/${y}`;
+      };
+      return `<p class="status warn-status"><b>${esc(f.name)}</b> holds a different plan from the one on screen. Nothing has been written to it: choose which one to keep.</p>
+        <p class="hint">In the file${f.hold.modified ? ` (last changed ${esc(when(f.hold.modified))})` : ''}: ${esc(sum(f.hold.state))}.<br>On screen: ${esc(sum(state))}.${f.hold.differ ? `<br>${esc(n(f.hold.differ, 'route'))} ${f.hold.differ === 1 ? 'differs' : 'differ'} between the two.` : ''}</p>
+        <button class="btn" data-act="file-keep-file">Load the file</button>
+        <button class="btn" data-act="file-keep-screen">Write this screen to the file</button>
+        ${stop}
+        <p class="hint">Whichever one you replace is put in Backups first, so either choice can be undone there.</p>`;
+    }
+    const why = f.hold.kind === 'notPlan'
+      ? `<b>${esc(f.name)}</b> does not hold a plan this version can read`
+      : `<b>${esc(f.name)}</b> could not be read to check it against the screen`;
+    const over = armed === 'file-overwrite';
+    return `<p class="status warn-status">${why}, so nothing has been written to it.</p>
+      <button class="btn" data-act="reconnect-file">Try again</button>
+      <button class="btn ${over ? 'armed' : ''}" data-act="file-overwrite">${over ? 'Sure? Click again' : 'Write this screen over it'}</button>
+      ${stop}
+      <p class="hint">What is in the file cannot be put in Backups, because it cannot be read. Export a copy of this screen first if you are unsure.</p>`;
   }
   if (f.permission !== 'granted') {
     return `<p class="status warn-status">Saving to <b>${esc(f.name)}</b> is paused \u2014 the browser needs you to allow it again. This happens after a restart.</p>
@@ -1386,32 +1398,47 @@ function openShare(share) {
   renderShareDialog();
 }
 
+// After a hold is answered in the screen's favour: write it now and say what
+// happened, which is only "written" once the write has come back clean.
+async function writeScreenToFile() {
+  save();
+  await Store.flush();
+  if (Store.file.error) note('warn', `Nothing was written to ${Store.file.name}: ${Store.file.error} This screen is still saved in this browser.`);
+  else note('info', `Wrote this screen to ${Store.file.name}.`);
+}
+
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
    the synchronous switch below. */
 async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'link-file': await Store.linkFile(state); break;
     case 'reconnect-file': await Store.reconnect(state, defaults); break;
-    // The two answers to the question Reconnect asks when the file and the
-    // screen disagree. The one given up goes into Backups first either way.
+    // The answers to the hold Reconnect puts up. Whatever is given up goes
+    // into Backups first, and if that cannot be done nothing happens at all.
     case 'file-keep-file': {
-      const c = Store.file.choice;
-      if (!c) break;
-      Store.snapshot(state, 'Before loading the save file');
-      Store.file.choice = null;
-      state = c.state;
+      const h = Store.file.hold;
+      if (!h || h.kind !== 'differs') break;
+      if (!Store.snapshot(state, 'Before loading the save file')) break;   // render() shows why
+      Store.release();
+      state = h.state;
+      Store.saveLocal(state);
       note('info', `Loaded the plan from ${Store.file.name}. What was on screen before is in Backups.`);
-      save();
       break;
     }
     case 'file-keep-screen': {
-      const c = Store.file.choice;
-      if (!c) break;
-      Store.snapshot(c.state, 'The save file, before it was written over');
-      Store.file.choice = null;
-      note('info', `Wrote this screen to ${Store.file.name}. What the file held before is in Backups.`);
-      save();
-      Store.flush();
+      const h = Store.file.hold;
+      if (!h || h.kind !== 'differs') break;
+      if (!Store.snapshot(h.raw, 'The save file, before it was written over')) break;
+      Store.release();
+      await writeScreenToFile();
+      break;
+    }
+    case 'file-overwrite': {
+      const h = Store.file.hold;
+      if (!h || h.kind === 'differs') break;
+      if (!confirmTwice('file-overwrite', fromKeyboard)) return;
+      Store.release();
+      await writeScreenToFile();
       break;
     }
     case 'unlink-file': await Store.unlink(); break;
@@ -2260,7 +2287,7 @@ document.addEventListener('keydown', (e) => {
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag']);
-const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
+const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
    reached with Tab, a question just asked — would otherwise land under it.
@@ -2314,7 +2341,7 @@ async function start() {
   if (!Store.hasUsableLocalData()) {
     const fromFile = await Store.recoverFromFile(defaults);
     if (fromFile) { state = fromFile; note('info', `Loaded your data from ${Store.file.name}.`); }
-  }
+  } else await Store.checkFileAtStart(state, defaults);
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
   // Offers, never applications: these only ever add a notice with a button in

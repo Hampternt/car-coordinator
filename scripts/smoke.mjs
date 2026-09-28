@@ -1984,44 +1984,53 @@ await pickRow.locator('[data-field="carId"]').click();
 await page.click('#tab-plan thead');
 check('and so does a click anywhere else', await picker.isHidden());
 
-// --- Reconnect asks before it writes over a save file ---
-// The save file's handle lives in IndexedDB, which cannot hold a stand-in
-// with methods, so each case puts one straight onto Store.file: the state
-// init() leaves after a restart, a handle whose permission is back to
-// "prompt". What decides the answer is what the page started from, and the
-// reload before each case sets that.
+// --- the save file is never written over unread ---
+// The save file's handle lives in IndexedDB, which cannot hold a stand-in with
+// methods, so each case puts one straight onto Store.file: the state init()
+// leaves after a restart, a handle whose permission is back to "prompt". What
+// decides the answer is what the page started from, and whether the "check the
+// file first" marker survived, which the reloads before each case set up.
 const devPlan = await readFile(new URL('./fixtures/dev-data.json', import.meta.url), 'utf8');
 const pcFile = await browser.newContext();
 const fp = await pcFile.newPage();
 const fpErrors = [];
 fp.on('console', (m) => m.type() === 'error' && fpErrors.push(m.text()));
 fp.on('pageerror', (e) => fpErrors.push(String(e)));
-const linkStandIn = (pg, text) => pg.evaluate((text) => {
-  const disk = window.__disk = { text, writes: 0, lastModified: Date.parse('2026-09-27T15:00:00') };
+const linkStandIn = (pg, text, opts = {}) => pg.evaluate(([text, opts]) => {
+  const disk = window.__disk = { text, writes: 0, throwRead: !!opts.throwRead, lastModified: Date.parse('2026-09-27T15:00:00') };
   if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
-  let perm = 'prompt';
+  let perm = opts.perm || 'prompt';
   Store.file.handle = {
     name: 'car-coordinator.json',
     queryPermission: async () => perm,
     requestPermission: async () => (perm = 'granted'),
-    getFile: async () => new File([disk.text], 'car-coordinator.json', { lastModified: disk.lastModified }),
+    getFile: async () => {
+      if (opts.delay) await new Promise((r) => setTimeout(r, opts.delay));
+      if (disk.throwRead) throw new DOMException('offline placeholder', 'NotReadableError');
+      return new File([disk.text], 'car-coordinator.json', { lastModified: disk.lastModified });
+    },
     createWritable: async () => {
       let out = '';
-      return { write: async (t) => { out += t; }, close: async () => { disk.text = out; disk.writes++; } };
+      return { write: async (t) => { out += t; }, close: async () => { disk.text = out; disk.writes++; }, abort: async () => {} };
     },
   };
   Store.file.name = 'car-coordinator.json';
-  Store.file.permission = 'prompt';
+  Store.file.permission = perm;
+  Store.file.hold = null;
   render();
-}, text);
+}, [text, opts]);
+const onData = (pg) => pg.evaluate(() => { tab = 'data'; render(); });
 const reconnect = async (pg) => {
-  await pg.click('[data-act="tab"][data-tab="data"]');
+  await onData(pg);
   await pg.click('[data-act="reconnect-file"]');
-  await pg.waitForFunction(() => !document.querySelector('[data-act="reconnect-file"]'));
+  await pg.waitForFunction(() => Store.file.permission === 'granted');
 };
-const disk = (pg) => pg.evaluate(() => ({ ...window.__disk, backups: Store.backups() }));
+const disk = (pg) => pg.evaluate(() => ({ ...window.__disk, backups: Store.backups(), hold: Store.file.hold && Store.file.hold.kind,
+  marker: localStorage.getItem('carcoord:pref:fileNeedsCheck') }));
+const settle = (pg) => pg.evaluate(async () => { save(); await Store.flush(); });
+const fresh = async (pg) => { await pg.evaluate(() => localStorage.clear()); await pg.reload({ waitUntil: 'networkidle' }); };
 
-// A browser with nothing of its own: the file is the only copy.
+// 1. A browser with nothing of its own: the file is the only copy.
 await fp.goto(base, { waitUntil: 'networkidle' });
 await linkStandIn(fp, devPlan);
 await reconnect(fp);
@@ -2029,56 +2038,144 @@ check('Reconnect on an empty browser asks instead of writing',
   (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await disk(fp)).writes === 0);
 const ask = await fp.locator('#tab-data .card').first().innerText();
 check('and says what the file and the screen each hold', ask.includes('17 cars') && ask.includes('0 cars'), ask.replace(/\s+/g, ' '));
-await fp.evaluate(() => { state.routes[0].driver = 'Typed while asking'; save(); });
-await fp.waitForTimeout(1100);
+await fp.evaluate(() => { state.routes[0].driver = 'Typed while asking'; });
+await settle(fp);
 check('nothing reaches the file while the question is up', (await disk(fp)).writes === 0);
 await fp.click('[data-act="file-keep-file"]');
-await fp.waitForTimeout(1100);
 const loaded = await disk(fp);
 check('Load the file brings its plan back', await fp.evaluate(() => state.cars.length === 17 && state.routes[0].driver === 'Anders'));
-check('and the file still holds that plan', JSON.parse(loaded.text).cars.length === 17 && JSON.parse(loaded.text).routes[0].driver === 'Anders');
+check('and leaves the file exactly as it was', loaded.text === devPlan && loaded.writes === 0);
 const screenCopy = loaded.backups.find((b) => b.label === 'Before loading the save file');
 check('and what was on screen went into Backups first', screenCopy && JSON.parse(screenCopy.json).routes[0].driver === 'Typed while asking',
   loaded.backups.map((b) => b.label).join(' | '));
+check('and the file counts as checked from then on', loaded.marker === null && loaded.hold === null);
 
-// A plan recovered from the file, then edited: start() leaves it on screen
-// with no plan of this browser's own behind it, as set here.
-await fp.evaluate(() => localStorage.clear());
+// 2. The loss the first version of this fix let through: typing after an
+// unreadable save, then a reload, used to count as a plan of this browser's own.
+await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
 await fp.reload({ waitUntil: 'networkidle' });
-await fp.evaluate((text) => { state = Store.parseImport(text, defaults).state; state.routes[0].driver = 'Edited after recovery'; save(); render(); }, devPlan);
+await fp.evaluate(() => { state.routes[0].driver = 'Typed after the warning'; save(); });
+await fp.reload({ waitUntil: 'networkidle' });
+check('a plan typed after an unreadable save still reads as usable on reload', await fp.evaluate(() => Store.hasUsableLocalData()));
 await linkStandIn(fp, devPlan);
 await reconnect(fp);
-check('a plan recovered from the file and then edited still asks',
-  (await fp.locator('[data-act="file-keep-screen"]').isVisible()) && (await disk(fp)).writes === 0);
+check('but Reconnect still asks, one reload later', (await fp.locator('[data-act="file-keep-screen"]').isVisible()) && (await disk(fp)).writes === 0);
 await fp.click('[data-act="file-keep-screen"]');
-await fp.waitForTimeout(300);
 const written = await disk(fp);
-check('Write this screen keeps the edits, on screen and in the file',
-  JSON.parse(written.text).routes[0].driver === 'Edited after recovery'
-  && await fp.evaluate(() => state.routes[0].driver === 'Edited after recovery'));
+check('Write this screen puts the screen in the file', written.writes === 1 && JSON.parse(written.text).routes[0].driver === 'Typed after the warning');
 const overwritten = written.backups.find((b) => b.label === 'The save file, before it was written over');
 check('and what the file held went into Backups first', overwritten && JSON.parse(overwritten.json).routes[0].driver === 'Anders',
   written.backups.map((b) => b.label).join(' | '));
 
-// Typed into a fresh plan after the "could not be read" warning.
-await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
-await fp.reload({ waitUntil: 'networkidle' });
-await fp.evaluate(() => { state.routes[0].driver = 'Typed after the warning'; save(); });
+// 3. A file that cannot be read is held, not treated as empty.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { throwRead: true });
+await reconnect(fp);
+const unread = await disk(fp);
+check('a file that cannot be read is held, not written over', unread.hold === 'unreadable' && unread.writes === 0,
+  (await fp.locator('#tab-data .card').first().innerText()).replace(/\s+/g, ' '));
+await fp.evaluate(() => { window.__disk.throwRead = false; });
+await fp.click('[data-act="reconnect-file"]');
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind === 'differs', null, { timeout: 3000 }).catch(() => {});
+check('and Try again reads it and asks', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+await fp.click('[data-act="unlink-file"]');
+const unlinked = await disk(fp);
+check('Stop using this file lets it go with nothing written', unlinked.writes === 0 && unlinked.hold === null && unlinked.marker === null
+  && await fp.evaluate(() => Store.file.handle === null));
+
+// 4. Something that is not a plan (a half-synced copy) is held too, and only
+// two deliberate clicks write over it.
+await fresh(fp);
+await linkStandIn(fp, devPlan.slice(0, -200));
+await reconnect(fp);
+check('a file that is not a plan is held', (await disk(fp)).hold === 'notPlan' && (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-overwrite"]');
+check('one click on Write this screen over it writes nothing', (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-overwrite"]');
+check('the second one does', (await disk(fp)).writes === 1 && (await disk(fp)).hold === null);
+
+// 5. No copy in Backups, no overwrite.
+await fresh(fp);
 await linkStandIn(fp, devPlan);
 await reconnect(fp);
-check('after an unreadable save, Reconnect asks too',
-  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await disk(fp)).writes === 0);
+await fp.evaluate(() => {
+  const real = Storage.prototype.setItem;
+  window.__realSetItem = real;
+  Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:backups') throw new DOMException('full', 'QuotaExceededError'); return real.call(this, k, v); };
+});
+await fp.click('[data-act="file-keep-screen"]');
+const full = await disk(fp);
+await fp.evaluate(() => { Storage.prototype.setItem = window.__realSetItem; });
+check('with Backups full, Write this screen writes nothing and keeps asking', full.writes === 0 && full.hold === 'differs');
+check('and says why', (await fp.locator('#notices').innerText()).includes('storage is full'));
 
-// A browser that started from a plan of its own keeps it up to date, as before.
-await fp.evaluate((text) => localStorage.setItem('carcoord:v1', JSON.stringify(Store.parseImport(text, defaults).state)), devPlan);
+// 6. A file that already holds the plan on screen is left alone, even when
+// every id in it is different (another PC, or a fresh start, mints its own).
+await fresh(fp);
+await fp.evaluate((text) => { state = Store.parseImport(text, defaults).state; render(); }, devPlan);
+const renamed = devPlan.replace(/"((?:lbl|pos|car|drv|grp|rt|tpl)-[a-z0-9]+)"/g, '"x-$1"');
+await linkStandIn(fp, renamed);
+await reconnect(fp);
+const alike = await disk(fp);
+check('a file holding the same plan under other ids: no question, no write', alike.hold === null && alike.writes === 0 && alike.marker === null);
+
+// 7. An edit queued just before Reconnect cannot reach the file while it is read.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { delay: 1200 });
+await onData(fp);
+await fp.evaluate(() => { state.routes[0].driver = 'Queued before Reconnect'; save(); });
+await fp.click('[data-act="reconnect-file"]');
+await fp.waitForFunction(() => Store.file.permission === 'granted', null, { timeout: 5000 });
+await fp.waitForTimeout(200);
+const queued = await disk(fp);
+check('a write queued just before Reconnect does not slip in while the file is read', queued.writes === 0 && queued.hold === 'differs');
+
+// 8. Start-up recovery reads the same three ways.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+const rec = await fp.evaluate(async () => { const s = await Store.recoverFromFile(defaults); return { cars: s && s.cars.length, marker: localStorage.getItem('carcoord:pref:fileNeedsCheck') }; });
+check('recovery at start-up reads the plan back and counts the file as checked', rec.cars === 17 && rec.marker === null);
+await fresh(fp);
+await linkStandIn(fp, devPlan.slice(0, -200), { perm: 'granted' });
+check('recovery from a file that is not a plan holds it', await fp.evaluate(async () => (await Store.recoverFromFile(defaults)) === null && Store.file.hold.kind === 'notPlan'));
+await settle(fp);
+check('and the first save does not reach it', (await disk(fp)).writes === 0);
+
+// 9. A plan recovered from the file descends from it: edits made since are
+// written without asking, as they always were.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(async () => { state = await Store.recoverFromFile(defaults); state.routes[0].driver = 'Edited after recovery'; Store.file.permission = 'prompt'; save(); render(); });
+await reconnect(fp);
+await settle(fp);
+const recovered = await disk(fp);
+check('a plan recovered from the file and then edited reconnects without asking',
+  recovered.hold === null && recovered.writes >= 1 && JSON.parse(recovered.text).routes[0].driver === 'Edited after recovery');
+
+// 10. At start-up, a plan of this browser's own but a file never checked
+// against it, with the file already writable: checked before the first save.
+await fp.evaluate((text) => {
+  const s = Store.parseImport(text, defaults).state;
+  s.routes[0].driver = 'Saved since the loss';
+  localStorage.setItem('carcoord:v1', JSON.stringify(s));
+  localStorage.setItem('carcoord:pref:fileNeedsCheck', '1');
+}, devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(() => Store.checkFileAtStart(state, defaults));
+await settle(fp);
+const atStart = await disk(fp);
+check('an unchecked file writable at start-up is checked before the first save', atStart.hold === 'differs' && atStart.writes === 0);
+
+// 11. A browser that started from a plan of its own keeps it up to date, as before.
+await fp.evaluate((text) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify(Store.parseImport(text, defaults).state)); }, devPlan);
 await fp.reload({ waitUntil: 'networkidle' });
 await linkStandIn(fp, JSON.stringify({ schemaVersion: 4, date: '2026-01-01', cars: [], routes: [] }));
 await reconnect(fp);
-await fp.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
 const kept = await disk(fp);
 check('with a plan of its own, Reconnect writes it to the file without asking',
-  kept.writes === 1 && JSON.parse(kept.text).cars.length === 17 && !(await fp.locator('[data-act="file-keep-file"]').count()));
-check('the Reconnect cases log no console errors', fpErrors.length === 0, fpErrors.join(' | '));
+  kept.writes === 1 && JSON.parse(kept.text).cars.length === 17 && kept.hold === null);
+check('the save-file cases log no console errors', fpErrors.length === 0, fpErrors.join(' | '));
 await pcFile.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---

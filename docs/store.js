@@ -207,11 +207,15 @@ const Store = (() => {
     } catch { return []; }
   }
 
+  // Returns whether the plan is now in Backups: true when it was written, and
+  // true when it was skipped because the newest entry already holds exactly
+  // it; false only when storage is full and nothing could be stored. A caller
+  // about to overwrite something checks this before it goes ahead.
   function snapshot(state, label) {
     const list = backups();
     const entry = { t: new Date().toISOString(), label, json: JSON.stringify(state) };
     // Skip a snapshot identical to the newest one (nothing actually changed).
-    if (list[0] && list[0].json === entry.json) return;
+    if (list[0] && list[0].json === entry.json) return true;
     list.unshift(entry);
     while (list.length > MAX_BACKUPS) list.pop();
     // Storage can be full, and dropping the oldest entries is worth nothing
@@ -220,9 +224,10 @@ const Store = (() => {
     // quietly turns that promise into a lie: trim until it fits, and if it
     // never does, leave the backups already stored alone and say so.
     while (list.length) {
-      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch { list.pop(); }
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return true; } catch { list.pop(); }
     }
     notices.push({ kind: 'warn', text: `Could not take a backup before "${label}" \u2014 this browser's storage is full. Export a copy from the Data tab before you go any further.` });
+    return false;
   }
 
   function dailySnapshot(state) {
@@ -277,10 +282,33 @@ const Store = (() => {
   /* ---------- auto-saved file (File System Access API) ---------- */
   const fileSupported = () => typeof window.showSaveFilePicker === 'function';
 
-  // `choice` is set when Reconnect found the file and the screen disagreeing
-  // and must not pick for the leader: { state, modified } of what the file
-  // holds. While it is set nothing is written to the file.
-  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '', choice: null };
+  // `hold` stops every write to the file until the leader has answered for
+  // it: { kind: 'differs', state, raw, modified, differ } when the file holds
+  // a different plan from the screen, { kind: 'unreadable' } when it could not
+  // be read, { kind: 'notPlan' } when it holds something that is not a plan.
+  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '', hold: null };
+
+  /* Whether the file has to be read before anything is written to it. Set on
+     every load that finds no usable plan of this browser's own, because then
+     the file may be the only good copy, and kept in storage rather than for
+     this load only: typing a few names after a loss saves a small plan that
+     the next load would otherwise take for this browser's own. Cleared only
+     when the file and the screen have been brought together: a question
+     answered, a file found empty or holding the same plan, a plan recovered
+     from it, or a file linked, opened or let go. If it cannot be stored it
+     holds in memory, which errs towards asking. Kept under carcoord:pref:,
+     the per-browser keys the update-note pack reads through Store.pref. */
+  const CHECK_KEY = 'carcoord:pref:fileNeedsCheck';
+  let checkThisSession = false;
+  const needsCheck = () => {
+    if (checkThisSession) return true;
+    try { return localStorage.getItem(CHECK_KEY) === '1'; } catch { return true; }
+  };
+  const markCheck = () => { try { localStorage.setItem(CHECK_KEY, '1'); } catch { checkThisSession = true; } };
+  const clearCheck = () => {
+    checkThisSession = false;
+    try { localStorage.removeItem(CHECK_KEY); } catch { /* a read that throws still asks */ }
+  };
   let pending = null;
   let timer = null;
   let onChange = () => {};
@@ -296,9 +324,11 @@ const Store = (() => {
   }
 
   async function writeFile(state) {
-    if (!file.handle || file.permission !== 'granted' || file.choice) return;
+    if (!file.handle || file.permission !== 'granted' || file.hold) return;
     try {
       const w = await file.handle.createWritable();
+      // A hold raised while the file was being opened wins over this write.
+      if (file.hold) { try { await w.abort(); } catch { /* nothing was written */ } return; }
       await w.write(JSON.stringify(state, null, 2));
       await w.close();
       file.lastSaved = new Date();
@@ -319,13 +349,14 @@ const Store = (() => {
     timer = setTimeout(() => { timer = null; const s = pending; pending = null; writeFile(s); }, FILE_DEBOUNCE);
   }
 
+  // Returns the write, so a caller that says "written" can wait for it.
   function flush() {
-    if (!timer) return;
+    if (!timer) return Promise.resolve();
     clearTimeout(timer);
     timer = null;
     const s = pending;
     pending = null;
-    if (s) writeFile(s);
+    return s ? writeFile(s) : Promise.resolve();
   }
 
   async function linkFile(state) {
@@ -337,7 +368,8 @@ const Store = (() => {
       });
       file.handle = handle;
       file.name = handle.name;
-      file.choice = null;
+      file.hold = null;
+      clearCheck();
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
       await writeFile(state);
@@ -354,7 +386,8 @@ const Store = (() => {
       const text = await (await handle.getFile()).text();
       file.handle = handle;
       file.name = handle.name;
-      file.choice = null;
+      file.hold = null;
+      clearCheck();
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
       return text;
@@ -362,26 +395,43 @@ const Store = (() => {
   }
 
   /* Reconnect writes what is on screen to the file, because this browser's
-     own plan is the one being kept up to date. That only holds when this
-     browser started from a plan of its own. After a cleared or unreadable
-     save, or a plan recovered from this very file, the file may be the only
-     good copy: writing first would put an empty plan over it, and the person
-     most likely to press Reconnect is the one whose plan has gone missing.
-     So then the file is read first, and when it holds something different
-     nothing is written until the leader chooses which one to keep.
-     localUsable is set once, at load, which is exactly "started from a plan
-     of its own"; a session recovered from the file keeps asking even after
-     edits, because the file then holds the plan it started from. */
+     own plan is the one being kept up to date. When the check marker is set,
+     the file may be the only good copy, and the person most likely to press
+     Reconnect is the one whose plan has gone missing: so the file is read
+     first, and nothing is written unless it is empty or already holds the
+     plan on screen. Otherwise a hold goes up and the Data tab asks. The
+     permission is only recorded once that is settled, and anything queued
+     from before is dropped (the screen is still in this browser), so no
+     write can slip in while the file is being read. */
   async function reconnect(state, defaults) {
-    file.permission = await permissionFor(file.handle, true);
-    if (file.permission === 'granted') {
-      const found = localUsable ? null : await readFileState(defaults);
-      const onScreen = migrate(JSON.parse(JSON.stringify(state)), defaults).state;
-      if (found && JSON.stringify(found.state) !== JSON.stringify(onScreen)) file.choice = found;
-      else await writeFile(state);
-    }
+    clearTimeout(timer);
+    timer = null;
+    pending = null;
+    file.hold = null;
+    const permission = await permissionFor(file.handle, true);
+    const write = permission === 'granted' ? await reconcile(state, defaults) : false;
+    file.permission = permission;
+    if (write) await writeFile(state);
     onChange();
-    return file.permission === 'granted';
+    return permission === 'granted';
+  }
+
+  // Whether the screen may now be written to the file; raises a hold when not.
+  async function reconcile(state, defaults) {
+    if (!needsCheck()) return true;
+    const found = await readFileState(defaults);
+    if (found.empty) { clearCheck(); return true; }
+    if (found.kind) { file.hold = { kind: found.kind }; return false; }
+    const onScreen = migrate(JSON.parse(JSON.stringify(state)), defaults).state;
+    if (samePlan(found.state, onScreen)) { clearCheck(); return false; }
+    file.hold = { kind: 'differs', ...found, differ: routesDiffering(found.state, onScreen) };
+    return false;
+  }
+
+  // The leader has answered the hold: the file and the screen are one again.
+  function release() {
+    file.hold = null;
+    clearCheck();
   }
 
   async function unlink() {
@@ -390,7 +440,8 @@ const Store = (() => {
     file.permission = fileSupported() ? 'none' : 'unsupported';
     file.lastSaved = null;
     file.error = '';
-    file.choice = null;
+    file.hold = null;
+    clearCheck();
     await clearHandle();
     onChange();
   }
@@ -431,6 +482,7 @@ const Store = (() => {
   async function init(defaults, changed) {
     onChange = changed || (() => {});
     const state = readLocal(defaults);
+    if (!localUsable) markCheck();
     askPersist();
 
     const handle = await getHandle();
@@ -446,24 +498,61 @@ const Store = (() => {
   }
 
   /* Read the linked file when this browser has nothing of its own — a new PC,
-     a cleared profile, a different Windows user. */
+     a cleared profile, a different Windows user. A file that cannot be read
+     is held, not written over: the plan on screen is only the defaults. */
   async function recoverFromFile(defaults) {
     if (!file.handle || file.permission !== 'granted') return null;
     const found = await readFileState(defaults);
-    return found ? found.state : null;
+    if (found.state) { clearCheck(); return found.state; }
+    if (found.kind) file.hold = { kind: found.kind };
+    else clearCheck();
+    return null;
   }
 
-  // What the linked file holds, as a plan, or null when it is empty, gone or
-  // not a plan at all. A file with nothing usable in it is not worth keeping
-  // over the screen, so Reconnect writes over it as it always has.
+  // At start-up, when this browser has a plan again but the marker says the
+  // file was never checked against it, and the file can already be written:
+  // check it now, before the first save reaches it.
+  async function checkFileAtStart(state, defaults) {
+    if (!file.handle || file.permission !== 'granted' || !needsCheck()) return;
+    await reconcile(state, defaults);
+    onChange();
+  }
+
+  /* What the linked file holds. Three answers, because they call for three
+     different things: { empty: true } has nothing to lose; { kind:
+     'unreadable' } or { kind: 'notPlan' } cannot be looked at, so must not
+     be written over unasked; { state, raw, modified } is a plan, and raw
+     keeps whatever a newer version put in it for the backup. */
   async function readFileState(defaults) {
+    let f, text;
     try {
-      const f = await file.handle.getFile();
-      const text = await f.text();
-      if (!text.trim()) return null;
-      const { state } = parseImport(text, defaults);
-      return state ? { state, modified: f.lastModified } : null;
-    } catch { return null; }
+      f = await file.handle.getFile();
+      text = await f.text();
+    } catch { return { kind: 'unreadable' }; }
+    if (!text.trim()) return { empty: true };
+    let raw;
+    try { raw = JSON.parse(text); } catch { return { kind: 'notPlan' }; }
+    const { state } = parseImport(text, defaults);
+    return state ? { state, raw, modified: f.lastModified } : { kind: 'notPlan' };
+  }
+
+  /* Two plans are the same when they read the same. Ids are random per PC and
+     per fresh start, so every id is swapped for the name it stands for and
+     the things' own ids are left out. Generic on purpose: a field a later
+     version adds is compared without anyone having to list it here. */
+  function readable(s) {
+    const names = new Map();
+    for (const [list, key] of [['cars', 'reg'], ['positions', 'name'], ['labels', 'name'], ['drivers', 'name']]) {
+      for (const x of s[list] || []) names.set(x.id, `${list}:${x[key]}`);
+    }
+    return (v) => JSON.stringify(v, (k, x) => (k === 'id' ? undefined : typeof x === 'string' && names.has(x) ? names.get(x) : x));
+  }
+  const samePlan = (a, b) => readable(a)(a) === readable(b)(b);
+  function routesDiffering(a, b) {
+    const ra = readable(a), rb = readable(b);
+    let n = 0;
+    for (let i = 0; i < Math.max(a.routes.length, b.routes.length); i++) if (ra(a.routes[i]) !== rb(b.routes[i])) n++;
+    return n;
   }
 
   // Only usable data should stop us reading the linked save file back.
@@ -473,10 +562,12 @@ const Store = (() => {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, init, recoverFromFile, hasUsableLocalData,
+    SCHEMA, init, recoverFromFile, checkFileAtStart, hasUsableLocalData,
     save(state) { writeLocal(state); queueFileWrite(state); },
+    // This browser only, leaving the file as it is until the next real change.
+    saveLocal(state) { writeLocal(state); },
     flush, snapshot, dailySnapshot, backups, restore,
-    file, persistence, fileSupported, linkFile, openFile, reconnect, unlink,
+    file, persistence, fileSupported, linkFile, openFile, reconnect, release, unlink,
     download, parseImport, takeNotices, migrate,
   };
 })();
