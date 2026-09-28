@@ -2,7 +2,7 @@
 
 **Status:** 💭 planned — item list awaiting the owner's approval; nothing built
 **Date:** 2026-09-28
-**Branch:** to be cut when execution starts: `update-note`, from `main`. First, `dev-test-data` has to be merged into `main` (the container's Branch line). `dev-test-data` holds the dev fixture, the INVENTORY notes and these plans, and it is not merged yet.
+**Branch:** cut when execution starts: `update-note`, from `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
 ## Goal
 

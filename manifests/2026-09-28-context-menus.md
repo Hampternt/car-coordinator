@@ -2,7 +2,7 @@
 
 **Status:** 💭 planned — item list awaiting the owner's approval; nothing built
 **Date:** 2026-09-28
-**Branch:** cut when execution starts: `context-menus`, from `main`, after pack 7 has merged. Not from `dev-test-data`, because that branch holds the dev fixture and the INVENTORY notes and is unmerged. The container merges it before pack 1 (the container's Branch line).
+**Branch:** cut when execution starts: `context-menus`, from `dev`, after pack 7 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
 ## Goal
 
@@ -343,7 +343,7 @@ The same item gets the same entries, in the same order, on every surface. A surf
 - [ ] **14. Update-note entry and version cut.**
   - This pack's entry in pack 1's update note: right-click a row for its actions; text boxes keep copy and paste; your data is untouched.
   - The version cut in the five places plus pack 1's constant (the container's Releasing a pack), with check.sh's agreement line green.
-      *Done when:* the upgrade check from the previous `main` build shows the menus entry, and the loaded state deep-equals that build's.
+      *Done when:* the upgrade check from the previous `dev` build shows the menus entry, and the loaded state deep-equals that build's.
 
 ## Owner questions
 
