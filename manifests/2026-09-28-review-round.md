@@ -1,6 +1,6 @@
 # Container: The review round
 
-**Status:** 💭 planned — pack order awaiting the owner's approval; nothing built
+**Status:** 💭 planned — pack order approved and every question answered (2026-09-28); the Reconnect fix is the first work. No pack has started.
 **Date:** 2026-09-28
 **Branch:** none yet. Each pack cuts its own branch from `main` when it starts, after the previous pack has merged. Before pack 1: merge `dev-test-data`, which holds the dev fixture, a README line and these plans. It changes nothing under `docs/` or `src-tauri/`, so the v0.2.4 rebuild it triggers ships the same app.
 
@@ -22,7 +22,7 @@ Found while planning pack 9, and checked against the code:
 
 Someone missing their data is exactly the person likely to press Reconnect, hoping to get it back.
 
-- [ ] **⚠️ Reconnect asks before it overwrites.** When this session did not start from a usable plan of its own (a cleared or unreadable save, or a plan recovered from the file) and the file holds something different from the screen, Reconnect first shows both and asks: **Load the file** or **Write this screen to the file**. A backup is taken of whichever is about to be replaced. When the session started from a usable plan, Reconnect keeps today's behaviour. This follows the app's preview-before-replace rule. Loading the file blindly isn't safe either: `hasUsableLocalData()` is set only at load (`docs/store.js:179`), so a session recovered from the file and then edited would lose its edits. **Risky — review individually.**
+- [ ] **⚠️ Reconnect asks before it overwrites.** *(Go given 2026-09-28.)* When this session did not start from a usable plan of its own (a cleared or unreadable save, or a plan recovered from the file) and the file holds something different from the screen, Reconnect first shows both and asks: **Load the file** or **Write this screen to the file**. A backup is taken of whichever is about to be replaced. When the session started from a usable plan, Reconnect keeps today's behaviour. This follows the app's preview-before-replace rule. Loading the file blindly isn't safe either: `hasUsableLocalData()` is set only at load (`docs/store.js:179`), so a session recovered from the file and then edited would lose its edits. **Risky — review individually.**
   *Done when:* smoke cases show all of these:
   - With a linked file holding the dev fixture, an emptied local plan and permission "prompt", Reconnect asks. **Load the file** brings the fixture back and leaves the file byte-identical.
   - A plan recovered from the file, then edited, then reconnected after a write fails, asks. **Write this screen** keeps the edits and puts the file's old contents in Backups.
@@ -105,7 +105,9 @@ Reconciled with pack 1's manifest on 2026-09-28. Pack 1's question 1 is still op
 - The note mentions keeping a save file on your own PC (Data tab → Choose save file). Every change is also written to that file: routes, templates, fleet, roster and labels. This PC's own choices, like the theme, are not in it. It's the copy to recover from on a new or cleared PC, not a sync between PCs. Before the note says this, the pack checks whether the file picker works in the Windows app and not only in Edge and Chrome.
 - Owns the version constant and the `check.sh` version line described under the release rules above.
 
-Full plan: `manifests/2026-09-28-update-note.md` (11 items, 3 owner questions).
+**Decided:** an identical newest backup is named as it is; past notes live in a What's new card on the Data tab above Backups; the exe's save-file check is still to do, so the note's save-file sentence stays hidden in the Windows app until the owner confirms it.
+
+Full plan: `manifests/2026-09-28-update-note.md` (11 items).
 </details>
 
 <details>
@@ -121,7 +123,7 @@ Decided by the owner in the review threads:
   - The README line (`README.md:29`), updated.
 
   What stays: share codes and `#d=` links, so sheets already printed with a QR keep working. The phone-width layout and its test also stay; their comments get reworded to cite share links.
-- Drop "Check before posting" and "Positions not available". Warnings belong before printing.
+- Drop "Check before posting" and "Positions not available", and the "!" marks and dotted underlines. Warnings belong before printing.
 - Keep "Free cars".
 - "Cars not available" lists only cars whose label has a new **Show on printout** tick, set on the Labels tab.
 
@@ -131,10 +133,10 @@ Decided by the owner in the review threads:
 - An absent tick reads as the default everywhere the sheet reads it, not only in `normalise()`. New labels get the field at `docs/app.js:1616` and `:1809`, and in `docs/share.js:179`.
 - `qrOnSheet` is written as a fixed `false`, so an older build that opens v5 data keeps the QR off.
 
-**Settle at start:**
-- Should existing labels start ticked (nobody's printout changes until they untick, the safe default) or unticked?
-- My proposal, not yet answered: also drop the "!" marks and dotted underlines on the **printed** sheet (`docs/app.js:1065`, `docs/style.css:332`). The day plan's on-screen stripes and warning box stay either way.
-- Does the tick travel in "Copy everything" share codes? It would be appended as a third element of each label row, which fits `share.js`'s append-only rule. Or it stays on this PC.
+**Decided:**
+- Existing labels start **unticked**, so "Cars not available" is empty until you tick the labels you want printed. The printout changes on update, so pack 2's note entry must say exactly that and where the tick is.
+- The "!" marks and dotted underlines go from the printed sheet. The screen keeps its warnings and stripes.
+- The tick stays on this PC: it is not sent in share codes. (It still travels in Export files and the save file, like every label setting.)
 </details>
 
 <details>
@@ -144,13 +146,14 @@ Decided by the owner in the review threads:
 - Labels whose colour the user picked stay readable on a dark background.
 - The printed sheet and print preview stay black on white. Pin light values for the tokens `.sheet` uses, including `--marker` for the pink rows. Add a case that prints while the page is in dark mode.
 
-**Settle at start:** follow the computer's light/dark setting, have a switch in the app, or both? (Recommended: both.)
+**Decided:** both. It follows the computer's light/dark setting, and a switch in the app overrides it.
 </details>
 
 <details>
 <summary><b>4. Plan for tomorrow</b></summary>
 
-- When the app opens, a saved date that has passed moves to tomorrow. This happens **in memory only**, and it's saved with your next real change. That way opening the app can never overwrite data it couldn't read, or data from a newer version, before you've seen the warning about it (`docs/store.js:150`, `:180`).
+- "Tomorrow" means the next working day. The warehouse works Monday to Friday, so Friday, Saturday and Sunday all plan for Monday.
+- When the app opens, a saved date that has passed moves to the next working day. This happens **in memory only**, and it's saved with your next real change. That way opening the app can never overwrite data it couldn't read, or data from a newer version, before you've seen the warning about it (`docs/store.js:150`, `:180`).
 - A notice says the date was moved, with a **Keep ⟨old date⟩** button. That's the real undo, and it offers rather than forces.
 - The Day plan warns when its date isn't tomorrow, with a **Set to tomorrow** button. It warns but never blocks.
 - Also in scope:
@@ -159,24 +162,22 @@ Decided by the owner in the review threads:
   - `dailySnapshot` counts days by the local date instead of the UTC one (`docs/store.js:229`).
   - The smoke checks that assume the date stays put (`scripts/smoke.mjs:1033`, `:1262`, `:1395`).
 
-**Settle at start:**
-- A plan dated **today**: move it too, or only warn? (Recommended: only past dates move. A plan opened on its own day, for a morning fix or a reprint, gets the warning and the button.)
-- Does the warehouse plan Sundays? (If not, Saturday's "tomorrow" becomes Monday.)
-- Should template offers and the lit week button follow the plan's date? (Recommended: yes.)
-- Keep the Mon–Sun button row in the Drivers panel? This is pack 5's question, but it has to be answered before this pack edits that row.
+**Decided:**
+- Only past dates move. A plan dated today, opened for a morning fix or a reprint, gets the warning and the Set to tomorrow button.
+- No Saturday or Sunday planning: the next working day skips the weekend.
+- Template offers and the lit day follow the plan's date.
+- The Mon–Sun button row in the Drivers panel is removed in pack 5, so this pack doesn't rework it.
 </details>
 
 <details>
 <summary><b>5. Day plan layout</b> — the space under the route list</summary>
 
 - Day templates go directly under the route list (the owner's ask), instead of below the Drivers/Cars panels.
-- Week columns go where the owner pointed on the day plan: Monday to Sunday, each column listing that day's crew, with a **Load** button at the top. They use the existing crews.
+- Week columns under the route list, after templates: **Monday to Friday**, each column listing that day's crew, with a **Load** button at the top that sets who is in. They use the existing crews.
+- The Mon–Sun button row in the Drivers panel goes, because the columns do the same job.
 - Settle the whole stack under the list here, including a reserved slot for the map (pack 6).
 
-**Settle at start:**
-- Should **Load** only set who is in, or also load that day's template? If it loads the template, it goes through the existing ask-first and backup (`askTemplate`, `docs/app.js:1689`) and never replaces routes in one click.
-- Where exactly do the week columns sit? My proposal is under the route list, after templates. The owner pointed at the plan area, not a line.
-- Should drivers who are away today show greyed in their column?
+**Decided:** Load only sets who is in (templates stay separate); the columns go under the list after templates; drivers who are away today show greyed in their usual column; Monday to Friday only.
 </details>
 
 <details>
@@ -187,11 +188,7 @@ Decided by the owner in the review threads:
 - Spots match positions by name. A position the map doesn't know goes in a short "not on the map" list, so renaming or adding positions never breaks the map.
 - The map is drawn as plain boxes with no labels that identify the site, because the repo is public.
 
-**Settle at start:**
-- Is the gate one port or two?
-- Are the hatched areas building or dock where nobody parks, and does the hatching on spots 1–3 mean something?
-- Is the per-round listing on each spot what you want?
-- Nothing for the garage, or a one-line count under the map?
+**Decided:** the gate is one port; the hatched areas are building or dock where nobody parks, and spots 1–3 are ordinary spots beside it; each spot lists its routes by round; nothing for the garage.
 </details>
 
 <details>
@@ -200,10 +197,7 @@ Decided by the owner in the review threads:
 - Seven day toggles on each driver's row. A toggle adds the driver to, or removes them from, that weekday's crew, and ticking a day with no crew creates one. No shape change: the weekday comes from the crew's name (`docs/app.js:45`).
 - Tag and Note columns, as on the Cars tab. Decided by the owner: one tag per driver, from the one shared list, so any tag can go on anyone, and both stay until removed. Drivers have had `labelId` and `note` since schema v4.
 
-**Settle at start:**
-- Should a tag like "Sick" also set the driver to Away?
-- Keep the crew cards under the table, which are still useful for a crew with no weekday like "Reserves"?
-- Do driver tags and notes travel in "Copy everything" share codes? Driver rows carry only name and in/away today (`docs/share.js:77`). The tag and note would be appended, which fits the append-only rule. Or they stay on this PC.
+**Decided:** a tag is only a label and never sets Away; the crew cards stay; driver tags and notes stay on this PC and are not sent in share codes.
 </details>
 
 <details>
@@ -213,7 +207,9 @@ Decided by the owner in the review threads:
 - Each entry reuses an existing action, and destructive entries keep their two-click confirm and backup.
 - Right-clicking inside text boxes keeps the browser's own copy/paste menu.
 
-Full plan: `manifests/2026-09-28-context-menus.md` (14 items, 1 owner question).
+**Decided:** routes that aren't running are blanked, not deleted, so the menu keeps "Clear driver, car, position and round" (item 5).
+
+Full plan: `manifests/2026-09-28-context-menus.md` (14 items).
 </details>
 
 <details>
@@ -224,7 +220,9 @@ Full plan: `manifests/2026-09-28-context-menus.md` (14 items, 1 owner question).
 - Its "where your data lives" step shows the save-file option.
 - A smoke test checks that every step's target still exists, so later changes to the app can't silently break the tour.
 
-Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
+**Decided:** the Tour button goes in the top bar, right of Print, so item 5 runs (the tabs move to their own row below about 1245px, which also fixes the sideways scroll at the exe's minimum width); newer parts get a sentence in the nearest step, not steps of their own.
+
+Full plan: `manifests/2026-09-28-tour.md` (8 items).
 </details>
 
 ## Found while planning, not yet scheduled
@@ -241,53 +239,7 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items, 2 owner questions).
 
 ## Questions for you
 
-Answer whenever suits; each pack only needs its own answers when it starts. The ⭐ answers are my recommendations.
-
-**Now**
-- [ ] Go for the Reconnect fix (it asks before overwriting), ahead of everything?
-- [ ] Approve the pack order above?
-
-**Pack 1: Update note**
-- [ ] If the newest backup already holds exactly your plan, should the note name it as it is ⭐, or relabel it "Updating to …"?
-- [ ] After ✕, where can notes be read again: a What's new card on the Data tab above Backups ⭐, or a button in the top bar?
-- [ ] On a Windows PC, in the exe: does Data → Choose save file… open a picker, and does the file get written after a change? (A hand check only you can do.)
-
-**Pack 2: Printed sheet cleanup**
-- [ ] Should existing labels start with Show on printout ticked ⭐ (nobody's sheet changes until they untick) or unticked?
-- [ ] Also drop the "!" marks and dotted underlines on the printed sheet? (My proposal; the screen keeps its warnings.)
-- [ ] Should the tick travel in "Copy everything" share codes, or stay on this PC?
-
-**Pack 3: Dark mode**
-- [ ] Follow the computer's light/dark setting, a switch in the app, or both ⭐?
-
-**Pack 4: Plan for tomorrow**
-- [ ] A plan dated today: only warn, with Set to tomorrow ⭐, or move it too?
-- [ ] Does the warehouse plan Sundays?
-- [ ] Should template offers and the lit week button follow the plan's date ⭐?
-- [ ] Keep the Mon–Sun button row in the Drivers panel?
-
-**Pack 5: Day plan layout**
-- [ ] Should Load only set who is in, or also load that day's template (asking first)?
-- [ ] Where should the week columns go? (My proposal: under the route list, after templates.)
-- [ ] Should drivers who are away today show greyed in their column?
-
-**Pack 6: Parking map**
-- [ ] Is the gate one port or two?
-- [ ] What do the hatched areas mean: building or dock nobody parks in, and do spots 1–3 differ?
-- [ ] Each spot listing its routes by round: is that what you want?
-- [ ] Nothing for the garage, or a one-line count under the map?
-
-**Pack 7: Drivers tab**
-- [ ] Should a tag like "Sick" also set the driver to Away?
-- [ ] Keep the crew cards under the table?
-- [ ] Should driver tags and notes travel in "Copy everything" share codes, or stay on this PC?
-
-**Pack 8: Right-click menus**
-- [ ] When a route isn't running tomorrow, do you blank its row ⭐ (the menu gets "Clear driver, car, position and round") or delete it?
-
-**Pack 9: First-use tour**
-- [ ] Where does the Tour button go: top bar ⭐ (the tabs move to their own row below about 1245px wide), the Day plan, or the Data tab?
-- [ ] Should newer parts (templates, week, map, menus) get steps of their own, or a sentence in the nearest step ⭐?
+All answered by the owner on 2026-09-28, and folded into each pack above. Still open: the hand check of **Choose save file…** in the Windows app (pack 1).
 
 ## Not in this container
 
@@ -328,4 +280,5 @@ Answer whenever suits; each pack only needs its own answers when it starts. The 
 
   Rejected one finding: "most i would guess would be obvious" is the owner's own chat message. It is now quoted verbatim.
 - Packs 1 and 9 planned in detail (d582585). Both follow this container's rules; pack 1 refines them, as noted under the rules. Pack 9's planning found the Reconnect data-loss path, now the first item. Pack 8 planned too (14 items); it found five more pre-existing issues, listed above. All open questions collected under Questions for you.
+- 2026-09-28: the owner approved the pack order and answered every question; the answers are in each pack under **Decided**. The one that changes shipped behaviour most: labels start unticked, so "Cars not available" empties on update until labels are ticked, and pack 2's note must say so. Go given for the Reconnect fix.
 </details>

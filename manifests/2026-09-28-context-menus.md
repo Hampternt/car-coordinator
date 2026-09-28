@@ -347,6 +347,8 @@ The same item gets the same entries, in the same order, on every surface. A surf
 
 ## Owner questions
 
+**Answered 2026-09-28:** routes that aren't running are blanked, so item 5 (Clear one route) stays.
+
 1. When a route isn't running tomorrow, do you blank its row or delete it?
    - Item 5 adds "Clear driver, car, position and round" to every route's menu.
    - It asks twice and takes a backup every time, because that is your snapshot-before-overwrite rule. So each use costs one of the 12 backup slots and can push "Start of day" out.

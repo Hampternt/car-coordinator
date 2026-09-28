@@ -6,7 +6,7 @@ What this repo's two apps are, at feature altitude. Implementation lives in
 State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## In flight
-- 🚧 **The review round** — everything raised on 2026-09-28, in review comments and in chat, as nine packs. Pack order awaiting approval: `manifests/2026-09-28-review-round.md`. Its entries stay under Considered until each pack starts.
+- 🚧 **The review round** — everything raised on 2026-09-28, in review comments and in chat, as nine packs. Pack order approved 2026-09-28: `manifests/2026-09-28-review-round.md`. Its entries stay under Considered until each pack starts.
 
 ## Day plan
 - ✅ **Route rows** — route name, driver, car, packing **position** and **round** as separate fields, with reorder and two-click delete.

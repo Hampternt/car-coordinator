@@ -346,6 +346,8 @@ This is illustrative: pack 8's menu contents are not settled yet. It assumes a r
 
 ## Owner questions
 
+**Answered 2026-09-28:** 1, name the identical backup as it is; 2, a What's new card on the Data tab above Backups; 3, not checked yet, so the save-file sentence stays hidden in the exe until the owner confirms.
+
 1. When the newest backup already holds exactly the plan being opened, should the note name that entry under its own label (recommended; it keeps `Start of day` meaning start of day), or relabel it `Updating to ⟨v⟩` which was the container's first draft?
 2. Where should the notes be readable after ✕? A **What's new** card on the Data tab directly above Backups (recommended: it sits next to the copy the note points at, and the top bar stays as it is), or a **What's new** button in the top bar?
 3. On a Windows PC, in the exe: does Data → **Choose save file…** open a picker, and does the chosen file get written after a change? Until you confirm, the note says nothing about the save file in the Windows app.
