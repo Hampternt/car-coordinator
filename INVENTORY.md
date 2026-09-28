@@ -78,3 +78,4 @@ this list that you did not ask for.
 
 - 💭 **Drop the QR code from the printed sheet**, and the Data tab switch that turns it off.
 - 💭 **No warnings on the printed sheet** — they are for before printing. Drop "Check before posting" and "Positions not available", keep Free cars, and list a car as not available only when its label is ticked to show on the printout.
+- 💭 **Plan for tomorrow by default** — the date moves to tomorrow when the app opens, and the day plan warns when the date on it is not tomorrow.
