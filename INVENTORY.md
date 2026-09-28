@@ -77,3 +77,4 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **Drop the QR code from the printed sheet**, and the Data tab switch that turns it off.
+- 💭 **Trim the sheet's footer**: drop "Check before posting", keep Free cars, and list a car as not available only when its label is ticked to show on the printout.
