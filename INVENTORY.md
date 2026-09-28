@@ -84,3 +84,4 @@ this list that you did not ask for.
 - 💭 **Dark mode.**
 - 💭 **The week under the route list** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
+- 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has.
