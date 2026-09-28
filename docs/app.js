@@ -960,6 +960,21 @@ function fileStatus() {
       <button class="btn primary-ish" data-act="link-file">Choose save file\u2026</button>
       <button class="btn" data-act="open-file">Open an existing file\u2026</button>`;
   }
+  // Reconnect found the file holding a different plan from the screen, on a
+  // browser that did not start from a plan of its own. Neither is written
+  // over until the leader has seen both and picked one.
+  if (f.choice) {
+    const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+    const sum = (s) => {
+      const [y, m, d] = String(s.date || '').split('-');
+      return `${n(s.routes.length, 'route')}, ${n(s.cars.length, 'car')}, ${n(s.drivers.length, 'driver')}, dated ${d}/${m}/${y}`;
+    };
+    return `<p class="status warn-status"><b>${esc(f.name)}</b> holds a different plan from the one on screen. Nothing has been written to it: choose which one to keep.</p>
+      <p class="hint">In the file${f.choice.modified ? ` (last changed ${esc(when(f.choice.modified))})` : ''}: ${esc(sum(f.choice.state))}.<br>On screen: ${esc(sum(state))}.</p>
+      <button class="btn" data-act="file-keep-file">Load the file</button>
+      <button class="btn" data-act="file-keep-screen">Write this screen to the file</button>
+      <p class="hint">Whichever one you replace is put in Backups first, so either choice can be undone there.</p>`;
+  }
   if (f.permission !== 'granted') {
     return `<p class="status warn-status">Saving to <b>${esc(f.name)}</b> is paused \u2014 the browser needs you to allow it again. This happens after a restart.</p>
       <button class="btn primary-ish" data-act="reconnect-file">Reconnect ${esc(f.name)}</button>
@@ -1376,7 +1391,29 @@ function openShare(share) {
 async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'link-file': await Store.linkFile(state); break;
-    case 'reconnect-file': await Store.reconnect(state); break;
+    case 'reconnect-file': await Store.reconnect(state, defaults); break;
+    // The two answers to the question Reconnect asks when the file and the
+    // screen disagree. The one given up goes into Backups first either way.
+    case 'file-keep-file': {
+      const c = Store.file.choice;
+      if (!c) break;
+      Store.snapshot(state, 'Before loading the save file');
+      Store.file.choice = null;
+      state = c.state;
+      note('info', `Loaded the plan from ${Store.file.name}. What was on screen before is in Backups.`);
+      save();
+      break;
+    }
+    case 'file-keep-screen': {
+      const c = Store.file.choice;
+      if (!c) break;
+      Store.snapshot(c.state, 'The save file, before it was written over');
+      Store.file.choice = null;
+      note('info', `Wrote this screen to ${Store.file.name}. What the file held before is in Backups.`);
+      save();
+      Store.flush();
+      break;
+    }
     case 'unlink-file': await Store.unlink(); break;
     case 'open-file': {
       const text = await Store.openFile();
@@ -2223,7 +2260,7 @@ document.addEventListener('keydown', (e) => {
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag']);
-const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
+const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
    reached with Tab, a question just asked — would otherwise land under it.

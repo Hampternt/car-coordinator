@@ -277,7 +277,10 @@ const Store = (() => {
   /* ---------- auto-saved file (File System Access API) ---------- */
   const fileSupported = () => typeof window.showSaveFilePicker === 'function';
 
-  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '' };
+  // `choice` is set when Reconnect found the file and the screen disagreeing
+  // and must not pick for the leader: { state, modified } of what the file
+  // holds. While it is set nothing is written to the file.
+  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '', choice: null };
   let pending = null;
   let timer = null;
   let onChange = () => {};
@@ -293,7 +296,7 @@ const Store = (() => {
   }
 
   async function writeFile(state) {
-    if (!file.handle || file.permission !== 'granted') return;
+    if (!file.handle || file.permission !== 'granted' || file.choice) return;
     try {
       const w = await file.handle.createWritable();
       await w.write(JSON.stringify(state, null, 2));
@@ -334,6 +337,7 @@ const Store = (() => {
       });
       file.handle = handle;
       file.name = handle.name;
+      file.choice = null;
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
       await writeFile(state);
@@ -350,15 +354,32 @@ const Store = (() => {
       const text = await (await handle.getFile()).text();
       file.handle = handle;
       file.name = handle.name;
+      file.choice = null;
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
       return text;
     } catch { return null; }
   }
 
-  async function reconnect(state) {
+  /* Reconnect writes what is on screen to the file, because this browser's
+     own plan is the one being kept up to date. That only holds when this
+     browser started from a plan of its own. After a cleared or unreadable
+     save, or a plan recovered from this very file, the file may be the only
+     good copy: writing first would put an empty plan over it, and the person
+     most likely to press Reconnect is the one whose plan has gone missing.
+     So then the file is read first, and when it holds something different
+     nothing is written until the leader chooses which one to keep.
+     localUsable is set once, at load, which is exactly "started from a plan
+     of its own"; a session recovered from the file keeps asking even after
+     edits, because the file then holds the plan it started from. */
+  async function reconnect(state, defaults) {
     file.permission = await permissionFor(file.handle, true);
-    if (file.permission === 'granted') await writeFile(state);
+    if (file.permission === 'granted') {
+      const found = localUsable ? null : await readFileState(defaults);
+      const onScreen = migrate(JSON.parse(JSON.stringify(state)), defaults).state;
+      if (found && JSON.stringify(found.state) !== JSON.stringify(onScreen)) file.choice = found;
+      else await writeFile(state);
+    }
     onChange();
     return file.permission === 'granted';
   }
@@ -369,6 +390,7 @@ const Store = (() => {
     file.permission = fileSupported() ? 'none' : 'unsupported';
     file.lastSaved = null;
     file.error = '';
+    file.choice = null;
     await clearHandle();
     onChange();
   }
@@ -427,11 +449,20 @@ const Store = (() => {
      a cleared profile, a different Windows user. */
   async function recoverFromFile(defaults) {
     if (!file.handle || file.permission !== 'granted') return null;
+    const found = await readFileState(defaults);
+    return found ? found.state : null;
+  }
+
+  // What the linked file holds, as a plan, or null when it is empty, gone or
+  // not a plan at all. A file with nothing usable in it is not worth keeping
+  // over the screen, so Reconnect writes over it as it always has.
+  async function readFileState(defaults) {
     try {
-      const text = await (await file.handle.getFile()).text();
+      const f = await file.handle.getFile();
+      const text = await f.text();
       if (!text.trim()) return null;
       const { state } = parseImport(text, defaults);
-      return state || null;
+      return state ? { state, modified: f.lastModified } : null;
     } catch { return null; }
   }
 

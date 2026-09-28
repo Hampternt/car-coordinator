@@ -1984,6 +1984,103 @@ await pickRow.locator('[data-field="carId"]').click();
 await page.click('#tab-plan thead');
 check('and so does a click anywhere else', await picker.isHidden());
 
+// --- Reconnect asks before it writes over a save file ---
+// The save file's handle lives in IndexedDB, which cannot hold a stand-in
+// with methods, so each case puts one straight onto Store.file: the state
+// init() leaves after a restart, a handle whose permission is back to
+// "prompt". What decides the answer is what the page started from, and the
+// reload before each case sets that.
+const devPlan = await readFile(new URL('./fixtures/dev-data.json', import.meta.url), 'utf8');
+const pcFile = await browser.newContext();
+const fp = await pcFile.newPage();
+const fpErrors = [];
+fp.on('console', (m) => m.type() === 'error' && fpErrors.push(m.text()));
+fp.on('pageerror', (e) => fpErrors.push(String(e)));
+const linkStandIn = (pg, text) => pg.evaluate((text) => {
+  const disk = window.__disk = { text, writes: 0, lastModified: Date.parse('2026-09-27T15:00:00') };
+  if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+  let perm = 'prompt';
+  Store.file.handle = {
+    name: 'car-coordinator.json',
+    queryPermission: async () => perm,
+    requestPermission: async () => (perm = 'granted'),
+    getFile: async () => new File([disk.text], 'car-coordinator.json', { lastModified: disk.lastModified }),
+    createWritable: async () => {
+      let out = '';
+      return { write: async (t) => { out += t; }, close: async () => { disk.text = out; disk.writes++; } };
+    },
+  };
+  Store.file.name = 'car-coordinator.json';
+  Store.file.permission = 'prompt';
+  render();
+}, text);
+const reconnect = async (pg) => {
+  await pg.click('[data-act="tab"][data-tab="data"]');
+  await pg.click('[data-act="reconnect-file"]');
+  await pg.waitForFunction(() => !document.querySelector('[data-act="reconnect-file"]'));
+};
+const disk = (pg) => pg.evaluate(() => ({ ...window.__disk, backups: Store.backups() }));
+
+// A browser with nothing of its own: the file is the only copy.
+await fp.goto(base, { waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+check('Reconnect on an empty browser asks instead of writing',
+  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await disk(fp)).writes === 0);
+const ask = await fp.locator('#tab-data .card').first().innerText();
+check('and says what the file and the screen each hold', ask.includes('17 cars') && ask.includes('0 cars'), ask.replace(/\s+/g, ' '));
+await fp.evaluate(() => { state.routes[0].driver = 'Typed while asking'; save(); });
+await fp.waitForTimeout(1100);
+check('nothing reaches the file while the question is up', (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-keep-file"]');
+await fp.waitForTimeout(1100);
+const loaded = await disk(fp);
+check('Load the file brings its plan back', await fp.evaluate(() => state.cars.length === 17 && state.routes[0].driver === 'Anders'));
+check('and the file still holds that plan', JSON.parse(loaded.text).cars.length === 17 && JSON.parse(loaded.text).routes[0].driver === 'Anders');
+const screenCopy = loaded.backups.find((b) => b.label === 'Before loading the save file');
+check('and what was on screen went into Backups first', screenCopy && JSON.parse(screenCopy.json).routes[0].driver === 'Typed while asking',
+  loaded.backups.map((b) => b.label).join(' | '));
+
+// A plan recovered from the file, then edited: start() leaves it on screen
+// with no plan of this browser's own behind it, as set here.
+await fp.evaluate(() => localStorage.clear());
+await fp.reload({ waitUntil: 'networkidle' });
+await fp.evaluate((text) => { state = Store.parseImport(text, defaults).state; state.routes[0].driver = 'Edited after recovery'; save(); render(); }, devPlan);
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+check('a plan recovered from the file and then edited still asks',
+  (await fp.locator('[data-act="file-keep-screen"]').isVisible()) && (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-keep-screen"]');
+await fp.waitForTimeout(300);
+const written = await disk(fp);
+check('Write this screen keeps the edits, on screen and in the file',
+  JSON.parse(written.text).routes[0].driver === 'Edited after recovery'
+  && await fp.evaluate(() => state.routes[0].driver === 'Edited after recovery'));
+const overwritten = written.backups.find((b) => b.label === 'The save file, before it was written over');
+check('and what the file held went into Backups first', overwritten && JSON.parse(overwritten.json).routes[0].driver === 'Anders',
+  written.backups.map((b) => b.label).join(' | '));
+
+// Typed into a fresh plan after the "could not be read" warning.
+await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await fp.reload({ waitUntil: 'networkidle' });
+await fp.evaluate(() => { state.routes[0].driver = 'Typed after the warning'; save(); });
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+check('after an unreadable save, Reconnect asks too',
+  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await disk(fp)).writes === 0);
+
+// A browser that started from a plan of its own keeps it up to date, as before.
+await fp.evaluate((text) => localStorage.setItem('carcoord:v1', JSON.stringify(Store.parseImport(text, defaults).state)), devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, JSON.stringify({ schemaVersion: 4, date: '2026-01-01', cars: [], routes: [] }));
+await reconnect(fp);
+await fp.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
+const kept = await disk(fp);
+check('with a plan of its own, Reconnect writes it to the file without asking',
+  kept.writes === 1 && JSON.parse(kept.text).cars.length === 17 && !(await fp.locator('[data-act="file-keep-file"]').count()));
+check('the Reconnect cases log no console errors', fpErrors.length === 0, fpErrors.join(' | '));
+await pcFile.close();
+
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and
 // the run below fails on those — rightly, everywhere but here.
