@@ -542,3 +542,7 @@ Written identically in the `updates.js` header, the README and the container's G
 - Fix 9 (held loads tested too narrowly), 72056f2. `carcoord:v1` of `[]`, `null` and `42` each give one warning, zero update notes, no marker, and a rescue of that exact text. Gate: `check.sh` OK. Car suite: exit 0, 484 ok, 0 FAIL.
 - Fix 10 (the note step's try/catch was never exercised), 3c707bc. A context serves a `store.js` with `Store.loadTrouble` throwing. With a differing OPFS file and the marker, the `differs` hold is raised and drawn, the plan is drawn, a typed change doesn't reach the file, and there is no note and no marker. A `#d=` link opens the dialog. No page errors. Gate: `check.sh` OK. Car suite: exit 0, 488 ok, 0 FAIL.
 - Fix 11 (nothing checked the archive is the first boot write), f50ce47. An init script records every `setItem` key from page start. For a returning leader, the `carcoord:*` writes are `archives, backups, pref:seenUpdate`, and never `v1`. Gate: `check.sh` OK. Car suite: exit 0, 489 ok, 0 FAIL.
+- Fix 12 (byte checks only saw canonical JSON), aed110f. Smoke's `upPlan` is hand-written JSON with reordered keys, spacing and unknown fields. Upgrade (a), (d) and (e) apply `makeOdd` on the old build (keys reversed, `JSON.stringify(…, null, 1)`, `"extra"` first), and `expectKeptAndNoted` first asserts that layout is in place. Gate:
+  - `check.sh` OK;
+  - car suite: exit 0, 489 ok, 0 FAIL;
+  - upgrade from v0.2.4: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
