@@ -28,6 +28,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Check before posting** — unresolved clashes repeated on the sheet.
 - ✅ **Unavailable and free cars** listed under the plan.
 - ✅ **QR on the sheet** (browser build) — links the day plan so a phone can read it off the paper. Switchable off.
+- 🚧 **Printed sheet cleanup** — no QR code and no warnings on paper; Cars not available lists only parked cars whose label has a new Show on printout tick. `manifests/2026-09-29-sheet-cleanup.md`.
 
 ## Sharing
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
@@ -82,8 +83,6 @@ stays where it is and stays the source of truth for the printed page.
 Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
-- 💭 **Drop the QR code from the printed sheet**, and the Data tab switch that turns it off.
-- 💭 **No warnings on the printed sheet** — they are for before printing. Drop "Check before posting" and "Positions not available", keep Free cars, and list a car as not available only when its label is ticked to show on the printout.
 - 💭 **Plan for tomorrow by default** — the date moves to tomorrow when the app opens, and the day plan warns when the date on it is not tomorrow.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
 - 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.

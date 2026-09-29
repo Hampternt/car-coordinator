@@ -1,6 +1,6 @@
 # Pack: Printed sheet cleanup
 
-**Status:** 💭 planned — item list awaiting the owner's approval; nothing built.
+**Status:** 🚧 building, since 2026-09-29, as part 2 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved.
 **Date:** 2026-09-29. Planned against `dev` at 73dd734, before pack 1 merged.
 **Branch:** cut when execution starts: `sheet-cleanup`, from `dev` after pack 1 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -560,3 +560,5 @@ Both answers are needed before item 4 starts. Items 1–3 don't depend on them. 
   - `git log` since pack 1 is swept into the docs.
 
 ## Ledger
+
+- **2026-09-29, start (combined pack, part 2).** Built on `review-round`, not a `sheet-cleanup` branch, per the combined manifest: it is cut from `update-note` (pack 1, 0.3.0) and merged with `origin/dev` for the plans. Base commit 771f560. Line numbers are re-found by symbol, because pack 1 moved most of `app.js`.

@@ -58,3 +58,6 @@ The manager runs these alongside the build and sends back what they confirm:
   - Then the combined review, the walkthrough, and one PR into `dev`.
 
 ## Ledger
+
+- **Setup.** `review-round` cut from `update-note` at 1af5ab5, merged with `origin/dev` (0f9b59a) at 771f560. Conflicts only in the two pack 1 manifests: pack 1's ticked items and ledger kept, and the container's status line combined. `npm ci` in the worktree. Baseline: `check.sh` OK; car smoke on system Chrome exit 0, 477 ok, 0 FAIL.
+- **Part 2 start.** Base 771f560 (0.3.0). `update-note` had no new commits.
