@@ -312,6 +312,11 @@ check(
   (await page.locator('.size').count()) === 35,
 );
 check('the crate rules are offered for a bread list', await page.locator('#cratePane').isVisible());
+// The substitute marker has one look, so there is nothing to choose.
+check(
+  'the configure step offers no substitute choices',
+  (await page.locator('#step-configure [data-marker], #step-configure :text("substitute")').count()) === 0,
+);
 
 // ── 04 Print ───────────────────────────────────────────────────────────────
 
@@ -450,7 +455,6 @@ const sequenceLeak = await page.evaluate(() => {
   const settings = {
     kind: Model.BREAD,
     showOrderId: true,
-    marker: 'word-only',
     crates: Model.defaultCrateRules(),
   };
   const printed = Sheet.paginate(
@@ -638,8 +642,7 @@ for (const [folder, fixture, what] of EDGE) {
       const settings = {
         kind: Model.BREAD,
         showOrderId: true,
-        marker: 'word-only',
-        crates: Model.defaultCrateRules(),
+            crates: Model.defaultCrateRules(),
       };
       const pages = [];
       for (const route of Model.group(Model.fold(rows))) {
@@ -748,7 +751,7 @@ for (const [fixture, expected, saying] of SHAPES) {
         return { outcome: 'refused', why: String(error.message || error) };
       }
       const findings = Validate.run(rows, Model.BREAD);
-      const settings = { kind: Model.BREAD, showOrderId: true, marker: 'word-only',
+      const settings = { kind: Model.BREAD, showOrderId: true,
                          crates: Model.defaultCrateRules() };
       let printed = '';
       for (const route of Model.group(Model.fold(rows))) {
@@ -914,7 +917,7 @@ const crowded = await page.evaluate(() => {
     };
     const pages = Sheet.paginate(
       route,
-      { kind: Model.BREAD, showOrderId: true, marker: 'word-only', crates: Model.defaultCrateRules() },
+      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
       { dates: null, source: 'crowded', routeStops: 1, routeLines: count },
       { host },
     );

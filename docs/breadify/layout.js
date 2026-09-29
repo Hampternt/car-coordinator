@@ -164,19 +164,13 @@ const Sheet = (() => {
 
   /**
    * Quiet when substitutes are fine, loud when they are not. The words print
-   * in Archivo ExtraBold caps under every treatment; the badge and the bar
-   * down the block are the non-default extras.
+   * in Archivo ExtraBold caps.
    */
-  function marker(stop, settings) {
+  function marker(stop) {
     if (stop.acceptAlternatives) {
       return element('span', 'bf-marker', 'want substitute: true');
     }
-    const badge = settings.marker === 'inverted-badge';
-    return element(
-      'span',
-      `bf-marker-loud${badge ? ' bf-marker-badge' : ''}`,
-      'WANT SUBSTITUTE: FALSE',
-    );
+    return element('span', 'bf-marker-loud', 'WANT SUBSTITUTE: FALSE');
   }
 
   /**
@@ -186,7 +180,7 @@ const Sheet = (() => {
    */
   function stamp(stop, settings) {
     const group = element('span', 'bf-stamp');
-    group.appendChild(marker(stop, settings));
+    group.appendChild(marker(stop));
     if (settings.showOrderId) {
       group.appendChild(element('span', 'bf-order-id', stop.id));
     }
@@ -380,8 +374,7 @@ const Sheet = (() => {
 
   /** One order — one stop, one block, one crate label (D16). */
   function stopBlock(stop, settings, measure) {
-    const barred = !stop.acceptAlternatives && settings.marker !== 'word-only';
-    const block = element('article', `bf-block${barred ? ' bf-block-barred' : ''}`);
+    const block = element('article', 'bf-block');
 
     const count =
       settings.kind === Model.BREAD

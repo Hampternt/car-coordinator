@@ -389,13 +389,6 @@
   padding: 1.7mm 0 1.2mm;
 }
 
-/* The loud half of the asymmetric substitute marker, when the treatment asks
- * for the bar as well as the words (D21 makes the words alone the default). */
-.bf-block-barred {
-  border-left: 5pt solid var(--ink);
-  padding-left: 2.3mm;
-}
-
 /* Explicit margins rather than a flex `gap`, because the heading's two gaps
  * differ: 4.6 mm after the name, but only 2.3 mm between the crates and the
  * marker they belong beside (D20). */
@@ -488,14 +481,6 @@
   font: 800 10.4pt/1 Archivo, sans-serif;
   letter-spacing: -0.02em;
   color: var(--ink);
-}
-
-.bf-marker-badge {
-  background: var(--ink);
-  color: #fff;
-  padding: 0.7mm 1.6mm;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
 }
 
 /* Deliberately the quietest thing on the page, but never below ~8 pt: it is

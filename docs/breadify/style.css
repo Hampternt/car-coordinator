@@ -545,39 +545,12 @@ button {
   display: block;
 }
 
-.row em,
-.choices em {
+.row em {
   display: block;
   font-style: normal;
   font-size: 13px;
   color: var(--muted);
   margin-top: 2px;
-}
-
-.choices {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.choices button {
-  text-align: left;
-  padding: 10px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-control);
-  background: var(--raised);
-  color: var(--body);
-  font: inherit;
-  cursor: pointer;
-}
-
-.choices button b {
-  color: var(--strong);
-}
-
-.choices button[aria-pressed='true'] {
-  border-color: var(--accent-border);
-  background: var(--accent-tint);
 }
 
 .capacities {

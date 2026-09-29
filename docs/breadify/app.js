@@ -28,7 +28,6 @@
     settings: {
       kind: Model.BREAD,
       showOrderId: true,
-      marker: 'word-only',
       crates: Model.defaultCrateRules(),
     },
   };
@@ -272,13 +271,6 @@
     const bread = state.settings.kind === Model.BREAD;
     $('showOrderId').checked = state.settings.showOrderId;
 
-    for (const button of $('markerChoices').querySelectorAll('button')) {
-      button.setAttribute(
-        'aria-pressed',
-        String(button.dataset.marker === state.settings.marker),
-      );
-    }
-
     // Nothing on a freezer sheet reads the crate sizes (F4), so the step does
     // not offer them there.
     $('cratePane').hidden = !bread;
@@ -463,13 +455,6 @@
     $('showOrderId').onchange = () => {
       state.settings.showOrderId = $('showOrderId').checked;
     };
-
-    for (const button of $('markerChoices').querySelectorAll('button')) {
-      button.onclick = () => {
-        state.settings.marker = button.dataset.marker;
-        renderConfigure();
-      };
-    }
 
     for (const id of ['largeCapacity', 'smallCapacity']) {
       $(id).onchange = () => {
