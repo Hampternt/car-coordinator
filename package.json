@@ -10,7 +10,8 @@
     "test": "node scripts/versions.mjs && node scripts/smoke.mjs && node scripts/breadify.mjs",
     "screens": "node scripts/screens.mjs",
     "test:car": "node scripts/smoke.mjs",
-    "test:breadify": "node scripts/breadify.mjs"
+    "test:breadify": "node scripts/breadify.mjs",
+    "upgrade": "node scripts/upgrade.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

@@ -58,7 +58,9 @@ npm run test:car       # headless Chromium: drives the UI, checks the printed sh
 npm run test:breadify  # drives Breadify with both real exports and checks the sheets against the spec's figures
 python3 scripts/make_edge_fixtures.py   # regenerates scripts/fixtures/edge/, only needed if you change those shapes
 npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
+npm run upgrade -- <old checkout>   # opens an older build, then this one, in one browser profile: nothing saved lost, the copy in Archives, the note right
 ```
+For the upgrade check, make the old checkout with `git worktree add --detach <dir> v0.2.4` (or the build live on `main`). It serves both builds on port 5199, one after the other, because saved data belongs to an address.
 `test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
 
 It then drives the awkward exports in `scripts/fixtures/edge/` and `scripts/fixtures/shape/` (regenerate either with `python3 scripts/make_edge_fixtures.py` / `make_shape_fixtures.py`). `edge/` is about scale and length — twelve bakeries on one route, an order with 300 product lines, a school kitchen taking 400 of one bread; `shape/` is about the file itself — a column added, a header renamed, a quantity that is zero, negative, fractional or four figures.
