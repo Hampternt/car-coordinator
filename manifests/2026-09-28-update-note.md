@@ -1,6 +1,6 @@
 # Pack: Update note and fail-safe — say what changed, and keep an untouched copy
 
-**Status:** 🚧 go given 2026-09-29, after an independent plan review. Building.
+**Status:** 🚧 all 12 items built and the pack gate green, 2026-09-29, on system Chrome. Waiting on the individual reviews of items 3 and 7, one review pass for the rest, and the browser walkthrough.
 **Date:** 2026-09-28. Reworked against `dev` at b0ae257, after the 0.2.5 save-file fix. Revised 2026-09-29 after the plan review (see Ledger).
 **Branch:** `update-note`, cut from `dev` and merged back into `dev` through a PR (the container's Branch line).
 
@@ -496,3 +496,15 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Opening the app** is rewritten to Design D's nine steps.
   - **The meta-write pointer** now quotes the line and gives `docs/app.js:1240` at 0.3.0 (:1166 before), not :1166 alone. That line moved with this pack.
   - **Gate:** `check.sh` OK.
+- **2026-09-29, pack gate: green, on system Chrome (`CHROMIUM_PATH=/usr/bin/google-chrome`).**
+  - `npm test`: exit 0. It ends "VERSIONS OK", the car suite "all checks passed" (472 ok, 0 FAIL), and Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 15 files.
+  - `npm run upgrade` from a `v0.2.4` worktree: exit 0, 43 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - `npm run upgrade` from a `dev` worktree (4f0c26f): exit 0, 43 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - The scratch worktrees are removed afterwards.
+  - **Not verified here:**
+    - whether the Windows app's asset protocol ignores `?v=`;
+    - whether the exe serves `recover.html`;
+    - `cargo check`, which needs CI's icons.
+
+    `versions.mjs` stands in for the last.
