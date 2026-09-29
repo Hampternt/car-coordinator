@@ -520,3 +520,4 @@ Written identically in the `updates.js` header, the README and the container's G
     - the fourth-archive case now expects `dropped: 0`.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
   - **Flaky, not caused by this fix:** the first run failed "a disarm leaves the page where the user scrolled it — 285". That check dates from e5c8472 (2026-09-24), before this pack. The rerun was clean.
+- Fix 3 (update note not last), 9303368. `drainStoreNotices()` right before the note's try, with the earlier drain left as it was. Smoke, storage full: the note is `:last-child`, and "Could not take a backup before "Start of day"" is shown above it. Gate: `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
