@@ -34,6 +34,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
 
 ## Data
+- 🚧 **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white. `manifests/2026-09-29-dark-mode.md`.
 - ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - 🚧 **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start. `manifests/2026-09-28-update-note.md`.
@@ -86,7 +87,6 @@ this list that you did not ask for.
 - 💭 **Plan for tomorrow by default** — the date moves to tomorrow when the app opens, and the day plan warns when the date on it is not tomorrow.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
 - 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
-- 💭 **Dark mode.**
 - 💭 **The week on the day plan** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
 - 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
