@@ -509,3 +509,7 @@ Written identically in the `updates.js` header, the README and the container's G
 
     `versions.mjs` stands in for the last.
 - 0ca3667: the returning-leader context now stubs `showSaveFilePicker` where the browser has none, so its "Choose save file…" check doesn't depend on CI's Chromium. Car suite after the change: exit 0, 472 ok, 0 FAIL. `check.sh` OK. **Not verified on CI's Playwright Chromium:** every new smoke case ran on system Chrome only, and the OPFS-backed cases (linked file, hold, isolation) depend on the browser.
+- **2026-09-29, review of pack 1: 13 confirmed findings, fixed one commit each.** The coordinator accepted both escalations:
+  - `screens/` stays untracked, per `.gitignore`;
+  - `archiveNeeded` taking `seen` is right.
+- Fix 1 (major, downgrade not archived), 61adbd4. An update archive counts as this open's copy only when both `to === version` and `from ===` this browser's `from` (the marker, or "0.2.4 or earlier"). `copyFor` and `updatingFrom` are shared by `archiveNeeded` (which now takes `from`) and `archiveBeforeUpdate`'s early return. Smoke: with an archive 0.2.4→V and the marker at the next minor, a new archive (next→V) is taken, and a reload adds none. The pure-rule case `backFromNewer` is added. Gate: `check.sh` OK. Car suite: exit 0, 474 ok, 0 FAIL.
