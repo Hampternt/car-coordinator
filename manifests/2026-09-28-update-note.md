@@ -1,6 +1,6 @@
 # Pack: Update note and fail-safe — say what changed, and keep an untouched copy
 
-**Status:** 🚧 all 12 items built and the pack gate green, 2026-09-29, on system Chrome. Waiting on the individual reviews of items 3 and 7, one review pass for the rest, and the browser walkthrough.
+**Status:** 🚧 all 12 items built. The review's findings are fixed and the pack gate is green again (2026-09-29, system Chrome). Waiting on the browser walkthrough.
 **Date:** 2026-09-28. Reworked against `dev` at b0ae257, after the 0.2.5 save-file fix. Revised 2026-09-29 after the plan review (see Ledger).
 **Branch:** `update-note`, cut from `dev` and merged back into `dev` through a PR (the container's Branch line).
 
@@ -563,3 +563,9 @@ Written identically in the `updates.js` header, the README and the container's G
   | M12: the archive tidies the text | "one update archive, byte for byte the saved plan…" |
 
   M4 is also masked on the boot path, by `archiveBeforeUpdate`'s own `rescuedDuring` early return, so only the pure-rule case sees it. The scratch copy is deleted.
+- **2026-09-29, pack gate after the review fixes: green, on system Chrome.**
+  - `npm test`: exit 0. It ends "VERSIONS OK", the car suite "all checks passed" (489 ok, 0 FAIL), and Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 15 files.
+  - `npm run upgrade` from `v0.2.4`: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - `npm run upgrade` from `dev` at 0f9b59a (manifests and INVENTORY.md only since 4f0c26f; `docs/` is still 0.2.5): exit 0, 47 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - The scratch worktrees are removed.
