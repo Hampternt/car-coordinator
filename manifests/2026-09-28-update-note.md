@@ -577,3 +577,7 @@ Written identically in the `updates.js` header, the README and the container's G
     - the boot case (old V rescue, newer marker) expects `[update newer→V, rescue]`.
     - Both failed before the change: they got `false` and `[rescue]`.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 490 ok, 0 FAIL.
+- **Tests for fix 4's dedup branches, f55438c.**
+  - **Re-record:** the same text rescued with `during: '0.0.1'` gives, after a reload, one rescue with `during` V and a new `t`. The re-record resets the time.
+  - **No-room fallback:** storage filled to the last bytes with 8-byte grains, an old rescue of the same text. After a reload, `carcoord:archives` is byte-identical and the warning still says "An untouched copy is kept". That can only pass through the fallback.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 492 ok, 0 FAIL.
