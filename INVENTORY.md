@@ -65,6 +65,8 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **Pallet call** in the page note when a route needs more than 16 crates, in the short form when the line is already crowded.
 - ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots.
 - ✅ **Self-hosted faces**, so no printer falls back to one with different metrics and silently re-sizes the page.
+- 🚧 **One look for the substitute marker** — `want substitute: true` or `false` in the same quiet type every time, with only the word **false** in bold. In progress: `manifests/2026-09-29-breadify-blocks.md`.
+- 🚧 **One block per customer at a stop** — a customer's orders at one stop print in one block, grouped by department and kept apart by order, each line carrying its order id; nothing is added together. In progress: `manifests/2026-09-29-breadify-blocks.md`.
 
 ## Printing
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
@@ -74,8 +76,6 @@ stays where it is and stays the source of truth for the printed page.
 
 ## Considered
 - 💭 **Printing the freezer `Position`** as a where-to-look-first hint. The loader carries it; the page does not show it.
-- 🚧 **One look for the substitute marker** — the same "Want substitute:" wording every time, with only the word **false** in bold, instead of the whole phrase printed loud in capitals.
-- 🚧 **One block per customer** — when a customer has several orders on a route (several order ids), list them in one customer block, each order's lines kept separate and not added together (e.g. 1 Kneippbrød, then 1 Kneippbrød again below it), each marked with its order id. Today each order is its own block (the Rust app's D16, "one order, one block"). In progress: `manifests/2026-09-29-breadify-blocks.md`.
 
 ## Considered
 

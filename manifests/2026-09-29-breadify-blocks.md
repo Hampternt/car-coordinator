@@ -9,13 +9,14 @@
 This pack changes Breadify's web version only. The Rust desktop app and its docs stay as they are.
 
 - **One look for the substitute marker.** Every order prints `want substitute: true` or `want substitute: false` in the same quiet type. When it is false, only the word **false** is bold.
-- **One block per customer at a stop.** A customer can have several orders (several order ids) at one stop on a route. Those orders print in one block, under one customer heading.
-  - Each order keeps its own line with its order id, crates and marker, and its own bread lines below it.
-  - Nothing is added together. "1 Kneippbrød" and "1 Kneippbrød" stay as two lines under two order ids.
+- **One block per customer at a stop.** A customer can have several orders (several order ids) at one stop on a route. Those orders print in one block, under one customer heading, departments included (owner, 2026-09-29).
+  - Inside the block the orders are grouped by department, then kept apart by order.
+  - Every bread line of a block of several orders carries its order id as small, quiet text at its right. Each order's crates and marker sit on its first line. There is no order heading line.
+  - Nothing is added together. "1 Kneippbrød" and "1 Kneippbrød" stay as two lines with two order ids.
 
 Both are deliberate departures from the Rust spec, and the port says so wherever those D-numbers are cited:
 - the marker: D8 and D21;
-- one block per customer: D16, with D20 and D2 following from it.
+- one block per customer: D16, with D20, D2 and D19 following from it.
 
 Three smaller changes come with the pack and are named in Decisions:
 - a missing Order ID is flagged at Check;
@@ -84,30 +85,33 @@ How the items run:
 - Items 1–6 can start on the go. Item 7 waits for owner question 1, and item 8 for questions 1 and 2.
 - There are no dependency edges on the review-round packs.
 - The `dev` worktree has an untracked `--1.ppm`, so every commit names its paths.
+- **The owner's answers came before item 7, so Decisions, Designs B–G and items 7–9 below are already fitted to them.** Where the answers and the first plan differed, the Ledger names each change.
 
 ## Decisions taken
 
 | Decision | Choice |
 |---|---|
-| Web version only | The Rust app and its docs don't change. The port departs from D8/D21 (the marker) and D16 ("one order, one block"). Following from D16, it also departs from D20 (one stamp column per block) and from D2 (the tie-break gains the customer). D9 ("no stop block split") was already departed from for a stop taller than a page. Each departure is written into the comment where its D-number is cited, and into README.md:18. |
+| Web version only | The Rust app and its docs don't change. The port departs from D8/D21 (the marker) and D16 ("one order, one block"). Following from D16, it also departs from D20 (one stamp column per block), from D2 (the tie-break gains the customer) and from D19 (in a block whose orders have different departments, each department is a quiet sub-heading instead of the boxed crate label under the name). D9 ("no stop block split") was already departed from for a stop taller than a page. Each departure is written into the comment where its D-number is cited, and into README.md:18. |
 | Marker wording | `want substitute: true` and `want substitute: false`, lowercase. That is how the true form prints today, so a true order prints exactly as now. Both use one style: Plex Mono 500, 9.2 pt, quiet ink. |
 | What is bold | Only the word `false`, in Plex Mono 700, which is already self-hosted (sheet.css:70-74). Same size, same ink. The owner asked for bold alone, so full ink was considered and not taken. |
 | Badge and bar | Removed, along with the choice on the Configure step. The owner asked for one look every time, and a bar down a block of several orders would mark its true orders too. The choice was never saved (only the crate rules are, app.js:16, :65-82), so nothing needs migrating. |
 | Page note's right half | Dropped (layout.js:675). It explains the loud capitals, and every order now states its own value. The pallet call on the left gets the room. |
-| "Same customer" (default; owner question 1) | Orders merge when they share the route, customer name, department (or both have none), delivery street and route ordering, compared as exact trimmed text. Bread: 4 groups merge, so 148 orders print as 143 blocks. Freezer: 5 groups, so 115 orders print as 107 blocks. No merged group mixes true and false today. |
+| "Same customer" (owner question 1: departments included) | Orders merge when they share the route, customer name, delivery street and route ordering, compared as exact trimmed text. The department is **not** in the key. Bread: 8 groups merge, so 148 orders print as 123 blocks. Freezer: 10 groups, so 115 orders print as 94 blocks. Three real blocks mix true and false: bread Customer 061 at Street 62 and Customer 037 on route 13, freezer Customer 017 on route 4. |
 | The street is always in the key | The address is never printed, so merging two streets would hide a second drop-off. A customer at two streets keeps one block per street, as today. |
-| Where a customer's orders print | The tie-break gains the customer name before the order id, so a stop's orders always sit next to each other. No rule is needed for orders scattered down a route. Checked: this reorders nothing in either sample. A customer at two positions on one route stays two blocks. |
+| Where a customer's orders print | The tie-break becomes sequence, street, customer, department, order id, so a stop's orders always sit next to each other, grouped by department. No rule is needed for orders scattered down a route. Checked: this reorders nothing in either sample. A customer at two positions on one route stays two blocks. |
+| Departments inside a block (owner question 1) | When every order in a block has the same department, the boxed department sits under the name as today. When they differ, the orders with no department come first, straight under the name, with no sub-heading. Each department follows under a quiet sub-heading of its own. `''` sorting before any name is what puts the no-department orders first, and a test guards it: printed after a sub-heading, they would read as that department's. |
 | Exact matching | Two spellings of a name or a street stay separate. That is exactly today's print, so it is never a wrong one. |
 | Per order, never per block | Order id, lines, crates and marker all belong to the order, and nothing is added up. For example, Customer 092's two orders print 2 full + 1 half crates each. Summed, they would print 4 full + 1 half: one crate fewer than is packed. The pallet call and the route total read the flat list of orders and don't change. |
-| The order id | In a block of several orders, every order line prints `Order ⟨id⟩` in full ink, whatever "Show the order ID" says, because the id is what tells the orders apart. The toggle still controls one-order blocks, and its hint (index.html:78-79) says so. |
-| One-order blocks | Unchanged apart from the marker. That covers 138 of 143 bread blocks and 102 of 107 freezer blocks. |
-| Data shape | `route.orders` is the flat, sorted list that every sum reads. `route.stops` is the grouped list the page walks. A stop has no `lines` of its own, so nothing can add across orders by accident. One constructor builds both: `Model.route(nickname, orders)`. |
-| What "stops" counts | Blocks, everywhere it appears. The bread Check step reads 16 routes, 143 stops and 352 lines. |
+| The order id (owner question 2) | In a block of several orders, every bread line carries its order id in the existing `.bf-order-id` look (small, grey, never bold), whatever "Show the order ID" says, because the id is what tells the orders apart. It sits at the right of the line, just left of the tick boxes, so the ids stand in one column. There is no order heading line and no rule between orders. The toggle still controls one-order blocks, and its hint (index.html:78-79) says so. |
+| Crates and marker in a block of several (owner question 2) | Per order, on that order's first line, left of its id: `… Kneippbrød   ■  want substitute: true  1000619017  M F`. The marker is its one quiet look. The crate glyphs keep their size, so full and half stay easy to tell apart; the owner's look before the PR settles whether they should be smaller. Placement is measured: glyphs, then the ×N form (D24), then a line of their own under that first line. |
+| One-order blocks | Unchanged apart from the marker. That covers 115 of 123 bread blocks and 84 of 94 freezer blocks. |
+| Data shape | `route.orders` is the flat, sorted list that every sum reads. `route.stops` is the grouped list the page walks. A stop has no `lines`, `id` or marker value of its own, so nothing can add across orders by accident, and a stop passed where an order belongs throws. One constructor builds both: `Model.route(nickname, orders)`. |
+| What "stops" counts | Blocks, everywhere it appears. The bread Check step reads 16 routes, 123 stops and 352 lines; the freezer's reads 94 stops. |
 | A missing Order ID | A new blocking finding: `Order ID is empty or not a number on row N`. Blocking in the house sense (INVENTORY.md:54): the Check step says the pages would be wrong, and **Continue anyway** stays the leader's call. Today such rows read as 0 and quietly fold into one order. |
 | Wrong values fail loudly | `marker()` throws on anything but `true` or `false`. The code that prints an id throws on anything but a number. `rebuild()` catches the error: no sheets, Print disabled, and one sentence saying why. A stop passed where an order belongs can then never print "false" or "undefined". |
 | Cutting a block taller than a page | Whole orders go first. Only an order taller than a page by itself is cut between its lines. The rules cover both one-order and several-order blocks (Design D). |
 | Changes beyond the ask | Both come in item 9, and the walkthrough looks for both. (1) A cut order's crates print once, on the part where it starts. Today each part shows crates for its own lines only, and the parts can add up to more than the order needs. (2) The "no position assigned" flag never ends a page on its own. |
-| Freezer sheet | Same blocks and order lines, without crates, which are already forced to zero (layout.js:386-389). The flat total adds up by product and is unaffected. |
+| Freezer sheet | Same blocks, ids and markers, without crates, which are already forced to zero (layout.js:386-389). A check line's name does not wrap today, so a line that would overflow with its marker and id lets the name wrap instead. The flat total adds up by product and is unaffected. |
 | Validation | The Order ID check is the only new one. Merging never crosses routes, so `address-on-two-routes` is unchanged. |
 | Where the pack sits | A standalone pack: the review-round container excludes Breadify ("Not in this container"). No update-note entry and no version bump, because the release rule exempts `docs/breadify/` and `scripts/` isn't shipped. It reaches `main` only after the owner has tested `dev`. |
 
@@ -128,8 +132,8 @@ These are deleted: the treatment setting and its UI, the bar, the badge, `.bf-ma
 ### B. What a stop is
 
 `fold()` is unchanged: one order per order id. `Model.route(nickname, orders)` then does two things:
-1. It sorts by `printingPosition`: sequenced or not, sequence, street, department, **customer**, order id.
-2. It groups neighbouring orders that share customer, department, delivery street and sequence into one stop: `{customer, department, deliveryStreet, route, sequence, orders}`.
+1. It sorts by `printingPosition`: sequenced or not, sequence, street, **customer**, department, order id.
+2. It groups neighbouring orders that share customer, delivery street and sequence into one stop: `{customer, deliveryStreet, route, sequence, orders}`. The department stays on each order.
 
 Who reads which list:
 - **`route.orders`** is read by `lineCount`, `routeCrates`, `routeTotal` (and `flatTotal` through it), `supplierKey` and `productsById`.
@@ -149,33 +153,32 @@ Two things stay true:
 
 **A stop with one order** renders exactly as today.
 
-**A stop with several orders** renders like this:
-- **One heading:** the name line, plus the department box when there is one. Nothing sits at the heading's right.
-- **For each order,** in order-id order:
-  - An order line, `div.bf-head-line.bf-order-head`. At the left, `Order` and its `.bf-order-id`. At the right, that order's own crates and marker.
-  - That order's bread lines, in file order, in their own `.bf-lines`. The zebra striping restarts under each order line.
-- **A hairline** above every order line after the first.
+**A stop with several orders** renders like this (owner questions 1 and 2):
+- **One heading:** the name line, plus the boxed department when every order shares one. Nothing sits at the heading's right.
+- **Department groups,** in sort order. The no-department orders come first, straight under the heading. Then, when the block's departments differ, each department opens with a quiet sub-heading: `div.bf-head-line.bf-dpt-sub`.
+- **Orders,** in order-id order within their department. Each order's bread lines are ordinary `.bf-row`s, in file order:
+  - every line carries the order's `.bf-order-id` just left of the tick boxes;
+  - the order's first line also carries its crates and its marker, left of the id.
+- No order heading line and no rule between orders. The zebra restarts under each sub-heading.
 
-The order line reuses heading()'s `place` / `placeCrates`, factored out: full glyphs first, then the ×N compact form (D24), then a spare line below. It is measured, never assumed to fit.
+The first line's crates reuse heading()'s `place` / `placeCrates`, factored out: full glyphs first, then the ×N compact form (D24), then a line of their own under the first line. It is measured, never assumed to fit.
 
 Styles and classes:
-- In an order line, the id is set by `.bf-order-head .bf-order-id`: Plex Mono 500, 9.2 pt, full ink.
-- Order lines are never `.bf-row`, which would upset the freezer's note-field count, and never `.bf-block`, which would upset route 8's 5 blocks.
-- Order lines are `.bf-head-line`, so the overlap check covers them.
+- The id keeps the existing `.bf-order-id` look: Plex Mono 400, 8.3 pt, `--faintest`.
+- Sub-headings are never `.bf-row`, which would upset the freezer's note-field count, and never `.bf-block`, which would upset route 8's 5 blocks. They are `.bf-head-line`, so the overlap check covers them.
+- Every row keeps its note field on the freezer sheet, so the note-field count still equals the rows.
 
-The freezer block is identical apart from the crates.
+The freezer block is identical apart from the crates. Its check line's name is `nowrap` today; a line that overflows once its marker and id are in lets the name wrap instead.
 
-Example: route 11, Customer 017, no department. ■ is a full crate and ▪ a half.
+Example: route 11, Customer 017, three orders with no department and one in Department 09. ■ is a full crate and ▪ a half.
 ```
 Customer 017
-Order 1000619017                            ■  want substitute: true
-P   7  SB  Kneippbrød …                                        M  F
-────────────────────────────────────────────────────────────────────
-Order 1000619019                            ▪  want substitute: true
-P   4  SB  Kneippbrød …                                        M  F
-────────────────────────────────────────────────────────────────────
-Order 1000619029                            ■  want substitute: true
-P  10  SB  Kneippbrød …                                        M  F
+P   7  SB  Kneippbrød …        ■  want substitute: true   1000619017  M  F
+P   4  SB  Kneippbrød …        ▪  want substitute: true   1000619019  M  F
+P  10  SB  Kneippbrød …        ■  want substitute: true   1000619029  M  F
+DPT Department 09
+P   3  SB  …                   ■  want substitute: true   1000622398  M  F
+P   7  SB  …                                              1000622398  M  F
 ```
 
 ### D. Cutting across pages
@@ -186,10 +189,10 @@ P  10  SB  Kneippbrød …                                        M  F
 2. **Measuring.** Every part is built exactly as it will print and measured before it is accepted. Nothing reuses another part's measurement. Today's reuse (layout.js:351-352) only worked because every slice had the same heading.
 3. **The part tag.** Trial parts carry a stand-in tag as wide as `part 99 of 99`. Final parts get their real tag, which is never wider.
 4. **Where a cut can fall.** Only an order that doesn't fit a fresh part whole is cut between its lines. The cut is found by measuring (halve, then step up), as today.
-5. **No bare order line.** An order line never ends a part without at least one of its lines under it.
-6. **The heading.** Every part repeats the customer heading with `part N of M`.
-7. **Several orders.** A continued order opens its part with `Order ⟨id⟩ continued` and its marker, and no crates.
-8. **One order.** Every part carries the heading and the stamp: the marker, plus the id if the toggle is on. Crates print on part 1 only, and there is no order line.
+5. **Departments across a cut** (replaces "no bare order line", since there are no order lines). A part that starts inside a department group opens with that department's sub-heading again. A sub-heading never ends a part without at least one line under it.
+6. **The heading.** Every part repeats the customer heading, and the shared department box where there is one, with `part N of M`.
+7. **Several orders.** A continued order's first line on its new part carries its marker and a quiet `continued` beside its id, and no crates. Without the cue it would read as an order with no crates.
+8. **One order.** Every part carries the heading and the stamp: the marker, plus the id if the toggle is on. Crates print on part 1 only.
 9. **Crates print once per order,** on the part where the order starts. Today `stopSlice` (:321-322) hands each slice to `stopBlock`, which counts crates from that slice's lines only.
 10. **The flag.** The stop right after the unsequenced flag is packed against the limit minus the flag's height. Today a stop whose height falls between (limit − flag) and limit pushes the flag onto a page of its own.
 11. `shareOut` and `rebalance` are otherwise unchanged; they already take pieces whole.
@@ -200,24 +203,25 @@ Until item 9 lands, item 8 uses an interim fallback: a several-order stop taller
 
 `one-customer-many-orders` is a bread fixture made by `make_edge_fixtures.py`:
 - **`line()` gains `accept=True`**, passed through to `acceptAlternatives`. Existing calls are unchanged.
-- **Route 1, the tall customer.** One small ordinary stop first. Then one customer with no department, one street passed as `street=`, and one sequence. It has:
-  - about 14 orders of 12–25 lines;
-  - one order of 80 lines;
+- **Route 1, the tall customer.** One small ordinary stop first. Then one customer at one street passed as `street=`, and one sequence. It has:
+  - about 14 orders of 12–25 lines, some with no department and the rest in three departments;
+  - one order of 80 lines, inside a department, so a cut lands mid-department;
   - an identical pair: same breads, same quantities, two ids;
   - two orders with `accept=False`.
-- **Route 2, the wide customer.** A name about 120 characters long and a long department, with three orders:
-  - one of 250 breads on one line: 25 full crates, too wide for glyphs, so it prints in the compact form;
-  - one with `accept=False`;
-  - one ordinary order.
+- **Route 2, the wide customer.** A name about 120 characters long, with three orders:
+  - one of 250 breads on one line, in a long department: 25 full crates, too wide for glyphs, so it prints in the compact form;
+  - one with `accept=False`, in the same long department;
+  - one ordinary order with no department, so the long department prints as a sub-heading.
+- **Route 3, the shared department.** One customer with two orders in the same department, so the boxed department stays in the heading.
 
 Running the script rewrites every KEEP fixture with new zip timestamps. It also rewrites bakeries-3/4/5 with new product ids, because `hash()` is randomised per run. So:
-- restore every other rewritten fixture with `git checkout --`;
-- commit only the `.py` and the new `.xlsx`, by path.
+- restore every other rewritten fixture with `git checkout --`, busy-real-day, four-figure-line and bakeries-3/4/5 included;
+- check `git status` shows only the `.py` and the new `.xlsx`, and commit those two by path.
 
 <details>
 <summary><b>F. Tests that change in breadify.mjs</b></summary>
 
-- **:92-101 (item 8):** reads 143 stops, with a comment that 148 orders print as 143 blocks.
+- **:92-101 (item 8):** reads 123 stops, with a comment that 148 orders print as 123 blocks.
 - **:103-110 and :404-409:** still exactly two notices each. Item 3 guards this.
 - **:133-135 and :139-144 (item 6):** read `route.orders`. The figures don't change: Customer 012 is [9, 13], and the route 8 table stays.
 - **:208:** unchanged, because `routeCrates` reads `route.orders`.
@@ -226,26 +230,26 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 - **:332-369:** the key becomes `orders:` in item 6. In item 7 it goes through `Model.route`, gains a fourth order, and gains a check that the stop names print.
 - **:441-447 (item 8):** the freezer sheet count is measured again. If it moves:
   - the Ledger names the route whose count changed and why;
-  - the owner looks at it in the browser;
-  - only then does the assertion change, noting that 21 is freezer-list.md's figure.
-- **:469-473:** unchanged, because order lines are never `.bf-row`.
+  - the assertion takes the measured value, with a comment that 21 is freezer-list.md's figure, because the implementer stops before the walkthrough;
+  - the final report escalates it, and the owner looks at it in the PDF and the browser.
+- **:469-473:** unchanged, because every row keeps its note field and sub-headings are never `.bf-row`.
 - **:498 (item 7):** the EDGE list gains `one-customer-many-orders`.
 - **:356, :540, :712 and :853 (item 4):** the `marker: 'word-only'` keys go.
-- **:572 and :605:** the selectors grow in item 2, and gain `.bf-order-head` in item 8.
+- **:572 and :605:** the selectors grow in item 2, and gain `.bf-dpt-sub` in item 8.
 - **:776-795:** the row helper gains `orderIdExact` in item 3. The test still holds, because stops carry `deliveryStreet`.
 - **:828-891:** the key becomes `orders:` in item 6, then goes through `Model.route` in item 7. In item 9, crates print once across the parts.
 
 </details>
 
 <details>
-<summary><b>G. If the owner answers "departments merge too"</b></summary>
+<summary><b>G. "Departments merge too": the owner's answer, and what it costs</b></summary>
 
 - The key drops the department.
-- The sort becomes sequence, street, customer, department, id. Checked: this also reorders nothing in either sample.
-- The department box moves from the heading into each order line of a several-order block.
-- Blocks become 123 on the bread day and 94 on the freezer day.
-- Customer 012 on route 14 becomes one block of 9 orders and 30 lines. Customer 037 on route 13 becomes one block of 8. Both must be measured against the page.
-- True and false then mix inside real blocks: Customers 061 and 037 on the bread day, and Customer 017 on the freezer day. The per-order marker already handles that.
+- The sort becomes sequence, street, customer, department, id. Checked again 2026-09-29: this reorders nothing in either sample.
+- Mixed departments print as quiet sub-headings inside the block (Design C), not in the heading.
+- Blocks become 123 on the bread day and 94 on the freezer day. Re-counted from the samples 2026-09-29.
+- Customer 012 on route 14 becomes one block of 9 orders and 30 lines. Customer 037 on route 13 becomes one block of 8. Both are measured against the page in item 8; one that does not fit takes item 8's interim fallback until item 9.
+- True and false then mix inside real blocks: Customer 061 at Street 62 and Customer 037 on the bread day, and Customer 017 on route 4 of the freezer day. The per-order marker handles that, and item 8 checks it against the model.
 - Items 7 and 8 grow. The Customer 012 assertion still holds, because it counts orders.
 
 </details>
@@ -301,42 +305,48 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 
       The UI still says "stops".
       *Done when:* `grep -nF '.stops' docs/breadify/*.js scripts/breadify.mjs` and `grep -n 'stops:' docs/breadify/*.js scripts/breadify.mjs` both find nothing. test:breadify passes with every figure unchanged: 148 stops, the route 8 table, Customer 012 [9, 13], the six pallet routes and 21 freezer sheets.
-- [ ] **7. Group each route's orders into stops.** Waits for owner question 1. Design B.
-      - Add `Model.route`, and give `printingPosition` its customer tie-break. `group()` and the two hand-built test routes use `Model.route`.
-      - The sequence-leak route gains a fourth order with the third order's customer, department, street and sequence. It also asserts that the stop names print, so an empty render cannot pass.
+- [ ] **7. Group each route's orders into stops.** Owner question 1 answered: departments included. Design B.
+      - Add `Model.route`, and give `printingPosition` its customer tie-break before the department. `group()` and the two hand-built test routes use `Model.route`.
+      - The sequence-leak route gains a fourth order with the third order's customer, street and sequence, in another department. It also asserts that the stop names print, so an empty render cannot pass.
       - Rewrite the comments at model.js:333-335 (fold) and :425-432 (D2) as departures.
       - Add the Design E fixture to KEEP and to EDGE. Nothing renders stops yet, so it prints one block per order for now.
 
       *Done when:* these new assertions pass:
-      - The bread stops total 143, and the freezer stops 107.
-      - Route 11 has one Customer 017 stop with no department, holding 1000619017, 1000619019 and 1000619029 in that order. The Department 09 order 1000622398 is its own stop, right after it.
-      - Customer 061 on route 11 is three stops, with Department 22's 1000622154 and 1000622155 together.
-      - Customer 012 on route 14 is nine stops.
+      - The bread stops total 123, and the freezer stops 94.
+      - Route 11 has one Customer 017 stop holding 1000619017, 1000619019, 1000619029 and then Department 09's 1000622398, in that order.
+      - Customer 061 on route 11 is two stops: Street 112's 1000622508, and Street 62's 1000621633, 1000622154 and 1000622155.
+      - Customer 012 on route 14 is one stop of nine orders and 30 lines.
       - Re-sorting both samples by the old key gives the same order ids on every route.
-      - In the new fixture, `Model.group(Model.fold(rows))` gives the tall customer exactly one stop holding every one of its order ids, and the wide customer likewise.
+      - In the new fixture, `Model.group(Model.fold(rows))` gives the tall customer exactly one stop holding every one of its order ids, and the wide and shared-department customers likewise.
 
       Every existing figure holds, and the new fixture passes every generic edge check.
-- [ ] **8. ⚠️ Print a customer's orders at one stop in one block.** Waits for owner questions 1 and 2. Design C.
+- [ ] **8. ⚠️ Print a customer's orders at one stop in one block.** Owner questions 1 and 2 answered. Design C.
       - `paginate` walks `route.stops`, and `stopBlock` renders a stop.
-      - The order line's id carries the same number guard as `stamp()`.
+      - A row's id carries the same number guard as `stamp()`.
       - Every "stops" count switches to blocks: the page counter via `day()`, the page note, `unsequencedStops`, the Check stats and the route list.
       - The toggle's hint says ids always print in a block of several orders.
       - A several-order stop taller than a page uses the interim fallback from Design D.
       - Comments rewritten as departures:
         - D16: layout.js:381 and sheet.css:386;
         - D20: sheet.css:465-466 and the header at :9-12;
+        - D19: the sheet.css header and the `.bf-dpt` comment (:430-431);
         - `stamp()` (:182-186), `heading()` (:209-218), `.bf-order-id` (sheet.css:501-502) and the zebra rule (:524-525).
 
       *Done when:* breadify.mjs asserts all of this:
-      - The Check step reads 16 routes, 143 stops and 352 lines on the bread day, and 107 stops on the freezer day.
-      - **Route 11, Customer 017:** its no-department block is one `.bf-block` with three `.bf-order-head` lines. They read 1000619017, 1000619019 and 1000619029, each followed by one Kneippbrød `.bf-row` of 7, 4 and 10. Their crate glyphs are full, half, full.
-      - **Customer 092:** its two order lines each carry 2 full + 1 half.
-      - **Marker per order:** a hand-built stop of two orders, one true and one false, prints `false` only on the false order's line, found by its id.
-      - **Show the order ID off:** both ids of the Customer 092 pair and of the Customer 061 Department 22 pair still print, and no one-order block prints an id.
-      - **Ink:** every order line's `.bf-order-id` is computed black.
-      - **Classes:** no `.bf-order-head` is a `.bf-row` or a `.bf-block`, and `.bf-order-head` joins the across and clipping selectors.
-      - **The wide customer:** it prints as one block. Its 250-bread order line carries the compact `×N` form, its refusing order reads false, and nothing overlaps, clips or runs off.
+      - The Check step reads 16 routes, 123 stops and 352 lines on the bread day, and 94 stops on the freezer day.
+      - **Route 11, Customer 017:** one `.bf-block`. Its first three rows are Kneippbrød 7, 4 and 10, carrying 1000619017, 1000619019 and 1000619029, with crate glyphs full, half, full. Then a Department 09 sub-heading, and 1000622398's two rows under it.
+      - **Every several-order block on both days, joined to the model:** for each order, the rows carrying its id equal its line count; only its first row carries crates and a marker; the marker matches `acceptAlternatives`; on bread, the glyphs equal `Model.crateCount(order)`.
+      - **No-department orders first:** in every mixed block, they sit straight under the name, before any sub-heading.
+      - **Customer 092:** its two orders' first rows each carry 2 full + 1 half.
+      - **Marker per order:** a hand-built stop of two orders, one true and one false, prints `false` only on the false order's first row, found by its id.
+      - **Show the order ID off:** every row of a several-order block (the Customer 092 pair, Customer 061 at Street 62) still prints its id, and no one-order block prints an id.
+      - **Ink:** a row's `.bf-order-id` keeps the quiet look: `--faintest`, weight 400.
+      - **Classes:** no `.bf-dpt-sub` is a `.bf-row` or a `.bf-block`, and `.bf-dpt-sub` joins the across and clipping selectors.
+      - **The wide customer:** it prints as one block. Its 250-bread first row carries the compact `×N` form, its refusing order reads false, its long department prints as a sub-heading, and nothing overlaps, clips or runs off.
+      - **The shared department:** its boxed department sits in the heading, and the block has no sub-heading.
+      - **A freezer block of several orders with a long product name**, hand-built: nothing overlaps, clips or runs off.
       - **The tall customer:** it prints one block per order (the fallback), and every id prints once.
+      - **Customer 012 and Customer 037** are measured against the page; the Ledger says whether either took the fallback.
       - **Unchanged:**
         - route 8 is one sheet of 5 blocks;
         - Kneippbrød has 4 dots;
@@ -360,10 +370,10 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       - Every order id prints.
       - Every order's lines print exactly once, in file order.
       - Across all parts, only the 80-line order's id appears on more than one part. Every other order's lines sit on a single part.
-      - Every order line in a part has at least one of its lines under it.
+      - Every row sits under its own order's department, joined by id to the model: a part that starts inside a department opens with its sub-heading, and no sub-heading ends a part without a row under it.
       - There is exactly one `.bf-crates` run per order across all parts. For one-giant-stop that means one, not one per part.
-      - Continued order lines read `Order ⟨id⟩ continued`, with a marker and no crates.
-      - One-giant-stop's later parts carry the heading, the tag and the marker, with no crates and no order line.
+      - A continued order's first row on its new part reads `continued`, with a marker and no crates.
+      - One-giant-stop's later parts carry the heading, the tag and the marker, with no crates.
       - Only the two refusing orders read false.
       - No sheet's body ends with `.bf-flag`. This holds on both sample days, on every edge fixture, and across a sweep of 30 to 70 lines on an unsequenced stop that follows one sequenced stop.
 
@@ -458,14 +468,28 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 - **Pack gate:** `CHROMIUM_PATH=/usr/bin/google-chrome npm test`, both suites, because `check.sh` changed. Say that the suite ran on system Chrome, not the pinned Playwright Chromium that CI uses.
 - **Review:** items 8 and 9 individually, plus one pass for the rest.
 - **A look at the printed sheets in a browser before the PR.** Open `/breadify/` and hard-reload first.
-  1. **Bread sample, Check step:** 16 routes, 143 stops, 352 lines, and two notices.
+  1. **Bread sample, Check step:** 16 routes, 123 stops, 352 lines, and two notices.
   2. **Configure step:** there are no substitute choices.
-  3. **Route 11:** Customer 017's three orders sit in one block, with crates full, half, full. Its Department 09 block follows. Customer 061 Department 22 shows two bold "false".
-  4. **Route 9, with Show the order ID off:** Customer 092's two ids still print, and the one-order blocks show none.
+  3. **Route 11:** Customer 017's four orders sit in one block: the three Kneippbrød lines with crates full, half, full, then Department 09 under a quiet sub-heading. Customer 061 at Street 62 shows Department 16, then Department 22 with two bold "false".
+  4. **Route 9, with Show the order ID off:** Customer 092's two ids still print on every line, and the one-order blocks show none.
   5. **Route 8:** one sheet, five blocks.
-  6. **Freezer sample:** route 9's Customer 141 is one block of five orders, and the sheet count is as asserted.
-  7. **The new fixture:** the tall customer runs across parts with "continued" lines, and crates print once per order. One-giant-stop's crates print once. No page ends with the "no position assigned" flag.
-  8. **Print preview at 100 %, or a PDF:** "false" is plainly bolder on paper than "true".
+  6. **Freezer sample:** route 9's Customer 141 is one block of five orders, route 11's Customer 159 keeps its boxed department, and the sheet count is as asserted.
+  7. **The new fixture:** the tall customer runs across parts, a continued order says "continued", and crates print once per order. One-giant-stop's crates print once. No page ends with the "no position assigned" flag.
+  8. **Print preview at 100 %, or a PDF:** "false" is plainly bolder on paper than "true", and the ids are quiet but readable.
 - **At pack close:** item 10. No update-note entry and no version bump.
 
 ## Ledger
+
+- 2026-09-29 · **Start.** Branch `breadify-blocks` cut from `origin/dev` at d1d1117, in its own worktree. Baseline on unchanged code: `npm run test:breadify` all passed, `npm run test:car` all checks passed, both on system Chrome (`/usr/bin/google-chrome`).
+- 2026-09-29 · **Plan fitted to the owner's answers**, before any code. Each change:
+  - Key: the department left the grouping key (question 1). Re-counted from the samples: bread 148 orders → 123 blocks (8 merged groups), freezer 115 → 94 (10 groups). The old key's 143/107 are gone everywhere they appeared.
+  - Sort: the tie-break is sequence, street, customer, department, id. Re-checked: it reorders nothing in either sample.
+  - Departments inside a block: new decision row. A shared department keeps its box in the heading (only freezer Customer 159 on route 11 is such a block today); mixed departments get quiet sub-headings, no-department orders first. This departs from D19 too, so D19 joined the departures.
+  - The order id (question 2): every line of a several-order block carries its id in the existing quiet `.bf-order-id` look, in a column just left of the tick boxes. The plan's `Order ⟨id⟩` heading line in full ink, and its hairline, are gone. Item 8's "computed black" check became "keeps the quiet look".
+  - Crates and marker: per order, on the order's first line, left of the id. Glyphs keep their size so full and half stay easy to tell apart; flagged for the owner's look.
+  - Freezer: the check line's name may wrap when a marker and id would overflow the line. New item 8 check with a hand-built long-name freezer block.
+  - Design D rule 5 ("no bare order line") became "departments across a cut"; rule 7's `Order ⟨id⟩ continued` became a quiet `continued` beside the id on the continued order's first row.
+  - Design E: the tall customer gains departments (the 80-line order inside one), the wide customer is a mixed block, and a route 3 shared-department customer is added.
+  - Design F: the freezer sheet count, if it moves, takes the measured value and is escalated in the report, because the implementer stops before the walkthrough.
+  - Items 7–9 done-conditions and the walkthrough list rewritten to match; item 8 gains a check of every several-order block on both days against the model.
+- 2026-09-29 · **Gates "on the go":** the two 🚧 lines moved from Breadify's Considered up under "## The printed sheet" in INVENTORY.md, as pointers to this manifest.
