@@ -168,16 +168,48 @@ const Store = (() => {
     return normalise(raw, defaults);
   }
 
+  /* ---------- per-browser preferences ----------
+     What belongs to this browser rather than to the plan: which update note
+     it has shown, whether the save file has to be read before it is written.
+     Kept under carcoord:pref:, never on the plan, so none of it travels into
+     Export, the save file, backups or share codes. Every access is wrapped,
+     so a browser that refuses storage still starts. */
+  const PREF = 'carcoord:pref:';
+  // undefined when storage cannot be read at all, which is not the same as
+  // never set (null): a caller that must fail closed can tell them apart.
+  function pref(name) {
+    try { return localStorage.getItem(PREF + name); } catch { return undefined; }
+  }
+  // null removes it. Returns whether storage took the change.
+  function setPref(name, value) {
+    try {
+      if (value === null || value === undefined) localStorage.removeItem(PREF + name);
+      else localStorage.setItem(PREF + name, String(value));
+      return true;
+    } catch { return false; }
+  }
+
   /* ---------- localStorage ---------- */
   let localUsable = false;
+  // The saved text exactly as this load found it, so the update archive can
+  // keep it byte for byte, and whether this load was one the update note must
+  // wait out: unreadable, or written by a newer version. Both describe the
+  // load only; an import later on changes neither.
+  let localText = null;
+  let trouble = false;
+  let appVersion = null;
 
   function readLocal(defaults) {
     let raw = null;
+    let text = null;
     let unreadable = false;
-    try { raw = JSON.parse(localStorage.getItem(KEY)); } catch { unreadable = true; }
+    try { text = localStorage.getItem(KEY); raw = JSON.parse(text); } catch { unreadable = true; }
+    localText = text;
     const { state, repaired, usable } = migrate(raw, defaults);
     localUsable = usable;
-    if (unreadable || (!usable && localStorage.getItem(KEY) !== null)) {
+    trouble = !!raw && typeof raw === 'object' && (Number(raw.schemaVersion) || 0) > SCHEMA;
+    if (unreadable || (!usable && text !== null)) {
+      trouble = true;
       notices.push({ kind: 'warn', text: 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
     } else if (repaired.length) {
       notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
@@ -296,18 +328,19 @@ const Store = (() => {
      when the file and the screen have been brought together: a question
      answered, a file found empty or holding the same plan, a plan recovered
      from it, or a file linked, opened or let go. If it cannot be stored it
-     holds in memory, which errs towards asking. Kept under carcoord:pref:,
-     the per-browser keys the update-note pack reads through Store.pref. */
-  const CHECK_KEY = 'carcoord:pref:fileNeedsCheck';
+     holds in memory, which errs towards asking, and storage that cannot be
+     read counts as set. A per-browser pref: carcoord:pref:fileNeedsCheck. */
+  const CHECK = 'fileNeedsCheck';
   let checkThisSession = false;
   const needsCheck = () => {
     if (checkThisSession) return true;
-    try { return localStorage.getItem(CHECK_KEY) === '1'; } catch { return true; }
+    const v = pref(CHECK);
+    return v === undefined || v === '1';
   };
-  const markCheck = () => { try { localStorage.setItem(CHECK_KEY, '1'); } catch { checkThisSession = true; } };
+  const markCheck = () => { if (!setPref(CHECK, '1')) checkThisSession = true; };
   const clearCheck = () => {
     checkThisSession = false;
-    try { localStorage.removeItem(CHECK_KEY); } catch { /* a read that throws still asks */ }
+    setPref(CHECK, null);   // a removal that fails leaves it set, which still asks
   };
   let pending = null;
   let timer = null;
@@ -489,8 +522,11 @@ const Store = (() => {
   }
 
   /* ---------- startup ---------- */
-  async function init(defaults, changed) {
+  // `version` is the running APP_VERSION, passed in rather than read from
+  // app.js, so the Store never depends on which app.js it was paired with.
+  async function init(defaults, changed, version) {
     onChange = changed || (() => {});
+    appVersion = typeof version === 'string' ? version : null;
     const state = readLocal(defaults);
     if (!localUsable) markCheck();
     askPersist();
@@ -566,12 +602,15 @@ const Store = (() => {
 
   // Only usable data should stop us reading the linked save file back.
   const hasUsableLocalData = () => localUsable;
+  const savedText = () => localText;
+  const loadTrouble = () => trouble;
 
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, init, recoverFromFile, checkFileAtStart, hasUsableLocalData,
+    SCHEMA, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
+    pref, setPref,
     save(state) { writeLocal(state); queueFileWrite(state); },
     // This browser only, leaving the file as it is until the next real change.
     saveLocal(state) { writeLocal(state); },

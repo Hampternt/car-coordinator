@@ -48,6 +48,7 @@ await page.goto(base, { waitUntil: 'networkidle' });
 // The tab's own empty message, not the template shelf's further down it.
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
 check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
 
 // An unescaped quote in an inline data: URI silently dumps the rest of the
 // attribute into the document as text, which nothing else here would catch.
@@ -270,6 +271,8 @@ check('import replaces the data', (await page.locator('#tab-cars tbody tr').firs
 await page.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
 await page.reload({ waitUntil: 'networkidle' });
 check('survives corrupt saved data', await page.locator('#notices .notice.warn').isVisible());
+check('an unreadable save is load trouble, and its text is kept byte for byte',
+  await page.evaluate(() => Store.loadTrouble() === true && Store.savedText() === '{not json at all'));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: 'not-a-date', labels: 'nope', cars: [{ id: 'c1', reg: 'DD44444' }],
@@ -279,6 +282,7 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
 await page.reload({ waitUntil: 'networkidle' });
 check('repairs a dangling car reference', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').inputValue()) === '');
 check('keeps the good fields while repairing', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Kept');
+check('a repaired but usable save is no load trouble', await page.evaluate(() => Store.loadTrouble() === false));
 
 // --- data saved by the previous version (no round, no roster) ---
 // The fields v1 never wrote must arrive at their defaults, quietly: a leader
@@ -333,6 +337,7 @@ check('a weekday that is not a day is no weekday at all', await page.evaluate(()
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
 check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));
+check('and a save from a newer version is load trouble', await page.evaluate(() => Store.loadTrouble() === true));
 
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
@@ -2243,6 +2248,48 @@ check('with a plan of its own, Reconnect writes it to the file without asking',
   kept.writes === 1 && JSON.parse(kept.text).cars.length === 17 && kept.hold === null);
 check('the save-file cases log no console errors', fpErrors.length === 0, fpErrors.join(' | '));
 await pcFile.close();
+
+// --- the update note's pieces in the Store ---
+// On a context of its own, so what it stores cannot leak into the cases above.
+const pcNote = await browser.newContext();
+const un = await pcNote.newPage();
+const unErrors = [];
+un.on('console', (m) => m.type() === 'error' && unErrors.push(m.text()));
+un.on('pageerror', (e) => unErrors.push(String(e)));
+await un.goto(base, { waitUntil: 'networkidle' });
+
+// A per-browser pref is stored beside the plan, never in it.
+const prefTrip = await un.evaluate(() => {
+  const stored = Store.setPref('smokeTest', 'a value');
+  const back = Store.pref('smokeTest');
+  const raw = localStorage.getItem('carcoord:pref:smokeTest');
+  Store.setPref('smokeTest', null);
+  return { stored, back, raw, gone: Store.pref('smokeTest'), unset: Store.pref('neverSet') };
+});
+same('a pref round-trips, and null removes it', prefTrip, { stored: true, back: 'a value', raw: 'a value', gone: null, unset: null });
+await un.evaluate(() => { Store.setPref('seenUpdate', '0.0.1'); Store.setPref('fileNeedsCheck', '1'); save(); tab = 'data'; render(); });
+const [prefExport] = await Promise.all([un.waitForEvent('download'), un.click('[data-act="export"]')]);
+const prefExported = await readFile(await prefExport.path(), 'utf8');
+check('an Export carries no pref', !/seenUpdate|fileNeedsCheck|carcoord:pref/.test(prefExported)
+  && !Object.keys(JSON.parse(prefExported)).some((k) => /pref|seen/i.test(k)), Object.keys(JSON.parse(prefExported)).join(','));
+await un.evaluate(() => { localStorage.clear(); });
+await un.reload({ waitUntil: 'networkidle' });
+
+// Load trouble describes the load, not what happens after it.
+await un.setInputFiles('#importFile', { name: 'newer.json', mimeType: 'application/json',
+  buffer: Buffer.from(JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [{ id: 'c1', reg: 'NEW1' }], positions: [], labels: [], routes: [] })) });
+await un.waitForFunction(() => state.cars.length === 1);
+check('importing newer data is not load trouble', await un.evaluate(() => Store.loadTrouble() === false));
+// The saved text, whatever it is, exactly as stored.
+for (const text of ['{not json', '{"schemaVersion":4,"date":"2026-09-29","cars":[],"routes":[]}   ', '[]']) {
+  await un.evaluate((t) => localStorage.setItem('carcoord:v1', t), text);
+  await un.reload({ waitUntil: 'networkidle' });
+  check(`savedText() returns ${JSON.stringify(text)} byte for byte`, (await un.evaluate(() => Store.savedText())) === text);
+}
+await un.evaluate(() => { localStorage.clear(); });
+
+check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
+await pcNote.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and
