@@ -2767,6 +2767,32 @@ check('and the note claims no copy it did not make', brokenNote.notes === 1 && !
 check('no console errors with the archive step broken', broken.errs.length === 0, broken.errs.join(' | '));
 await broken.ctx.close();
 
+// The same for the note's own step: it failing must stop nothing after it.
+const noteBroke = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {
+  const res = await route.fetch();
+  await route.fulfill({ response: res, body: `${await res.text()}\nStore.loadTrouble = () => { throw new Error('note step broke'); };\n` });
+}));
+await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+await linkOpfs(noteBroke.pg, otherPlan);
+await noteBroke.pg.reload({ waitUntil: 'networkidle' });
+await noteBroke.pg.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+check('with the note step broken, the save-file hold is still raised and drawn',
+  (await noteBroke.pg.evaluate(() => Store.file.hold && Store.file.hold.kind)) === 'differs'
+  && (await noteBroke.pg.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused')
+  && (await noteBroke.pg.locator('#tab-plan tbody tr [data-field="driver"]').first().inputValue()) === 'Returning Leader');
+await noteBroke.pg.evaluate(async () => { state.routes[0].driver = 'Typed after start-up'; save(); await Store.flush(); });
+check('and nothing is written to the file, no note is shown and nothing is marked',
+  (await opfsText(noteBroke.pg)) === otherPlan && (await opened(noteBroke.pg)).notes === 0
+  && (await noteBroke.pg.evaluate(() => localStorage.getItem('carcoord:pref:seenUpdate'))) === null);
+const brokeCode = await noteBroke.pg.evaluate(async () => Share.encode(state, 'day'));
+await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan });
+await noteBroke.pg.goto('about:blank');
+await noteBroke.pg.goto(`${base}#d=${brokeCode}`, { waitUntil: 'networkidle' });
+await noteBroke.pg.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+check('and a share link still opens its dialog', (await noteBroke.pg.locator('#shareDlg[open]').count()) === 1);
+check('no page errors with the note step broken', noteBroke.errs.length === 0, noteBroke.errs.join(' | '));
+await noteBroke.ctx.close();
+
 // Missing pieces, as after a deploy with some files still cached: no release
 // notes, and a store.js without archives or prefs.
 const partial = await newContext(async (ctx) => {
