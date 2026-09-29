@@ -11,7 +11,8 @@
     "screens": "node scripts/screens.mjs",
     "test:car": "node scripts/smoke.mjs",
     "test:breadify": "node scripts/breadify.mjs",
-    "upgrade": "node scripts/upgrade.mjs"
+    "upgrade": "node scripts/upgrade.mjs",
+    "colours": "node scripts/colours.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
