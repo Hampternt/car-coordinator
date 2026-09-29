@@ -30,6 +30,99 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('response', (r) => r.status() >= 400 && errors.push(`HTTP ${r.status()} ${r.url()}`));
 
+// The checks every printed sheet has to pass, whoever made it: the two sample
+// days and every edge fixture alike. Installed into each page load, so any
+// evaluate below can hand it the sheets it laid out.
+//
+// Staying inside the paper is not the same as being readable. Two things fit
+// a sheet perfectly well and still make it useless: type set on top of other
+// type, and type clipped away by the box holding it. Both happened — a
+// quantity of 2147483648 printed through "Rundstykke", and the supplier key
+// lost its last codes off the end of the band — and neither moved a single
+// bounding box outside the page. The marker, the stamp and the order id are
+// in the lists because they are what tells one order from another.
+await page.addInitScript(() => {
+  window.inspectSheets = (sheets) => {
+    const ruler = document.createElement('div');
+    ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+    document.body.append(ruler);
+    const perPx = 100 / ruler.getBoundingClientRect().width;
+    ruler.remove();
+
+    let down = 0;
+    let across = 0;
+    let clearance = Infinity;
+    const collisions = [];
+    const clipped = [];
+    let printed = '';
+    for (const sheet of sheets) {
+      const body = sheet.querySelector('.bf-body');
+      const foot = sheet.querySelector('.bf-footer');
+      const last = body.lastElementChild;
+      const bottom = last ? last.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
+      clearance = Math.min(clearance, (foot.getBoundingClientRect().top - bottom) * perPx);
+      down = Math.max(down, (sheet.scrollHeight - sheet.clientHeight) * perPx);
+
+      const edge =
+        sheet.getBoundingClientRect().right - parseFloat(getComputedStyle(sheet).paddingRight);
+      for (const node of sheet.querySelectorAll(
+        '.bf-name, .bf-product, .bf-dpt-name, .bf-total-product, .bf-route-number, .bf-crates, ' +
+          '.bf-total-col, .bf-stamp, .bf-marker, .bf-order-id',
+      )) {
+        across = Math.max(across, (node.getBoundingClientRect().right - edge) * perPx);
+      }
+
+      for (const line of sheet.querySelectorAll('.bf-row, .bf-total-row, .bf-total-head, .bf-head-line')) {
+        const kids = Array.from(line.children)
+          .map((node) => ({ name: node.className.split(' ')[0], box: node.getBoundingClientRect() }))
+          .filter((k) => k.box.width > 0);
+        for (let i = 0; i < kids.length; i += 1) {
+          for (let j = i + 1; j < kids.length; j += 1) {
+            const a = kids[i].box;
+            const b = kids[j].box;
+            const sameLine = a.top < b.bottom - 1 && b.top < a.bottom - 1;
+            const over = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            if (sameLine && over > 1) collisions.push(`${kids[i].name}/${kids[j].name}`);
+          }
+        }
+      }
+      for (const node of sheet.querySelectorAll(
+        '.bf-legend-suppliers, .bf-code, .bf-qty, .bf-total-qty, .bf-name, .bf-total-name, ' +
+          '.bf-stamp, .bf-marker, .bf-order-id',
+      )) {
+        if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
+      }
+      printed += ` ${sheet.textContent}`;
+    }
+
+    return {
+      sheets: sheets.length,
+      down: Math.round(down * 10) / 10,
+      across: Math.round(across * 10) / 10,
+      clearance: Math.round(clearance * 10) / 10,
+      collisions: Array.from(new Set(collisions)),
+      clipped: Array.from(new Set(clipped)),
+      // A number that went wrong shows up as one of these on the paper.
+      nonsense: ['NaN', 'Infinity', 'undefined', '[object'].filter((w) => printed.includes(w)),
+      zoomed: sheets.some((sheet) => sheet.style.zoom !== ''),
+    };
+  };
+});
+
+/** The inspection's verdicts, for a set of sheets already on the page. */
+const inspected = (what, seen) => {
+  check(
+    `${what}: nothing runs off the paper`,
+    seen.down <= 0.5 && seen.across <= 0.5 && !seen.zoomed,
+    `${seen.down} mm down, ${seen.across} mm across, ${seen.sheets} sheets` +
+      (seen.zoomed ? ', measured zoomed' : ''),
+  );
+  check(`${what}: every sheet still keeps its 10 mm`, seen.clearance >= 10, `${seen.clearance} mm`);
+  same(`${what}: nothing is set on top of anything else`, seen.collisions, []);
+  same(`${what}: nothing is clipped away by the box holding it`, seen.clipped, []);
+  same(`${what}: nothing nonsensical is printed`, seen.nonsense, []);
+};
+
 await page.goto(`${base}breadify/`, { waitUntil: 'networkidle' });
 
 // Every measurement on the sheet assumes these eight faces. A face that did
@@ -296,6 +389,10 @@ same(
   spilling.map((s) => [s.route, s.page, Math.round(s.overflow * 10) / 10]),
   [],
 );
+inspected(
+  'the bread day',
+  await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+);
 
 // The handoff's verified budget: route 8 is 5 stops, 13 lines and its total,
 // on one sheet.
@@ -471,6 +568,10 @@ check(
   freezer.noteFields === freezer.lines,
   `${freezer.noteFields} of ${freezer.lines}`,
 );
+inspected(
+  'the freezer day',
+  await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+);
 
 // F10: flipping the kind re-runs validation on the spot, since what counts as
 // familiar depends on it.
@@ -554,58 +655,12 @@ for (const [folder, fixture, what] of EDGE) {
       }
       for (const sheet of pages) host.appendChild(sheet);
 
-      let down = 0;
-      let across = 0;
-      let clearance = Infinity;
-      for (const sheet of pages) {
-        const body = sheet.querySelector('.bf-body');
-        const foot = sheet.querySelector('.bf-footer');
-        const last = body.lastElementChild;
-        const bottom = last
-          ? last.getBoundingClientRect().bottom
-          : body.getBoundingClientRect().top;
-        clearance = Math.min(clearance, (foot.getBoundingClientRect().top - bottom) * perPx);
-        down = Math.max(down, (sheet.scrollHeight - sheet.clientHeight) * perPx);
-        const edge =
-          sheet.getBoundingClientRect().right -
-          parseFloat(getComputedStyle(sheet).paddingRight);
-        for (const node of sheet.querySelectorAll('.bf-name, .bf-product, .bf-dpt-name, .bf-total-product, .bf-route-number, .bf-crates, .bf-total-col')) {
-          across = Math.max(across, (node.getBoundingClientRect().right - edge) * perPx);
-        }
-      }
+      const seen = inspectSheets(pages);
+
       // Every code the lines print has to be spelled out in the key above them.
       const codes = new Set(Array.from(host.querySelectorAll('.bf-code'), (n) => n.textContent));
       const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
       const unexplained = Array.from(codes).filter((code) => !key.includes(code));
-
-      // Staying inside the paper is not the same as being readable. Two things
-      // fit a sheet perfectly well and still make it useless: type set on top
-      // of other type, and type clipped away by the box holding it. Both
-      // happened — a quantity of 2147483648 printed through "Rundstykke", and
-      // the supplier key lost its last codes off the end of the band — and
-      // neither moved a single bounding box outside the page.
-      const collisions = [];
-      const clipped = [];
-      for (const sheet of pages) {
-        for (const line of sheet.querySelectorAll('.bf-row, .bf-total-row, .bf-total-head, .bf-head-line')) {
-          const kids = Array.from(line.children).map((node) => ({
-            name: node.className.split(' ')[0],
-            box: node.getBoundingClientRect(),
-          })).filter((k) => k.box.width > 0);
-          for (let i = 0; i < kids.length; i += 1) {
-            for (let j = i + 1; j < kids.length; j += 1) {
-              const a = kids[i].box;
-              const b = kids[j].box;
-              const sameLine = a.top < b.bottom - 1 && b.top < a.bottom - 1;
-              const over = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-              if (sameLine && over > 1) collisions.push(`${kids[i].name}/${kids[j].name}`);
-            }
-          }
-        }
-        for (const node of sheet.querySelectorAll('.bf-legend-suppliers, .bf-code, .bf-qty, .bf-total-qty, .bf-name, .bf-total-name')) {
-          if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
-        }
-      }
 
       // One bakery, one column — and every column the same width. A wrapping
       // flex row stretched whatever landed on the last row to fill it, so a
@@ -618,13 +673,8 @@ for (const [folder, fixture, what] of EDGE) {
       }
 
       return {
-        pages: pages.length,
-        down: Math.round(down * 10) / 10,
-        across: Math.round(across * 10) / 10,
-        clearance: Math.round(clearance * 10) / 10,
+        seen,
         unexplained,
-        collisions: Array.from(new Set(collisions)),
-        clipped: Array.from(new Set(clipped)),
         columnWidths: Array.from(widths).sort((a, b) => a - b),
       };
     } finally {
@@ -632,19 +682,8 @@ for (const [folder, fixture, what] of EDGE) {
     }
   }, [bytes]);
 
-  check(
-    `${what}: nothing runs off the paper`,
-    shape.down <= 0.5 && shape.across <= 0.5,
-    `${shape.down} mm down, ${shape.across} mm across, ${shape.pages} sheets`,
-  );
-  check(
-    `${what}: every sheet still keeps its 10 mm`,
-    shape.clearance >= 10,
-    `${shape.clearance} mm`,
-  );
+  inspected(what, shape.seen);
   same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
-  same(`${what}: nothing is set on top of anything else`, shape.collisions, []);
-  same(`${what}: nothing is clipped away by the box holding it`, shape.clipped, []);
   check(
     `${what}: the bakery columns are all one width`,
     shape.columnWidths.length <= 1,
