@@ -13,6 +13,12 @@
 // never left as the last thing on a page; and at least 10 mm of clearance
 // between the last content and the footer, below which a printer with
 // slightly different metrics silently clips a row.
+//
+// D9 gives way in one place, a departure of the web port's own: a block
+// taller than a page is cut rather than run off the paper — between orders
+// first, and inside an order only when that order alone is taller than a
+// page (see stopPieces()). The Rust app's blocks are one order each; the
+// port's can be a customer's several orders at one stop.
 
 'use strict';
 
@@ -259,6 +265,26 @@ const Sheet = (() => {
   }
 
   /**
+   * A heading's lines before any marks: the name, with a cut block's
+   * `part N of M` beside it where that fits and on a line of its own where it
+   * does not, then the boxed department when there is one.
+   *
+   * The tag goes in first and is measured, because a long name can leave it
+   * no room — added afterwards, it used to be set past whatever the marks had
+   * already been measured into.
+   */
+  function headLines(customer, department, tag, measure) {
+    const lines = [nameLine(customer)];
+    if (tag && !place(lines[0], element('span', 'bf-block-part', tag), null, measure)) {
+      lines.push(append(element('div', 'bf-head-line'), element('span', 'bf-block-part', tag)));
+    }
+    if (department) {
+      lines.push(append(element('div', 'bf-head-line'), departmentBox(department)));
+    }
+    return lines;
+  }
+
+  /**
    * The heading of a one-order block, placed the way the Rust layout places
    * it.
    *
@@ -272,11 +298,8 @@ const Sheet = (() => {
    * A block of several orders has no marks in its heading at all: each order
    * carries its own on its first line (see orderRows()).
    */
-  function heading(order, settings, count, measure) {
-    const lines = [nameLine(order.customer)];
-    if (order.department) {
-      lines.push(append(element('div', 'bf-head-line'), departmentBox(order.department)));
-    }
+  function heading(order, settings, count, measure, tag) {
+    const lines = headLines(order.customer, order.department, tag, measure);
 
     const total = count.large + count.small;
     let cratesWanted = total > 0;
@@ -357,18 +380,26 @@ const Sheet = (() => {
    * read as another's. Nothing is added across orders: each keeps its own
    * lines, crates and marker.
    *
+   * `segment` is the run of the order's lines this block carries. An order
+   * cut across pages opens its next part with a quiet "continued", its marker
+   * and its id, and no crates: those print once, where the order starts.
+   * Without the word it would read as an order that needs no crate.
+   *
    * The first line is measured, never assumed to fit: full glyphs, then the
    * compact form (D24); on a check line, whose name does not otherwise wrap,
    * then a wrapped name; and only then do the crates and marker take a line
    * of their own under it. Any other check line whose name will not fit
    * beside its id wraps the name too.
    */
-  function orderRows(order, settings, measure, from = 0) {
+  function orderRows(order, settings, measure, segment, from = 0) {
     const bread = settings.kind === Model.BREAD;
-    const count = bread ? Model.crateCount(order, settings.crates) : { large: 0, small: 0 };
+    const continued = segment.from > 0;
+    const count =
+      bread && !continued ? Model.crateCount(order, settings.crates) : { large: 0, small: 0 };
     const total = count.large + count.small;
+    const cue = () => (continued ? element('span', 'bf-order-cont', 'continued') : null);
 
-    return order.lines.map((line, index) => {
+    return order.lines.slice(segment.from, segment.to).map((line, index) => {
       const row = breadLine(line, settings, (from + index) % 2 === 1);
       row.classList.add('bf-row-shared');
       const stamp = element('span', 'bf-row-stamp');
@@ -383,16 +414,16 @@ const Sheet = (() => {
 
       const mark = marker(order);
       stamp.insertBefore(mark, stamp.firstChild);
-      const makers = [];
-      if (total > 0 && crateRunWidth(total) <= 194) makers.push(() => crateRun(count));
-      if (total > 0) makers.push(() => crateCompact(count));
-      if (total === 0) makers.push(() => null);
+      const leads = [];
+      if (total > 0 && crateRunWidth(total) <= 194) leads.push(() => crateRun(count));
+      if (total > 0) leads.push(() => crateCompact(count));
+      if (total === 0) leads.push(cue);
       const fits = () => {
-        for (const make of makers) {
-          const crates = make();
-          if (crates) stamp.insertBefore(crates, stamp.firstChild);
+        for (const make of leads) {
+          const lead = make();
+          if (lead) stamp.insertBefore(lead, stamp.firstChild);
           if (!measure.overflows(row)) return true;
-          if (crates) stamp.removeChild(crates);
+          if (lead) stamp.removeChild(lead);
         }
         return false;
       };
@@ -407,13 +438,18 @@ const Sheet = (() => {
       // visible, rather than an order going out with no crate count.
       stamp.removeChild(mark);
       const extra = element('div', 'bf-head-line bf-order-extra');
-      const markStamp = append(element('span', 'bf-stamp'), marker(order));
+      const markStamp = append(element('span', 'bf-stamp'), cue(), marker(order));
       extra.appendChild(markStamp);
       if (total > 0 && !placeCrates(extra, count, markStamp, measure)) {
         extra.insertBefore(crateCompact(count), markStamp);
       }
       return [row, extra];
     }).flat();
+  }
+
+  /** All of an order's lines: the segment every uncut block carries. */
+  function whole(order) {
+    return { order, from: 0, to: order.lines.length };
   }
 
   /** An order's department groups, in the order the stop already sorts them. */
@@ -452,144 +488,197 @@ const Sheet = (() => {
    * apart by order id. The heading is the name, and the boxed department too
    * when every order shares one; otherwise each department is a quiet
    * sub-heading. The zebra restarts under each.
+   *
+   * `segments` are the runs of the orders' lines this block carries: every
+   * order whole, or one part's share of a block cut across pages. A part that
+   * starts inside a department opens with that department's sub-heading
+   * again, so its lines never read as the department above them, or as none.
    */
-  function sharedBlock(stop, settings, measure) {
+  function sharedBlock(stop, segments, settings, measure, tag) {
     const block = element('article', 'bf-block');
     const groups = departmentGroups(stop.orders);
     const shared = groups.length === 1 ? groups[0].department : null;
+    for (const line of headLines(stop.customer, shared, tag, measure)) block.appendChild(line);
 
-    block.appendChild(nameLine(stop.customer));
-    if (shared) {
-      block.appendChild(append(element('div', 'bf-head-line'), departmentBox(shared)));
-    }
-    for (const group of groups) {
-      if (group.department && !shared) {
-        block.appendChild(departmentSubHeading(group.department));
+    let lines = null;
+    let department;
+    let from = 0;
+    for (const segment of segments) {
+      if (lines === null || segment.order.department !== department) {
+        department = segment.order.department;
+        // Lines with no department after a sub-heading would read as that
+        // department's. The sort never allows it; this says so if it ever did.
+        if (!department && block.querySelector('.bf-dpt-sub')) {
+          throw new Error(
+            `order ${segment.order.id} has no department but would print under another one`,
+          );
+        }
+        if (department && !shared) block.appendChild(departmentSubHeading(department));
+        lines = block.appendChild(element('div', 'bf-lines'));
+        from = 0;
       }
-      const lines = element('div', 'bf-lines');
-      let from = 0;
-      for (const order of group.orders) {
-        for (const node of orderRows(order, settings, measure, from)) lines.appendChild(node);
-        from += order.lines.length;
+      for (const node of orderRows(segment.order, settings, measure, segment, from)) {
+        lines.appendChild(node);
       }
-      block.appendChild(lines);
+      from += segment.to - segment.from;
     }
     return block;
   }
 
   /**
-   * The same block again, carrying only some of its lines — the last resort
-   * for a stop that cannot fit a page whole.
-   *
-   * The heading is repeated so the continuation is still addressed to a
-   * customer, and marked, so nobody reads it as a second delivery to the same
-   * place. D16's "one order, one block" is kept wherever it can be: this only
-   * ever runs when the alternative is ink off the edge of the paper.
-   */
-  function orderSlice(order, lines, settings, measure, part, parts) {
-    const slice = { ...order, lines };
-    const block = orderBlock(slice, settings, measure);
-    if (parts > 1) {
-      const tag = element('span', 'bf-block-part', `part ${part} of ${parts}`);
-      const first = block.querySelector('.bf-head-line');
-      if (first) first.appendChild(tag);
-      else block.insertBefore(tag, block.firstChild);
-    }
-    return block;
-  }
-
-  /**
-   * A one-order block, split across as few pages as it takes.
-   *
-   * Measured after the fact rather than predicted: the heading's own height
-   * depends on how many lines its marks needed, so the only honest way to
-   * know how many product lines fit is to build a slice and measure it. The
-   * search halves the slice until one fits, then keeps going from there.
-   *
-   * Returns one piece when the block fits, which is every real stop in both
-   * sample exports — this costs nothing until a file needs it.
-   */
-  function orderPieces(order, settings, measure, limit) {
-    const whole = orderBlock(order, settings, measure);
-    const height = measure.height(whole);
-    if (height <= limit || order.lines.length < 2) {
-      return [{ node: whole, height, keepWithNext: false, over: height > limit }];
-    }
-
-    // How many lines fit, found once and reused: every slice carries the same
-    // heading, so the answer does not change between them.
-    let fits = order.lines.length;
-    while (fits > 1) {
-      const trial = orderSlice(order, order.lines.slice(0, fits), settings, measure, 1, 2);
-      if (measure.height(trial) <= limit) break;
-      fits = Math.floor(fits / 2);
-    }
-    for (let more = fits + 1; more <= order.lines.length; more += 1) {
-      const trial = orderSlice(order, order.lines.slice(0, more), settings, measure, 1, 2);
-      if (measure.height(trial) > limit) break;
-      fits = more;
-    }
-
-    const parts = Math.ceil(order.lines.length / fits);
-    const pieces = [];
-    for (let index = 0; index < parts; index += 1) {
-      const node = orderSlice(
-        order,
-        order.lines.slice(index * fits, (index + 1) * fits),
-        settings,
-        measure,
-        index + 1,
-        parts,
-      );
-      pieces.push({ node, height: measure.height(node), keepWithNext: false });
-    }
-    return pieces;
-  }
-
-  /**
-   * A stop's block, as the pieces the page shares out.
-   *
-   * A stop of several orders taller than a page prints, for now, as one block
-   * per order — exactly what it printed before blocks were shared — until the
-   * cut between orders replaces it.
-   */
-  function stopPieces(stop, settings, measure, limit) {
-    if (stop.orders.length === 1) return orderPieces(stop.orders[0], settings, measure, limit);
-    const whole = sharedBlock(stop, settings, measure);
-    const height = measure.height(whole);
-    if (height <= limit) return [{ node: whole, height, keepWithNext: false }];
-    return stop.orders.flatMap((order) => orderPieces(order, settings, measure, limit));
-  }
-
-  /**
-   * One order in a block of its own: the crate label, then its lines.
+   * One order in a block of its own: the crate label, then the lines
+   * `segment` carries.
    *
    * D16 makes every order its own block. The web port keeps that only for a
    * customer with one order at a stop; several share one (see sharedBlock()).
+   *
+   * A part of an order cut across pages repeats the heading, the marker and
+   * the id (when shown), so it is still addressed to a customer, and its
+   * `part N of M` says nobody should read it as a second delivery. Its crates
+   * print once, on the part where it starts: each part used to count only
+   * its own lines, and the parts could add up to more crates than the order
+   * packs into.
    */
-  function orderBlock(order, settings, measure) {
+  function orderBlock(order, settings, measure, segment = whole(order), tag = null) {
     const block = element('article', 'bf-block');
 
     const count =
-      settings.kind === Model.BREAD
+      settings.kind === Model.BREAD && segment.from === 0
         ? Model.crateCount(order, settings.crates)
         : { large: 0, small: 0 };
 
-    for (const line of heading(order, settings, count, measure)) block.appendChild(line);
+    for (const line of heading(order, settings, count, measure, tag)) block.appendChild(line);
 
     const lines = element('div', 'bf-lines');
-    order.lines.forEach((line, index) => {
+    order.lines.slice(segment.from, segment.to).forEach((line, index) => {
       lines.appendChild(breadLine(line, settings, index % 2 === 1));
     });
     block.appendChild(lines);
     return block;
   }
 
-  /** A stop's block: its one order's, or the block its orders share. */
-  function stopBlock(stop, settings, measure) {
+  /**
+   * A stop's block — its one order's, or the block its orders share — or,
+   * given `segments`, one part of it.
+   */
+  function stopBlock(stop, settings, measure, segments = stop.orders.map(whole), tag = null) {
     return stop.orders.length === 1
-      ? orderBlock(stop.orders[0], settings, measure)
-      : sharedBlock(stop, settings, measure);
+      ? orderBlock(stop.orders[0], settings, measure, segments[0], tag)
+      : sharedBlock(stop, segments, settings, measure, tag);
+  }
+
+  /**
+   * The most lines, up to `left`, that `fit` accepts — 0 if not even one.
+   *
+   * Adding a line never makes a part shorter, so this halves down from
+   * everything until something fits, then closes in between the most that
+   * did and the fewest that did not.
+   */
+  function mostLines(left, fit) {
+    let high = left + 1;
+    let low = left;
+    while (low > 0 && !fit(low)) {
+      high = low;
+      low = Math.floor(low / 2);
+    }
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2);
+      if (fit(middle)) low = middle;
+      else high = middle;
+    }
+    return low;
+  }
+
+  /** A part's tag while its part count is not yet known, and no narrower. */
+  const PART_STAND_IN = 'part 99 of 99';
+
+  /**
+   * A stop's block, cut across as few pages as it takes — only ever when the
+   * alternative is ink off the bottom of the paper.
+   *
+   * D9 says a stop block never splits. The Rust app can keep that, because
+   * its blocks are one order each; the web port's can be a customer's whole
+   * morning, so it departs from D9 for a block taller than a page:
+   *
+   * - whole orders go first: each part takes as many as fit;
+   * - only an order taller than a part of its own is cut between its lines,
+   *   and its first lines take whatever room is left where it starts;
+   * - every part is built exactly as it will print and measured before it is
+   *   accepted, with a stand-in tag as wide as `part 99 of 99`, because
+   *   parts differ — only the one an order starts on carries its crates.
+   *
+   * Returns one piece when the block fits, which is every real stop in both
+   * sample exports — this costs nothing until a file needs it.
+   *
+   * `first` is the room on the part that opens the stop: less than `limit`
+   * right under the unsequenced flag, which must never end a page alone.
+   */
+  function stopPieces(stop, settings, measure, limit, first = limit) {
+    const node = stopBlock(stop, settings, measure);
+    const height = measure.height(node);
+    const lines = stop.orders.reduce((sum, order) => sum + order.lines.length, 0);
+    if (height <= first || lines < 2) {
+      return [{ node, height, keepWithNext: false, over: height > limit }];
+    }
+
+    const parts = [];
+    let current = [];
+    const close = () => {
+      parts.push(current);
+      current = [];
+    };
+    const room = () => (parts.length === 0 ? first : limit);
+    const fits = (segments, cap) =>
+      measure.height(stopBlock(stop, settings, measure, segments, PART_STAND_IN)) <= cap;
+
+    for (const order of stop.orders) {
+      const all = whole(order);
+      if (fits([...current, all], room())) {
+        current.push(all);
+        continue;
+      }
+      if (current.length > 0 && fits([all], limit)) {
+        close();
+        current.push(all);
+        continue;
+      }
+      // Taller than a part of its own: cut between its lines.
+      let from = 0;
+      while (from < order.lines.length) {
+        const cap = room();
+        const take = mostLines(order.lines.length - from, (count) =>
+          fits([...current, { order, from, to: from + count }], cap),
+        );
+        if (take === 0 && current.length > 0) {
+          close();
+          continue;
+        }
+        // Not even one line fits an empty part: the furniture has eaten the
+        // page, and one line over is the least wrong thing to print.
+        const to = from + Math.max(take, 1);
+        current.push({ order, from, to });
+        from = to;
+        if (from < order.lines.length) close();
+      }
+    }
+    if (current.length > 0) close();
+
+    return parts.map((segments, index) => {
+      const part = stopBlock(
+        stop,
+        settings,
+        measure,
+        segments,
+        `part ${index + 1} of ${parts.length}`,
+      );
+      const partHeight = measure.height(part);
+      return {
+        node: part,
+        height: partHeight,
+        keepWithNext: false,
+        over: partHeight > (index === 0 ? first : limit),
+      };
+    });
   }
 
   /**
@@ -1126,15 +1215,23 @@ const Sheet = (() => {
       // worked out first because a stop with more lines than a page can hold
       // has to be cut against it — 300 lines on one order used to print 45 and
       // send the other 255 off the bottom of the paper without a word.
+      //
+      // The stop right under the flag is packed against the page less the
+      // flag, because the two must share a page: a stop that fitted a page
+      // but not the room beside the flag used to push the flag onto a page of
+      // its own.
       const pieces = [];
       let flagged = false;
       for (const stop of route.stops) {
+        let first = limit;
         if (!Model.isSequenced(stop) && !flagged) {
           flagged = true;
           const flag = unsequencedFlag();
-          pieces.push({ node: flag, height: measure.height(flag), keepWithNext: true });
+          const flagHeight = measure.height(flag);
+          pieces.push({ node: flag, height: flagHeight, keepWithNext: true });
+          first = limit - flagHeight;
         }
-        pieces.push(...stopPieces(stop, settings, measure, limit));
+        pieces.push(...stopPieces(stop, settings, measure, limit, first));
       }
       pieces.push(...totalPieces(route, settings, measure, limit));
 

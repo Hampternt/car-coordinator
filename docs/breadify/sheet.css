@@ -365,6 +365,24 @@
   white-space: nowrap;
 }
 
+/* Beside the name, not at the far end: the marker and the id keep the
+ * right-hand end of a heading, as on every other block. */
+.bf-name + .bf-block-part {
+  margin-left: 0;
+  padding-left: 0;
+  align-self: center;
+}
+
+/* An order cut across pages, opening its next part: in the place its crates
+ * took on the part where it started, so a line with no crates is never read
+ * as an order that needs none. As quiet as the part tag it goes with. */
+.bf-order-cont {
+  font: 400 8.6pt/1 'IBM Plex Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--note);
+}
+
 /* D24: a run that will not fit whole on one line is set as `×N` beside a
  * single glyph, never wrapped onto a second row of squares. */
 .bf-crates-compact {

@@ -97,6 +97,13 @@ await page.addInitScript(() => {
 
     return {
       sheets: sheets.length,
+      // The flag belongs above the stops it covers, never alone at a foot.
+      flagLast: sheets
+        .filter((sheet) => {
+          const last = sheet.querySelector('.bf-body').lastElementChild;
+          return last && last.classList.contains('bf-flag');
+        })
+        .map((sheet) => `${sheet.dataset.route}/${sheet.dataset.page}`),
       down: Math.round(down * 10) / 10,
       across: Math.round(across * 10) / 10,
       clearance: Math.round(clearance * 10) / 10,
@@ -206,6 +213,45 @@ await page.addInitScript(() => {
     return { blocks, ids: Array.from(seen.keys()), problems: problems.slice(0, 8) };
   };
 
+  // A customer's block as it came out across pages, part by part: its
+  // heading and tag, which orders each part carries, where the continued
+  // orders and the crates fall, and any department sub-heading left with no
+  // line under it.
+  window.readParts = (sheets, customer) => {
+    const idOf = (row) => {
+      const id = row.querySelector('.bf-order-id');
+      return id ? Number(id.textContent) : null;
+    };
+    return sheets
+      .flatMap((sheet) => Array.from(sheet.querySelectorAll('.bf-block')))
+      .filter((block) => block.querySelector('.bf-name').textContent === customer)
+      .map((block) => {
+        const rows = Array.from(block.querySelectorAll('.bf-row'));
+        return {
+          names: block.querySelectorAll('.bf-name').length,
+          tags: Array.from(block.querySelectorAll('.bf-block-part'), (t) => t.textContent),
+          ids: Array.from(new Set(rows.map(idOf).filter((id) => id !== null))),
+          headIds: Array.from(
+            block.querySelectorAll(':scope > .bf-head-line .bf-stamp .bf-order-id'),
+            (n) => Number(n.textContent),
+          ),
+          products: rows.map((row) => row.querySelector('.bf-product').textContent),
+          crates: block.querySelectorAll('.bf-crates').length,
+          markers: block.querySelectorAll('.bf-marker').length,
+          continued: rows
+            .filter((row) => row.querySelector('.bf-order-cont'))
+            .map((row) => [idOf(row), row.querySelectorAll('.bf-marker').length, row.querySelectorAll('.bf-crate').length]),
+          falses: rows
+            .filter((row) => row.querySelector('.bf-marker b') && !row.querySelector('.bf-order-cont'))
+            .map(idOf),
+          bareSubs: Array.from(block.querySelectorAll('.bf-dpt-sub')).filter((sub) => {
+            const next = sub.nextElementSibling;
+            return !next || !next.querySelector('.bf-row');
+          }).length,
+        };
+      });
+  };
+
   // How a day's orders group into stops, and which routes the customer's
   // place in the tie-break reorders against D2's own key.
   window.stopFigures = (routes) => {
@@ -238,6 +284,7 @@ const inspected = (what, seen) => {
   same(`${what}: nothing is set on top of anything else`, seen.collisions, []);
   same(`${what}: nothing is clipped away by the box holding it`, seen.clipped, []);
   same(`${what}: nothing nonsensical is printed`, seen.nonsense, []);
+  same(`${what}: no page ends with the "no position assigned" flag`, seen.flagLast, []);
 };
 
 /**
@@ -662,11 +709,11 @@ same(
   [],
 );
 // Customer 012's nine orders at one stop are taller than a page as one block,
-// so until a block can be cut between orders they print as nine, as before.
+// so the block is cut between two of its orders: eight stops, nine blocks.
 same(
-  'every bread stop of several orders is one block, but Customer 012 on route 14',
+  'every bread stop of several orders prints as its own block, Customer 012 in two parts',
   [breadShared.read.blocks, breadShared.apart],
-  [7, ['14: Customer 012']],
+  [9, []],
 );
 same(
   'route 11’s Customer 017: 7, 4 and 10 Kneippbrød with crates full, half, full, then Department 09',
@@ -687,6 +734,17 @@ same(
     [1000619939, 12, ['full', 'full', 'half']],
     [1000619941, 12, ['full', 'full', 'half']],
   ],
+);
+const c012Parts = await page.evaluate(() =>
+  readParts(Array.from(document.querySelectorAll('#preview .bf-sheet[data-route="14"]')), 'Customer 012'),
+);
+check(
+  'route 14’s Customer 012 is cut in two parts, between orders, each with its heading and tag',
+  c012Parts.length === 2 &&
+    c012Parts.every((p, i) => p.names === 1 && p.tags[0] === `part ${i + 1} of 2`) &&
+    c012Parts[0].ids.every((id) => !c012Parts[1].ids.includes(id)) &&
+    c012Parts.every((p) => p.continued.length === 0 && p.bareSubs === 0),
+  JSON.stringify(c012Parts.map((p) => [p.tags, p.ids, p.continued])),
 );
 same('an order id in a shared block stays quiet: grey, never bold', breadShared.ink, [
   'rgb(156, 156, 156) 400',
@@ -1334,12 +1392,8 @@ const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
         ),
         subs: subs(sharedBlocks),
       },
-      tall: {
-        sharedRows: tallBlocks.reduce((n, block) => n + block.querySelectorAll('.bf-row-shared').length, 0),
-        ids: Array.from(
-          new Set(tallBlocks.flatMap((n) => Array.from(n.querySelectorAll('.bf-order-id'), (d) => Number(d.textContent)))),
-        ).sort(),
-      },
+      tall: readParts(byRoute['1'], tall),
+      tallSharedRows: tallBlocks.reduce((n, b) => n + b.querySelectorAll('.bf-row-shared').length, 0),
     };
   } finally {
     host.remove();
@@ -1356,12 +1410,86 @@ same('a shared department stays boxed in the heading, with no sub-heading', many
   boxed: ['Avdeling 2'],
   subs: [],
 });
-// Taller than a page as one block: until a block can be cut between orders it
-// prints one block per order, as before, and every id still prints.
-same('the tall customer prints one block per order, every id with it', manyPrinted.tall, {
-  sharedRows: 0,
-  ids: [7101, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110, 7111, 7112, 7113, 7114],
-});
+
+// ── A block taller than a page, cut between orders ─────────────────────────
+//
+// Whole orders first; only an order taller than a page of its own is cut
+// between its lines. Every part says which part it is, reopens the department
+// its lines belong to, and a continued order says so where its crates were.
+
+/** What every set of parts must show, whoever made them. */
+const partsHold = (what, parts) => {
+  check(
+    `${what}: each part prints one heading with its part N of M`,
+    parts.length > 1 &&
+      parts.every(
+        (p, i) => p.names === 1 && JSON.stringify(p.tags) === JSON.stringify([`part ${i + 1} of ${parts.length}`]),
+      ),
+    JSON.stringify(parts.map((p) => [p.names, p.tags])),
+  );
+  same(`${what}: no department sub-heading ends a part without a line under it`,
+    parts.map((p) => p.bareSubs).filter((n) => n > 0), []);
+};
+
+const tall = manyPrinted.tall;
+const TALL_IDS = [7101, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110, 7111, 7112, 7113, 7114];
+partsHold('the tall customer', tall);
+check('the tall customer prints as one block, cut into parts', manyPrinted.tallSharedRows === 304,
+  `${manyPrinted.tallSharedRows} of 304 lines in shared parts`);
+const partsOf = (id) => tall.map((p, i) => (p.ids.includes(id) ? i : -1)).filter((i) => i >= 0);
+same('every order id prints', TALL_IDS.filter((id) => partsOf(id).length === 0), []);
+same(
+  'only the 80-line order runs onto a second part; every other order sits on one',
+  TALL_IDS.filter((id) => partsOf(id).length > 1),
+  [7106],
+);
+same(
+  'the 80-line order opens each later part with continued and its marker, and no crates',
+  tall.flatMap((p, i) => p.continued.map((row) => [i, ...row])),
+  partsOf(7106).slice(1).map((i) => [i, 7106, 1, 0]),
+);
+check(
+  'there is one crate run per order across all the parts',
+  tall.reduce((n, p) => n + p.crates, 0) === TALL_IDS.length,
+  `${tall.reduce((n, p) => n + p.crates, 0)} runs for ${TALL_IDS.length} orders`,
+);
+same('only the two refusing orders read false', tall.flatMap((p) => p.falses), [7107, 7111]);
+
+// One order of 300 lines: every part carries the heading, the tag and the
+// marker, and the crates print once — they used to print on every part, each
+// counted from that part's lines alone.
+const giant = await page.evaluate(async ([b]) => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  try {
+    const book = await Xlsx.open(new Uint8Array(b).buffer);
+    const [route] = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+    const sheets = Sheet.paginate(
+      route,
+      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+      { dates: null, source: 'edge', routeStops: 1, routeLines: 300 },
+      { host },
+    );
+    for (const sheet of sheets) host.append(sheet);
+    return readParts(sheets, 'Customer 001');
+  } finally {
+    host.remove();
+  }
+}, [Array.from(await readFile('scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-one-giant-stop.xlsx'))]);
+partsHold('one order of 300 lines', giant);
+same(
+  'its 300 lines print once each, in file order',
+  giant.flatMap((p) => p.products),
+  Array.from({ length: 300 }, (_, i) => `Bread variety number ${String(i).padStart(3, '0')}`),
+);
+same('its crates print once, on its first part', giant.map((p) => p.crates),
+  giant.map((_, i) => (i === 0 ? 1 : 0)));
+check(
+  'and every later part still carries its marker and its id',
+  giant.slice(1).every((p) => p.markers === 1 && JSON.stringify(p.headIds) === '[1]'),
+  JSON.stringify(giant.slice(1).map((p) => [p.markers, p.headIds])),
+);
 
 // ── Changes to the export's own shape ──────────────────────────────────────
 //
@@ -1600,10 +1728,16 @@ const crowded = await page.evaluate(() => {
     }
     const legend = Math.round(pages[0].querySelector('.bf-legend').getBoundingClientRect().height * perPx);
     const key = pages[0].querySelector('.bf-legend-suppliers').textContent;
+    const parts = readParts(pages, 'Kafé 01');
+    const products = parts.flatMap((p) => p.products);
     host.innerHTML = '';
     return { pages: pages.length, legend, spill: Math.round(spill),
              clearance: Math.round(clearance), spelled: /Bakeri Nummer/.test(key),
-             saysMore: /\+\d+ more/.test(key) };
+             saysMore: /\+\d+ more/.test(key),
+             parts: parts.length,
+             crates: parts.map((p) => p.crates).join(''),
+             inOrder: products.length === count &&
+               products.every((name, i) => name === `Brød nummer ${i + 1}`) };
   };
 
   try {
@@ -1624,6 +1758,57 @@ check('and the sheet count stays sane rather than one page per line',
   `${crowded.many.pages} sheets for 250 lines`);
 check('the key says how many it could not name', crowded.many.saysMore,
   JSON.stringify(crowded.many));
+check(
+  'its 250 lines print once each, in order, with the crates on the first part alone',
+  crowded.many.inOrder && crowded.many.parts > 1 &&
+    crowded.many.crates === `1${'0'.repeat(crowded.many.parts - 1)}`,
+  JSON.stringify(crowded.many),
+);
+
+// The flag says the stops below it were never given a position, so it must
+// never end a page alone. An unsequenced stop that fitted a page but not the
+// room left beside the flag used to push the flag onto a page of its own.
+const flagSweep = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const loaf = (i) => ({
+    product: { id: 100 + i, name: `Brød ${i + 1}`, sku: String(100 + i), supplier: 'sandnes bakeri' },
+    quantity: 2,
+  });
+  const wrong = [];
+  try {
+    for (let lines = 30; lines <= 70; lines += 1) {
+      const route = Model.route('5', [
+        { id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01', route: '5',
+          sequence: 100, acceptAlternatives: true, comment: null, lines: [loaf(0)] },
+        { id: 2, customer: 'Kafé 02', department: null, deliveryStreet: 'Street 02', route: '5',
+          sequence: 0, acceptAlternatives: true, comment: null,
+          lines: Array.from({ length: lines }, (_, i) => loaf(i)) },
+      ]);
+      const sheets = Sheet.paginate(
+        route,
+        { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+        { dates: null, source: 'sweep', routeStops: 2, routeLines: lines + 1 },
+        { host },
+      );
+      for (const sheet of sheets) host.append(sheet);
+      const seen = inspectSheets(sheets);
+      if (seen.flagLast.length > 0 || seen.clearance < 10 || seen.down > 0.5) {
+        wrong.push([lines, seen.flagLast, seen.clearance, seen.down]);
+      }
+      host.innerHTML = '';
+    }
+    return wrong;
+  } finally {
+    host.remove();
+  }
+});
+same(
+  'an unsequenced stop of 30 to 70 lines after a sequenced one never leaves the flag alone at a foot',
+  flagSweep,
+  [],
+);
 
 // A file that is not this file at all still fails with a sentence, not a stack.
 for (const [what, bytes] of [
