@@ -345,10 +345,6 @@ body.show-sheet .sheet {
 .sheet td { padding: .6mm 2mm; }
 .sheet td.rn { width: 18%; text-align: right; padding-right: 6mm; }
 .sheet tr.hl td { background: var(--marker); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-/* dotted, so it reads as an annotation rather than a table rule, and
-   survives a black-and-white laser printer where a colour would not */
-.sheet tr.warn td { border-bottom: 0.4mm dotted #000; }
-.sheet .mark { font-size: 12pt; vertical-align: super; padding-left: 1mm; }
 .sheet tr.spacer td { height: 8mm; }
 .sheet .extra { margin-top: 10mm; font-size: 13pt; }
 .sheet .extra h4 { margin: 3mm 0 1mm; font-size: 14pt; }

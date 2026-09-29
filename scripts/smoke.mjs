@@ -811,26 +811,39 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
 await page.reload({ waitUntil: 'networkidle' });
 check('a car id of __proto__ does not brick the app', (await page.locator('#tab-plan tbody tr').count()) === 1);
 
-// --- the printed sheet carries the clashes it is showing on screen ---
+// --- the screen warns, the paper does not ---
+// Warnings belong before printing. The printed sheet shows the plan, its pink
+// row and its gap, and the lists under it, and nothing that argues with it.
+// c3 and p3 raise no screen warning: a marked position only warns when a route
+// uses it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
-  cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }, { id: 'c3', reg: 'CC33333', labelId: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }, { id: 'p3', name: 'Spot 9', labelId: 'L1' }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
-    { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1' },
-    { id: 'r3', name: '3', driver: 'Cai', carId: 'c2', positionId: 'p2' },
+    { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1', gapBefore: true },
+    { id: 'r3', name: '3', driver: 'Cai', carId: 'c2', positionId: 'p2', highlight: true },
   ],
 })));
 await page.reload({ waitUntil: 'networkidle' });
+const clashScreen = await page.locator('#tab-plan .problems').innerText().catch(() => '');
+check('the day plan names the doubled car', clashScreen.includes('AA11111 is on 2 routes'), clashScreen);
+check('the day plan names the doubled spot', clashScreen.includes('Spot 1 is taken by 2 routes'), clashScreen);
+check('the day plan names the car that should be in the workshop', clashScreen.includes('BB22222 is marked Workshop'), clashScreen);
+check('the day plan stripes the rows involved', (await page.locator('#tab-plan tbody tr.warn').count()) === 3);
+check('a shared Garage is not called a clash', !clashScreen.includes('Garage is taken'));
 await page.click('[data-act="tab"][data-tab="preview"]');
 const clashSheet = await page.locator('#sheet').innerText();
-check('the sheet names the doubled car', clashSheet.includes('AA11111 is on 2 routes'));
-check('the sheet names the doubled spot', clashSheet.includes('Spot 1 is taken by 2 routes'));
-check('the sheet names the car that should be in the workshop', clashSheet.includes('BB22222 is marked Workshop'));
-check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
-check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
+check('the sheet does not name the doubled car', !clashSheet.includes('is on 2 routes'), clashSheet);
+check('the sheet does not name the doubled spot', !clashSheet.includes('is taken by'), clashSheet);
+check('the sheet does not name the workshop car as a clash', !clashSheet.includes('is marked Workshop'), clashSheet);
+check('the sheet has no Check before posting', !clashSheet.includes('Check before posting'));
+check('the sheet has no Positions not available', !clashSheet.includes('Positions not available') && !clashSheet.includes('Spot 9'), clashSheet);
+check('the sheet has no warning marks', !clashSheet.includes('!') && (await page.locator('#sheet tr.warn').count()) === 0 && (await page.locator('#sheet .mark').count()) === 0);
+check('the sheet keeps its pink row and its gap', (await page.locator('#sheet tr.hl').count()) === 1 && (await page.locator('#sheet tr.spacer').count()) === 1);
+check('the sheet lists the free car', /Free cars\s*CC33333/.test(clashSheet), clashSheet);
 
 // --- the clash rule is per round, not per spot ---
 // The headline feature. Two routes in one spot are a clash only when they are
@@ -858,7 +871,7 @@ await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
 check('the same spot in the same round still warns', (await problemText()).includes('Spot 1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
 check('and both rows are flagged', (await warnRows()) === 2);
 await page.click('[data-act="tab"][data-tab="preview"]');
-check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1 in round 2 is taken by 2 routes'));
+check('the printed sheet does not', !(await page.locator('#sheet').innerText()).includes('is taken by'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 await loadPlan(spotPlan([['1', ''], ['2', '']]));

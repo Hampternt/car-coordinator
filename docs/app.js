@@ -1158,11 +1158,12 @@ const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.rou
 
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
-  const { lines: found, rows: flagged } = problems();
-  const rows = state.routes.map((r, at) =>
+  // Warnings belong on screen, before printing: the paper shows the plan and
+  // nothing that argues with it.
+  const rows = state.routes.map((r) =>
     (r.gapBefore ? '<tr class="spacer"><td colspan="4"></td></tr>' : '') +
-    `<tr class="${[r.highlight && 'hl', flagged.has(at) && 'warn'].filter(Boolean).join(' ')}">
-      <td class="rn">${dash(r.name)}${flagged.has(at) ? '<span class="mark">!</span>' : ''}</td>
+    `<tr class="${r.highlight ? 'hl' : ''}">
+      <td class="rn">${dash(r.name)}</td>
       <td>${dash(r.driver)}</td>
       <td>${dash(byId(state.cars, r.carId)?.reg)}</td>
       <td>${dash(spotCell(r))}</td>
@@ -1173,7 +1174,6 @@ function renderSheet() {
   const use = usage();
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).map((c) => esc(c.reg)).join(', ');
   const downCars = marked(state.cars, 'reg');
-  const downPos = marked(state.positions, 'name');
 
   // The weekday in words under the date, from the plan's own date: the sheet
   // on the pillar is read by people checking it is the right day's list.
@@ -1186,9 +1186,7 @@ function renderSheet() {
       <tbody>${rows}</tbody>
     </table>
     <div class="extra">
-      ${found.length ? `<h4>Check before posting</h4>${found.map((t) => `<p>! ${esc(t)}</p>`).join('')}` : ''}
       ${downCars ? `<h4>Cars not available</h4>${downCars}` : ''}
-      ${downPos ? `<h4>Positions not available</h4>${downPos}` : ''}
       ${free ? `<h4>Free cars</h4><p>${free}</p>` : ''}
     </div>`;
 }
