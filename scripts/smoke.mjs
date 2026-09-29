@@ -2567,6 +2567,10 @@ const newContext = async (setup, options = {}) => {
 // without one covers the other sentence.
 const upA = await newContext((ctx) => ctx.addInitScript(() => {
   if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+  // Every key written to storage from the moment the page starts, in order.
+  const set = Storage.prototype.setItem;
+  window.__writes = [];
+  Storage.prototype.setItem = function (k, v) { window.__writes.push(String(k)); return set.call(this, k, v); };
 }));
 const up = upA.pg;
 const V = await up.evaluate(() => APP_VERSION);
@@ -2576,6 +2580,10 @@ const listed = await up.evaluate(() => UPDATES.map((u) => u.version));
 await leaveAs(up, { 'carcoord:v1': upPlan });
 await up.reload({ waitUntil: 'networkidle' });
 const back = await opened(up);
+const bootWrites = await up.evaluate(() => window.__writes.filter((k) => k.startsWith('carcoord:')));
+check('the archive is the first thing written at boot, ahead of the backup and the marker, and the plan is never written',
+  bootWrites[0] === 'carcoord:archives' && bootWrites.includes('carcoord:backups') && bootWrites.includes('carcoord:pref:seenUpdate')
+  && !bootWrites.includes('carcoord:v1'), bootWrites.join(', '));
 check('a returning leader gets exactly one update note, last on the page', back.notes === 1 && back.last, JSON.stringify(back).slice(0, 300));
 check(`and it shows ${listed.slice(0, 2).join(' and ')} in full`,
   listed.slice(0, 2).every((v) => back.text.includes(`What's new in ${v}:`)) && back.text.includes('What it affects:') && back.text.includes('Your data:'), back.text.slice(0, 400));
