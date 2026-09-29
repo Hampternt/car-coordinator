@@ -536,3 +536,4 @@ Written identically in the `updates.js` header, the README and the container's G
     - car suite: exit 0, 478 ok, 0 FAIL;
     - `npm run upgrade` from v0.2.4: exit 0, 44 ok, "upgrade check passed: 0.2.4 to 0.3.0".
 - Fix 5 (recover.html in UTC), d7b5cb9. Times are now shown with `toLocaleString`, always with the date; download names are unchanged. Smoke, in a Pacific/Auckland en-GB context: the rows read "kept 29/09/2026, 17:00", "kept 28/09/2026, 17:00" and "29/09/2026, 18:00" for 04:00Z and 05:00Z. Gate: `check.sh` OK. Car suite: exit 0, 479 ok, 0 FAIL.
+- Fix 6 (the rescue-once check was too weak), 2b998c8. It now also asserts `carcoord:archives` is byte-identical across the reload. Gate: `check.sh` OK. Car suite: exit 0, 479 ok, 0 FAIL. A mutation run is logged below.
