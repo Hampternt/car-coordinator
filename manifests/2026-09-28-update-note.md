@@ -546,3 +546,20 @@ Written identically in the `updates.js` header, the README and the container's G
   - `check.sh` OK;
   - car suite: exit 0, 489 ok, 0 FAIL;
   - upgrade from v0.2.4: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+- **Mutation run, to show the review's tests bite.** The suite ran against a scratch copy of `docs/` and `scripts/` with ten mutations applied at once: exit 1, 21 FAIL. Each mutation is caught by the check its fix added:
+
+  | Mutation | Caught by |
+  |---|---|
+  | M1: `copyFor` ignores `from` | the pure archive rule; "back to 0.3.0 from 0.4.0" |
+  | M3: no drain before the note | "…the note says storage is full, last…" |
+  | M4: `archiveNeeded` ignores this version's rescue | the pure archive rule (`rescueThisVersion`) |
+  | M5: recover.js back to UTC | "times on the recovery page are this computer's own" |
+  | M6: rescue rewritten every load | "…leaves Archives byte for byte as they were" |
+  | M7: a failed rescue claimed as kept | "…the first change will overwrite it, with one link…" |
+  | M8: `while (i > 0 && false)` | "…keeps the newer one, and the rescue" (dropped 2) |
+  | M9: only unparseable text is held | "a save of [] / null / 42…", plus the old damaged-save loop |
+  | M10: note step unguarded | "with the note step broken…" (three checks) |
+  | M11: archive after `dailySnapshot` | "the archive is the first thing written at boot…" (got backups first) |
+  | M12: the archive tidies the text | "one update archive, byte for byte the saved plan…" |
+
+  M4 is also masked on the boot path, by `archiveBeforeUpdate`'s own `rescuedDuring` early return, so only the pure-rule case sees it. The scratch copy is deleted.
