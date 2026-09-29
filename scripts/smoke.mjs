@@ -2633,6 +2633,16 @@ same('and it copies nothing typed since the loss, pointing at the rescue instead
   rescueSaid: afterLoss.say.includes('What this browser had saved before could not be read; it is kept unchanged in Archives on the Data tab.'),
   copiedSaid: afterLoss.say.includes('copied unchanged'),
 }, { kinds: ['rescue'], during: [V], rescueSaid: true, copiedSaid: false });
+// Saved text that is valid JSON but not a plan is held the same way.
+for (const odd of ['[]', 'null', '42']) {
+  await leaveAs(up, { 'carcoord:v1': odd });
+  await up.reload({ waitUntil: 'networkidle' });
+  const held = await opened(up);
+  same(`a save of ${odd}: one warning, no update note, no marker, and a rescue of ${odd}`, {
+    warns: await up.locator('#notices .notice.warn').count(), notes: held.notes, marker: held.marker,
+    rescued: await up.evaluate(() => Store.archives().map((a) => [a.kind, a.text])),
+  }, { warns: 1, notes: 0, marker: null, rescued: [['rescue', odd]] });
+}
 const newer = JSON.stringify({ schemaVersion: 99, date: '2026-09-29', cars: [], positions: [], labels: [], routes: [{ id: 'r1', name: 'Newer' }] });
 await leaveAs(up, { 'carcoord:v1': newer });
 await up.reload({ waitUntil: 'networkidle' });
