@@ -9,3 +9,6 @@ app-icon.png
 
 # generated screenshots
 screens/
+
+# other agents' git worktrees, made by the Claude Code harness
+.claude/worktrees/
