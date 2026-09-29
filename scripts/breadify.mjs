@@ -225,6 +225,19 @@ await page.addInitScript(() => {
         if (!block.querySelector('.bf-row-shared')) continue;
         blocks += 1;
         const name = block.querySelector('.bf-name').textContent;
+        // Nothing at the heading's right: the marks belong to the orders, on
+        // their own lines. The name line holds the name and perhaps the part
+        // tag; any other heading line a department box or the tag.
+        Array.from(block.querySelectorAll(':scope > .bf-head-line')).forEach((line, index) => {
+          const allowed = index === 0 ? ['bf-name', 'bf-block-part'] : ['bf-dpt', 'bf-block-part'];
+          for (const child of line.children) {
+            const kind = child.className.split(' ')[0];
+            if (!allowed.includes(kind)) problems.push(`${name}: its heading holds ${kind}`);
+          }
+          if (line.querySelector('.bf-crates, .bf-marker, .bf-stamp, .bf-order-id')) {
+            problems.push(`${name}: crates, a marker or an id sit in its heading`);
+          }
+        });
         const boxed = block.querySelector(':scope > .bf-head-line .bf-dpt:not(.bf-dpt-quiet) .bf-dpt-name');
         let department = boxed ? boxed.textContent : null;
         let last = null;
