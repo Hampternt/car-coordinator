@@ -295,7 +295,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - `versions.mjs` requiring all of it.
 
   *Done when:* `versions.mjs` passes at 0.3.0 and fails with any piece removed, and smoke reads `UPDATES[0].version === APP_VERSION` with no console errors.
-- [ ] **6. Notice lines with a heading, and the update style.**
+- [x] **6. Notice lines with a heading, and the update style.**
   *Done when:* a synthetic update note with `<b>` in it is escaped, its heading is bold, and ✕ removes it. Every existing notice case passes unchanged.
 - [ ] **7. ⚠️ Wire the start-up.** Design D and E, with the two separate try/catches and the render guards.
   *Done when:* smoke shows all of these, reading the version from the page:
@@ -434,3 +434,4 @@ Written identically in the `updates.js` header, the README and the container's G
   - 0.2.5's `must`.
 
   The `must` rule reads `data` as "starts with the Nothing sentence", and treats `affects` as a change unless the sentence naming the printed sheet or share codes says "unchanged". Otherwise 0.3.0 would need `must`, against Design I. Smoke reads `UPDATES[0].version === APP_VERSION`. Gate: `check.sh` OK. Car suite: exit 0, 409 ok, 0 FAIL, no console errors.
+- Item 6 done, 683f9af. Smoke: a synthetic update note keeps `<b>`/`<i>` as text, only the line heading is bold, ink with a hi-vis edge, and ✕ removes it. Existing notice cases are unchanged. Gate: `check.sh` OK. Car suite: exit 0, 412 ok, 0 FAIL.
