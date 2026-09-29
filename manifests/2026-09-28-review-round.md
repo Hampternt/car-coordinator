@@ -289,6 +289,10 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   - What's new lists all nine entries, and the note shows the newest three and counts the rest.
 
   This check covers the web build only. The exe gets a hand check on install.
+- **Known blocker before `dev` → `main`** (found 2026-09-29, deferred by the owner until they ask for the merge to `main`):
+  - Pack 1's car suite crashes CI's pinned Playwright Chromium (headless shell v1243) at `scripts/smoke.mjs:2734`. That is the update-note case that reloads with a save file linked: "Target page, context or browser has been closed".
+  - It fails on both CI runs of PR #16 and again locally on that same Chromium. On system Chrome it passes.
+  - `main`'s build job runs this suite before it releases, so this must be fixed before `dev` → `main`. It does not block merges into `dev`.
 
 ## Ledger
 
