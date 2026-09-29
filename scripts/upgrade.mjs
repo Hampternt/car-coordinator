@@ -132,11 +132,20 @@ const linkOpfs = (page, text) => page.evaluate(async (text) => {
     r.onerror = () => rej(r.error);
   });
 }, text);
+// Saved text in a layout no build writes (keys reversed, spaced out, a field
+// no build knows), put in place on the old build before the switch. A boot
+// that rewrote the plan, or an archive that tidied it, fails byte for byte.
+const ODD = 'kept by the upgrade check';
+const makeOdd = (page) => page.evaluate((odd) => {
+  const o = JSON.parse(localStorage.getItem('carcoord:v1'));
+  localStorage.setItem('carcoord:v1', JSON.stringify({ extra: odd, ...Object.fromEntries(Object.entries(o).reverse()) }, null, 1));
+}, ODD);
 const opfsText = (page) => page.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('car-coordinator.json')).getFile()).text());
 
 // The old build's work, then this build's first open: data kept, the copy
 // taken, the note as the rules say. Shared by the full setup and the save file.
 async function expectKeptAndNoted(label, profile, before, extra = async () => {}) {
+  check(`${label}: the old build's saved text is in a layout no build writes`, String(before['carcoord:v1']).startsWith(`{\n "extra": "${ODD}"`));
   const now = await open(profile, NEW_DOCS);
   await assertBuild(now.page, 'new');
   const after = await everything(now.page);
@@ -170,6 +179,7 @@ const scenarios = {
     await assertBuild(old.page, 'old');
     await importPlan(old.page, devPlan);
     await old.page.evaluate(() => { for (let i = 1; i <= 6; i++) { state.routes[0].driver = `Edit ${i}`; Store.snapshot(state, `Before edit ${i}`); } save(); });
+    await makeOdd(old.page);
     const before = await everything(old.page);
     await old.context.close();
     const n = JSON.parse(before['carcoord:backups'] || '[]').length;
@@ -234,6 +244,7 @@ const scenarios = {
     await old.page.reload({ waitUntil: 'networkidle' });
     await old.page.waitForTimeout(300);
     const linked = await old.page.evaluate(() => Store.file.name);
+    await makeOdd(old.page);
     const before = await everything(old.page);
     const fileBefore = await opfsText(old.page);
     await old.context.close();
@@ -251,6 +262,7 @@ const scenarios = {
     const old = await open(profile, OLD_DOCS);
     await assertBuild(old.page, 'old');
     await importPlan(old.page, devPlan);
+    await makeOdd(old.page);
     const before = await everything(old.page);
     const routes = await old.page.evaluate(() => state.routes.length);
     await old.context.close();

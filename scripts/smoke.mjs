@@ -2523,8 +2523,16 @@ await pcNote.close();
 // --- opening after an update: the archive first, the note last ---
 // Every case sets up this browser as an older version would have left it,
 // then opens the app. The version is read from the page, never written here.
-const upPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-29', labels: [], positions: [], drivers: [], driverGroups: [], templates: [],
-  cars: [{ id: 'c1', reg: 'UP11111' }], routes: [{ id: 'r1', name: '1', driver: 'Returning Leader', carId: 'c1' }] });
+// Written the way no build writes it (keys reordered, spaced out, fields
+// this build does not know), so a boot that rewrote the plan, or an archive
+// that tidied it, would show as a different string.
+const upPlan = `{
+  "routes": [ { "name": "1", "id": "r1", "carId": "c1", "driver": "Returning Leader" } ],
+  "cars": [ { "reg": "UP11111", "id": "c1", "extra": "kept" } ],
+  "date": "2026-09-29",   "schemaVersion": 4,
+  "labels": [], "positions": [], "drivers": [], "driverGroups": [], "templates": [],
+  "extra": "kept as written"
+}`;
 const otherPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-01', labels: [], positions: [], cars: [], routes: [{ id: 'x', name: 'From the file' }] });
 // A real file in this origin's private file system, linked the way Choose
 // save file links one, so start-up finds it without a stand-in.
