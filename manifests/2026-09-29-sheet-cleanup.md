@@ -360,7 +360,7 @@ Dependency edges:
   - `#sheet tr.hl` = 1 and `#sheet tr.spacer` = 1;
   - the sheet shows Free cars with CC33333.
 
-- [ ] **3. ⚠️ Schema v5: the label tick and a fixed-off QR in the saved plan.** Make the changes in Design E, plus `onSheet: false` at add-label (app.js:1891), add-tag (:1697) and share.js:179. share.js :71 and :178 are unchanged.
+- [x] **3. ⚠️ Schema v5: the label tick and a fixed-off QR in the saved plan.** Make the changes in Design E, plus `onSheet: false` at add-label (app.js:1891), add-tag (:1697) and share.js:179. share.js :71 and :178 are unchanged.
 
   Smoke :262 becomes `schemaVersion === 5`. A new case block, in its own context:
   - **(a)** A v4 save with `qrOnSheet: true`, and labels without the field, loads with every label unticked, `qrOnSheet` false, `schemaVersion` 5 and no repair notice. `carcoord:v1` is byte-identical across the load.
@@ -564,3 +564,4 @@ Both answers are needed before item 4 starts. Items 1–3 don't depend on them. 
 - **2026-09-29, start (combined pack, part 2).** Built on `review-round`, not a `sheet-cleanup` branch, per the combined manifest: it is cut from `update-note` (pack 1, 0.3.0) and merged with `origin/dev` for the plans. Base commit 771f560. Line numbers are re-found by symbol, because pack 1 moved most of `app.js`.
 - Item 1 done, 6c44bb3. The QR block was at app.js:1346-1373 at 0.3.0, the tag at index.html:70. The smoke decode block became four checks on `planA` (no `#sheet .qr`, no QR switch, `QR` undefined, no `qr.js` tag). `npm uninstall jsqr` then `npm ci`: OK. Gate: `check.sh` OK. Car suite on system Chrome: exit 0, 477 ok, 0 FAIL, "all checks passed" (the `#d=` link and phone-width cases included). The first run failed only the known flaky "a disarm leaves the page where the user scrolled it — 285" (pack 1's ledger); the rerun was clean.
 - Item 2 done, 503900b. `renderSheet` no longer calls `problems()`; the clash fixture gained the pink row, the gap, CC33333 and Spot 9, and its checks now read the day plan's `.problems` box for the warnings and the sheet for their absence. Gate: `check.sh` OK. Car suite: exit 0, 485 ok, 0 FAIL.
+- Item 3 done, 9788635. **Awaiting individual review.** Design E as planned; `onSheet: false` at `defaults()`, add-label, add-tag and share.js:179. The case block (a)-(f) runs in its own context near the end of smoke.mjs. (a) reads `carcoord:v1` before the reload and after the full start, and compares both with the v4 text; (b) compares the stored v5 plan with the input plus the change, key order ignored; (d) finds the v4 backup by its label, because the daily snapshot sits above it. Gate: `check.sh` OK. Car suite: exit 0, 501 ok, 0 FAIL; save-file case 6 passes unchanged.
