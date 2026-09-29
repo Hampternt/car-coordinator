@@ -67,7 +67,7 @@ await page.addInitScript(() => {
         sheet.getBoundingClientRect().right - parseFloat(getComputedStyle(sheet).paddingRight);
       for (const node of sheet.querySelectorAll(
         '.bf-name, .bf-product, .bf-dpt-name, .bf-total-product, .bf-route-number, .bf-crates, ' +
-          '.bf-total-col, .bf-stamp, .bf-marker, .bf-order-id',
+          '.bf-total-col, .bf-stamp, .bf-marker, .bf-order-id, .bf-row-stamp, .bf-dpt-sub',
       )) {
         across = Math.max(across, (node.getBoundingClientRect().right - edge) * perPx);
       }
@@ -88,7 +88,7 @@ await page.addInitScript(() => {
       }
       for (const node of sheet.querySelectorAll(
         '.bf-legend-suppliers, .bf-code, .bf-qty, .bf-total-qty, .bf-name, .bf-total-name, ' +
-          '.bf-stamp, .bf-marker, .bf-order-id',
+          '.bf-stamp, .bf-marker, .bf-order-id, .bf-dpt-sub',
       )) {
         if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
       }
@@ -106,6 +106,104 @@ await page.addInitScript(() => {
       nonsense: ['NaN', 'Infinity', 'undefined', '[object'].filter((w) => printed.includes(w)),
       zoomed: sheets.some((sheet) => sheet.style.zoom !== ''),
     };
+  };
+
+  // Every block of several orders, read back line by line and held against
+  // the orders it prints (`orders`: the model's, by id). A marker or a crate
+  // count attached to the wrong order would print wrong without a word, so
+  // this is the check that matters: each order's lines, in file order, under
+  // its own department; its crates and its marker once, on its first line.
+  // Returns what disagrees, so an empty list is the pass.
+  window.readSharedBlocks = (sheets, orders, rules, bread) => {
+    const problems = [];
+    const seen = new Map();
+    const readCrates = (node) => {
+      const count = { large: 0, small: 0 };
+      if (node.classList.contains('bf-crates-compact')) {
+        for (const group of node.querySelectorAll('.bf-crate-group')) {
+          const n = Number(group.querySelector('.bf-crate-count').textContent.replace('×', ''));
+          if (group.querySelector('.bf-crate-full')) count.large += n;
+          else count.small += n;
+        }
+      } else {
+        count.large = node.querySelectorAll('.bf-crate-full').length;
+        count.small = node.querySelectorAll('.bf-crate-half').length;
+      }
+      return count;
+    };
+    const marks = (rec, holder) => {
+      const marker = holder.querySelector('.bf-marker');
+      if (marker) {
+        if (holder.querySelector('.bf-order-cont')) rec.continued.push(marker.textContent);
+        else rec.markers.push([rec.rows.length - 1, marker.textContent]);
+      }
+      const crates = holder.querySelector('.bf-crates');
+      if (crates) rec.crates.push([rec.rows.length - 1, readCrates(crates)]);
+    };
+
+    let blocks = 0;
+    for (const sheet of sheets) {
+      for (const block of sheet.querySelectorAll('.bf-block')) {
+        if (!block.querySelector('.bf-row-shared')) continue;
+        blocks += 1;
+        const name = block.querySelector('.bf-name').textContent;
+        const boxed = block.querySelector(':scope > .bf-head-line .bf-dpt:not(.bf-dpt-quiet) .bf-dpt-name');
+        let department = boxed ? boxed.textContent : null;
+        let last = null;
+        for (const node of block.querySelectorAll('.bf-dpt-sub, .bf-row, .bf-order-extra')) {
+          if (node.classList.contains('bf-dpt-sub')) {
+            department = node.querySelector('.bf-dpt-name').textContent;
+            continue;
+          }
+          if (node.classList.contains('bf-order-extra')) {
+            if (last) marks(last, node);
+            else problems.push(`${name}: crates and a marker on a line of their own, under no order`);
+            continue;
+          }
+          if (!node.classList.contains('bf-row-shared')) {
+            problems.push(`${name}: a line with no order id in a block of several orders`);
+            continue;
+          }
+          const idNode = node.querySelector('.bf-row-stamp .bf-order-id');
+          const id = idNode ? Number(idNode.textContent) : NaN;
+          const order = orders.get(id);
+          if (!order) {
+            problems.push(`${name}: a line carries "${idNode && idNode.textContent}", no order of this day`);
+            continue;
+          }
+          if (order.customer !== name) problems.push(`${id} printed under ${name}`);
+          if ((order.department || null) !== department) {
+            problems.push(`${id} printed under department ${department}, belongs to ${order.department}`);
+          }
+          if (!seen.has(id)) seen.set(id, { order, rows: [], markers: [], continued: [], crates: [] });
+          last = seen.get(id);
+          last.rows.push([
+            Number(node.querySelector('.bf-qty').textContent),
+            node.querySelector('.bf-product').textContent,
+          ]);
+          marks(last, node.querySelector('.bf-row-stamp'));
+        }
+      }
+    }
+
+    for (const [id, rec] of seen) {
+      const { order } = rec;
+      const want = order.lines.map((line) => [line.quantity, line.product.name]);
+      if (JSON.stringify(rec.rows) !== JSON.stringify(want)) {
+        problems.push(`${id}: prints ${rec.rows.length} lines, the order has ${want.length} (or not in file order)`);
+      }
+      const answer = `want substitute: ${order.acceptAlternatives}`;
+      if (rec.markers.length !== 1 || rec.markers[0][0] !== 0 || rec.markers[0][1] !== answer) {
+        problems.push(`${id}: markers ${JSON.stringify(rec.markers)}, wanted "${answer}" once on its first line`);
+      }
+      if (rec.continued.some((text) => text !== answer)) problems.push(`${id}: a continued marker is wrong`);
+      const count = bread ? Model.crateCount(order, rules) : { large: 0, small: 0 };
+      const wantCrates = count.large + count.small > 0 ? [[0, count]] : [];
+      if (JSON.stringify(rec.crates) !== JSON.stringify(wantCrates)) {
+        problems.push(`${id}: crates ${JSON.stringify(rec.crates)}, wanted ${JSON.stringify(wantCrates)}`);
+      }
+    }
+    return { blocks, ids: Array.from(seen.keys()), problems: problems.slice(0, 8) };
   };
 
   // How a day's orders group into stops, and which routes the customer's
@@ -231,12 +329,14 @@ const read = await page.evaluate(() => ({
   ]),
 }));
 
+// A stop is a block: the day's 148 orders print as 123, because a customer's
+// orders at one stop share one (the owner, 2026-09-29).
 same(
-  'the bread export reads as 16 routes, 148 stops, 352 lines',
+  'the bread export reads as 16 routes, 123 stops, 352 lines',
   read.stats,
   [
     ['16', 'routes'],
-    ['148', 'stops'],
+    ['123', 'stops'],
     ['352', 'lines'],
     ['2026-03-04', 'delivery'],
   ],
@@ -493,6 +593,110 @@ check(
   JSON.stringify(breadMarkers),
 );
 
+// ── One block per customer at a stop (the owner, 2026-09-29) ─────────────
+
+/**
+ * Every block of several orders in the preview, held against the day's
+ * orders; which stops of several orders did not print as one block; and the
+ * lines of the named blocks, as [id, quantity, crate glyphs] with the
+ * department sub-headings between them.
+ */
+const sharedReport = (bytes, kind, named) =>
+  page.evaluate(
+    async ([b, kind, named]) => {
+      const book = await Xlsx.open(new Uint8Array(b).buffer);
+      const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+      const orders = new Map(routes.flatMap((r) => r.orders).map((o) => [o.id, o]));
+      const sheets = Array.from(document.querySelectorAll('#preview .bf-sheet'));
+      const read = readSharedBlocks(sheets, orders, Model.defaultCrateRules(), kind === Model.BREAD);
+      const printed = new Set(read.ids);
+      const apart = routes.flatMap((r) =>
+        r.stops
+          .filter((s) => s.orders.length > 1 && !s.orders.every((o) => printed.has(o.id)))
+          .map((s) => `${r.nickname}: ${s.customer}`),
+      );
+      const lines = {};
+      for (const [route, customer] of named) {
+        const block = sheets
+          .filter((s) => s.dataset.route === route)
+          .flatMap((s) => Array.from(s.querySelectorAll('.bf-block')))
+          .find((n) => n.querySelector('.bf-name').textContent === customer && n.querySelector('.bf-row-shared'));
+        lines[`${route}: ${customer}`] = block
+          ? Array.from(block.querySelectorAll('.bf-dpt-sub, .bf-row')).map((node) =>
+              node.classList.contains('bf-dpt-sub')
+                ? ['dpt', node.querySelector('.bf-dpt-name').textContent]
+                : [
+                    Number(node.querySelector('.bf-order-id').textContent),
+                    Number(node.querySelector('.bf-qty').textContent),
+                    Array.from(node.querySelectorAll('.bf-crate'), (c) =>
+                      c.classList.contains('bf-crate-full') ? 'full' : 'half',
+                    ),
+                  ],
+            )
+          : null;
+      }
+      const ids = Array.from(document.querySelectorAll('#preview .bf-row-shared .bf-order-id'));
+      return {
+        read,
+        apart,
+        lines,
+        ink: Array.from(
+          new Set(ids.map((n) => `${getComputedStyle(n).color} ${getComputedStyle(n).fontWeight}`)),
+        ),
+        subsMisclassed: document.querySelectorAll(
+          '#preview .bf-dpt-sub.bf-row, #preview .bf-dpt-sub.bf-block',
+        ).length,
+        subs: document.querySelectorAll('#preview .bf-dpt-sub').length,
+      };
+    },
+    [Array.from(bytes), kind, named],
+  );
+
+const breadShared = await sharedReport(breadBytes, 'bread', [
+  ['11', 'Customer 017'],
+  ['9', 'Customer 092'],
+]);
+same(
+  'every order in a bread block of several prints its own lines, crates and marker, under its own department',
+  breadShared.read.problems,
+  [],
+);
+// Customer 012's nine orders at one stop are taller than a page as one block,
+// so until a block can be cut between orders they print as nine, as before.
+same(
+  'every bread stop of several orders is one block, but Customer 012 on route 14',
+  [breadShared.read.blocks, breadShared.apart],
+  [7, ['14: Customer 012']],
+);
+same(
+  'route 11’s Customer 017: 7, 4 and 10 Kneippbrød with crates full, half, full, then Department 09',
+  breadShared.lines['11: Customer 017'],
+  [
+    [1000619017, 7, ['full']],
+    [1000619019, 4, ['half']],
+    [1000619029, 10, ['full']],
+    ['dpt', 'Department 09'],
+    [1000622398, 3, ['full']],
+    [1000622398, 7, []],
+  ],
+);
+same(
+  'Customer 092’s two identical orders each carry 2 full and 1 half, not 4 full and 1 half',
+  breadShared.lines['9: Customer 092'].filter((row) => row[2].length > 0),
+  [
+    [1000619939, 12, ['full', 'full', 'half']],
+    [1000619941, 12, ['full', 'full', 'half']],
+  ],
+);
+same('an order id in a shared block stays quiet: grey, never bold', breadShared.ink, [
+  'rgb(156, 156, 156) 400',
+]);
+check(
+  'a department sub-heading is neither a bread line nor a block',
+  breadShared.subs > 0 && breadShared.subsMisclassed === 0,
+  `${breadShared.subs} sub-headings, ${breadShared.subsMisclassed} misclassed`,
+);
+
 // The handoff's verified budget: route 8 is 5 stops, 13 lines and its total,
 // on one sheet.
 const route8 = sheets.filter((s) => s.route === '8');
@@ -636,6 +840,77 @@ check(
 );
 check('and a whole order still prints', refusals.whole === 'printed', refusals.whole);
 
+// A block of several orders carries each order's marker on that order's first
+// line, so a refusing order can never lend its "false" to the one beside it —
+// and a check line whose name will not fit beside a marker and an id wraps
+// the name rather than leaving the paper.
+const handBuilt = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const order = (id, accept, department, names) => ({
+    id, customer: 'Kafé 02', department, deliveryStreet: 'Street 02', route: '1',
+    sequence: 200, acceptAlternatives: accept, comment: null,
+    lines: names.map((name, i) => ({
+      product: { id: 10 + i, name, sku: String(10 + i), supplier: 'Asko' },
+      quantity: 3 + i,
+    })),
+  });
+  const lay = (kind, orders) => {
+    const route = Model.route('1', orders);
+    const sheets = Sheet.paginate(
+      route,
+      { kind, showOrderId: false, crates: Model.defaultCrateRules() },
+      { dates: null, source: 'test', routeStops: route.stops.length, routeLines: 4 },
+      { host },
+    );
+    for (const sheet of sheets) host.append(sheet);
+    return { route, sheets };
+  };
+  try {
+    const two = lay(Model.BREAD, [
+      order(1000000011, true, null, ['Grovbrød', 'Loff']),
+      order(1000000012, false, null, ['Grovbrød', 'Loff']),
+    ]);
+    const markers = Array.from(host.querySelectorAll('.bf-row-shared'), (row) => [
+      Number(row.querySelector('.bf-order-id').textContent),
+      row.querySelector('.bf-marker') ? row.querySelector('.bf-marker').textContent : null,
+    ]);
+    host.innerHTML = '';
+
+    const long =
+      'Torskefilet i blokk uten skinn og bein, frossen, 400 g, First Price, ' +
+      'fra Lofoten Sjømat AS, pakket i kartong på 12';
+    const freezer = lay(Model.FREEZER, [
+      order(1000000021, false, null, [long, 'Pitabrød']),
+      order(1000000022, true, 'Kjøkken', ['Pitabrød', long]),
+    ]);
+    const orders = new Map(freezer.route.orders.map((o) => [o.id, o]));
+    return {
+      markers,
+      freezer: inspectSheets(freezer.sheets),
+      freezerRead: readSharedBlocks(freezer.sheets, orders, Model.defaultCrateRules(), false).problems,
+      noteFields: host.querySelectorAll('.bf-note-field').length,
+      rows: host.querySelectorAll('.bf-row').length,
+    };
+  } finally {
+    host.remove();
+  }
+});
+same('in a block of two orders, only the refusing order’s first line says false', handBuilt.markers, [
+  [1000000011, 'want substitute: true'],
+  [1000000011, null],
+  [1000000012, 'want substitute: false'],
+  [1000000012, null],
+]);
+inspected('a freezer block of several orders with a long product name', handBuilt.freezer);
+same('and each of its orders prints its own lines and marker', handBuilt.freezerRead, []);
+check(
+  'and every check line in it keeps its note field',
+  handBuilt.rows === 4 && handBuilt.noteFields === 4,
+  `${handBuilt.noteFields} of ${handBuilt.rows}`,
+);
+
 // When the layout does refuse, the Print step says why and prints nothing.
 const laidOutWrong = await page.evaluate(() => {
   const real = Sheet.day;
@@ -666,6 +941,43 @@ check(
     !(await page.locator('#print').isDisabled()),
 );
 
+// "Show the order ID" is for one-order blocks. In a block of several orders
+// the id is what tells them apart, so it prints on every line regardless.
+await page.click('[data-step="configure"]');
+await page.uncheck('#showOrderId');
+await page.click('#advance');
+await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0);
+const idsOff = await page.evaluate(() => {
+  const rows = Array.from(document.querySelectorAll('#preview .bf-row-shared'));
+  const idsOf = (route, customer) =>
+    Array.from(document.querySelectorAll(`#preview .bf-sheet[data-route="${route}"] .bf-block`))
+      .filter((b) => b.querySelector('.bf-name').textContent === customer)
+      .flatMap((b) => Array.from(b.querySelectorAll('.bf-order-id'), (n) => Number(n.textContent)));
+  return {
+    rows: rows.length,
+    rowsWithoutId: rows.filter((r) => !r.querySelector('.bf-order-id')).length,
+    idsElsewhere: Array.from(document.querySelectorAll('#preview .bf-order-id')).filter(
+      (n) => !n.closest('.bf-row-shared'),
+    ).length,
+    c092: Array.from(new Set(idsOf('9', 'Customer 092'))),
+    c061: Array.from(new Set(idsOf('11', 'Customer 061'))),
+  };
+});
+check(
+  'with Show the order ID off, every line of a shared block still prints its id',
+  idsOff.rows > 0 && idsOff.rowsWithoutId === 0,
+  JSON.stringify(idsOff),
+);
+check('and no one-order block prints one', idsOff.idsElsewhere === 0, JSON.stringify(idsOff));
+same(
+  'Customer 092’s pair and Customer 061’s three orders at Street 62 still show their ids',
+  [idsOff.c092, idsOff.c061],
+  [
+    [1000619939, 1000619941],
+    [1000621633, 1000622154, 1000622155],
+  ],
+);
+
 // ── The freezer list ───────────────────────────────────────────────────────
 
 const freezerBytes = Array.from(await readFile(`scripts/fixtures/${FREEZER}`));
@@ -686,6 +998,17 @@ same(
   [
     ['notice', '28 rows have no position in their route'],
     ['notice', 'Column O carries no header'],
+  ],
+);
+// 115 orders, 94 blocks: a customer's orders at one stop count once.
+same(
+  'the freezer export reads as 15 routes and 94 stops',
+  await page.$$eval('.stat', (cards) =>
+    cards.slice(0, 2).map((s) => [s.querySelector('b').textContent, s.querySelector('span').textContent]),
+  ),
+  [
+    ['15', 'routes'],
+    ['94', 'stops'],
   ],
 );
 
@@ -712,18 +1035,22 @@ const freezer = await page.evaluate(() => {
     note: first.querySelector('.bf-note div').textContent,
     legend: first.querySelector('.bf-legend').textContent.replace(/\s+/g, ' ').trim(),
     crates: all.reduce((n, s) => n + s.querySelectorAll('.bf-block .bf-crate').length, 0),
-    noteFields: first.querySelectorAll('.bf-note-field').length,
-    lines: first.querySelectorAll('.bf-row').length,
+    noteFields: all.reduce((n, s) => n + s.querySelectorAll('.bf-note-field').length, 0),
+    lines: all.reduce((n, s) => n + s.querySelectorAll('.bf-row').length, 0),
     tens: all.reduce((n, s) => n + s.querySelectorAll('.bf-total-dots .bf-dot').length, 0),
+    route13: all.filter((s) => s.dataset.route === '13').length,
   };
 });
 
-// docs/freezer-list.md: "The sample freezer day prints as 15 routes over 21
-// sheets."
+// docs/freezer-list.md says "The sample freezer day prints as 15 routes over
+// 21 sheets", and it did until a customer's orders at one stop shared a block
+// (the owner, 2026-09-29). Route 13's Customer 012 has eight orders there:
+// as one block with eight department sub-headings it is shorter than eight
+// blocks with eight headings, and the route now fits one sheet instead of two.
 check(
-  'the freezer day is 15 routes over 21 sheets',
-  freezer.routes === 15 && freezer.count === 21,
-  `${freezer.routes} routes over ${freezer.count} sheets`,
+  'the freezer day is 15 routes over 20 sheets',
+  freezer.routes === 15 && freezer.count === 20 && freezer.route13 === 1,
+  `${freezer.routes} routes over ${freezer.count} sheets, route 13 on ${freezer.route13}`,
 );
 // F7: the page note says `check list`, so the two sheets cannot be mistaken
 // for one another in a stack.
@@ -782,6 +1109,34 @@ check(
   'the freezer sheets have no loud marker and no convention in the note either',
   freezerMarkers.loud === 0 && !freezerMarkers.noteSays,
   JSON.stringify(freezerMarkers),
+);
+
+const freezerShared = await sharedReport(freezerBytes, 'freezer', [
+  ['11', 'Customer 159'],
+  ['4', 'Customer 017'],
+]);
+same(
+  'every order in a freezer block of several prints its own lines and marker, under its own department',
+  freezerShared.read.problems,
+  [],
+);
+same(
+  'every freezer stop of several orders is one block',
+  [freezerShared.read.blocks, freezerShared.apart],
+  [10, []],
+);
+// Customer 159's two orders share Department 38, so the boxed department stays
+// in the heading and nothing divides the block. Customer 017 on route 4 mixes
+// a refusing order with three that take substitutes.
+same(
+  'a block whose orders share a department has no sub-heading',
+  freezerShared.lines['11: Customer 159'].filter((row) => row[0] === 'dpt'),
+  [],
+);
+same(
+  'route 4’s Customer 017: no department first, then 09, 22 and 32',
+  freezerShared.lines['4: Customer 017'].filter((row) => row[0] === 'dpt').map((row) => row[1]),
+  ['Department 09', 'Department 22', 'Department 32'],
 );
 
 // F10: flipping the kind re-runs validation on the spot, since what counts as
@@ -922,6 +1277,91 @@ same('the tall, wide and shared-department customers are one stop each', manySto
   ['2', [[7203, 7201, 7202]]],
   ['3', [[7301, 7302]]],
 ]);
+
+const TALL = 'Hinna skole og barnehage';
+const WIDE =
+  'Stavanger kommune, Hinna bydel, Oppvekst og levekår: kantinedrift og ' +
+  'storkjøkken ved Hinna skole, idrettshall og svømmehall';
+const WIDE_DEPT = 'Avdeling for storhusholdning og institusjonskjøkken';
+const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  try {
+    const book = await Xlsx.open(new Uint8Array(b).buffer);
+    const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+    const settings = { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() };
+    const all = [];
+    const byRoute = {};
+    for (const route of routes) {
+      byRoute[route.nickname] = Sheet.paginate(
+        route,
+        settings,
+        { dates: null, source: 'edge', routeStops: route.stops.length, routeLines: Model.lineCount(route) },
+        { host },
+      );
+      for (const sheet of byRoute[route.nickname]) host.append(sheet);
+      all.push(...byRoute[route.nickname]);
+    }
+    const blocksOf = (route, customer) =>
+      byRoute[route]
+        .flatMap((s) => Array.from(s.querySelectorAll('.bf-block')))
+        .filter((n) => n.querySelector('.bf-name').textContent === customer);
+    const firstRow = (blocks, id) =>
+      blocks
+        .flatMap((n) => Array.from(n.querySelectorAll('.bf-row-shared')))
+        .find((row) => row.querySelector('.bf-order-id').textContent === String(id));
+    const subs = (blocks) =>
+      blocks.flatMap((n) => Array.from(n.querySelectorAll('.bf-dpt-sub .bf-dpt-name'), (d) => d.textContent));
+
+    const wideBlocks = blocksOf('2', wide);
+    const sharedBlocks = blocksOf('3', 'Madla sykehjem');
+    const tallBlocks = blocksOf('1', tall);
+    const orders = new Map(routes.flatMap((r) => r.orders).map((o) => [o.id, o]));
+    return {
+      read: readSharedBlocks(all, orders, settings.crates, true).problems,
+      wide: {
+        blocks: wideBlocks.length,
+        compact: !!firstRow(wideBlocks, 7201).querySelector('.bf-crates-compact'),
+        refusing: firstRow(wideBlocks, 7202).querySelector('.bf-marker').textContent,
+        subs: subs(wideBlocks),
+      },
+      shared: {
+        blocks: sharedBlocks.length,
+        boxed: Array.from(
+          sharedBlocks[0].querySelectorAll(':scope > .bf-head-line .bf-dpt:not(.bf-dpt-quiet) .bf-dpt-name'),
+          (d) => d.textContent,
+        ),
+        subs: subs(sharedBlocks),
+      },
+      tall: {
+        sharedRows: tallBlocks.reduce((n, block) => n + block.querySelectorAll('.bf-row-shared').length, 0),
+        ids: Array.from(
+          new Set(tallBlocks.flatMap((n) => Array.from(n.querySelectorAll('.bf-order-id'), (d) => Number(d.textContent)))),
+        ).sort(),
+      },
+    };
+  } finally {
+    host.remove();
+  }
+}, [manyBytes, TALL, WIDE]);
+same('every order in the fixture’s shared blocks prints its own lines, crates and marker', manyPrinted.read, []);
+same(
+  'the wide customer is one block: ×N crates on its 250 breads, its refusing order false, its long department a sub-heading',
+  manyPrinted.wide,
+  { blocks: 1, compact: true, refusing: 'want substitute: false', subs: [WIDE_DEPT] },
+);
+same('a shared department stays boxed in the heading, with no sub-heading', manyPrinted.shared, {
+  blocks: 1,
+  boxed: ['Avdeling 2'],
+  subs: [],
+});
+// Taller than a page as one block: until a block can be cut between orders it
+// prints one block per order, as before, and every id still prints.
+same('the tall customer prints one block per order, every id with it', manyPrinted.tall, {
+  sharedRows: 0,
+  ids: [7101, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7109, 7110, 7111, 7112, 7113, 7114],
+});
 
 // ── Changes to the export's own shape ──────────────────────────────────────
 //

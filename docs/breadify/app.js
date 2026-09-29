@@ -117,8 +117,8 @@
   function productsById() {
     const products = new Map();
     for (const route of state.routes) {
-      for (const stop of route.orders) {
-        for (const line of stop.lines) products.set(line.product.id, line.product);
+      for (const order of route.orders) {
+        for (const line of order.lines) products.set(line.product.id, line.product);
       }
     }
     return products;
@@ -204,7 +204,8 @@
       ? `Read from the filename — ${state.filename}`
       : `The filename says nothing, so it is read as bread — ${state.filename}`;
 
-    const stops = state.routes.reduce((sum, route) => sum + route.orders.length, 0);
+    // Stops are blocks: a customer's orders at one stop count once.
+    const stops = state.routes.reduce((sum, route) => sum + route.stops.length, 0);
     const lines = state.routes.reduce((sum, route) => sum + Model.lineCount(route), 0);
     const stats = [
       [state.routes.length, 'routes'],
@@ -347,7 +348,7 @@
         meta.className = 'route-meta';
         const unplaced = Model.unsequencedStops(route).length;
         meta.textContent =
-          `${route.orders.length} stops · ${Model.lineCount(route)} lines` +
+          `${route.stops.length} stops · ${Model.lineCount(route)} lines` +
           (unplaced > 0 ? ` · ${unplaced} unplaced` : '');
 
         row.append(tick, name, meta);

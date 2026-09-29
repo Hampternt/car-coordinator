@@ -525,12 +525,13 @@ const Model = (() => {
     return routes;
   }
 
+  /** The stops, not the orders: a count of blocks, as the page prints them. */
   function unsequencedStops(route) {
-    return route.orders.filter((stop) => !isSequenced(stop));
+    return route.stops.filter((stop) => !isSequenced(stop));
   }
 
   function lineCount(route) {
-    return route.orders.reduce((sum, stop) => sum + stop.lines.length, 0);
+    return route.orders.reduce((sum, order) => sum + order.lines.length, 0);
   }
 
   // ── Crates (D17, D24, D25) ─────────────────────────────────────────────
@@ -623,10 +624,13 @@ const Model = (() => {
   /** More than this on one route and the sheet asks for a pallet (D25). */
   const PALLET_THRESHOLD = 16;
 
-  /** Every crate a route needs, all stops summed. */
+  /**
+   * Every crate a route needs, all orders summed — never per stop, because
+   * two orders at one stop still pack into crates of their own.
+   */
   function routeCrates(route, rules) {
     return route.orders.reduce(
-      (sum, stop) => sum + crateTotal(crateCount(stop, rules)),
+      (sum, order) => sum + crateTotal(crateCount(order, rules)),
       0,
     );
   }
@@ -641,8 +645,8 @@ const Model = (() => {
    */
   function routeTotal(route) {
     const byProduct = new Map();
-    for (const stop of route.orders) {
-      for (const line of stop.lines) {
+    for (const order of route.orders) {
+      for (const line of order.lines) {
         let entry = byProduct.get(line.product.id);
         if (!entry) {
           entry = { product: line.product, units: 0, fullTens: 0 };

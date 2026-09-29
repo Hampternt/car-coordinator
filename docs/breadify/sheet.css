@@ -10,6 +10,13 @@
  * customer name (D19), the crates joined the right-hand group (D20), and a
  * crate run too wide for its line compresses to `×N` rather than wrapping
  * (D24).
+ *
+ * Where the web port departs from the log, at the owner's request
+ * (2026-09-29), the rule says so: a customer's orders at one stop share a
+ * block (against D16), each order's crates, marker and id sit on its own
+ * first line rather than in one column per block (against D20), and a block
+ * of several departments divides them with quiet sub-headings rather than
+ * one boxed label (against D19).
  */
 
 /* ── The faces ───────────────────────────────────────────────────────────
@@ -377,7 +384,9 @@
 
 /* ── A stop block ────────────────────────────────────────────────────── */
 
-/* One block = one order = one stop = one crate label (D16). */
+/* One block = one stop. D16 also makes it one order; the web port gives a
+ * customer's several orders at one stop one block between them, each order
+ * still its own crate label (the owner, 2026-09-29). */
 .bf-block {
   border-top: 1.25pt solid var(--ink);
   padding: 1.7mm 0 1.2mm;
@@ -415,7 +424,9 @@
 }
 
 /* The department sits under the customer name, not beside it: a heading is
- * one crate label in two parts, and side by side they read as equals (D19). */
+ * one crate label in two parts, and side by side they read as equals (D19).
+ * A block of several orders keeps it there when they all share it; when they
+ * do not, each department is a quiet sub-heading instead (.bf-dpt-sub). */
 .bf-dpt {
   flex: none;
   max-width: 100%;
@@ -449,8 +460,36 @@
   overflow-wrap: anywhere;
 }
 
+/* A department dividing a block of several orders — a departure from D19's
+ * one boxed label, which cannot carry several departments. The same box,
+ * quieter: thinner, greyer and smaller, because it divides a block rather
+ * than heading one. The lines under it are that department's, down to the
+ * next; orders with no department come first, above any of these. */
+.bf-dpt-sub {
+  margin-top: 1.4mm;
+}
+
+.bf-dpt-quiet {
+  border-width: 0.75pt;
+  border-color: var(--ink-quiet);
+  color: var(--ink-quiet);
+  padding: 0.25mm 1.1mm;
+}
+
+.bf-dpt-quiet .bf-dpt-tag {
+  font-size: 6.8pt;
+  border-right: 0.75pt solid var(--ink-quiet);
+}
+
+.bf-dpt-quiet .bf-dpt-name {
+  font: 500 9.2pt/1.2 'Space Grotesk', sans-serif;
+  letter-spacing: 0;
+}
+
 /* The crates, the marker and the order id form one column the eye finds once
- * per block, at the right-hand end of the heading (D20). */
+ * per block, at the right-hand end of the heading (D20). A block of several
+ * orders departs from that: it has one such group per order, on the order's
+ * first line (.bf-row-stamp). */
 .bf-stamp {
   flex: none;
   margin-left: auto;
@@ -478,11 +517,43 @@
   font-weight: 700;
 }
 
-/* Deliberately the quietest thing on the page, but never below ~8 pt: it is
- * the only mark telling apart several no-department orders at one address. */
+/* Deliberately the quietest thing on the page, but never below ~8 pt. In a
+ * block of several orders it is on every line, and it is what tells one
+ * order's lines from another's — the owner asked for it seen, not standing
+ * out (2026-09-29). */
 .bf-order-id {
   font: 400 8.3pt/1 'IBM Plex Mono', monospace;
   color: var(--faintest);
+}
+
+/* A line in a block of several orders: its order's id at the right, and on
+ * the order's first line its crates and marker too, left of the id. Right
+ * before the tick boxes, so the ids stand in one column down the block. */
+.bf-row-stamp {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 2.3mm;
+  white-space: nowrap;
+}
+
+/* The name keeps room to be read. A first line that cannot leave it this much
+ * sends its crates to the compact form, then onto a line of their own — and
+ * only a name that measures can make that call. */
+.bf-row-shared .bf-product {
+  min-width: 30mm;
+}
+
+/* A check line's name does not wrap (F8), unless the marker and id beside it
+ * would push the line off the paper. */
+.bf-row-check.bf-row-wrap .bf-product {
+  flex: 1 1 auto;
+  white-space: normal;
+}
+
+/* An order's crates and marker when its first line had no room for them. */
+.bf-order-extra {
+  padding: 0.3mm 0 0.5mm;
 }
 
 /* ── A bread line ────────────────────────────────────────────────────── */
@@ -502,7 +573,8 @@
 }
 
 /* Every second line in a block, restarting at each heading so the stripe
- * never straddles one. */
+ * never straddles one. In a block of several orders it runs on across orders
+ * and restarts under each department sub-heading. */
 .bf-row-zebra {
   background: var(--zebra);
   -webkit-print-color-adjust: exact;
