@@ -297,7 +297,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       - When `Sheet.day` is made to throw in the page, the Print step shows the sentence, no sheets, and a disabled Print button.
 
       test:breadify passes, including item 2's checks.
-- [ ] **6. Rename `route.stops` to `route.orders`.** A mechanical rename with no change in behaviour. The readers are:
+- [x] **6. Rename `route.stops` to `route.orders`.** A mechanical rename with no change in behaviour. The readers are:
       - model.js:458 (the key), 467, 471, 566, 582;
       - layout.js:682-683, 787, 935, 982;
       - app.js:121, 208, 358;
@@ -498,3 +498,4 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 - 2026-09-29 · **Item 3 done** (d3fa087). `readRows` keeps `orderIdExact`; `blankRequiredFields` flags any row whose `orderIdExact` is not a finite number (so a hand-built row missing the field is flagged too, rather than passing). Two hand-made no-id rows give two blocking findings, rows 2 and 3, and `Validate.blocks` is true; the `twoRoutes` helper gained `orderIdExact` and still does not block; both sample days still read exactly two notices. Gate: check.sh OK; test:breadify all passed, 191 ok.
 - 2026-09-29 · **Item 4 done** (42abf83). Settings key, Configure heading and three buttons, both handlers, the bar, the badge, the `.choices` rules and the four `marker: 'word-only'` keys removed; `marker()` no longer takes settings. `grep -rn "markerChoices\|settings.marker\|bf-block-barred\|bf-marker-badge\|choices" docs/breadify/ scripts/breadify.mjs` finds nothing. New check: the Configure step has no `[data-marker]` and no "substitute" text. Gate: check.sh OK; test:breadify all passed, 192 ok.
 - 2026-09-29 · **Item 5 done** (ad030ae). `marker()` returns one `.bf-marker` span and throws on anything but `true`/`false`; a new `orderId()` guard throws on a non-number id and `stamp()` uses it (item 8 reuses it for rows); `rebuild()` catches, clears the preview, disables Print and says why. `.bf-marker-loud`, `.bf-note em` and the note's right half gone; `.bf-marker b` is 700. The false counts are taken from the model and match: bread 18, freezer 10. Gate: check.sh OK; test:breadify all passed, 203 ok (route 8 still 1 sheet of 5 blocks, freezer still 21 sheets).
+- 2026-09-29 · **Item 6 done** (2eaa6c1). 24 lines renamed across app.js, layout.js, model.js and breadify.mjs, including the three `.stops` reads items 3 and 5 added to the test. Both greps (`.stops`, `stops:`) find nothing at this commit; `.stops` returns in item 7 by design. Figures unchanged: 148 stops, the route 8 table, Customer 012 [9, 13], pallets 3/4/5/9/11/13, freezer 21 sheets. Gate: check.sh OK; test:breadify all passed, 203 ok.
