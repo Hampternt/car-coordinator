@@ -2047,39 +2047,57 @@ const flagSweep = await page.evaluate(() => {
     product: { id: 100 + i, name: `Brød ${i + 1}`, sku: String(100 + i), supplier: 'sandnes bakeri' },
     quantity: 2,
   });
+  // The second stop is unsequenced (under the flag) or given a position of
+  // its own (no flag), and printed; the parts it took are counted.
+  const lay = (lines, sequence) => {
+    const route = Model.route('5', [
+      { id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01', route: '5',
+        sequence: 100, acceptAlternatives: true, comment: null, lines: [loaf(0)] },
+      { id: 2, customer: 'Kafé 02', department: null, deliveryStreet: 'Street 02', route: '5',
+        sequence, acceptAlternatives: true, comment: null,
+        lines: Array.from({ length: lines }, (_, i) => loaf(i)) },
+    ]);
+    const sheets = Sheet.paginate(
+      route,
+      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+      { dates: null, source: 'sweep', routeStops: 2, routeLines: lines + 1 },
+      { host },
+    );
+    for (const sheet of sheets) host.append(sheet);
+    const seen = inspectSheets(sheets);
+    const parts = readParts(sheets, 'Kafé 02').length;
+    host.innerHTML = '';
+    return { seen, parts };
+  };
   const wrong = [];
+  const cuts = [];
   try {
     for (let lines = 30; lines <= 70; lines += 1) {
-      const route = Model.route('5', [
-        { id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01', route: '5',
-          sequence: 100, acceptAlternatives: true, comment: null, lines: [loaf(0)] },
-        { id: 2, customer: 'Kafé 02', department: null, deliveryStreet: 'Street 02', route: '5',
-          sequence: 0, acceptAlternatives: true, comment: null,
-          lines: Array.from({ length: lines }, (_, i) => loaf(i)) },
-      ]);
-      const sheets = Sheet.paginate(
-        route,
-        { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
-        { dates: null, source: 'sweep', routeStops: 2, routeLines: lines + 1 },
-        { host },
-      );
-      for (const sheet of sheets) host.append(sheet);
-      const seen = inspectSheets(sheets);
+      const { seen, parts } = lay(lines, 0);
       if (seen.flagLast.length > 0 || seen.clearance < 10 || seen.down > 0.5) {
         wrong.push([lines, seen.flagLast, seen.clearance, seen.down]);
       }
-      host.innerHTML = '';
+      if (lines >= 38 && lines <= 41) cuts.push([lines, parts, lay(lines, 200).parts]);
     }
-    return wrong;
+    return { wrong, cuts };
   } finally {
     host.remove();
   }
 });
 same(
   'an unsequenced stop of 30 to 70 lines after a sequenced one never leaves the flag alone at a foot',
-  flagSweep,
+  flagSweep.wrong,
   [],
 );
+// The price of that, kept on purpose: at 39 and 40 lines the stop fits a
+// page of its own whole, but not the room beside the flag, so under the flag
+// it is cut in two. [lines, parts under the flag, parts with a position]
+same('a stop that fits a page but not beside the flag is cut, and only then', flagSweep.cuts, [
+  [38, 1, 1],
+  [39, 2, 1],
+  [40, 2, 1],
+  [41, 2, 2],
+]);
 
 // A file that is not this file at all still fails with a sentence, not a stack.
 for (const [what, bytes] of [

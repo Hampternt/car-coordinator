@@ -55,7 +55,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **Kind override** — a full-width `TREATED AS` banner in the list's own colour, for a renamed or custom filename. Flipping it re-validates on the spot, since what counts as familiar depends on the kind.
 
 ## The printed sheet
-- ✅ **A4, one route per sheet set** — a route always starts a fresh page and no page ever carries two. A stop block, and the route total, split only when taller than a page: a block between whole orders first, each part repeating the customer's name with `part N of M`, a continued order saying so, and its crates printed once.
+- ✅ **A4, one route per sheet set** — a route always starts a fresh page and no page ever carries two. A stop block, and the route total, split only when taller than a page: a block between whole orders first, each part repeating the customer's name with `part N of M`, a continued order saying so, and its crates printed once. The one other split is the first block under the "no position assigned" flag. If it fits a page but not beside the flag, it is split so the flag never ends a page alone.
 - ✅ **Delivery order top to bottom**, ties broken address → customer → department → order id so two runs of one file print identically.
 - ✅ **Unsequenced stops last, under a flag** — `Route ordering = 0` means nobody assigned a position, not "deliver last". The flag never ends a page on its own.
 - ✅ **The crate label** — customer, and the department beneath it in its own outlined box.

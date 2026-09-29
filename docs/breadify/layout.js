@@ -622,8 +622,11 @@ const Sheet = (() => {
   }
 
   /**
-   * A stop's block, cut across as few pages as it takes — only ever when the
-   * alternative is ink off the bottom of the paper.
+   * A stop's block, cut across as few pages as it takes. That happens when the
+   * alternative is ink off the bottom of the paper — and in one other case,
+   * kept on purpose: the first stop under the unsequenced flag must share a
+   * page with the flag, so a block that fits a page but not the room beside
+   * the flag is cut too (see `first` below).
    *
    * D9 says a stop block never splits. The Rust app can keep that, because
    * its blocks are one order each; the web port's can be a customer's whole
