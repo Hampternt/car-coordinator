@@ -445,7 +445,9 @@ const Sheet = (() => {
       // visible, rather than an order going out with no crate count.
       stamp.removeChild(mark);
       const extra = element('div', 'bf-head-line bf-order-extra');
-      const markStamp = append(element('span', 'bf-stamp'), cue(), marker(order));
+      // The id too, like every line of the order: crates and a marker on a
+      // line of their own must still say whose they are.
+      const markStamp = append(element('span', 'bf-stamp'), cue(), marker(order), orderId(order));
       extra.appendChild(markStamp);
       if (total > 0 && !placeCrates(extra, count, markStamp, measure)) {
         extra.insertBefore(crateCompact(count), markStamp);

@@ -234,8 +234,18 @@ await page.addInitScript(() => {
             continue;
           }
           if (node.classList.contains('bf-order-extra')) {
-            if (last) marks(last, node);
-            else problems.push(`${name}: crates and a marker on a line of their own, under no order`);
+            if (last) {
+              const own = node.querySelector('.bf-order-id');
+              if (!own || Number(own.textContent) !== last.order.id) {
+                problems.push(
+                  `${name}: a line of crates and a marker says ${own ? own.textContent : 'no id'}, ` +
+                    `under ${last.order.id}`,
+                );
+              }
+              marks(last, node);
+            } else {
+              problems.push(`${name}: crates and a marker on a line of their own, under no order`);
+            }
             continue;
           }
           if (!node.classList.contains('bf-row-shared')) {
@@ -1123,6 +1133,12 @@ const crowdedFirstLine = await page.evaluate(() => {
       loaf(62, 'Loff', 'Bakehuset', 1),
     ]),
     order(1000000032, true, [loaf(63, 'Grovbrød', 'Sandnes Bakeri', 2)]),
+    // Too long even beside the compact crates: its crates and marker take a
+    // line of their own, which must carry its id.
+    order(1000000033, true, [
+      loaf(64, 'Surdeigsrundstykkermedkanelogkardemommeogrosiner', 'Sandnes Bakeri', 20),
+      loaf(65, 'Grovbrød', 'Bakehuset', 1),
+    ]),
   ];
   try {
     const sheets = Sheet.paginate(
@@ -1134,6 +1150,9 @@ const crowdedFirstLine = await page.evaluate(() => {
     for (const sheet of sheets) host.append(sheet);
     return {
       seen: inspectSheets(sheets),
+      extras: Array.from(host.querySelectorAll('.bf-order-extra'), (line) =>
+        Array.from(line.querySelectorAll('.bf-order-id'), (n) => Number(n.textContent)),
+      ),
       spilled: Array.from(host.querySelectorAll('.bf-row-shared .bf-product'))
         .filter((n) => n.scrollWidth > n.clientWidth + 1)
         .map((n) => n.textContent),
@@ -1151,6 +1170,9 @@ const crowdedFirstLine = await page.evaluate(() => {
 inspected('a shared first line whose bread name is one long word', crowdedFirstLine.seen);
 same('and no bread name spills out of its box onto the crates', crowdedFirstLine.spilled, []);
 same('and its orders still print their own lines, crates and marker', crowdedFirstLine.read, []);
+same('a line of its own for crates and a marker carries its order’s id', crowdedFirstLine.extras, [
+  [1000000033],
+]);
 
 // When the layout does refuse, the Print step says why and prints nothing.
 const laidOutWrong = await page.evaluate(() => {
