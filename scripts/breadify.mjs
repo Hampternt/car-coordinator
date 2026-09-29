@@ -1097,6 +1097,26 @@ same('one customer’s orders at a shared street and position sit together', tie
 ]);
 same('and print as one Kafé A block', tieBreak.body.filter((n) => n === 'Kafé A'), ['Kafé A']);
 
+// The position in the route is part of what makes a stop. One customer at
+// one street with a position and without one is two stops, and the
+// unsequenced flag stands between them; at two positions it is two stops.
+const bySequence = await page.evaluate(() => ({
+  placedAndNot: handRoute([
+    [31, 'Kafé C', 'Street 9', 5],
+    [32, 'Kafé C', 'Street 9', 0],
+  ]),
+  twoPlaces: handRoute([
+    [33, 'Kafé D', 'Street 9', 5],
+    [34, 'Kafé D', 'Street 9', 6],
+  ]),
+}));
+same(
+  'a customer at one street, placed and unplaced, is two stops with the flag between',
+  [bySequence.placedAndNot.stops, bySequence.placedAndNot.body],
+  [['Kafé C:31', 'Kafé C:32'], ['Kafé C', 'flag', 'Kafé C', 'bf-total']],
+);
+same('and at two positions, two stops', bySequence.twoPlaces.stops, ['Kafé D:33', 'Kafé D:34']);
+
 // acceptance check 7: names print exactly as the file has them (D14).
 const truncated = sheets
   .flatMap((s) => s.products)

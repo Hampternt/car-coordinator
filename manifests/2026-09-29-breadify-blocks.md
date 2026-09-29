@@ -419,7 +419,7 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 - [x] **R11. A shared block's heading holds nothing at its right.** Whitelisted head-line children; no crates, marker, stamp or id.
 - [x] **R12. The crate count on a cut one-order block.** Part 1's crates equal `crateCount` (90 large for one-giant-stop; the crowded route too).
 - [x] **R13. The customer tie-break.** Kafé A (21, 23) and Kafé B (22) at one street and sequence → stops A:21+23, B:22 and one Kafé A block.
-- [ ] **R14. Sequence in the key.** Sequences 5 and 0 → two stops with a flag between; 5 and 6 → two stops.
+- [x] **R14. Sequence in the key.** Sequences 5 and 0 → two stops with a flag between; 5 and 6 → two stops.
 - [ ] **R15. Exact spelling.** Two spellings of one customer → two stops, both names printed.
 - [ ] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
 
@@ -592,3 +592,8 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 
   Before, the checks only counted crate runs, so part 1 showing just its own lines' crates would have passed. Test only. Gate: check.sh OK; test:breadify all passed, 306 ok.
 - 2026-09-29 · **R13 done** (commit "Check the customer tie-break keeps a customer's orders together"). New page helper `handRoute([id, customer, street, sequence]…)` groups and lays out a hand-made route, returning its stops and its sheets' bodies. Kafé A (21, 23) and Kafé B (22), all at Torget 1 and sequence 700, give stops ["Kafé A:21+23", "Kafé B:22"] and one Kafé A block. With the customer taken out of `printingPosition` (scratch model copy, Node, `stopkey.cjs`) the same orders give ["Kafé A:21", "Kafé B:22", "Kafé A:23"], so the check bites. The sample days never exercised this: re-sorting them by D2's key moves nothing. Test only. Gate: check.sh OK; test:breadify all passed, 308 ok.
+- 2026-09-29 · **R14 done** (commit "Check a stop's position in the route keeps it apart"). Two new `handRoute` checks:
+  - Kafé C at Street 9, sequences 5 and 0: stops ["Kafé C:31", "Kafé C:32"], printed as Kafé C, flag, Kafé C, then the total.
+  - Kafé D at sequences 5 and 6: two stops.
+
+  With the sequence taken out of `sameStop` (scratch model copy) both merged, into "Kafé C:31+32" and "Kafé D:33+34", so the checks bite. Test only. Gate: check.sh OK; test:breadify all passed, 310 ok.
