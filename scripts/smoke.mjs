@@ -2550,14 +2550,23 @@ const upA = await newContext((ctx) => ctx.addInitScript(() => {
 const up = upA.pg;
 const V = await up.evaluate(() => APP_VERSION);
 const listed = await up.evaluate(() => UPDATES.map((u) => u.version));
+// What a browser that has seen none of them gets in full, by the rules in
+// updates.js: every must entry, and the newest others up to three.
+const inFull = await up.evaluate(() => {
+  const must = UPDATES.filter((u) => u.must === true);
+  const fill = UPDATES.filter((u) => u.must !== true).slice(0, Math.max(0, 3 - must.length));
+  return UPDATES.filter((u) => must.includes(u) || fill.includes(u)).map((u) => u.version);
+});
 
 // A returning leader: a plan saved by an older version, and no marker.
 await leaveAs(up, { 'carcoord:v1': upPlan });
 await up.reload({ waitUntil: 'networkidle' });
 const back = await opened(up);
 check('a returning leader gets exactly one update note, last on the page', back.notes === 1 && back.last, JSON.stringify(back).slice(0, 300));
-check(`and it shows ${listed.slice(0, 2).join(' and ')} in full`,
-  listed.slice(0, 2).every((v) => back.text.includes(`What's new in ${v}:`)) && back.text.includes('What it affects:') && back.text.includes('Your data:'), back.text.slice(0, 400));
+check(`and it shows ${inFull.join(', ')} in full`,
+  inFull.length >= 2 && inFull.every((v) => back.text.includes(`What's new in ${v}:`))
+  && listed.filter((v) => !inFull.includes(v)).every((v) => !back.text.includes(`What's new in ${v}:`))
+  && back.text.includes('What it affects:') && back.text.includes('Your data:'), back.text.slice(0, 400));
 check('and says the plan and setup were copied into Archives first', back.text.includes('copied unchanged into Archives on the Data tab'));
 check('and, with no file linked, offers Choose save file', back.text.includes('use Choose save file… on the Data tab'));
 same('one update archive, byte for byte the saved plan, from before this version', back.archives, [{ kind: 'update', from: '0.2.4 or earlier', to: V, sameAsSaved: true }]);

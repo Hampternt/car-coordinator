@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.4.0',
+    must: true,
+    title: 'A printed sheet without warnings or a QR code',
+    changed: 'The printed sheet loses its QR code, warnings and Positions not available. Cars not available lists only parked cars whose label has Show on printout ticked on the Labels tab.',
+    affects: 'The printed sheet, the Labels tab, and the Data tab, whose QR switch is gone. Share codes are unchanged and never carry the tick. Update older copies: they still print warnings.',
+    data: 'Every label starts unticked, so Cars not available is empty, and labelled parked cars print on neither list, until you tick some. Older copies keep the QR off and drop the ticks when saving.',
+  },
+  {
     version: '0.3.0',
     title: 'A note like this after each update, and Archives',
     changed: 'After each update, a note like this appears once. Your plan and setup are copied into Archives first, and What\'s new keeps every note.',
