@@ -3222,6 +3222,214 @@ check('a PDF printed while dark is not empty', darkPdf.length > 5000, `${darkPdf
 check('the paper cases log no console errors', ppErrors.length === 0, ppErrors.join(' | '));
 await paperCtx.close();
 
+// --- dark: the two dark lists agree, and everything on them can be read ---
+// The same dark tokens whether the computer asks for dark or Dark is picked
+// here, and Light picked here under a dark computer is plain light.
+const tokenNames = [...(await readFile('docs/style.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  .match(/:root\s*\{([^}]*)\}/)[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+const darkCtx = await browser.newContext({ colorScheme: 'light' });
+const dk = await darkCtx.newPage();
+const dkErrors = [];
+dk.on('console', (m) => m.type() === 'error' && dkErrors.push(m.text()));
+dk.on('pageerror', (e) => dkErrors.push(String(e)));
+await dk.goto(base, { waitUntil: 'networkidle' });
+const themeAs = async (colorScheme, theme) => {
+  await dk.emulateMedia({ media: 'screen', colorScheme });
+  await dk.evaluate((t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }, theme || null);
+};
+const tokensNow = () => dk.evaluate((names) => names.map((n) => `${n}: ${getComputedStyle(document.documentElement).getPropertyValue(n).trim()}`), tokenNames);
+await themeAs('light'); const plainLight = await tokensNow();
+await themeAs('dark'); const darkComputer = await tokensNow();
+await themeAs('light', 'dark'); const darkPicked = await tokensNow();
+await themeAs('dark', 'light'); const lightPicked = await tokensNow();
+const tokenDiff = (a, b) => a.filter((x, i) => x !== b[i]).slice(0, 3).join(', ');
+check('the two dark lists give the same tokens', tokenNames.length > 30 && darkComputer.join() === darkPicked.join(), tokenDiff(darkComputer, darkPicked));
+check('and dark is not light', darkComputer.join() !== plainLight.join());
+check('Light picked under a dark computer is plain light', lightPicked.join() === plainLight.join(), tokenDiff(lightPicked, plainLight));
+
+// A plan with every state the lists below name: a car on two routes, a pink
+// row, a driver away, a crew for today (lit), a template, a label, and the
+// update note with an info and a warning line beside it.
+const todayName = await dk.evaluate(() => WEEKDAYS[new Date().getDay()]);
+await dk.evaluate((crew) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
+  cars: [{ id: 'c1', reg: 'DK11111', labelId: 'L1', note: '' }, { id: 'c2', reg: 'DK22222', labelId: '', note: '' }, { id: 'c3', reg: 'DK33333', labelId: '', note: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: true }, { id: 'd3', name: 'Cai', available: false }],
+  driverGroups: [{ id: 'g1', name: crew, driverIds: ['d1', 'd2'] }],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: false, gapBefore: false }] }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: true, gapBefore: false },
+    { id: 'r2', name: '2', driver: 'Bo', carId: 'c2', positionId: '', round: '', highlight: false, gapBefore: false },
+    { id: 'r3', name: '3', driver: 'Cai', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false },
+  ],
+})); }, todayName);
+await themeAs('light');
+await dk.reload({ waitUntil: 'networkidle' });
+await dk.evaluate(() => { note('info', 'An information line.'); note('warn', 'A warning line.'); render(); });
+await dk.click('#tab-plan .day.today');   // today's crew, lit
+check('the dark cases have their states: the update note, today lit, a clash',
+  (await dk.locator('#notices .notice.update').count()) === 1 && (await dk.locator('#tab-plan .day.today.on').count()) === 1
+  && (await dk.locator('#tab-plan tbody tr.warn').count()) >= 2);
+
+// Colours on screen, as a reader sees them: a colour with transparency is
+// laid over what is behind it, and what is behind is the nearest background.
+const readable = (list) => dk.evaluate((list) => {
+  const parse = (c) => {
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?/.exec(c);
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
+    m = /color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+))?/.exec(c);
+    return m ? [m[1] * 255, m[2] * 255, m[3] * 255, m[4] === undefined ? 1 : +m[4]] : null;
+  };
+  const over = (fg, bg) => fg[3] >= 1 ? fg : [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3])).concat(1);
+  const behind = (el) => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) {
+      const c = parse(getComputedStyle(e).backgroundColor);
+      if (c && c[3] > 0) { layers.push(c); if (c[3] >= 1) break; }
+    }
+    return layers.reduceRight((acc, c) => over(c, acc), [255, 255, 255, 1]);
+  };
+  const lum = (c) => { const [r, g, b] = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  return list.map(([name, sel, prop, min, pseudo]) => {
+    const el = document.querySelector(sel);
+    if (!el) return { name, missing: true };
+    const cs = getComputedStyle(el, pseudo || null);
+    const raw = prop === 'box-shadow' ? cs.boxShadow : cs.getPropertyValue(prop);
+    const bg = prop === 'background-color' ? behind(el.parentElement) : behind(el);
+    const fg = over(parse(raw) || [0, 0, 0, 0], bg);
+    return { name, got: Math.round(ratio(fg, bg) * 100) / 100, min };
+  });
+}, list);
+const TEXT = 4.5, MARK = 3;
+const pairs = [
+  ['page text', 'main', 'color', TEXT],
+  ['a hint', '.hint', 'color', TEXT],
+  ['a table heading', '#tab-plan .grid th', 'color', TEXT],
+  ['a route field', '#tab-plan tbody tr:nth-child(2) [data-field="driver"]', 'color', TEXT],
+  ['a pink row', '#tab-plan .grid tr.hl td', 'color', TEXT],
+  ['the warning box', '#tab-plan .problems', 'color', TEXT],
+  ['the rail count', '.rail-count', 'color', TEXT],
+  ['a route badge', '.rail-list .assign.yes', 'color', TEXT],
+  ['an away driver', '.rail-row.away', 'color', TEXT],
+  ['a rail button', '.rail-list .btn:not(.on)', 'color', TEXT],
+  ['a tab', '.tabs button:not(.active)', 'color', TEXT],
+  ['the tab in use', '.tabs button.active', 'color', TEXT],
+  ['the way to Breadify', '.sibling', 'color', TEXT],
+  ['the print button', 'button.primary', 'color', TEXT],
+  ['a button', '#tab-plan tbody .btn:not(.on)', 'color', TEXT],
+  ['Mark, on', '#tab-plan tbody .btn.on', 'color', TEXT],
+  ['a crew member, in', '#tab-drivers .chip.member.on', 'color', TEXT],
+  ['a label, off', '#tab-cars .chip:not(.on)', 'color', TEXT],
+  ['Not assigned', '#tab-cars .assign.none', 'color', TEXT],
+  ['an information line', '#notices .notice:not(.warn):not(.update) .say', 'color', TEXT],
+  ['a warning line', '#notices .notice.warn .say', 'color', TEXT],
+  ['the update note', '#notices .notice.update .say', 'color', TEXT],
+  ["the update note's headings", '#notices .notice.update .say b', 'color', TEXT],
+  ["the update note's ✕", '#notices .notice.update .btn', 'color', TEXT],
+  ['a template button', '.tpl .btn:not(.primary-ish)', 'color', TEXT],
+  ['a Data tab button', '#tab-data .card .btn', 'color', TEXT],
+  ['the share code box', '#shareIn', 'color', TEXT],
+  ['a day with no crew', '#tab-plan .day.none', 'color', TEXT],
+  ['a day with a crew', '#tab-plan .day:not(.none):not(.on)', 'color', TEXT],
+  ['the recovery page link', '#tab-data a[href="recover.html"]', 'color', TEXT],
+  ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
+  ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
+  ['a grip', '.grip', 'color', MARK],
+  ["today's line, lit", '#tab-plan .day.today.on', 'box-shadow', MARK],
+  ['an information edge', '#notices .notice:not(.warn):not(.update)', 'border-left-color', MARK],
+  ['a warning edge', '#notices .notice.warn', 'border-left-color', MARK],
+  ["the warning box's edge", '#tab-plan .problems', 'border-left-color', MARK],
+  ['a status mark', '#tab-data .status', 'color', MARK, '::before'],
+];
+const pickerPairs = [
+  ['the picker heading', '.picker-head', 'color', TEXT],
+  ['a choice note', '#picker .pick:not(.on):not(.flag) .pick-note', 'color', TEXT],
+  ['a choice with a clash', '#picker .pick.flag:not(.on) .pick-note', 'color', TEXT],
+];
+const menu = [['a tag choice', '#tagMenu .tag-choice:not(.on)', 'color', TEXT]];
+const armedPair = [['an armed button', '#tab-data .btn.armed', 'color', TEXT]];
+const judge = (label, got) => {
+  const missing = got.filter((g) => g.missing).map((g) => g.name);
+  const low = got.filter((g) => !g.missing && g.got < g.min).map((g) => `${g.name} ${g.got}:1`);
+  check(`${label}: every pair on the list is there`, !missing.length, missing.join(', '));
+  check(`${label}: text reaches 4.5:1 and marks 3:1`, !low.length, low.join(', '));
+};
+// The picker on route 2's car, which is also on route 1; the tag menu on a
+// tagged car; an archive's Restore pressed once.
+const openPicker = async () => {
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.locator('#tab-plan tbody tr').nth(1).locator('[data-field="carId"]').click();
+  await dk.waitForSelector('#picker:not([hidden]) .pick.on');
+};
+const openMenu = async () => {
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c1"]');
+  await dk.waitForSelector('#tagMenu:not([hidden])');
+};
+const closeAll = async () => { await dk.keyboard.press('Escape'); await dk.mouse.click(2, 600); };
+for (const [label, scheme, theme] of [['dark computer', 'dark'], ['Dark picked here', 'light', 'dark']]) {
+  await themeAs(scheme, theme);
+  judge(`${label}, the page`, await readable(pairs));
+  await openPicker(); judge(`${label}, the picker`, await readable(pickerPairs)); await closeAll();
+  await openMenu(); judge(`${label}, the tag menu`, await readable(menu)); await closeAll();
+  await dk.click('[data-act="tab"][data-tab="data"]');
+  await dk.click('[data-act="archive-restore"]');
+  judge(`${label}, an armed button`, await readable(armedPair));
+  await dk.waitForFunction(() => !document.querySelector('.btn.armed'), null, { timeout: 6000 });
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.waitForTimeout(50);
+  // In dark, no field or button is left white.
+  const white = await dk.evaluate(() => [...document.querySelectorAll('input, select, textarea, .btn')]
+    .filter((el) => el.getClientRects().length && /^rgba?\(255, 255, 255(, 1)?\)$/.test(getComputedStyle(el).backgroundColor))
+    .map((el) => el.outerHTML.slice(0, 60)));
+  check(`${label}: no field or button is white`, !white.length, white.slice(0, 3).join(' | '));
+}
+
+// Everything drawn on hi-vis or marker pink reads the same in both themes,
+// and reads: the picker's picked choice, a tag choice, today's crew lit, the
+// tab in use, Mark.
+const brightWalk = () => dk.evaluate(() => {
+  const FILLS = ['rgb(255, 212, 0)', 'rgb(255, 143, 194)'];
+  const parse = (c) => (/rgba?\(([\d.]+), ([\d.]+), ([\d.]+)/.exec(c) || []).slice(1).map(Number);
+  const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const path = (el) => { const p = []; for (let e = el; e && e !== document.body; e = e.parentElement) p.unshift(`${e.tagName}:${[...(e.parentElement?.children || [])].indexOf(e)}`); return p.join('>'); };
+  const out = { looks: {}, low: [] };
+  for (const fill of [...document.querySelectorAll('body *')].filter((el) => el.getClientRects().length && FILLS.includes(getComputedStyle(el).backgroundColor))) {
+    const bg = parse(getComputedStyle(fill).backgroundColor);
+    for (const el of [fill, ...fill.querySelectorAll('*')].filter((e) => e.getClientRects().length)) {
+      const cs = getComputedStyle(el);
+      out.looks[path(el)] = ['color', 'background-color', 'border-top-color', 'border-bottom-color', 'box-shadow'].map((p) => cs.getPropertyValue(p)).join(' | ');
+      const text = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+      if (text && el !== fill && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)' && !FILLS.includes(cs.backgroundColor)) continue;
+      if (text) { const r = ratio(parse(cs.color), bg); if (r < 4.5) out.low.push(`${el.className || el.tagName} "${el.textContent.trim().slice(0, 20)}" ${r.toFixed(2)}:1`); }
+    }
+  }
+  return out;
+});
+const brightIn = async (scheme, theme) => {
+  await themeAs(scheme, theme);
+  const looks = {}, low = [];
+  const take = (w) => { Object.assign(looks, w.looks); low.push(...w.low); };
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  take(await brightWalk());
+  await openPicker(); take(await brightWalk()); await closeAll();
+  await openMenu(); take(await brightWalk()); await closeAll();
+  return { looks, low };
+};
+const brightLight = await brightIn('light');
+const brightDark = await brightIn('dark');
+const brightPicked = await brightIn('light', 'dark');
+check('on hi-vis and pink, all text reads, in light', Object.keys(brightLight.looks).length >= 8 && !brightLight.low.length, `${Object.keys(brightLight.looks).length} drawn; ${brightLight.low.join(', ')}`);
+check('on hi-vis and pink, all text reads, in dark', !brightDark.low.length && !brightPicked.low.length, [...brightDark.low, ...brightPicked.low].join(', '));
+const brightChanged = Object.keys(brightLight.looks).filter((k) => brightLight.looks[k] !== brightDark.looks[k] || brightLight.looks[k] !== brightPicked.looks[k]);
+check('and it looks the same in dark as in light', !brightChanged.length, brightChanged.slice(0, 2).map((k) => `${k}: ${brightLight.looks[k]} / ${brightDark.looks[k]}`).join(' ; '));
+check('the dark cases log no console errors', dkErrors.length === 0, dkErrors.join(' | '));
+await darkCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.

@@ -27,6 +27,8 @@
   --hivis: #ffd400;
   --marker: #ff8fc2;
   --on-bright: #1a1c1e;
+  --muted-on-bright: #555;
+  --steel-on-bright: #2f4a5c;
   /* accents: a line or text colour, and a fill under white text */
   --steel: #2f4a5c;
   --steel-fill: #2f4a5c;
@@ -49,6 +51,65 @@
   --head: "Bahnschrift", "DIN Alternate", "Segoe UI", sans-serif;
   --body: "Segoe UI", system-ui, sans-serif;
   color-scheme: light;
+}
+
+/* Dark, on screen only: print matches prefers-color-scheme too, and paper is
+   always white. The computer's setting applies unless Light is picked here;
+   Dark picked here applies whatever the computer says. The two lists are the
+   same, token for token (the smoke test checks), because CSS cannot share
+   one. Hi-vis, marker pink and the text on them are the same in both themes,
+   and the paper tokens are never here. */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --concrete: #121416;
+    --panel: #1e2226;
+    --field: #272c31;
+    --hl: #4a2238;
+    --drop: #4a4214;
+    --advice: #3a2d12;
+    --ok-soft: #1f3a22;
+    --ink: #e8e9e6;
+    --muted: #b3b7b2;
+    --quiet: #969a96;
+    --field-ink: #e8e9e6;
+    --line: #5a6167;
+    --faint: #7d8386;
+    --dash: #7d8386;
+    --bar-bg: #0b0c0d;
+    --steel: #7fa6c2;
+    --steel-fill: #3f6782;
+    --warn: #ff6b6b;
+    --caution: #f0a040;
+    --ok: #66bb6a;
+    --dot-edge: rgba(255, 255, 255, .55);
+    color-scheme: dark;
+  }
+}
+@media screen {
+  :root[data-theme="dark"] {
+    --concrete: #121416;
+    --panel: #1e2226;
+    --field: #272c31;
+    --hl: #4a2238;
+    --drop: #4a4214;
+    --advice: #3a2d12;
+    --ok-soft: #1f3a22;
+    --ink: #e8e9e6;
+    --muted: #b3b7b2;
+    --quiet: #969a96;
+    --field-ink: #e8e9e6;
+    --line: #5a6167;
+    --faint: #7d8386;
+    --dash: #7d8386;
+    --bar-bg: #0b0c0d;
+    --steel: #7fa6c2;
+    --steel-fill: #3f6782;
+    --warn: #ff6b6b;
+    --caution: #f0a040;
+    --ok: #66bb6a;
+    --dot-edge: rgba(255, 255, 255, .55);
+    color-scheme: dark;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -117,7 +178,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 
 .btn { border: 1px solid var(--line); background: var(--field); padding: 4px 9px; cursor: pointer; }
 .btn:hover { border-color: var(--ink); }
-.btn.on { background: var(--marker); border-color: var(--ink); color: var(--on-bright); }
+.btn.on { background: var(--marker); border-color: var(--on-bright); color: var(--on-bright); }
 .btn.armed { background: var(--warn-fill); color: var(--on-fill); }
 .btns { white-space: nowrap; }
 
@@ -175,7 +236,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .card .older { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
 .arch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 0; border-top: 1px solid var(--line); }
 .arch-row .what { flex: 1 1 24em; min-width: 0; }
-.btn.primary-ish { background: var(--hivis); border-color: var(--ink); color: var(--on-bright); font-weight: 600; }
+.btn.primary-ish { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); font-weight: 600; }
 .status { margin: 0 0 10px; padding-left: 24px; position: relative; }
 .status::before { position: absolute; left: 0; top: 0; font-weight: 700; }
 .status.on::before { content: "\2713"; color: var(--ok); }
@@ -264,8 +325,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .day-bar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; margin: 0 0 8px; }
 .day { min-width: 0; padding: 6px 0; border: 1px solid var(--line); background: var(--field); font: 700 13px var(--head); color: var(--ink); cursor: pointer; text-align: center; }
 .day:hover { border-color: var(--ink); }
-.day.on { background: var(--hivis); border-color: var(--ink); color: var(--on-bright); }
+.day.on { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); }
 .day.today { box-shadow: inset 0 -3px var(--steel); }
+.day.on.today { box-shadow: inset 0 -3px var(--steel-on-bright); }
 .day.none { background: none; border-style: dashed; border-color: var(--dash); color: var(--quiet); font-weight: 600; }
 .day.none:hover { color: var(--ink); }
 .day-badge { padding: 2px 8px; background: var(--steel-fill); color: var(--on-fill); font: 600 12px var(--head); white-space: nowrap; }
@@ -276,7 +338,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-groups .btn { flex: none; padding: 2px 8px; font-size: 12px; color: inherit; }
 /* The other crews say the same things the days do: lit when in force, dashed
    when there is nobody in them to bring in. */
-.rail-groups .btn.on { background: var(--hivis); border-color: var(--ink); color: var(--on-bright); font-weight: 700; }
+.rail-groups .btn.on { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); font-weight: 700; }
 .rail-groups .btn.quiet { background: none; border-style: dashed; border-color: var(--dash); color: var(--quiet); }
 /* The question a quiet day asks, under the week it came from. */
 /* The day being asked about keeps its dashes — it still has no crew — and
@@ -299,6 +361,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tpl { background: var(--panel); padding: 6px 8px; }
 .tpl-head { display: flex; align-items: center; gap: 8px; }
 .tpl .btn { padding: 2px 7px; color: var(--muted); }
+.tpl .btn.primary-ish { color: var(--muted-on-bright); }
 /* Open, a template says what it would put on the plan. Closed by default: the
    shelf is a shelf, and four open templates are a wall. */
 .tpl.open { flex-basis: 100%; }
@@ -337,7 +400,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .picker-grid { min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; max-height: 306px; overflow-y: auto; }
 .pick { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); background: var(--panel); text-align: left; cursor: pointer; }
 .pick:hover { background: var(--field); border-color: var(--ink); }
-.pick.on { background: var(--hivis); border-color: var(--ink); color: var(--on-bright); }
+.pick.on { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); }
 /* A name wraps rather than hides: the whole of it is what is being looked for. */
 .pick-name { font-weight: 600; line-height: 1.25; overflow-wrap: break-word; max-width: 100%; }
 .pick-note { display: flex; align-items: center; gap: 5px; max-width: 100%; font-size: 12px; line-height: 1.3; color: var(--quiet); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -345,6 +408,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* Out elsewhere, away or marked: still pickable, because a leader sometimes
    means it, but it reads as a second thought. */
 .pick.flag .pick-note { color: var(--caution); font-weight: 600; }
+/* On the hi-vis of the picked choice, grey and orange were too faint to read. */
+.pick.on .pick-note, .pick.on.flag .pick-note { color: var(--on-bright); }
+.tag-choice.on .dot, .pick.on .dot { --dot-edge: var(--edge-on-bright); }
 .pick.away .pick-name { opacity: .6; }
 .picker-empty { margin: 4px 2px; color: var(--muted); }
 @media (max-width: 560px) { .picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
