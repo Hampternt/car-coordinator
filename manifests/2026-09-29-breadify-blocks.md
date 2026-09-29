@@ -1,6 +1,6 @@
 # Pack: Breadify — one-look marker, one block per customer
 
-**Status:** 🚧 go given 2026-09-29 (plan now, build alongside), and both owner questions answered. Building on `breadify-blocks`.
+**Status:** 🚧 all ten items committed on `breadify-blocks` and the pack gate green (2026-09-29). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
 **Date:** 2026-09-29
 **Branch:** `breadify-blocks`, cut from `dev` and merged back into `dev` through a PR. It shares three files with the review-round packs: README.md, INVENTORY.md and `scripts/check.sh`. In `scripts/check.sh`, item 1 changes only the loop line at :38. update-note edits that file's header and tail, not :38.
 
@@ -523,3 +523,12 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 - 2026-09-29 · **Item 10 done** (d20e8d1). README names the departures with their D-numbers: D8/D21 marker; D16 one block per customer, with D20, D2 and D19 following; D9 cut between orders. It also says why the freezer sample prints on 20 sheets, not 21. INVENTORY: "Nine checks", with impossible quantities, colliding supplier codes and the Order ID named. :58 corrected: blocks and the total split only when taller than a page. :63 rewritten for the one look. Both 🚧 lines are now ✅ entries, plus a "refuses rather than misprints" entry. `grep -rn "one order, one block"` finds only layout.js:486, a departure. No 🚧 from this pack is left.
   - **Manifest contradiction, resolved:** item 10's text said the tie-break reads "address → department → customer → order id". The Decisions row, Designs B and G and the code all put the customer before the department, so INVENTORY says **address → customer → department → order id**.
   - Gate: check.sh OK (docs only; no logic touched).
+- 2026-09-29 · **Pack gate green.** `bash scripts/check.sh`: CHECK OK (Breadify's five scripts included). `CHROMIUM_PATH=/usr/bin/google-chrome npm test`: exit 0. Car suite `all checks passed` (368 ok); Breadify suite `all passed` (279 ok); 0 FAIL. Run on **system Chrome** (`/usr/bin/google-chrome`), not the pinned Playwright Chromium that CI uses, which is not installed here.
+- 2026-09-29 · **Sheet counts at pack close**, measured against one block per order:
+  - Bread: 26 → **28**. Route 13 went 2 → 3, because Customer 037's eight orders are one 192.8 mm block kept whole. Route 14 went 2 → 3, because Customer 012's nine orders are one 266.4 mm block cut into two page-sized parts. A part is sized against a full page and never starts part-way down one, so the sheet before it is left short. Nothing asserts the bread count.
+  - Freezer: 21 → **20** (route 13, see item 8). Asserted, and escalated.
+- 2026-09-29 · **The owner's look**, in the session scratchpad `breadify-look/`: `bread-sample-day.pdf` (28 A4 pages), `freezer-sample-day.pdf` (20 A4 pages), both printed through the app's own `beforeprint` move, with backgrounds on, and the page counts checked. PNG crops:
+  - `merged-two-departments-route11-customer061.png`
+  - `same-bread-orders-route11-customer017.png`
+  - `false-marker-one-order-block.png` and `false-marker-shared-block-line.png`
+  - extras: `merged-eight-departments-route13-customer037.png`, `identical-pair-route9-customer092.png`, `freezer-shared-department-route11-customer159.png` and `freezer-mixed-route4-customer017.png`
