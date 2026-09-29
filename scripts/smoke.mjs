@@ -2522,8 +2522,8 @@ const opened = (pg) => pg.evaluate(() => ({
   marker: localStorage.getItem('carcoord:pref:seenUpdate'),
   saved: localStorage.getItem('carcoord:v1'),
 }));
-const newContext = async (setup) => {
-  const ctx = await browser.newContext();
+const newContext = async (setup, options = {}) => {
+  const ctx = await browser.newContext(options);
   if (setup) await setup(ctx);
   const pg = await ctx.newPage();
   const errs = [];
@@ -2842,7 +2842,8 @@ check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 
 await dataUp.ctx.close();
 
 // --- the recovery page: works when the app does not, and only reads ---
-const rc = await newContext();
+// Somewhere far from UTC, so a time shown in UTC would show.
+const rc = await newContext(null, { timezoneId: 'Pacific/Auckland', locale: 'en-GB' });
 const recoverStore = {
   'carcoord:v1': JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [{ id: 'c1', reg: 'ÆØÅ 12345', note: 'Bremsene — sjekk' }], routes: [{ id: 'r1', name: '1' }] }),
   'carcoord:backups': JSON.stringify([{ t: '2026-09-29T05:00:00.000Z', label: 'Start of day', json: '{"routes":[{"name":"b1"}],"cars":[]}' }]),
@@ -2865,6 +2866,11 @@ check('and downloads each byte for byte', Object.keys(recoverStore).every((k) =>
 const [oneArchive] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.locator('#list li', { hasText: 'Before 0.3.0' }).locator('button').click()]);
 check('an archive on its own downloads as the plan it holds, ready to import',
   (await readFile(await oneArchive.path(), 'utf8')) === '{"routes":[{"name":"a1"}],  "cars":[]}' && oneArchive.suggestedFilename() === 'car-coordinator-before-0.3.0.json', oneArchive.suggestedFilename());
+same('times on the recovery page are this computer\'s own, with the date', await rc.pg.locator('#list li').allInnerTexts(), [
+  'Download Before 0.3.0 (from 0.2.4 or earlier), kept 29/09/2026, 17:00',
+  'Download Could not be read, kept 28/09/2026, 17:00',
+  'Download Start of day, 29/09/2026, 18:00',
+]);
 check('and opening it changed nothing stored', (await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))))) === storeBefore);
 check('the recovery page logs no console errors', rc.errs.length === 0, rc.errs.join(' | '));
 await rc.ctx.close();
