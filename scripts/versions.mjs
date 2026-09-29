@@ -17,7 +17,7 @@
 //   * docs/updates.js lists unique versions, newest first and newest equal to
 //     APP_VERSION, and sets `must` wherever the wording rules require it.
 //
-// The last three are checked once the files carry them. Exit 0 = all agree.
+// docs/recover.html is checked once it exists. Exit 0 = all agree.
 
 import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -88,13 +88,17 @@ export async function checkVersions(root) {
   const declared = app.match(/\b(?:const|let|var)\s+APP_VERSION\b/g) || [];
   const value = (/\bconst\s+APP_VERSION\s*=\s*'([^']*)'/.exec(app) || [])[1];
   let appVersion = null;
-  if (declared.length > 1) problems.push(`docs/app.js declares APP_VERSION ${declared.length} times`);
-  else if (declared.length === 1) {
+  if (declared.length !== 1) problems.push(`docs/app.js declares APP_VERSION ${declared.length} times, not once`);
+  else {
     if (value !== version) problems.push(`docs/app.js: APP_VERSION is ${value === undefined ? 'not a plain string' : value}, package.json says ${version}`);
     else { appVersion = value; passed.push(`docs/app.js declares APP_VERSION once, at ${value}`); }
   }
 
-  // --- every local tag asks for this version ---
+  // --- every local tag asks for this version, and the notes load first ---
+  const index = await readFile(at('docs/index.html'), 'utf8');
+  const order = ['updates.js', 'app.js'].map((f) => index.search(new RegExp(`<script\\b[^>]*\\bsrc="${f.replace('.', '\\.')}[?"]`)));
+  if (order[0] < 0) problems.push('docs/index.html does not load updates.js');
+  else if (order[1] >= 0 && order[0] > order[1]) problems.push('docs/index.html loads updates.js after app.js');
   if (appVersion) {
     for (const page of ['docs/index.html', 'docs/recover.html']) {
       if (!(await exists(at(page)))) continue;
@@ -108,7 +112,8 @@ export async function checkVersions(root) {
   }
 
   // --- the release notes ---
-  if (await exists(at('docs/updates.js'))) {
+  if (!(await exists(at('docs/updates.js')))) problems.push('docs/updates.js is missing');
+  else {
     const ctx = vm.createContext({});
     let releases;
     try {

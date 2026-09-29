@@ -49,6 +49,9 @@ await page.goto(base, { waitUntil: 'networkidle' });
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
 check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
+check('the release notes load, newest first at the running version', await page.evaluate(() =>
+  typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) && UPDATES[0].version === APP_VERSION),
+  await page.evaluate(() => `${typeof UPDATES === 'undefined' ? 'no UPDATES' : UPDATES[0] && UPDATES[0].version} / ${APP_VERSION}`));
 
 // An unescaped quote in an inline data: URI silently dumps the rest of the
 // attribute into the document as text, which nothing else here would catch.

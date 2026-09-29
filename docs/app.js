@@ -1,5 +1,11 @@
 'use strict';
 
+/* The running version. The update note keys on it, and every local tag in
+   index.html asks for ?v= of it, so a browser never pairs this file with one
+   from another release. scripts/versions.mjs keeps it level with
+   package.json, Cargo.toml and tauri.conf.json; declare it here only. */
+const APP_VERSION = '0.3.0';
+
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
 const byId = (arr, id) => arr.find((x) => x.id === id);
@@ -2408,7 +2414,7 @@ function clearOfBar(el) {
 
 async function start() {
   clearTheBar();
-  state = await Store.init(defaults, render);
+  state = await Store.init(defaults, render, APP_VERSION);
   // A browser with no data of its own but a linked file (new PC, cleared
   // profile, different Windows user) should come back to what is in the file.
   if (!Store.hasUsableLocalData()) {
