@@ -396,7 +396,7 @@ Dependency edges:
   - the Labels tab fits at 390px with a real Printout cell;
   - `npm run screens` exits 0 with no console errors.
 
-- [ ] **5. Docs follow the sheet.**
+- [x] **5. Docs follow the sheet.**
   - **README:**
     - :25 gains "the printed sheet carries none";
     - :27 gains the tick;
@@ -566,3 +566,4 @@ Both answers are needed before item 4 starts. Items 1–3 don't depend on them. 
 - Item 2 done, 503900b. `renderSheet` no longer calls `problems()`; the clash fixture gained the pink row, the gap, CC33333 and Spot 9, and its checks now read the day plan's `.problems` box for the warnings and the sheet for their absence. Gate: `check.sh` OK. Car suite: exit 0, 485 ok, 0 FAIL.
 - Item 3 done, 9788635. **Awaiting individual review.** Design E as planned; `onSheet: false` at `defaults()`, add-label, add-tag and share.js:179. The case block (a)-(f) runs in its own context near the end of smoke.mjs. (a) reads `carcoord:v1` before the reload and after the full start, and compares both with the v4 text; (b) compares the stored v5 plan with the input plus the change, key order ignored; (d) finds the v4 backup by its label, because the daily snapshot sits above it. Gate: `check.sh` OK. Car suite: exit 0, 501 ok, 0 FAIL; save-file case 6 passes unchanged.
 - Item 4 done, 5698b98. Design B and C as planned, with the owner's two answers (neither list; parked only). `marked()` is gone: Cars not available is built inline, and Positions not available no longer needs it. Gate: `check.sh` OK. `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", with the three new printout assertions. Car suite: exit 0, 507 ok, 0 FAIL, the Labels tab fitting at 390px with a ticked Printout cell.
+- Item 5 done, b0ec4e8. README, HANDOFF.md and the container as planned. The container's stale style.css and smoke citations now name 73dd734, because those lines are gone at 0.4.0; the add-tag and add-label lines are given at 0.4.0 (app.js:1917, :2111). The two Found-while-planning entries went under a new "Found while building pack 2" heading. `grep -n "QR\|Check before posting\|Positions not available\|unavailable cars/positions" README.md HANDOFF.md` finds only README:16 and HANDOFF.md:40, :41 and :47. Gate: `check.sh` OK.
