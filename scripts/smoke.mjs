@@ -2288,6 +2288,84 @@ for (const text of ['{not json', '{"schemaVersion":4,"date":"2026-09-29","cars":
 }
 await un.evaluate(() => { localStorage.clear(); });
 
+// --- archives: the untouched copy, outside the rolling Backups ---
+// A plan saved with a layout of its own, so a copy normalised on the way
+// through would show.
+const oddText = '{"schemaVersion":4, "date":"2026-09-29","cars":[{"id":"c1","reg":"ARC1","extra":"kept"}],  "routes":[]}';
+await un.evaluate((t) => localStorage.setItem('carcoord:v1', t), oddText);
+await un.reload({ waitUntil: 'networkidle' });
+const byteCopy = await un.evaluate(() => {
+  const r = Store.archive({ kind: 'update', from: 'test', to: 'byte-copy', t: new Date().toISOString(), text: Store.savedText() });
+  const mine = Store.archives().find((a) => a.to === 'byte-copy');
+  return { ok: r.ok, same: !!mine && mine.text === localStorage.getItem('carcoord:v1'),
+    stored: JSON.parse(localStorage.getItem('carcoord:archives')).some((a) => a.to === 'byte-copy' && a.text === localStorage.getItem('carcoord:v1')) };
+});
+check('an update archive holds the saved text byte for byte', byteCopy.ok && byteCopy.same && byteCopy.stored, JSON.stringify(byteCopy));
+
+const arch = (kind, to, text = `{"routes":[],"to":"${to}"}`) => ({ kind, from: kind === 'update' ? 'before' : null, to: kind === 'update' ? to : null, t: `2026-09-2${to === null ? 0 : String(to).slice(-1)}T08:00:00.000Z`, text });
+const fourth = await un.evaluate(([u1, u2, r, u3, u4]) => {
+  localStorage.setItem('carcoord:archives', JSON.stringify([u3, r, u2, u1]));
+  const res = Store.archive(u4);
+  return { res, kept: Store.archives().map((a) => a.kind === 'rescue' ? 'rescue' : a.to) };
+}, [arch('update', 'u1'), arch('update', 'u2'), arch('rescue', null, '{broken'), arch('update', 'u3'), arch('update', 'u4')]);
+same('a fourth update archive drops only the oldest, and the rescue stays', fourth, { res: { ok: true, dropped: 1 }, kept: ['u4', 'u3', 'rescue', 'u2'] });
+const newRescue = await un.evaluate(([r2]) => { Store.archive(r2); return Store.archives().map((a) => a.kind === 'rescue' ? a.text : a.to); }, [arch('rescue', null, '{broken again')]);
+same('a new rescue replaces the old one and keeps every update archive', newRescue, ['{broken again', 'u4', 'u3', 'u2']);
+
+// An unreadable save is copied the moment it is found, before any change.
+await un.evaluate(() => { localStorage.clear(); localStorage.setItem('carcoord:v1', '{"routes":[{"name":"lost'); });
+await un.reload({ waitUntil: 'networkidle' });
+const rescued = await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text));
+same('an unreadable save is rescued as it loads', rescued, ['{"routes":[{"name":"lost']);
+check('and the warning points at Archives', (await un.locator('#notices .notice.warn').innerText()).includes('An untouched copy is kept in Archives on the Data tab'),
+  await un.locator('#notices').innerText());
+await un.reload({ waitUntil: 'networkidle' });
+check('a reload on the same unreadable save keeps one copy', (await un.evaluate(() => Store.archives().length)) === 1);
+await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
+await un.reload({ waitUntil: 'networkidle' });
+same('the first change afterwards leaves the rescue intact',
+  await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text)), ['{"routes":[{"name":"lost']);
+
+// Twelve new backups, the whole rolling list, push no archive out.
+const rolled = await un.evaluate(([u1, u2]) => {
+  localStorage.setItem('carcoord:archives', JSON.stringify([u2, JSON.parse(localStorage.getItem('carcoord:archives')).find((a) => a.kind === 'rescue'), u1]));
+  const before = localStorage.getItem('carcoord:archives');
+  for (let i = 0; i < 13; i++) Store.snapshot({ ...state, date: `2026-10-${String(i + 1).padStart(2, '0')}` }, `Roll ${i}`);
+  return { backups: Store.backups().length, same: localStorage.getItem('carcoord:archives') === before };
+}, [arch('update', 'u1'), arch('update', 'u2')]);
+check('twelve new backups leave every archive in place', rolled.backups === 12 && rolled.same, JSON.stringify(rolled));
+
+// With this browser's storage really full, an archive that cannot fit is not
+// written at all, and nothing else is touched to make room.
+const fullArchive = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [], routes: [] }));
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Kept', json: '{"routes":[]}' }]));
+  const big = (c, n) => c.repeat(n * 1024);
+  localStorage.setItem('carcoord:archives', JSON.stringify([
+    { kind: 'update', from: 'b', to: 'B', t: '2026-09-02T00:00:00.000Z', text: big('b', 200) },
+    { kind: 'update', from: 'a', to: 'A', t: '2026-09-01T00:00:00.000Z', text: big('a', 200) },
+  ]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  const keys = ['carcoord:archives', 'carcoord:v1', 'carcoord:backups'];
+  const before = keys.map((k) => localStorage.getItem(k));
+  const tooBig = Store.archive({ kind: 'update', from: 'B', to: 'N', t: new Date().toISOString(), text: big('n', 450) });
+  const untouched = keys.map((k, i) => localStorage.getItem(k) === before[i]);
+  // One that fits once the oldest has made room: the newer one stays.
+  const fits = Store.archive({ kind: 'update', from: 'B', to: 'M', t: new Date().toISOString(), text: big('m', 150) });
+  const after = Store.archives().map((a) => a.to);
+  for (let i = 0; i < chunks; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  return { chunks, tooBig, untouched, fits, after };
+});
+check('the archive test really did fill this browser up', fullArchive.chunks > 0 && fullArchive.chunks < 2000, `${fullArchive.chunks} chunks`);
+same('an archive that does not fit leaves the archives, the plan and the Backups byte for byte',
+  { tooBig: fullArchive.tooBig, untouched: fullArchive.untouched }, { tooBig: { ok: false, dropped: 0 }, untouched: [true, true, true] });
+same('and one that fits once the oldest makes room keeps the newer one', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B'] });
+await un.evaluate(() => { localStorage.clear(); });
+
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
 await pcNote.close();
 

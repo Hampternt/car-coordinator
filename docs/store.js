@@ -210,7 +210,11 @@ const Store = (() => {
     trouble = !!raw && typeof raw === 'object' && (Number(raw.schemaVersion) || 0) > SCHEMA;
     if (unreadable || (!usable && text !== null)) {
       trouble = true;
-      notices.push({ kind: 'warn', text: 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
+      // Copied now, before any change can overwrite it. Only when that fails
+      // does the warning still say the first change will.
+      notices.push({ kind: 'warn', text: text !== null && rescue(text)
+        ? 'The data saved in this browser could not be read, so the plan on screen started empty. An untouched copy is kept in Archives on the Data tab; check Backups there too before relying on what is on screen.'
+        : 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
     } else if (repaired.length) {
       notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
     }
@@ -277,6 +281,60 @@ const Store = (() => {
       notices.push({ kind: 'warn', text: 'That backup could not be read \u2014 it was only half written. Try the one above or below it.' });
       return null;
     }
+  }
+
+  /* ---------- archives ----------
+     A copy of the saved text exactly as it stood, kept apart from the rolling
+     Backups so that a week of deletes and template loads can never push it
+     out. Two kinds: an 'update' copy, taken the first time a new version
+     opens, and a 'rescue' of saved text that could not be read, taken the
+     moment it is found. Newest first:
+       [{ kind: 'update' | 'rescue', from, to, t, text }]
+     A rescue has from and to null. The text is never normalised, so a bug in
+     reading it cannot reach the copy. */
+  const ARCHIVE_KEY = 'carcoord:archives';
+  const MAX_UPDATE_ARCHIVES = 3;
+
+  function archives() {
+    try {
+      const list = JSON.parse(localStorage.getItem(ARCHIVE_KEY));
+      return Array.isArray(list) ? list.filter((a) => a && typeof a === 'object') : [];
+    } catch { return []; }
+  }
+
+  /* Stores the entry whole, or leaves the list exactly as it was. Kept: the
+     three newest update copies and the newest rescue. When storage is full,
+     the oldest update copies make room one at a time; the new entry and the
+     rescue never do, and neither do the plan or the Backups, which are not
+     touched here at all. Returns { ok, dropped }: whether the entry is now
+     stored, and how many older archives are no longer kept. */
+  function archive(entry) {
+    const old = archives();
+    const list = [entry];
+    let updates = entry.kind === 'update' ? 1 : 0;
+    let rescued = entry.kind === 'rescue';
+    for (const a of old) {
+      if (a.kind === 'update') { if (updates < MAX_UPDATE_ARCHIVES) { list.push(a); updates++; } }
+      else if (a.kind === 'rescue') { if (!rescued) { list.push(a); rescued = true; } }
+      else list.push(a);   // a kind a later version added: not ours to drop
+    }
+    for (;;) {
+      try {
+        localStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
+        return { ok: true, dropped: old.length - (list.length - 1) };
+      } catch { /* full: make room below, or give up */ }
+      let i = list.length - 1;
+      while (i > 0 && list[i].kind !== 'update') i--;
+      if (i === 0) return { ok: false, dropped: 0 };
+      list.splice(i, 1);
+    }
+  }
+
+  // Once per text: reloading on the same unreadable save keeps one copy.
+  function rescue(text) {
+    const kept = archives().find((a) => a.kind === 'rescue');
+    if (kept && kept.text === text) return true;
+    return archive({ kind: 'rescue', from: null, to: null, t: new Date().toISOString(), text }).ok;
   }
 
   /* ---------- IndexedDB (one key: the save-file handle) ---------- */
@@ -614,7 +672,7 @@ const Store = (() => {
     save(state) { writeLocal(state); queueFileWrite(state); },
     // This browser only, leaving the file as it is until the next real change.
     saveLocal(state) { writeLocal(state); },
-    flush, snapshot, dailySnapshot, backups, restore,
+    flush, snapshot, dailySnapshot, backups, restore, archives, archive,
     file, persistence, fileSupported, linkFile, openFile, reconnect, release, unlink,
     download, parseImport, takeNotices, migrate,
   };
