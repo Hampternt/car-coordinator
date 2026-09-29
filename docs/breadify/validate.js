@@ -93,14 +93,16 @@ const Validate = (() => {
     const findings = [];
     for (const row of rows) {
       // The reader turns a missing id into 0, so without this every such row
-      // would quietly fold into one order and print as one.
-      if (!Number.isFinite(row.orderIdExact)) {
+      // would quietly fold into one order and print as one. An order id is a
+      // whole number above zero; 0, a fraction or a blank is none.
+      const id = row.orderIdExact;
+      if (!Number.isInteger(id) || id <= 0) {
         findings.push({
           severity: BLOCKING,
           kind: 'blank-required-field',
           headline: `Order ID is empty or not a number on row ${row.excelRow}`,
           detail:
-            `Row ${row.excelRow} has no Order ID that reads as a number. ` +
+            `Row ${row.excelRow} has no Order ID that reads as a whole number above zero. ` +
             'Every row without one would be printed as part of the same single order.',
           rows: [row.excelRow],
         });

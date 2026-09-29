@@ -97,7 +97,11 @@ const Model = (() => {
    */
   function exactNumber(cell) {
     if (!cell) return null;
-    const number = cell.kind === 'number' ? cell.value : Number(cell.value);
+    if (cell.kind === 'number') return Number.isFinite(cell.value) ? cell.value : null;
+    // `Number('')` and `Number('   ')` are 0, and `Number(true)` is 1: a
+    // blank or a TRUE is not a number the file gave, so it is none.
+    if (cell.kind === 'boolean' || String(cell.value).trim() === '') return null;
+    const number = Number(cell.value);
     return Number.isFinite(number) ? number : null;
   }
 

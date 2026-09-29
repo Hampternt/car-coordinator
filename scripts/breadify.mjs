@@ -326,6 +326,43 @@ await page.addInitScript(() => {
       });
   };
 
+  // A worksheet as Xlsx hands one over, built from plain values, for checks
+  // that must go through Model.readRows itself: a string is a text cell, a
+  // number a number cell, true or false a boolean cell, and null no cell.
+  window.sheetOf = (dataRows) => {
+    const cellOf = (value) =>
+      value === null || value === undefined
+        ? null
+        : typeof value === 'boolean'
+          ? { kind: 'boolean', value }
+          : typeof value === 'number'
+            ? { kind: 'number', value }
+            : { kind: 'text', value };
+    const row = (number, values) => ({
+      number,
+      cells: new Map(values.map((v, i) => [i, cellOf(v)]).filter(([, cell]) => cell)),
+    });
+    return {
+      width: Model.COLUMN_COUNT,
+      rows: [row(1, Model.HEADERS), ...dataRows.map((values, i) => row(i + 2, values))],
+    };
+  };
+
+  // One export row as plain values, in column order, with any column given
+  // by its Model.COLUMN name overridden.
+  window.exportRow = (overrides = {}) => {
+    const values = {
+      orderId: 1000000501, quantity: 4, productId: 10, productName: 'Grovbrød',
+      supplierSku: 'SB-10', position: null, supplier: 'Sandnes Bakeri',
+      customer: 'Hinna skole', department: null, deliveryStreet: 'Hinnavegen 1',
+      comment: null, routeNickname: '3', routeOrdering: 1, acceptAlternatives: true,
+      region: 'Stavanger', ...overrides,
+    };
+    return Object.entries(Model.COLUMN)
+      .sort((a, b) => a[1] - b[1])
+      .map(([name]) => values[name]);
+  };
+
   // How a day's orders group into stops, and which routes the customer's
   // place in the tie-break reorders against D2's own key.
   window.stopFigures = (routes) => {
@@ -1816,6 +1853,27 @@ same('a missing Order ID is said for each row, as blocking', noOrderId.said, [
   ['blocking', 'Order ID is empty or not a number on row 3'],
 ]);
 check('and it would make the pages wrong', noOrderId.blocks === true);
+
+// Read through the reader itself: a blank or whitespace Order ID cell used
+// to read as the number 0, and 0 passed as a number.
+const blankIds = await page.evaluate(() =>
+  Validate.run(
+    Model.readRows(
+      sheetOf([
+        exportRow({ orderId: '' }),
+        exportRow({ orderId: '   ' }),
+        exportRow({ orderId: 1000000502, productId: 11, productName: 'Loff', supplierSku: 'SB-11' }),
+      ]),
+    ),
+    Model.BREAD,
+  )
+    .filter((f) => f.kind === 'blank-required-field')
+    .map((f) => [f.severity, f.headline]),
+);
+same('a blank or whitespace Order ID cell is said for its row, as blocking', blankIds, [
+  ['blocking', 'Order ID is empty or not a number on row 2'],
+  ['blocking', 'Order ID is empty or not a number on row 3'],
+]);
 
 // 400 of one bread is a school kitchen and prints without comment. Four
 // figures is a decimal point in the wrong place — it still prints, because the
