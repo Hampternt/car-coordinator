@@ -1658,16 +1658,24 @@ function updateNoteFor({ version, releases, seen, firstRun, trouble, link }) {
   return { show: { full, more: unseen.length - full.length }, mark: true };
 }
 
+/* An update archive is the copy for one step, from one version to another:
+   a browser that ran 0.3.0, moved on to a newer build, then came back to
+   0.3.0 is making a different step from the first one, and needs a copy of
+   its own. */
+const copyFor = (a, version, from) => !!a && a.kind === 'update' && a.to === version && a.from === from;
+// The version a browser is coming from, as an archive records it.
+const updatingFrom = (seen) => (typeof seen === 'string' ? seen : '0.2.4 or earlier');
+
 /* Whether this open takes an update archive: the saved text is a usable
    plan, this browser has not already run this version (a first run, then a
    change and a reload, has nothing from before the update to keep), and no
-   update archive is already stored for it. A marker newer than this version
+   archive is already stored for this step. A marker newer than this version
    is a downgrade, and is archived: an older build is about to rewrite newer
    data. */
-function archiveNeeded({ version, usableText, archives, seen }) {
+function archiveNeeded({ version, from, usableText, archives, seen }) {
   if (typeof usableText !== 'string') return false;
   if (seen === version) return false;
-  return !(Array.isArray(archives) ? archives : []).some((a) => a && a.kind === 'update' && a.to === version);
+  return !(Array.isArray(archives) ? archives : []).some((a) => copyFor(a, version, from));
 }
 
 /* Whether this open is a first run: nothing saved in this browser and
@@ -1685,11 +1693,12 @@ let firstRun = false;
 function archiveBeforeUpdate() {
   if (!['archive', 'archives', 'savedText', 'pref'].every((f) => typeof Store[f] === 'function')) return null;
   const list = Store.archives();
-  if (list.some((a) => a && a.kind === 'update' && a.to === APP_VERSION)) return 'kept';
-  const text = Store.savedText();
   const seen = Store.pref('seenUpdate');
-  if (!archiveNeeded({ version: APP_VERSION, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
-  const { ok } = Store.archive({ kind: 'update', from: typeof seen === 'string' ? seen : '0.2.4 or earlier', to: APP_VERSION, t: new Date().toISOString(), text });
+  const from = updatingFrom(seen);
+  if (list.some((a) => copyFor(a, APP_VERSION, from))) return 'kept';
+  const text = Store.savedText();
+  if (!archiveNeeded({ version: APP_VERSION, from, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
+  const { ok } = Store.archive({ kind: 'update', from, to: APP_VERSION, t: new Date().toISOString(), text });
   return ok ? 'kept' : 'full';
 }
 

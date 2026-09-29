@@ -2432,14 +2432,15 @@ const rules = await un.evaluate(() => {
     nineIsNotNewer: run({ version: '0.10.0', releases: [R('0.10.0'), R('0.9.0')], seen: '0.10.0' }),
     tenIsNewerThanNine: run({ version: '0.9.0', releases: [R('0.9.0')], seen: '0.10.0' }),
   };
-  const A = (over) => archiveNeeded({ version: '0.6.0', usableText: '{"routes":[]}', archives: [], seen: '0.5.0', ...over });
+  const A = (over) => archiveNeeded({ version: '0.6.0', from: '0.5.0', usableText: '{"routes":[]}', archives: [], seen: '0.5.0', ...over });
   out.archive = {
     returning: A({}),
-    noMarker: A({ seen: null }),
-    downgrade: A({ seen: '9.9.9' }),
-    alreadyShownHere: A({ seen: '0.6.0' }),
-    alreadyArchived: A({ archives: [{ kind: 'update', to: '0.6.0' }] }),
-    olderArchiveOnly: A({ archives: [{ kind: 'update', to: '0.5.0' }] }),
+    noMarker: A({ seen: null, from: '0.2.4 or earlier' }),
+    downgrade: A({ seen: '9.9.9', from: '9.9.9' }),
+    alreadyShownHere: A({ seen: '0.6.0', from: '0.6.0' }),
+    alreadyArchived: A({ archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
+    backFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
+    olderArchiveOnly: A({ archives: [{ kind: 'update', from: '0.4.0', to: '0.5.0' }] }),
     rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
     nothingUsable: A({ usableText: null }),
   };
@@ -2463,8 +2464,8 @@ same('the note: must entries beyond three are all in full', rules.mustBeyondThre
 same('the note: 0.10.0 comes after 0.9.0', rules.tenAfterNine, { full: ['0.10.0'], more: 0, mark: true });
 same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, none);
 same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
-same('the archive: taken for a returning leader, no marker, and a downgrade; not twice, not after this version ran here, not without a usable plan', rules.archive, {
-  returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false,
+same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
+  returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
   olderArchiveOnly: true, rescueDoesNotCount: true, nothingUsable: false });
 check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
 
@@ -2555,6 +2556,18 @@ await up.reload({ waitUntil: 'networkidle' });
 const down = await opened(up);
 check('a downgrade: no note, but an archive, and the marker left alone',
   down.notes === 0 && down.archives.length === 1 && down.archives[0].to === V && down.marker === '9.9.9', JSON.stringify(down).slice(0, 200));
+// Back to this version from a newer build, having run this version before:
+// the copy from that first update is for a different step, and this one
+// needs its own.
+const newerThanV = V.split('.').map((x, i) => (i === 1 ? Number(x) + 1 : i === 2 ? 0 : Number(x))).join('.');
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': newerThanV,
+  'carcoord:archives': JSON.stringify([{ kind: 'update', from: '0.2.4 or earlier', to: V, t: '2026-09-01T06:00:00.000Z', text: '{"routes":[],"cars":[]}' }]) });
+await up.reload({ waitUntil: 'networkidle' });
+const stepBack = await opened(up);
+same(`back to ${V} from ${newerThanV}: a new archive of that step, beside the first update's`,
+  stepBack.archives.map((a) => [a.from, a.to, a.sameAsSaved]), [[newerThanV, V, true], ['0.2.4 or earlier', V, false]]);
+await up.reload({ waitUntil: 'networkidle' });
+check('and a reload takes no third', (await opened(up)).archives.length === 2);
 
 // Held loads wait for the next clean open, and leave the marker alone.
 await leaveAs(up, { 'carcoord:v1': '{not json at all' });
