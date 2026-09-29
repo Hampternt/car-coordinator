@@ -321,7 +321,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Download** equals the archive text byte for byte and imports to the same plan;
   - a rescue row offers Download only;
   - an update archive holding `[]` shows no Restore.
-- [ ] **9. The emergency page.** `recover.html` and `recover.js`, plus the static line in `index.html`'s `#notices` and the links (This browser card, unreadable warning, README).
+- [x] **9. The emergency page.** `recover.html` and `recover.js`, plus the static line in `index.html`'s `#notices` and the links (This browser card, unreadable warning, README).
   *Done when:* smoke shows all of these:
   - `recover.html` lists the plan, backups and archives keys, and downloads each byte for byte;
   - with `app.js` made to throw, the main page shows the static line, and it leads to `recover.html`, which still works;
@@ -466,3 +466,15 @@ Written identically in the `updates.js` header, the README and the container's G
 
     On the main page, a rescue is present when the old Backups-table checks (formerly :964 and :1040) run, and they pass unchanged.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 460 ok, 0 FAIL.
+- Item 9 done, 2d73ef7.
+  - **What shipped:**
+    - `recover.html` and `recover.js`: read-only and DOM-built. The plan, Archives and Backups are listed first, with each key downloadable, each archive and backup entry downloadable on its own, and a Download everything.
+    - The page has the same CSP and data: icon. Without the icon, Chrome's `/favicon.ico` 404 logs a console error.
+  - **Deviation:** the unreadable-save link is a new `link` field on notices, passed through `drainStoreNotices`, not an `offer`, because `dropOffers()` would wipe the warning.
+  - **Also in this commit:** a race fix in item 8's import check (it now waits for the async import).
+  - **Smoke:**
+    - the static line is gone after a normal start;
+    - the unreadable warning and This browser both link to the page;
+    - `recover.html` lists v1, archives and backups first; every key downloads byte for byte (with Æ Ø Å and —), an archive entry downloads alone, and storage is unchanged;
+    - with `app.js` answering `throw`, the static line shows, its link opens `recover.html`, which lists the plan, and there are no errors there.
+  - **Gate:** `check.sh` OK, with `versions.mjs` now requiring `recover.html` and its `?v=`. Car suite: exit 0, 471 ok, 0 FAIL.
