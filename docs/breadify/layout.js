@@ -366,7 +366,9 @@ const Sheet = (() => {
       row.appendChild(boxes);
     } else {
       // A leader of full stops, clipped to whatever room the name left. A name
-      // long enough to leave none simply has no field — nothing wraps.
+      // long enough to leave none simply has no field — nothing wraps (F8).
+      // A line of a shared block departs from that: its name wraps when the
+      // marker and id beside it would push the line off the paper (orderRows).
       row.appendChild(element('span', 'bf-note-field', '.'.repeat(120)));
       row.appendChild(tickBox('M'));
     }

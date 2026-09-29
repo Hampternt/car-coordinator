@@ -20,11 +20,12 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 The port departs from that log in three places, each at the owner's request, and the code says so wherever the D-number is cited. The Rust app is unchanged.
 
 - **The substitute marker has one look** (D8, D21). Every order prints `want substitute: true` or `want substitute: false` in the same quiet type, with only the word **false** in bold. The Rust app prints false in loud capitals.
-- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Four more departures follow from this:
+- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Five more departures follow from this:
   - A department no longer prints as a block of its own. It shares its customer's block, still named, under the customer's heading (D7).
   - Each order has its own crates, marker and id, not one column per block (D20).
   - Ties in the delivery order are broken by the customer before the department, so a customer's orders sit together (D2).
   - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
+  - On the freezer sheet, a check line in such a block wraps its bread name when the marker and id beside it would push the line off the paper. The freezer log says nothing on a check line wraps (F8).
 - **A block taller than a page is cut rather than run off the paper** (D9). The cut falls between whole orders first, and inside an order only when that order is taller than a page by itself. One more case is cut on purpose. The first unsequenced block sits right under the "no position assigned" flag, and the flag must never end a page alone. If that block fits a page but not the room left beside the flag, it is cut too.
 
 One more change has no D-number, because the log never set a line order. The Rust app prints an order's lines in the order the file lists them. The port sorts them within each order, at the owner's request: Sandnes Bakeri (SB) first, then Bakehuset (BH), then any other supplier A to Z by its code. Within a supplier the breads run A to Z in the Norwegian alphabet, so æ, ø and å come last. Two orders' lines are never mixed, and each order's crates and marker stay on its first line.
