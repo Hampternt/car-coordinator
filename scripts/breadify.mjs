@@ -107,6 +107,25 @@ await page.addInitScript(() => {
       zoomed: sheets.some((sheet) => sheet.style.zoom !== ''),
     };
   };
+
+  // How a day's orders group into stops, and which routes the customer's
+  // place in the tie-break reorders against D2's own key.
+  window.stopFigures = (routes) => {
+    const d2 = (o) => [
+      o.sequence !== 0 ? 0 : 1, o.sequence, o.deliveryStreet,
+      o.department === null ? '' : o.department, o.id,
+    ];
+    return {
+      orders: routes.reduce((n, r) => n + r.orders.length, 0),
+      stops: routes.reduce((n, r) => n + r.stops.length, 0),
+      reordered: routes
+        .filter((r) => {
+          const byD2 = r.orders.slice().sort((a, b) => Model.compare(d2(a), d2(b)));
+          return byD2.map((o) => o.id).join() !== r.orders.map((o) => o.id).join();
+        })
+        .map((r) => r.nickname),
+    };
+  };
 });
 
 /** The inspection's verdicts, for a set of sheets already on the page. */
@@ -278,8 +297,39 @@ const bread = await page.evaluate(async ([bytes]) => {
       .filter((r) => Model.routeCrates(r, rules) > Model.PALLET_THRESHOLD)
       .map((r) => r.nickname),
     refusing: routes.flatMap((r) => r.orders).filter((o) => o.acceptAlternatives === false).length,
+    stops: stopFigures(routes),
+    c017: route11.stops
+      .filter((s) => s.customer === 'Customer 017')
+      .map((s) => s.orders.map((o) => o.id)),
+    c061: route11.stops
+      .filter((s) => s.customer === 'Customer 061')
+      .map((s) => [s.deliveryStreet, s.orders.map((o) => o.id)]),
+    c012stop: routes
+      .find((r) => r.nickname === '14')
+      .stops.filter((s) => s.customer === 'Customer 012')
+      .map((s) => [s.orders.length, s.orders.reduce((n, o) => n + o.lines.length, 0)]),
   };
 }, [breadBytes]);
+
+// One block per customer at a stop, departments included (the owner,
+// 2026-09-29): 148 orders print as 123 stops. The customer joins D2's
+// tie-break, and that moves no order on any route of this day.
+same('the bread day groups 148 orders into 123 stops', [bread.stops.orders, bread.stops.stops], [148, 123]);
+same('the new tie-break reorders nothing on the bread day', bread.stops.reordered, []);
+same(
+  'route 11’s Customer 017 is one stop: three orders with no department, then Department 09',
+  bread.c017,
+  [[1000619017, 1000619019, 1000619029, 1000622398]],
+);
+same(
+  'Customer 061 on route 11 is two stops, one per street',
+  bread.c061,
+  [
+    ['Street 112', [1000622508]],
+    ['Street 62', [1000621633, 1000622154, 1000622155]],
+  ],
+);
+same('Customer 012 on route 14 is one stop of nine orders and 30 lines', bread.c012stop, [[9, 30]]);
 
 // docs/print-spec.md §2 and excel-format.md §4: the natural sort. Sorting
 // these as text gives 1, 10, 11, … 2, which is the single most likely bug in
@@ -475,27 +525,32 @@ check(
 // and `Oppskåret 750g`, so the check is made exact instead: a route whose
 // sequences are values nothing else on a page could be. If any of them
 // surfaces, `Route ordering` is being printed.
+//
+// The fourth order shares the third's customer, street and sequence in
+// another department, so the route has a stop of two orders; and the stop
+// names must print, so an empty render cannot pass.
 const sequenceLeak = await page.evaluate(() => {
   const marks = [811931, 811933, 811937];
-  const route = {
-    nickname: '1',
-    orders: marks.map((sequence, index) => ({
-      id: 1000000000 + index,
-      customer: `Stop ${index}`,
-      department: index === 1 ? 'Kitchen' : null,
-      deliveryStreet: `Street ${index}`,
-      route: '1',
-      sequence,
-      acceptAlternatives: index !== 2,
-      comment: null,
-      lines: [
-        {
-          product: { id: 1, name: 'Grovbrød', sku: 'x', supplier: 'sandnes bakeri' },
-          quantity: 3,
-        },
-      ],
-    })),
-  };
+  const order = (index, sequence, department) => ({
+    id: 1000000000 + index,
+    customer: `Stop ${Math.min(index, 2)}`,
+    department,
+    deliveryStreet: `Street ${Math.min(index, 2)}`,
+    route: '1',
+    sequence,
+    acceptAlternatives: index !== 2,
+    comment: null,
+    lines: [
+      {
+        product: { id: 1, name: 'Grovbrød', sku: 'x', supplier: 'sandnes bakeri' },
+        quantity: 3,
+      },
+    ],
+  });
+  const route = Model.route('1', [
+    ...marks.map((sequence, index) => order(index, sequence, index === 1 ? 'Kitchen' : null)),
+    order(3, marks[2], 'Bakery'),
+  ]);
   const settings = {
     kind: Model.BREAD,
     showOrderId: true,
@@ -504,14 +559,23 @@ const sequenceLeak = await page.evaluate(() => {
   const printed = Sheet.paginate(
     route,
     settings,
-    { dates: null, source: 'test', routeStops: 3, routeLines: 3 },
+    { dates: null, source: 'test', routeStops: route.stops.length, routeLines: 4 },
     {},
   )
     .map((sheet) => sheet.textContent)
     .join(' ');
-  return marks.filter((mark) => printed.includes(String(mark)));
+  return {
+    stops: route.stops.map((s) => s.orders.length),
+    leaked: marks.filter((mark) => printed.includes(String(mark))),
+    named: ['Stop 0', 'Stop 1', 'Stop 2'].filter((name) => printed.includes(name)),
+  };
 });
-same('the sequence number is never printed', sequenceLeak, []);
+same('the sequence number is never printed', sequenceLeak.leaked, []);
+same(
+  'and the stops it hides in print, one of them two orders',
+  [sequenceLeak.stops, sequenceLeak.named],
+  [[1, 1, 2], ['Stop 0', 'Stop 1', 'Stop 2']],
+);
 
 // acceptance check 7: names print exactly as the file has them (D14).
 const truncated = sheets
@@ -544,7 +608,7 @@ const refusals = await page.evaluate(() => {
   const attempt = (stop) => {
     try {
       Sheet.paginate(
-        { nickname: '1', orders: [stop] },
+        Model.route('1', [stop]),
         { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
         { dates: null, source: 'test', routeStops: 1, routeLines: 1 },
         {},
@@ -692,12 +756,21 @@ inspected(
   await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
 );
 
-const freezerRefusing = await page.evaluate(async ([bytes]) => {
+const freezerModel = await page.evaluate(async ([bytes]) => {
   const book = await Xlsx.open(new Uint8Array(bytes).buffer);
-  return Model.group(Model.fold(Model.readRows(await book.sheet('Data'))))
-    .flatMap((r) => r.orders)
-    .filter((o) => o.acceptAlternatives === false).length;
+  const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+  return {
+    refusing: routes.flatMap((r) => r.orders).filter((o) => o.acceptAlternatives === false).length,
+    stops: stopFigures(routes),
+  };
 }, [freezerBytes]);
+const freezerRefusing = freezerModel.refusing;
+same(
+  'the freezer day groups 115 orders into 94 stops',
+  [freezerModel.stops.orders, freezerModel.stops.stops],
+  [115, 94],
+);
+same('the new tie-break reorders nothing on the freezer day', freezerModel.stops.reordered, []);
 const freezerMarkers = await markerReport();
 same('every freezer marker reads true or false in the one look', freezerMarkers.odd, []);
 check(
@@ -753,6 +826,10 @@ const EDGE = [
   ['edge', 'bakeries-4', 'a fourth bakery'],
   ['edge', 'bakeries-5', 'a fifth bakery'],
   ['edge', 'four-figure-line', 'a four-figure quantity on one line'],
+  // One block per customer at a stop: a customer taller than a page, cut
+  // across departments; a name and a crate count too wide for their line; a
+  // department every order in the block shares.
+  ['edge', 'one-customer-many-orders', 'one customer with many orders at one stop'],
   ['shape', 'quantity-2-billion', 'a quantity far past anything real'],
   ['shape', 'quantity-beyond-float', 'a quantity past what a double holds'],
 ];
@@ -827,6 +904,24 @@ for (const [folder, fixture, what] of EDGE) {
     `${shape.columnWidths.join(', ')} mm`,
   );
 }
+
+// The fixture's customers each group into exactly one stop holding every one
+// of their orders, in printing order: no department first, then by department.
+const manyBytes = Array.from(
+  await readFile('scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-one-customer-many-orders.xlsx'),
+);
+const manyStops = await page.evaluate(async ([b]) => {
+  const book = await Xlsx.open(new Uint8Array(b).buffer);
+  return Model.group(Model.fold(Model.readRows(await book.sheet('Data')))).map((r) => [
+    r.nickname,
+    r.stops.map((s) => s.orders.map((o) => o.id)),
+  ]);
+}, [manyBytes]);
+same('the tall, wide and shared-department customers are one stop each', manyStops, [
+  ['1', [[7000], [7101, 7102, 7103, 7104, 7105, 7106, 7107, 7108, 7112, 7113, 7114, 7109, 7110, 7111]]],
+  ['2', [[7203, 7201, 7202]]],
+  ['3', [[7301, 7302]]],
+]);
 
 // ── Changes to the export's own shape ──────────────────────────────────────
 //
@@ -1037,18 +1132,15 @@ const crowded = await page.evaluate(() => {
   ruler.remove();
 
   const measure = (count) => {
-    const route = {
-      nickname: '3',
-      orders: [{
-        id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
-        route: '3', sequence: 100, acceptAlternatives: true, comment: null,
-        lines: Array.from({ length: count }, (_, i) => ({
-          quantity: 12,
-          product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
-                     supplier: `Bakeri Nummer ${i + 1}` },
-        })),
-      }],
-    };
+    const route = Model.route('3', [{
+      id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
+      route: '3', sequence: 100, acceptAlternatives: true, comment: null,
+      lines: Array.from({ length: count }, (_, i) => ({
+        quantity: 12,
+        product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
+                   supplier: `Bakeri Nummer ${i + 1}` },
+      })),
+    }]);
     const pages = Sheet.paginate(
       route,
       { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },

@@ -334,8 +334,13 @@ const Model = (() => {
    * order the file lists them.
    *
    * A row is one product on one order; everything else on it belongs to the
-   * order and is repeated onto each line. One order is one stop, one block and
-   * one crate label (D16).
+   * order and is repeated onto each line. One order is one crate label (D16):
+   * its crates, its lines and its substitute answer are its own.
+   *
+   * D16 also makes one order one stop and one block. The web port departs
+   * from that, at the owner's request (2026-09-29): a customer's orders at
+   * one stop share a block, and route() groups them. The Rust app still
+   * prints one block per order.
    */
   function fold(rows) {
     const orders = [];
@@ -426,29 +431,86 @@ const Model = (() => {
   }
 
   /**
-   * What decides where a stop prints: sequenced stops in ascending sequence,
-   * then the unsequenced ones, with address, department and order id breaking
-   * ties so two runs of one file print identically (D2).
+   * What decides where an order prints: sequenced stops in ascending
+   * sequence, then the unsequenced ones, with ties broken so two runs of one
+   * file print identically (D2).
    *
    * Equal sequences are legitimate — one site with several delivery points —
    * which is exactly why the tiebreak is not optional.
+   *
+   * D2 breaks ties by address, department and order id. The web port puts
+   * the customer before the department, a departure that follows from
+   * printing a customer's orders at one stop in one block (see route()): it
+   * keeps those orders next to each other, grouped by department. It
+   * reorders nothing in either sample export. An order with no department
+   * sorts first, which is what puts it straight under the customer's name.
    */
-  function printingPosition(stop) {
+  function printingPosition(order) {
     return [
-      isSequenced(stop) ? 0 : 1,
-      stop.sequence,
-      stop.deliveryStreet,
-      stop.department === null ? '' : stop.department,
-      stop.id,
+      isSequenced(order) ? 0 : 1,
+      order.sequence,
+      order.deliveryStreet,
+      order.customer,
+      order.department === null ? '' : order.department,
+      order.id,
     ];
   }
 
-  function sortStops(stops) {
-    stops.sort((left, right) => compare(printingPosition(left), printingPosition(right)));
-    return stops;
+  function sortOrders(orders) {
+    orders.sort((left, right) => compare(printingPosition(left), printingPosition(right)));
+    return orders;
   }
 
-  /** Groups orders into routes, both in printing order. */
+  /**
+   * Whether two orders, next to each other in printing order, are one stop:
+   * the same customer at the same street and the same position in the route,
+   * compared exactly as the file spells them.
+   *
+   * The department is not part of it (the owner, 2026-09-29): a customer's
+   * departments share the block and are told apart inside it. The street is,
+   * because the address never prints — merging two streets would hide a
+   * second drop-off. Two spellings of one name stay two blocks, which is
+   * exactly what printed before, so never a wrong print.
+   */
+  function sameStop(left, right) {
+    return (
+      left.customer === right.customer &&
+      left.deliveryStreet === right.deliveryStreet &&
+      left.sequence === right.sequence
+    );
+  }
+
+  /**
+   * One route: its orders in printing order, and the same orders grouped into
+   * the stops the page prints, one block each.
+   *
+   * `orders` is what every sum reads — the crates, the route total, the
+   * supplier key. `stops` is what the page walks. A stop carries no lines, id
+   * or substitute answer of its own, so nothing can add across two orders by
+   * accident, and a stop handed to code that wants an order fails loudly
+   * instead of printing.
+   */
+  function route(nickname, orders) {
+    const sorted = sortOrders(orders.slice());
+    const stops = [];
+    for (const order of sorted) {
+      const last = stops[stops.length - 1];
+      if (last && sameStop(last.orders[0], order)) {
+        last.orders.push(order);
+        continue;
+      }
+      stops.push({
+        customer: order.customer,
+        deliveryStreet: order.deliveryStreet,
+        route: order.route,
+        sequence: order.sequence,
+        orders: [order],
+      });
+    }
+    return { nickname, orders: sorted, stops };
+  }
+
+  /** Groups orders into routes, in printing order. */
   function group(orders) {
     const byNickname = new Map();
     for (const order of orders) {
@@ -456,10 +518,7 @@ const Model = (() => {
       byNickname.get(order.route).push(order);
     }
 
-    const routes = Array.from(byNickname, ([nickname, orders]) => ({
-      nickname,
-      orders: sortStops(orders),
-    }));
+    const routes = Array.from(byNickname, ([nickname, list]) => route(nickname, list));
     routes.sort((left, right) =>
       compare(naturalKey(left.nickname), naturalKey(right.nickname)),
     );
@@ -685,7 +744,8 @@ const Model = (() => {
     isSequenced,
     naturalKey,
     compare,
-    sortStops,
+    sortOrders,
+    route,
     group,
     unsequencedStops,
     lineCount,

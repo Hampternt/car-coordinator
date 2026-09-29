@@ -90,12 +90,12 @@ def write(path, data_rows, sheet_name="Data", headers=None, trailing_col=True):
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'edge')
 os.makedirs(OUT, exist_ok=True)
 
-def line(order, seq, route, cust, prod, qty, sup, pid, dept=None, street=None):
+def line(order, seq, route, cust, prod, qty, sup, pid, dept=None, street=None, accept=True):
     return dict(orderId=order, quantity=qty, productId=pid, productName=prod,
                 supplierSku=str(pid), position=str(seq or ''), supplier=sup,
                 customer=cust, department=dept,
                 deliveryStreet=street or f'Street {order % 90:02d}',
-                routeNickname=route, routeOrdering=seq, acceptAlternatives=True)
+                routeNickname=route, routeOrdering=seq, acceptAlternatives=accept)
 
 S = {}
 
@@ -175,8 +175,62 @@ S['product-id-clash'] = [
 ]
 
 
+# ── E. one customer, many orders ───────────────────────────────────────────
+# A customer's orders at one stop print in one block, grouped by department
+# and kept apart by order. These are that block at its worst: taller than a
+# page and cut across departments, one order longer than a page by itself, a
+# name and a crate count too wide for their line.
+def bread(i):
+    """The i-th of 90 breads, with one id, name and bakery each."""
+    return (f'Brødsort {i:02d}', 'Sandnes Bakeri' if i % 3 else 'Bakehuset', 1000 + i)
+
+def order_lines(order, seq, route, cust, dept, count, street, accept=True, seed=None):
+    """`count` lines of different breads; the same seed gives the same lines."""
+    seed = order if seed is None else seed
+    rows = []
+    for k in range(count):
+        name, sup, pid = bread((seed * 7 + k * 11) % 90)
+        rows.append(line(order, seq, route, cust, name, 1 + (seed + k * 5) % 9, sup, pid,
+                         dept=dept, street=street, accept=accept))
+    return rows
+
+TALL, TALL_STREET = 'Hinna skole og barnehage', 'Hinnavegen 1'
+many = [line(7000, 100, '1', 'Kafé Først', 'Rundstykke', 6, 'Sandnes Bakeri', 300),
+        line(7000, 100, '1', 'Kafé Først', 'Baguette', 3, 'Bakehuset', 305)]
+for order, dept, count, accept, seed in [
+    (7101, None, 14, True, None),
+    (7102, None, 18, True, None),
+    (7103, None, 12, True, 7103),        # the identical pair: same breads,
+    (7104, None, 12, True, 7103),        # same quantities, two ids
+    (7105, 'Kjøkken', 20, True, None),
+    (7106, 'Kjøkken', 80, True, None),   # taller than a page by itself
+    (7107, 'Kjøkken', 16, False, None),
+    (7108, 'Kjøkken', 22, True, None),
+    (7109, 'SFO', 25, True, None),
+    (7110, 'SFO', 13, True, None),
+    (7111, 'SFO', 19, False, None),
+    (7112, 'Personalrom', 15, True, None),
+    (7113, 'Personalrom', 21, True, None),
+    (7114, 'Personalrom', 17, True, None),
+]:
+    many += order_lines(order, 200, '1', TALL, dept, count, TALL_STREET, accept, seed)
+
+WIDE = ('Stavanger kommune, Hinna bydel, Oppvekst og levekår: kantinedrift og '
+        'storkjøkken ved Hinna skole, idrettshall og svømmehall')
+WIDE_DEPT = 'Avdeling for storhusholdning og institusjonskjøkken'
+many += [line(7201, 100, '2', WIDE, 'Rundstykke', 250, 'Sandnes Bakeri', 300,
+              dept=WIDE_DEPT, street='Langgata 2')]
+many += order_lines(7202, 100, '2', WIDE, WIDE_DEPT, 3, 'Langgata 2', accept=False)
+many += order_lines(7203, 100, '2', WIDE, None, 4, 'Langgata 2')
+
+many += order_lines(7301, 100, '3', 'Madla sykehjem', 'Avdeling 2', 3, 'Kirkegata 3')
+many += order_lines(7302, 100, '3', 'Madla sykehjem', 'Avdeling 2', 2, 'Kirkegata 3')
+S['one-customer-many-orders'] = many
+
+
 KEEP = {'suppliers-12','one-giant-stop','long-customer','long-department',
-        'long-route-name','long-supplier','supplier-code-collision','200-stops'}
+        'long-route-name','long-supplier','supplier-code-collision','200-stops',
+        'one-customer-many-orders'}
 for name, rows in S.items():
     if name not in KEEP:
         continue
