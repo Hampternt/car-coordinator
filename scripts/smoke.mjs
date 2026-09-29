@@ -3131,6 +3131,13 @@ const e5 = await s5.evaluate(async () => {
 check('(e) an everything code that brings a new label makes it unticked', e5.onSheet === false, JSON.stringify(e5));
 
 // (f) the tick never travels in a share code, and never changes on arrival.
+const sameCodes = await s5.evaluate(async () => {
+  const all = (on) => { const s = JSON.parse(JSON.stringify(state)); s.labels.forEach((l) => { l.onSheet = on; }); return s; };
+  const out = {};
+  for (const mode of ['day', 'all']) out[mode] = (await Share.encode(all(true), mode)) === (await Share.encode(all(false), mode));
+  return out;
+});
+check('(f) a share code is the same with every label ticked and with none', sameCodes.day && sameCodes.all, JSON.stringify(sameCodes));
 const f5 = await s5.evaluate(async () => {
   const from = JSON.parse(JSON.stringify(state));
   from.labels.forEach((l) => { l.onSheet = true; });
