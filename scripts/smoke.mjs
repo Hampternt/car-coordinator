@@ -2490,6 +2490,7 @@ const rules = await un.evaluate(() => {
     rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
     rescueThisVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
     rescueOlderVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.5.0' }] }),
+    rescueThisVersionBackFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
     nothingUsable: A({ usableText: null }),
   };
   out.untouched = all() === before;
@@ -2514,7 +2515,7 @@ same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, n
 same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
 same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
   returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
-  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, nothingUsable: false });
+  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, rescueThisVersionBackFromNewer: true, nothingUsable: false });
 check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
 
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
@@ -2632,6 +2633,13 @@ same(`back to ${V} from ${newerThanV}: a new archive of that step, beside the fi
   stepBack.archives.map((a) => [a.from, a.to, a.sameAsSaved]), [[newerThanV, V, true], ['0.2.4 or earlier', V, false]]);
 await up.reload({ waitUntil: 'networkidle' });
 check('and a reload takes no third', (await opened(up)).archives.length === 2);
+// A rescue this version took long ago, before the browser moved on to a
+// newer build, is not a copy of this step back.
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': newerThanV,
+  'carcoord:archives': JSON.stringify([{ kind: 'rescue', from: null, to: null, during: V, t: '2026-09-01T06:00:00.000Z', text: '{old' }]) });
+await up.reload({ waitUntil: 'networkidle' });
+same(`back to ${V} from ${newerThanV} with an old ${V} rescue kept: the step is still archived`,
+  (await opened(up)).archives.map((a) => [a.kind, a.from, a.to, a.sameAsSaved]), [['update', newerThanV, V, true], ['rescue', null, null, false]]);
 
 // Held loads wait for the next clean open, and leave the marker alone.
 await leaveAs(up, { 'carcoord:v1': '{not json at all' });
