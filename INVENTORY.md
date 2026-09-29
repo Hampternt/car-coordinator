@@ -35,6 +35,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 ## Data
 - ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
+- 🚧 **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start. `manifests/2026-09-28-update-note.md`.
 
 ## Packaging
 - ✅ **GitHub Pages** — the primary delivery; `docs/` is the published folder.
@@ -89,6 +90,5 @@ this list that you did not ask for.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
 - 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
-- 💭 **An update note** on the next open after an update — what changed, what it affects, that your data is safe, and the option of a save file on your own PC.
 - 💭 **Right-click menus** across the page.
 - 💭 **A first-use tour** for a new user.

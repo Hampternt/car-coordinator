@@ -1,6 +1,6 @@
 # Container: The review round
 
-**Status:** 💭 planned — pack order approved and every question answered (2026-09-28); the Reconnect fix is the first work. No pack has started.
+**Status:** 🚧 pack 1 (update note and fail-safe) in progress on `update-note`, since 2026-09-29. The Reconnect fix is done and on `dev` (0.2.5).
 **Date:** 2026-09-28
 **Branch:** `dev` is where everything is combined (owner, 2026-09-28). Each pack cuts its branch from `dev` and comes back through a PR into `dev`, and CI runs the tests on those PRs. `main` only receives `dev`, when the owner decides; that push is what publishes Pages and builds the Windows release. `dev` starts at 0.2.5, with the save-file fix and the dev fixture.
 
