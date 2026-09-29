@@ -1,8 +1,8 @@
 # Container: The review round
 
-**Status:** 🚧 pack 1 (update note and fail-safe) in progress on `update-note`, since 2026-09-29. The Reconnect fix is done and on `dev` (0.2.5).
+**Status:** 🚧 pack 1 (update note and fail-safe) built, reviewed, fixed and green on `update-note`; PR into `dev` next. Packs 2–9 are being built together as one combined pack on `review-round`, in its own worktree (owner, 2026-09-29): `manifests/2026-09-29-review-round-build.md`. The Reconnect fix is on `dev` (0.2.5).
 **Date:** 2026-09-28
-**Branch:** `dev` is where everything is combined (owner, 2026-09-28). Each pack cuts its branch from `dev` and comes back through a PR into `dev`, and CI runs the tests on those PRs. `main` only receives `dev`, when the owner decides; that push is what publishes Pages and builds the Windows release. `dev` starts at 0.2.5, with the save-file fix and the dev fixture.
+**Branch:** `dev` is where everything is combined (owner, 2026-09-28). Each pack cuts its branch from `dev` and comes back through a PR into `dev`, and CI runs the tests on those PRs. `main` only receives `dev`, and **only after the owner has tested the full combined update on `dev` and said go** (2026-09-29). Nothing else is a go: not a pack's approval, not a PR into `dev`, not green gates. that push is what publishes Pages and builds the Windows release. `dev` starts at 0.2.5, with the save-file fix and the dev fixture.
 
 ## Goal
 
@@ -50,12 +50,12 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 | # | Pack | Manifest | Saved data |
 |---|---|---|---|
 | 1 | Update note and fail-safe | `manifests/2026-09-28-update-note.md` | New per-browser keys; an untouched archive of the saved text before each update |
-| 2 | Printed sheet cleanup | created when it starts | **Schema v5**: a print tick on each label |
-| 3 | Dark mode | created when it starts | New per-PC key |
-| 4 | Plan for tomorrow | created when it starts | The date moves forward on open (not saved until you change something) |
-| 5 | Day plan layout | created when it starts | None; a Load that includes a template takes the existing backup |
-| 6 | Parking map | created when it starts | None, if spots match positions by name |
-| 7 | Drivers tab | created when it starts | None: uses existing fields and crews |
+| 2 | Printed sheet cleanup | `manifests/2026-09-29-sheet-cleanup.md` (7 items) | **Schema v5**: a print tick on each label |
+| 3 | Dark mode | `manifests/2026-09-29-dark-mode.md` (10 items) | New per-PC key |
+| 4 | Plan for tomorrow | `manifests/2026-09-29-plan-for-tomorrow.md` (10 items) | The date moves forward on open (not saved until you change something) |
+| 5 | Day plan layout | `manifests/2026-09-29-day-plan-layout.md` (12 items) | None; a Load that includes a template takes the existing backup |
+| 6 | Parking map | `manifests/2026-09-29-parking-map.md` (9 items) | None, if spots match positions by name |
+| 7 | Drivers tab | `manifests/2026-09-29-drivers-tab.md` (11 items) | None: uses existing fields and crews |
 | 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` | None |
 | 9 | First-use tour | `manifests/2026-09-28-tour.md` | New per-PC key |
 
