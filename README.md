@@ -31,6 +31,8 @@ One more change has no D-number, because the log never set a line order. The Rus
 
 Because of the second, the freezer sample prints on 20 sheets, not the 21 that `docs/freezer-list.md` states: route 13's Customer 012 now fits on one sheet as one block.
 
+The bread sample prints on 28 sheets, not 26. Route 13's Customer 037 is one block kept whole, and route 14's Customer 012 is one block cut into two page-sized parts. A block never starts partway down a page to fill it, so the sheet before each is left short. That is the chosen behaviour: the owner decided on 2026-09-29 that 28 sheets is fine and blocks stay whole.
+
 ## Features
 - **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A working rail beside the table holds the roster and the fleet: **add, rename, tag and delete** there, **drag a name or a registration straight onto the route it is driving**, and drag within the rail to reorder it. Everything in it is saved as you do it, and the Drivers and Cars tabs are still the full editors.
 - **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Drivers carry a status label of their own, from the same list cars and positions use. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
@@ -71,7 +73,7 @@ npm run test:breadify  # drives Breadify with both real exports and checks the s
 python3 scripts/make_edge_fixtures.py   # regenerates scripts/fixtures/edge/, only needed if you change those shapes
 npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
 ```
-`test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
+`test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's sheet count, and ≥ 10 mm of clearance above every footer. The sheet count is 20 now, not the 21 `docs/freezer-list.md` states, for the reason given above.
 
 It then drives the awkward exports in `scripts/fixtures/edge/` and `scripts/fixtures/shape/` (regenerate either with `python3 scripts/make_edge_fixtures.py` / `make_shape_fixtures.py`). `edge/` is about scale and length — twelve bakeries on one route, an order with 300 product lines, a school kitchen taking 400 of one bread; `shape/` is about the file itself — a column added, a header renamed, a quantity that is zero, negative, fractional or four figures.
 
