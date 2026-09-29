@@ -286,7 +286,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - `must` entries shown in full beyond three;
   - a downgrade: no note, but an archive;
   - localStorage byte-identical throughout.
-- [ ] **5. Release notes, running version, 0.3.0.** In one commit:
+- [x] **5. Release notes, running version, 0.3.0.** In one commit:
   - `docs/updates.js`, with the Design G header and both entries;
   - `APP_VERSION`, and `Store.init` given it;
   - the script tag;
@@ -424,3 +424,13 @@ Written identically in the `updates.js` header, the README and the container's G
   - localStorage byte-identical throughout.
 
   Gate: `check.sh` OK. Car suite: exit 0, 408 ok, 0 FAIL.
+- Item 5 done, 191b8b8. `versions.mjs` passes at 0.3.0 with six tags on `?v=0.3.0`. In a scratch copy it fails, each time naming the piece, when any one of these is removed:
+  - `APP_VERSION`;
+  - `updates.js`;
+  - the `updates.js` tag;
+  - `?v=` on `qr.js`;
+  - the Cargo.toml bump;
+  - the 0.3.0 entry;
+  - 0.2.5's `must`.
+
+  The `must` rule reads `data` as "starts with the Nothing sentence", and treats `affects` as a change unless the sentence naming the printed sheet or share codes says "unchanged". Otherwise 0.3.0 would need `must`, against Design I. Smoke reads `UPDATES[0].version === APP_VERSION`. Gate: `check.sh` OK. Car suite: exit 0, 409 ok, 0 FAIL, no console errors.
