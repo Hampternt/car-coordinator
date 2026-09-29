@@ -258,7 +258,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 
 - [x] **1. The item gate parses Breadify.** `scripts/check.sh` loops over `docs/*.js` only (:38), so no Breadify script is ever parsed. Every item below would pass the gate unchecked. Change that one line to `for f in docs/*.js docs/breadify/*.js; do` and leave the rest of the file alone, because update-note edits its header and tail. Commit `scripts/check.sh` by path.
       *Done when:* `bash scripts/check.sh` prints `ok` for docs/breadify/app.js, layout.js, model.js, validate.js and xlsx.js. It also fails when one of them is given a syntax error (tried by hand, then reverted).
-- [ ] **2. Check the sample days the way the edge fixtures are checked.** Today the across, overlap and clipping checks (:572, :588-603, :605) and the nonsense scan (:731) run only on fixtures. None of them looks at the marker or the order id.
+- [x] **2. Check the sample days the way the edge fixtures are checked.** Today the across, overlap and clipping checks (:572, :588-603, :605) and the nonsense scan (:731) run only on fixtures. None of them looks at the marker or the order id.
       - Factor the across, overlap and clipping pass into one function, and run it on the bread and freezer sample sheets too.
       - Add `.bf-stamp`, `.bf-marker` and `.bf-order-id` to the across and clipping selectors.
       - Scan both sample days' printed text for `NaN`, `Infinity`, `undefined` and `[object`.
@@ -494,3 +494,4 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
   - Items 7–9 done-conditions and the walkthrough list rewritten to match; item 8 gains a check of every several-order block on both days against the model.
 - 2026-09-29 · **Gates "on the go":** the two 🚧 lines moved from Breadify's Considered up under "## The printed sheet" in INVENTORY.md, as pointers to this manifest.
 - 2026-09-29 · **Item 1 done** (61f5455). `bash scripts/check.sh`: CHECK OK, `ok` for docs/breadify/app.js, layout.js, model.js, validate.js, xlsx.js. Trial: `const = ;` appended to model.js gave `FAIL docs/breadify/model.js`, CHECK FAILED, exit 1; reverted with `git checkout --`, gate OK again.
+- 2026-09-29 · **Item 2 done** (c136a07). One `inspectSheets` pass, installed with `addInitScript`, now runs on the bread day (26 sheets), the freezer day (21 sheets) and all 15 EDGE fixtures: off the paper, 10 mm, overlaps, clipping, nonsense. `.bf-stamp`, `.bf-marker`, `.bf-order-id` joined the across and clipping lists. Run on unchanged app code: **no findings** (bread 0 mm across, 12.7 mm clearance; freezer 0 mm, 13.2 mm; no collisions, clipping or nonsense). Gate: check.sh OK; test:breadify all passed, 189 ok.
