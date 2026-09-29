@@ -428,7 +428,17 @@ const markerReport = () =>
           !(text === 'want substitute: true' && kids.length === 0) &&
           !(text === 'want substitute: false' && kids.length === 1 && kids[0] === 'B:false:700'),
       );
+    // One marker per order: a continued order repeats its marker beside the
+    // word "continued", and a later part of a cut one-order block repeats it
+    // in its heading. Those repeats are not another order's.
+    const laterPart = (m) => {
+      const tag = m.closest('.bf-block').querySelector('.bf-block-part');
+      return tag && !/^part 1 of/.test(tag.textContent) && !m.closest('.bf-row, .bf-order-extra');
+    };
+    const once = markers.filter((m) => !m.parentElement.querySelector('.bf-order-cont') && !laterPart(m));
     return {
+      markers: once.length,
+      trues: once.filter((m) => m.textContent === 'want substitute: true').length,
       falses: markers.filter((m) => m.textContent === 'want substitute: false').length,
       odd: odd.slice(0, 3),
       loud: document.querySelectorAll('#preview .bf-marker-loud').length,
@@ -754,6 +764,13 @@ check(
   'every bread order that refuses substitutes prints false: 18 of them',
   bread.refusing === 18 && breadMarkers.falses === bread.refusing,
   `${breadMarkers.falses} printed, ${bread.refusing} in the file`,
+);
+// Counting only the falses let an order with no marker at all pass. Every
+// one of the 148 orders prints exactly one, and 130 of them say true.
+same(
+  'every bread order prints one marker, 130 of them true',
+  [breadMarkers.markers, breadMarkers.trues],
+  [148, 148 - bread.refusing],
 );
 check(
   'no loud marker is left, and the page note explains none',
@@ -1367,6 +1384,11 @@ check(
   'every freezer order that refuses substitutes prints false: 10 of them',
   freezerRefusing === 10 && freezerMarkers.falses === freezerRefusing,
   `${freezerMarkers.falses} printed, ${freezerRefusing} in the file`,
+);
+same(
+  'every freezer order prints one marker, 105 of them true',
+  [freezerMarkers.markers, freezerMarkers.trues],
+  [115, 115 - freezerRefusing],
 );
 check(
   'the freezer sheets have no loud marker and no convention in the note either',
