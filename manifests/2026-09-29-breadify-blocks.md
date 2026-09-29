@@ -399,6 +399,29 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 
       *Done when:* `readSharedBlocks` and a new `readOrderLines` hold every order on both sample days and in the fixture against the suite's own copy of the rule, starting from the file's order. They fail when the sort is removed, and test:breadify passes.
 
+### Review fixes (independent review of a873156, 18 confirmed findings, 2026-09-29)
+
+One commit per fix, each with its ledger line in the same commit, item-gated with check.sh and test:breadify. Item 11's sort must still hold after each; `readOrderLines` checks it on every run.
+
+- [ ] **R1. ⚠️ Text over crate glyphs.** A long word on a shared block's first line spilled onto the glyph run. `measure.overflows(node, outer)`; `fits()` also requires the name not to overflow its own box. `.bf-product` joins the clipping list, and a hand-built repro checks it. *Done when:* the repro (50× a long SB word first, BH Loff) shows no clipped name and no collision.
+- [ ] **R2. ⚠️ Blank Order ID not flagged.** `orderIdExact` is null for blank/whitespace text or a boolean cell; the finding fires on `!Number.isInteger(id) || id <= 0`. *Done when:* blank and whitespace ids are each a blocking finding, read through `readRows`.
+- [ ] **R3. ⚠️ Missing or unrecognised Accept alternatives printed as false.** `acceptAlternativesExact` (true/false only for a real boolean, 0/1 or true/false/yes/no); blocking finding "Accept alternatives is empty or not true/false on row N". *Done when:* a blank and a 'ja' row are each a blocking finding, and both samples still read two notices.
+- [ ] **R4. The `.bf-order-extra` line carries no id.** Put the order id on it. *Done when:* `readSharedBlocks` asserts an extra line carries the id of the line above it, and the R1 repro exercises it.
+- [ ] **R5. The part stand-in is too narrow past 99 parts.** Use `part ${lines} of ${lines}`; a final part over its cap holding more than one line throws.
+- [ ] **R6. Quadratic cut search.** `mostLines` seeds from the previous part's take, gallops up to a failing bound, then binary-searches.
+- [ ] **R7. The cut under the flag is undocumented.** Behaviour kept; README, INVENTORY and the `stopPieces` comment say so; the sweep pins the part counts at 39 and 40 lines.
+- [ ] **R8a. INVENTORY's "refuses rather than misprints" overclaims.** Narrow it to what the guard does, citing R2/R3's checks.
+- [ ] **R8b. README's sheet counts.** The test paragraph's 21 freezer sheets becomes 20 (21 in freezer-list.md); add the bread day's 28 sheets and why.
+- [ ] **R8c. F8 is a departure too.** A shared-block check line wraps its name. README's list, sheet.css and layout.js say so.
+- [ ] **R9. Every order prints a marker.** Total markers = orders (148, 115); true = orders − refusing (130, 105), excluding continued rows and later parts.
+- [ ] **R10. One quiet style.** One [family, weight 500, size, colour, no transform, style] across every marker; the `<b>` matches except weight 700.
+- [ ] **R11. A shared block's heading holds nothing at its right.** Whitelisted head-line children; no crates, marker, stamp or id.
+- [ ] **R12. The crate count on a cut one-order block.** Part 1's crates equal `crateCount` (90 large for one-giant-stop; the crowded route too).
+- [ ] **R13. The customer tie-break.** Kafé A (21, 23) and Kafé B (22) at one street and sequence → stops A:21+23, B:22 and one Kafé A block.
+- [ ] **R14. Sequence in the key.** Sequences 5 and 0 → two stops with a flag between; 5 and 6 → two stops.
+- [ ] **R15. Exact spelling.** Two spellings of one customer → two stops, both names printed.
+- [ ] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
+
 ## Owner questions
 
 **Answered by the owner, 2026-09-29, in their words. These override the recommendations below where they differ.**
