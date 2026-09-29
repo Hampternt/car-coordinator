@@ -3,7 +3,8 @@
 # its commit.
 #
 # The workflow gates in two tiers (~/.claude/CLAUDE.md §Quality gates):
-#   item gate — this script: static syntax over the shipped JS. Instant.
+#   item gate — this script: static syntax over the shipped JS, and the
+#               version guard (scripts/versions.mjs). Instant.
 #   pack gate — `npm test` (scripts/smoke.mjs, Playwright): drives the real
 #               app in a browser. Run before a pack's review and
 #               walkthrough; nothing merges without it.
@@ -20,8 +21,8 @@
 #     changes rarely. Touched it? Also run:
 #       cargo check --manifest-path src-tauri/Cargo.toml
 #
-# Exit 0 = every shipped script parses. On failure every file is still
-# checked, so one run shows every problem.
+# Exit 0 = every shipped script parses and the versions agree. On failure
+# every file is still checked, so one run shows every problem.
 
 set -uo pipefail
 
@@ -56,11 +57,18 @@ for f in scripts/*.mjs; do
   fi
 done
 
+# The release's version number, in every place it has to be the same. Nothing
+# else notices a place left behind: see the header of versions.mjs.
+printf '\n=== version guard\n'
+if ! node scripts/versions.mjs; then
+  bad=1
+fi
+
 printf '\n'
 if (( bad == 0 )); then
-  printf 'CHECK OK — every shipped script parses. (Logic touched? Run npm test.)\n'
+  printf 'CHECK OK — every shipped script parses and the versions agree. (Logic touched? Run npm test.)\n'
   exit 0
 fi
 
-printf 'CHECK FAILED: one or more scripts do not parse.\n'
+printf 'CHECK FAILED: a script does not parse, or the versions disagree.\n'
 exit 1
