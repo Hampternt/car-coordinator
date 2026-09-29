@@ -569,3 +569,11 @@ Written identically in the `updates.js` header, the README and the container's G
   - `npm run upgrade` from `v0.2.4`: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
   - `npm run upgrade` from `dev` at 0f9b59a (manifests and INVENTORY.md only since 4f0c26f; `docs/` is still 0.2.5): exit 0, 47 ok, "upgrade check passed: 0.2.5 to 0.3.0".
   - The scratch worktrees are removed.
+- **Conflict between fixes 1 and 4, found before hand-back and fixed in 27ea5da.**
+  - **The conflict:** a rescue with `during` equal to V stays until a newer rescue replaces it. So a browser that went V, then a newer build, then back to V matched it and skipped the step-back archive fix 1 requires.
+  - **Rule chosen:** a rescue counts as this version's copy only when the marker is not newer than V (`versionOrder(seen, V) <= 0`, or no marker). This applies in both `archiveNeeded` and `archiveBeforeUpdate`.
+  - **Tests:**
+    - the pure rule `rescueThisVersionBackFromNewer` expects true;
+    - the boot case (old V rescue, newer marker) expects `[update newer→V, rescue]`.
+    - Both failed before the change: they got `false` and `[rescue]`.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 490 ok, 0 FAIL.
