@@ -276,7 +276,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - twelve new backups leave every archive in place.
 
   **Risky: review individually.** It is the fail-safe itself.
-- [ ] **4. Who sees what, as pure functions.** `updateNoteFor` and `archiveNeeded`, per Design C.
+- [x] **4. Who sees what, as pure functions.** `updateNoteFor` and `archiveNeeded`, per Design C.
   *Done when:* smoke drives both with hand-made lists, covering:
   - every rule;
   - a first open by link, which marks;
@@ -412,3 +412,15 @@ Written identically in the `updates.js` header, the README and the container's G
   - real quota (73 × 64 KB chunks), with 2 × 200 KB stored: a 450 KB entry leaves `carcoord:archives`, `carcoord:v1` and `carcoord:backups` byte-identical, and a 150 KB entry fits by dropping only the oldest.
 
   Gate: `check.sh` OK. Car suite on system Chrome: exit 0, 390 ok, 0 FAIL, "all checks passed".
+- Item 4 done, d8d7e39. `updateNoteFor`, `archiveNeeded` (with `seen`, see above) and `versionOrder` sit next to `note()` in `app.js`. Smoke drives:
+  - every rule;
+  - a first open by link, which marks;
+  - trouble ahead of the link;
+  - a stale list and no list;
+  - an unknown marker;
+  - `must` entries beyond three;
+  - the 0.9.0/0.10.0 pair both ways;
+  - eight `archiveNeeded` cases, downgrade included;
+  - localStorage byte-identical throughout.
+
+  Gate: `check.sh` OK. Car suite: exit 0, 408 ok, 0 FAIL.
