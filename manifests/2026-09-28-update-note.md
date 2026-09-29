@@ -521,3 +521,17 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Gate:** `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
   - **Flaky, not caused by this fix:** the first run failed "a disarm leaves the page where the user scrolled it — 285". That check dates from e5c8472 (2026-09-24), before this pack. The rerun was clean.
 - Fix 3 (update note not last), 9303368. `drainStoreNotices()` right before the note's try, with the earlier drain left as it was. Smoke, storage full: the note is `:last-child`, and "Could not take a backup before "Start of day"" is shown above it. Gate: `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
+- Fix 4 (post-loss plan archived as "Before 0.3.0"), a8c6ff1.
+  - **What changed:**
+    - A rescue now carries `during: appVersion`, which also gives `init`'s `version` a use.
+    - Rescue dedup needs the same text *and* the same `during`. Otherwise it re-records under this version, and if that fails for lack of room, the old rescue of the same text still counts as kept.
+    - `rescuedDuring` makes `archiveNeeded` false, and `archiveBeforeUpdate` return `copy: 'rescued'`, for which the note uses the rescue sentence.
+  - **Deviation from Design A:** the rescue entry gains the field `during`.
+  - **Smoke:**
+    - after corrupt → type → reload, Archives holds only the rescue, `during` equals V, and the note has the rescue sentence and not "copied unchanged";
+    - new pure-rule cases `rescueThisVersion` (false) and `rescueOlderVersion` (true).
+  - **Upgrade (b)** gains the same check.
+  - **Gate:**
+    - `check.sh` OK;
+    - car suite: exit 0, 478 ok, 0 FAIL;
+    - `npm run upgrade` from v0.2.4: exit 0, 44 ok, "upgrade check passed: 0.2.4 to 0.3.0".
