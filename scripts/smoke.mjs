@@ -3106,10 +3106,12 @@ check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify
 await s5.evaluate(() => localStorage.clear());
 await s5.reload({ waitUntil: 'networkidle' });
 check('(e) a first run starts every label unticked', await s5.evaluate(() => state.labels.length === 3 && state.labels.every((l) => l.onSheet === false)));
+check('(e) and with the QR off', await s5.evaluate(() => state.qrOnSheet === false));
 await s5.click('[data-act="tab"][data-tab="labels"]');
 await s5.fill('#newLabel', 'Spare key');
 await s5.click('[data-act="add-label"]');
 check('(e) Add label makes it unticked', await s5.evaluate(() => state.labels.find((l) => l.name === 'Spare key')?.onSheet === false));
+check('(e) and the first run\'s first save keeps the QR off', await s5.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).qrOnSheet === false));
 await s5.click('[data-act="tab"][data-tab="cars"]');
 await s5.fill('#newCar', 'VE11111');
 await s5.click('#tab-cars [data-act="add-car"]');
