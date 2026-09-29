@@ -436,7 +436,18 @@ const markerReport = () =>
       return tag && !/^part 1 of/.test(tag.textContent) && !m.closest('.bf-row, .bf-order-extra');
     };
     const once = markers.filter((m) => !m.parentElement.querySelector('.bf-order-cont') && !laterPart(m));
+    // One look: every phrase set alike, wherever it sits — a heading, a
+    // shared line, a line of its own — and the bold word differing in
+    // weight alone.
+    const look = (node, weight) => {
+      const s = getComputedStyle(node);
+      return JSON.stringify([s.fontFamily, weight || s.fontWeight, s.fontSize, s.color,
+        s.textTransform, s.fontStyle]);
+    };
     return {
+      styles: Array.from(new Set(markers.map((m) => look(m)))),
+      bolds: Array.from(new Set(markers.flatMap((m) =>
+        Array.from(m.querySelectorAll('b'), (b) => `${getComputedStyle(b).fontWeight} ${look(b, '500')}`)))),
       markers: once.length,
       trues: once.filter((m) => m.textContent === 'want substitute: true').length,
       falses: markers.filter((m) => m.textContent === 'want substitute: false').length,
@@ -772,6 +783,22 @@ same(
   [breadMarkers.markers, breadMarkers.trues],
   [148, 148 - bread.refusing],
 );
+
+/**
+ * The one quiet look: every marker phrase alike, at weight 500 and never
+ * capitalised, and the bold "false" the same but for weight 700.
+ */
+const oneLook = (what, report) => {
+  const [style] = report.styles;
+  const [, weight, , , transform] = style ? JSON.parse(style) : [];
+  check(
+    `${what}: every marker phrase is set in one quiet look`,
+    report.styles.length === 1 && weight === '500' && transform === 'none',
+    report.styles.join(' | '),
+  );
+  same(`${what}: and the bold false differs from it in weight alone`, report.bolds, [`700 ${style}`]);
+};
+oneLook('the bread day', breadMarkers);
 check(
   'no loud marker is left, and the page note explains none',
   breadMarkers.loud === 0 && !breadMarkers.noteSays,
@@ -1390,6 +1417,7 @@ same(
   [freezerMarkers.markers, freezerMarkers.trues],
   [115, 115 - freezerRefusing],
 );
+oneLook('the freezer day', freezerMarkers);
 check(
   'the freezer sheets have no loud marker and no convention in the note either',
   freezerMarkers.loud === 0 && !freezerMarkers.noteSays,
