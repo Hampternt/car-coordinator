@@ -3132,6 +3132,69 @@ check('(f) a code naming a ticked label keeps it ticked and changes only its col
 check('the schema v5 cases log no console errors', sv.errs.length === 0, sv.errs.join(' | '));
 await sv.ctx.close();
 
+// --- the printed sheet is paper, whatever the screen's theme ---
+// White paper, black type and pink marked rows, under a dark computer and
+// under Dark picked here, in print and in Print preview. The page around the
+// preview follows the theme; nothing on the sheet does.
+const paperCtx = await browser.newContext({ colorScheme: 'light' });
+const pp = await paperCtx.newPage();
+const ppErrors = [];
+pp.on('console', (m) => m.type() === 'error' && ppErrors.push(m.text()));
+pp.on('pageerror', (e) => ppErrors.push(String(e)));
+await pp.goto(base, { waitUntil: 'networkidle' });
+await pp.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
+  cars: [{ id: 'c1', reg: 'PA11111', labelId: '' }, { id: 'c2', reg: 'PA22222', labelId: 'L1', note: 'Brakes' }, { id: 'c3', reg: 'PA33333', labelId: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+    { id: 'r2', name: '2', driver: 'Bo', carId: '', positionId: '', gapBefore: true },
+    { id: 'r3', name: 'HAU 1', driver: 'Cai', carId: '', positionId: '', highlight: true },
+  ],
+})));
+await pp.reload({ waitUntil: 'networkidle' });
+await pp.click('[data-act="tab"][data-tab="preview"]');
+const paperLook = (withPage) => pp.evaluate((withPage) => {
+  const props = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow', 'text-decoration-color'];
+  const out = [];
+  const walk = (el, path) => {
+    const cs = getComputedStyle(el);
+    out.push(`${path} ${props.map((p) => cs.getPropertyValue(p)).join(' | ')}`);
+    [...el.children].forEach((c, i) => walk(c, `${path}>${c.tagName.toLowerCase()}:${i}`));
+  };
+  walk(document.querySelector('#sheet'), '#sheet');
+  if (withPage) out.push(`html ${getComputedStyle(document.documentElement).backgroundColor}`, `body ${getComputedStyle(document.body).backgroundColor}`);
+  return out;
+}, withPage);
+const inkTokens = () => pp.evaluate(() => ['--ink', '--panel', '--field', '--concrete'].map((t) => `${t}: ${getComputedStyle(document.documentElement).getPropertyValue(t).trim()}`));
+const lookAs = async ({ media, colorScheme, theme }) => {
+  await pp.emulateMedia({ media, colorScheme });
+  await pp.evaluate((t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }, theme || null);
+};
+const firstDiff = (a, b) => { const i = a.findIndex((x, n) => x !== b[n]); return i < 0 ? '' : `${a[i]}  ≠  ${b[i]}`; };
+await lookAs({ media: 'screen', colorScheme: 'light' });
+const lightTokens = await inkTokens();
+const lightPreview = await paperLook(false);
+await lookAs({ media: 'print', colorScheme: 'light' });
+const lightPrint = await paperLook(true);
+check('the paper test has marked rows to look at', (await pp.locator('#sheet tr.hl').count()) === 2 && lightPrint.length > 20);
+for (const [name, how] of [['a dark computer', { colorScheme: 'dark' }], ['Dark picked here', { colorScheme: 'light', theme: 'dark' }]]) {
+  await lookAs({ media: 'print', ...how });
+  const printed = await paperLook(true);
+  check(`printed under ${name}, the sheet and the page behind it are as in light`, printed.join('\n') === lightPrint.join('\n'), firstDiff(printed, lightPrint));
+  const tokens = await inkTokens();
+  check(`printed under ${name}, the screen's colours are their light values`, tokens.join() === lightTokens.join(), tokens.join(', '));
+  await lookAs({ media: 'screen', ...how });
+  const previewed = await paperLook(false);
+  check(`in Print preview under ${name}, the sheet is as in light`, previewed.join('\n') === lightPreview.join('\n'), firstDiff(previewed, lightPreview));
+}
+await lookAs({ media: 'screen', colorScheme: 'dark', theme: 'dark' });
+const darkPdf = await pp.pdf({ format: 'A4', printBackground: true });
+check('a PDF printed while dark is not empty', darkPdf.length > 5000, `${darkPdf.length} bytes`);
+check('the paper cases log no console errors', ppErrors.length === 0, ppErrors.join(' | '));
+await paperCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
