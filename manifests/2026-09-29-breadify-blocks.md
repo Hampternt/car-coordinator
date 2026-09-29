@@ -270,7 +270,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       - `blankRequiredFields` adds a blocking finding of the same kind: `Order ID is empty or not a number on row N`.
 
       *Done when:* breadify.mjs asserts that two hand-made rows for one customer with no Order ID give that finding for each row, as blocking. The `twoRoutes` row helper (:777-781) gains `orderIdExact` and still reads `blocks === false`. Both sample days still read exactly their two notices.
-- [ ] **4. Remove the choice of marker treatment.** Delete:
+- [x] **4. Remove the choice of marker treatment.** Delete:
       - `settings.marker` (app.js:31);
       - the "When a customer refuses substitutes" heading and its three buttons (index.html:83-95);
       - their handlers (app.js:275-280, :467-472);
@@ -496,3 +496,4 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 - 2026-09-29 · **Item 1 done** (61f5455). `bash scripts/check.sh`: CHECK OK, `ok` for docs/breadify/app.js, layout.js, model.js, validate.js, xlsx.js. Trial: `const = ;` appended to model.js gave `FAIL docs/breadify/model.js`, CHECK FAILED, exit 1; reverted with `git checkout --`, gate OK again.
 - 2026-09-29 · **Item 2 done** (c136a07). One `inspectSheets` pass, installed with `addInitScript`, now runs on the bread day (26 sheets), the freezer day (21 sheets) and all 15 EDGE fixtures: off the paper, 10 mm, overlaps, clipping, nonsense. `.bf-stamp`, `.bf-marker`, `.bf-order-id` joined the across and clipping lists. Run on unchanged app code: **no findings** (bread 0 mm across, 12.7 mm clearance; freezer 0 mm, 13.2 mm; no collisions, clipping or nonsense). Gate: check.sh OK; test:breadify all passed, 189 ok.
 - 2026-09-29 · **Item 3 done** (d3fa087). `readRows` keeps `orderIdExact`; `blankRequiredFields` flags any row whose `orderIdExact` is not a finite number (so a hand-built row missing the field is flagged too, rather than passing). Two hand-made no-id rows give two blocking findings, rows 2 and 3, and `Validate.blocks` is true; the `twoRoutes` helper gained `orderIdExact` and still does not block; both sample days still read exactly two notices. Gate: check.sh OK; test:breadify all passed, 191 ok.
+- 2026-09-29 · **Item 4 done** (42abf83). Settings key, Configure heading and three buttons, both handlers, the bar, the badge, the `.choices` rules and the four `marker: 'word-only'` keys removed; `marker()` no longer takes settings. `grep -rn "markerChoices\|settings.marker\|bf-block-barred\|bf-marker-badge\|choices" docs/breadify/ scripts/breadify.mjs` finds nothing. New check: the Configure step has no `[data-marker]` and no "substitute" text. Gate: check.sh OK; test:breadify all passed, 192 ok.
