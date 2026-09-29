@@ -50,12 +50,12 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 | # | Pack | Manifest | Saved data |
 |---|---|---|---|
 | 1 | Update note and fail-safe | `manifests/2026-09-28-update-note.md` | New per-browser keys; an untouched archive of the saved text before each update |
-| 2 | Printed sheet cleanup | created when it starts | **Schema v5**: a print tick on each label |
-| 3 | Dark mode | created when it starts | New per-PC key |
-| 4 | Plan for tomorrow | created when it starts | The date moves forward on open (not saved until you change something) |
-| 5 | Day plan layout | created when it starts | None; a Load that includes a template takes the existing backup |
-| 6 | Parking map | created when it starts | None, if spots match positions by name |
-| 7 | Drivers tab | created when it starts | None: uses existing fields and crews |
+| 2 | Printed sheet cleanup | `manifests/2026-09-29-sheet-cleanup.md` (7 items) | **Schema v5**: a print tick on each label |
+| 3 | Dark mode | `manifests/2026-09-29-dark-mode.md` (10 items) | New per-PC key |
+| 4 | Plan for tomorrow | `manifests/2026-09-29-plan-for-tomorrow.md` (10 items) | The date moves forward on open (not saved until you change something) |
+| 5 | Day plan layout | `manifests/2026-09-29-day-plan-layout.md` (12 items) | None; a Load that includes a template takes the existing backup |
+| 6 | Parking map | `manifests/2026-09-29-parking-map.md` (9 items) | None, if spots match positions by name |
+| 7 | Drivers tab | `manifests/2026-09-29-drivers-tab.md` (11 items) | None: uses existing fields and crews |
 | 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` | None |
 | 9 | First-use tour | `manifests/2026-09-28-tour.md` | New per-PC key |
 
