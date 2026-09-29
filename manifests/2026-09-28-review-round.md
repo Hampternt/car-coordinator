@@ -102,18 +102,20 @@ Reconciled with pack 1's reworked manifest on 2026-09-28. The pre-update copy is
 <details>
 <summary><b>Opening the app</b> — one startup order, one meaning of "first open"</summary>
 
-- **Startup order**, which packs 1 and 4 both follow:
-  1. Load. Saved text that can't be read is rescued into an archive at once.
-  2. Archive the saved text, byte for byte, if this is the first open of a new version. This is the first write at boot.
-  3. Recover from the save file, or check it (0.2.5), and say so if a save-file hold is up.
-  4. `dailySnapshot`.
-  5. Move the date (pack 4).
-  6. Template and other offers.
-  7. The update note, last.
+- **Startup order** in `start()`, as pack 1 built it (its Design D), which pack 4 follows:
+  1. `Store.init(defaults, render, APP_VERSION)`. Inside it, `readLocal` rescues saved text that can't be read into an archive at once, and the renders during `init` drain its warnings into the notices.
+  2. **In a try of its own:** archive the saved text, byte for byte, when it is a usable plan, this browser has not run this version before, and no update archive for this version exists yet. This is the first write at boot. A failure is logged with `console.warn` and changes nothing else.
+  3. Recover from the save file, or `checkFileAtStart` (0.2.5), outside any new try.
+  4. `noteFileHold()`, then drain the Store's notices, as in 0.2.5.
+  5. `Store.dailySnapshot(state)`.
+  6. Move the date, and its Keep notice (pack 4).
+  7. Template and other offers.
+  8. **In a try of its own:** the update note (`updateNoteFor`). If it says mark, `Store.setPref('seenUpdate', APP_VERSION)`. The note is raised last.
+  9. `render()`, then the share-link block.
 
-  `carcoord:v1` itself is never written at boot.
+  `carcoord:v1` itself is never written at boot. The only writes at boot are the rescue, the archive, the markers and the daily backup.
 - **First-ever open** means no usable saved data: `carcoord:v1` is absent or unusable, and nothing was recovered from the save file. It never means "no note key". Every v0.2.4 user has usable data and no note key, and they must see the note. A save that could not be read, or that came from a newer version, is **held**: no note and no tour until the next clean open. Pack 1 sets one `firstRun` value in `start()`, and the tour (pack 9) reads it. Existing users reach the tour from its entry in the update note.
-- **Per-browser keys** go through pack 1's `Store.pref` / `Store.setPref` as `carcoord:pref:⟨name⟩`: `seenUpdate` (pack 1), `theme` (pack 3), `tour` (pack 9). Every access is wrapped in try/catch. Never go through a `data-kind="meta"` control or a field on `state` (`docs/app.js:1134`). Everything on `state` travels into Export, the save file and backups.
+- **Per-browser keys** go through pack 1's `Store.pref` / `Store.setPref` as `carcoord:pref:⟨name⟩`: `seenUpdate` (pack 1), `theme` (pack 3), `tour` (pack 9). Every access is wrapped in try/catch. Never go through a `data-kind="meta"` control or a field on `state` (the input handler's `if (kind === 'meta') state[name] = value;`, `docs/app.js:1240` at 0.3.0 and :1166 before it). Everything on `state` travels into Export, the save file and backups.
 </details>
 
 ## Packs
@@ -276,9 +278,21 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
 
 ## Gates
 
+- **Every pack, when it ships (pack 1's release rule).** Written the same way in `README.md` and the header of `docs/updates.js`:
+
+  Announce and cut. Every change to shipped files under docs/ outside docs/breadify/ ends with "Announce ⟨what⟩ and cut ⟨version⟩": one commit that
+
+  - adds an entry at the top of docs/updates.js, with must set by the wording rules;
+  - moves six places to that version: package.json, package-lock.json (twice), src-tauri/Cargo.toml, src-tauri/tauri.conf.json and APP_VERSION in docs/app.js.
+
+  The ?v= on every local tag in docs/index.html and docs/recover.html follows APP_VERSION, and scripts/versions.mjs fails the item gate when any of it disagrees.
+
+  A pack takes the next minor version; any other shipped change takes at least the next patch. A change to Markdown or manifests alone cuts nothing.
+
+  Entries are never removed or renumbered. The walkthrough re-reads the entry against what shipped. Merging dev into main publishes Pages and builds release v⟨version⟩.
 - **Per pack:**
   - Item gate: `scripts/check.sh`, plus the targeted smoke case when logic is touched.
-  - Pack gate: `npm test` and `npm run screens`, run with `CHROMIUM_PATH=/usr/bin/google-chrome` because the pinned Playwright Chromium isn't installed here. Plus the upgrade check from the release rules.
+  - Pack gate: `npm test` and `npm run screens`, run with `CHROMIUM_PATH=/usr/bin/google-chrome` because the pinned Playwright Chromium isn't installed here. Plus the upgrade check from the release rules, `npm run upgrade -- ⟨old checkout⟩` (pack 1).
   - One review and a browser walkthrough before merging.
 - **Container close:** the full suite, a walkthrough of the whole app, a sweep of `git log` into `INVENTORY.md`, and an end-to-end upgrade check from v0.2.4 to the final build:
   - Build the old app with `git worktree add <dir> v0.2.4`. For the car app it matches today's `main`.

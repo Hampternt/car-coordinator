@@ -23,9 +23,27 @@
    - No comfort words without the fact behind them.
    - At most about 25 words per field. Say "this browser", never "this PC".
 
-   Entries are never removed or renumbered. scripts/versions.mjs checks that
-   they run newest first, that the newest is APP_VERSION, and that must is
-   set wherever these rules need it. */
+   Announce and cut. Every change to shipped files under docs/ outside
+   docs/breadify/ ends with "Announce ⟨what⟩ and cut ⟨version⟩": one commit
+   that
+   - adds an entry at the top of docs/updates.js, with must set by the
+     wording rules;
+   - moves six places to that version: package.json, package-lock.json
+     (twice), src-tauri/Cargo.toml, src-tauri/tauri.conf.json and
+     APP_VERSION in docs/app.js.
+   The ?v= on every local tag in docs/index.html and docs/recover.html
+   follows APP_VERSION, and scripts/versions.mjs fails the item gate when
+   any of it disagrees.
+   A pack takes the next minor version; any other shipped change takes at
+   least the next patch. A change to Markdown or manifests alone cuts
+   nothing.
+   Entries are never removed or renumbered. The walkthrough re-reads the
+   entry against what shipped. Merging dev into main publishes Pages and
+   builds release v⟨version⟩.
+
+   scripts/versions.mjs also checks that the entries run newest first, that
+   the newest is APP_VERSION, and that must is set wherever these rules
+   need it. */
 const UPDATES = [
   {
     version: '0.3.0',

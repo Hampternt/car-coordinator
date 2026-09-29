@@ -41,7 +41,7 @@ Optional Windows app — grab the latest from **Releases**:
 
 Updating the Windows app: run the new installer over the old one. If it offers to uninstall the old version first, **never tick "Delete the application data"**: that folder is where the app keeps your plan, templates, drivers, cars and labels. The web version needs nothing: an update keeps everything saved in your browser.
 
-Every push to `main` runs the tests and then builds and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
+Every push to `main` runs the tests and then builds and publishes the release `v<version>`, so every change that reaches `main` carries a version of its own: see **Releasing a change** below.
 
 ## Run it from a checkout
 ```
@@ -70,6 +70,20 @@ What it asserts of them is what a reader of the paper would: no ink leaves the s
 A change to the file's own shape must be either refused with a message naming the problem, or read correctly. It is never printed wrong.
 
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
+
+## Releasing a change
+Work is combined on `dev`, and `main` only ever receives `dev`. The rule, written the same way in the header of `docs/updates.js` and in the review-round container's Gates:
+
+Announce and cut. Every change to shipped files under docs/ outside docs/breadify/ ends with "Announce ⟨what⟩ and cut ⟨version⟩": one commit that
+
+- adds an entry at the top of docs/updates.js, with must set by the wording rules;
+- moves six places to that version: package.json, package-lock.json (twice), src-tauri/Cargo.toml, src-tauri/tauri.conf.json and APP_VERSION in docs/app.js.
+
+The ?v= on every local tag in docs/index.html and docs/recover.html follows APP_VERSION, and scripts/versions.mjs fails the item gate when any of it disagrees.
+
+A pack takes the next minor version; any other shipped change takes at least the next patch. A change to Markdown or manifests alone cuts nothing.
+
+Entries are never removed or renumbered. The walkthrough re-reads the entry against what shipped. Merging dev into main publishes Pages and builds release v⟨version⟩.
 
 ## Build locally (Windows)
 Needs Rust, Node 20 and Python with Pillow.
