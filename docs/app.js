@@ -1068,10 +1068,13 @@ function renderNotices() {
   // What it says sits in its own box, so the buttons stay a row beside it
   // rather than joining the list. A notice that offers to change saved data
   // states every line of what it would do; one that has nothing to list is
-  // the sentence alone, exactly as before.
+  // the sentence alone, exactly as before. A line can carry a heading of its
+  // own, { head, text }, which is set in bold: the update note's "What it
+  // affects:" and "Your data:" are read as labels, not as part of a sentence.
+  const line = (l) => (l && typeof l === 'object' ? `<b>${esc(l.head)}</b> ${esc(l.text)}` : esc(l));
   $('#notices').innerHTML = notices.map((n, i) =>
     `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
-      ? `<ul>${n.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${n.offer
+      ? `<ul>${n.lines.map((l) => `<li>${line(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
       : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`).join('');
 

@@ -100,6 +100,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 #notices:not(:empty) { padding-top: 14px; }
 .notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
+/* the note after an update: ink with a hi-vis edge, like the top bar, so it
+   reads as the app telling you about itself rather than about the plan */
+.notice.update { background: var(--ink); color: #fff; border-left-color: var(--hivis); }
+.notice.update .say b { color: var(--hivis); }
 /* a notice that offers something carries two buttons: the offer, then the
    dismiss beside it. They sit in one box so they wrap as a pair, kept to the
    right, rather than the ✕ being left alone under the text; a long offer

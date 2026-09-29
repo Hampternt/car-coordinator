@@ -2369,6 +2369,28 @@ same('an archive that does not fit leaves the archives, the plan and the Backups
 same('and one that fits once the oldest makes room keeps the newer one', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B'] });
 await un.evaluate(() => { localStorage.clear(); });
 
+// --- a notice line can carry a heading, and the update note has a style ---
+await un.evaluate(() => {
+  note('update', 'Updated to <b>9.9.9</b>.', null, [{ head: 'What\'s new in <i>9.9.9</i>:', text: 'Something <b>bold</b>.' }, 'A plain <b>line</b>.']);
+  render();
+});
+const synth = un.locator('#notices .notice.update');
+const synthShape = await synth.evaluate((n) => ({
+  bold: [...n.querySelectorAll('b')].map((b) => b.textContent),
+  italic: n.querySelectorAll('i').length,
+  text: n.querySelector('.say').textContent,
+  buttons: [...n.querySelectorAll('button')].map((b) => b.textContent),
+}));
+same('an update note escapes what it is given, and sets only each line\'s heading in bold', synthShape, {
+  bold: ['What\'s new in <i>9.9.9</i>:'], italic: 0,
+  text: 'Updated to <b>9.9.9</b>.What\'s new in <i>9.9.9</i>: Something <b>bold</b>.A plain <b>line</b>.', buttons: ['\u2715'] });
+check('it looks like the top bar: ink, with a hi-vis edge', await synth.evaluate((n) => {
+  const cs = getComputedStyle(n);
+  return cs.backgroundColor === 'rgb(26, 28, 30)' && cs.borderLeftColor === 'rgb(255, 212, 0)';
+}));
+await synth.locator('[data-act="dismiss"]').click();
+check('and \u2715 takes it away', (await un.locator('#notices .notice.update').count()) === 0);
+
 // --- who sees the note, and who gets an archive: the rules on their own ---
 await un.goto(base, { waitUntil: 'networkidle' });
 const rules = await un.evaluate(() => {
