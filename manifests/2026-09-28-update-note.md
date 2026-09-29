@@ -340,7 +340,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - **(e) old cached `index.html` with the new `app.js`:** the plan is drawn, no console errors, and the save-file check still runs. The archive and the note come on the first fully fresh open.
 
   *Done when:* it passes from `v0.2.4` (a worktree) and from the previous `dev` build, and fails its build assertion when pointed at this build. It is added as `npm run upgrade -- ⟨dir⟩`.
-- [ ] **12. Write the process rule down.** Design H goes into the README, the container's Gates and the `updates.js` header. The container's **Opening the app** section is updated to Design D, and its reference to the meta write is corrected to app.js:1166.
+- [x] **12. Write the process rule down.** Design H goes into the README, the container's Gates and the `updates.js` header. The container's **Opening the app** section is updated to Design D, and its reference to the meta write is corrected to app.js:1166.
   *Done when:* the three places say the same thing, and the container matches Design D.
 
 ## Owner questions
@@ -491,3 +491,8 @@ Written identically in the `updates.js` header, the README and the container's G
   - **From `dev`** (4f0c26f, which is 0.2.5 plus planning manifests only): 43 ok, "upgrade check passed: 0.2.5 to 0.3.0".
   - **Pointed at this build:** all five scenarios fail their build assertion ("expected the old build, found APP_VERSION 0.3.0"), exit 1.
   - **Method:** a real save file is an OPFS handle put in IndexedDB. Scenario (e) serves a temporary copy of the old `docs/` with the new `app.js`, plus a spy on the old `store.js` that records which save-file checks `start()` calls.
+- Item 12 done, ba83d0a. Design H is in the `updates.js` header, a new README "Releasing a change" section and the container's Gates. A normalising diff of the three copies: identical.
+  - **Placeholders** are written ⟨what⟩ and ⟨version⟩, because Markdown would swallow `<what>`.
+  - **Opening the app** is rewritten to Design D's nine steps.
+  - **The meta-write pointer** now quotes the line and gives `docs/app.js:1240` at 0.3.0 (:1166 before), not :1166 alone. That line moved with this pack.
+  - **Gate:** `check.sh` OK.
