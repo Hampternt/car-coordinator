@@ -28,7 +28,7 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 - **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.
 - **QR on the sheet** (browser version): the printed sheet carries a link to the day plan as a QR in the corner, so a phone can read the list off the paper on the pillar. Turn it off on the Data tab to keep the sheet bare.
 - **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
-- **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day.
+- **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day. The first time an update is opened, the whole plan and setup is copied unchanged into **Archives** on the Data tab first, and a note says what changed; **What's new** there keeps every note.
 
 ## Use it
 Open the Pages URL for this repo in Edge or Chrome. Nothing to install.
@@ -36,6 +36,8 @@ Open the Pages URL for this repo in Edge or Chrome. Nothing to install.
 Optional Windows app — grab the latest from **Releases**:
 - `car-coordinator.exe` (portable, no install)
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
+
+**If the app ever won't start**, open [`recover.html`](docs/recover.html) beside it: on Pages that is `<the Pages URL>/recover.html`, and an empty page links to it too, in the Windows app as well. It shares no code with the app, changes nothing, lists everything this browser holds for Car Coordinator and downloads each piece exactly as stored, ready for **Import a copy…** on the Data tab.
 
 Updating the Windows app: run the new installer over the old one. If it offers to uninstall the old version first, **never tick "Delete the application data"**: that folder is where the app keeps your plan, templates, drivers, cars and labels. The web version needs nothing: an update keeps everything saved in your browser.
 

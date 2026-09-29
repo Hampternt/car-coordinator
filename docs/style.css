@@ -98,6 +98,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* notices: things the app needs to tell you, dismissable */
 #notices { padding: 0 20px; }
 #notices:not(:empty) { padding-top: 14px; }
+/* the plain line index.html carries until the app's first draw replaces it */
+.boot-line { margin: 0 0 8px; }
+.notice .acts a.btn { color: var(--ink); text-decoration: none; }
 .notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 10px 14px; margin-bottom: 8px; max-width: 1160px; background: var(--panel); border-left: 6px solid var(--steel); }
 .notice.warn { border-left-color: var(--warn); }
 /* the note after an update: ink with a hi-vis edge, like the top bar, so it

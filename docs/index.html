@@ -35,7 +35,10 @@
     <button class="primary" data-act="print">Print / save PDF</button>
   </header>
 
-  <div id="notices"></div>
+  <!-- Plain markup, so it shows even when no script runs: a broken or
+       half-updated app.js leaves an empty page, and this line is the way out.
+       The app's first draw replaces it. -->
+  <div id="notices"><p class="boot-line">If this page stays empty, open the <a href="recover.html">recovery page</a>.</p></div>
 
   <main>
     <section id="tab-plan" class="tab"></section>

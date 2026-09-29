@@ -48,6 +48,7 @@ await page.goto(base, { waitUntil: 'networkidle' });
 // The tab's own empty message, not the template shelf's further down it.
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
 check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+check('after a normal start, the static line pointing at the recovery page is gone', (await page.locator('#notices .boot-line').count()) === 0);
 check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
 check('the release notes load, newest first at the running version', await page.evaluate(() =>
   typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) && UPDATES[0].version === APP_VERSION),
@@ -2325,6 +2326,7 @@ const rescued = await un.evaluate(() => Store.archives().filter((a) => a.kind ==
 same('an unreadable save is rescued as it loads', rescued, ['{"routes":[{"name":"lost']);
 check('and the warning points at Archives', (await un.locator('#notices .notice.warn').innerText()).includes('An untouched copy is kept in Archives on the Data tab'),
   await un.locator('#notices').innerText());
+check('and links to the recovery page', (await un.locator('#notices .notice.warn a[href="recover.html"]').count()) === 1);
 await un.reload({ waitUntil: 'networkidle' });
 check('a reload on the same unreadable save keeps one copy', (await un.evaluate(() => Store.archives().length)) === 1);
 await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
@@ -2694,6 +2696,7 @@ await dt.click('[data-act="tab"][data-tab="data"]');
 same('What\'s new and Archives sit above Backups, which is still the last card',
   await dt.locator('#tab-data .card h3').allInnerTexts(),
   ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
+check('This browser links to the recovery page', (await dt.locator('#tab-data .card', { hasText: 'This browser' }).locator('a[href="recover.html"]').count()) === 1);
 check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
   document.querySelectorAll('#tab-data table').length === 1 && !!document.querySelector('#tab-data .card:last-child table')));
 const news = await dt.locator('#tab-data .card.whatsnew').innerText();
@@ -2736,6 +2739,7 @@ const archText = await readFile(await archFile.path(), 'utf8');
 check('Download is the archive byte for byte, named for the version', archText === beforePlan && archFile.suggestedFilename() === `car-coordinator-before-${V}.json`, archFile.suggestedFilename());
 await dt.evaluate(() => { state.routes[0].name = 'Changed again'; save(); render(); });
 await dt.setInputFiles('#importFile', { name: archFile.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(archText) });
+await dt.waitForFunction(() => state.routes[0].name !== 'Changed again', null, { timeout: 3000 }).catch(() => {});
 check('and it imports to the same plan', await dt.evaluate((t) => JSON.stringify(state) === JSON.stringify(Store.parseImport(t, defaults).state), archText));
 const [rescueFile] = await Promise.all([dt.waitForEvent('download'), rescueRow.locator('[data-act="archive-download"]').click()]);
 check('a rescue downloads byte for byte, named for its day',
@@ -2768,6 +2772,49 @@ check('with no room for the backup first, Restore changes nothing and says why',
 await dt.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
 check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 0, dataUp.errs.join(' | '));
 await dataUp.ctx.close();
+
+// --- the recovery page: works when the app does not, and only reads ---
+const rc = await newContext();
+const recoverStore = {
+  'carcoord:v1': JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [{ id: 'c1', reg: 'ÆØÅ 12345', note: 'Bremsene — sjekk' }], routes: [{ id: 'r1', name: '1' }] }),
+  'carcoord:backups': JSON.stringify([{ t: '2026-09-29T05:00:00.000Z', label: 'Start of day', json: '{"routes":[{"name":"b1"}],"cars":[]}' }]),
+  'carcoord:archives': JSON.stringify([{ kind: 'update', from: '0.2.4 or earlier', to: '0.3.0', t: '2026-09-29T04:00:00.000Z', text: '{"routes":[{"name":"a1"}],  "cars":[]}' },
+    { kind: 'rescue', from: null, to: null, t: '2026-09-28T04:00:00.000Z', text: '{not json' }]),
+  'carcoord:pref:seenUpdate': '0.3.0',
+};
+await leaveAs(rc.pg, recoverStore);
+const storeBefore = await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))));
+await rc.pg.goto(`${base}recover.html`, { waitUntil: 'networkidle' });
+same('the recovery page lists the plan, archives and backups first', (await rc.pg.locator('#list [data-key]').evaluateAll((bs) => bs.map((b) => b.dataset.key))).slice(0, 3),
+  ['carcoord:v1', 'carcoord:archives', 'carcoord:backups']);
+const fetched = {};
+for (const key of Object.keys(recoverStore)) {
+  const [dl] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.click(`#list [data-key="${key}"]`)]);
+  fetched[key] = await readFile(await dl.path(), 'utf8');
+}
+check('and downloads each byte for byte', Object.keys(recoverStore).every((k) => fetched[k] === recoverStore[k]),
+  Object.keys(recoverStore).filter((k) => fetched[k] !== recoverStore[k]).join(', '));
+const [oneArchive] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.locator('#list li', { hasText: 'Before 0.3.0' }).locator('button').click()]);
+check('an archive on its own downloads as the plan it holds, ready to import',
+  (await readFile(await oneArchive.path(), 'utf8')) === '{"routes":[{"name":"a1"}],  "cars":[]}' && oneArchive.suggestedFilename() === 'car-coordinator-before-0.3.0.json', oneArchive.suggestedFilename());
+check('and opening it changed nothing stored', (await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))))) === storeBefore);
+check('the recovery page logs no console errors', rc.errs.length === 0, rc.errs.join(' | '));
+await rc.ctx.close();
+
+// An app.js that will not run: the page is not left blank, and the way out works.
+const dead = await newContext(async (ctx) => {
+  await ctx.route('**/app.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'throw new Error("app.js broken on purpose");' }));
+});
+await leaveAs(dead.pg, recoverStore);
+await dead.pg.reload({ waitUntil: 'networkidle' });
+check('with app.js broken, the page still shows the line to the recovery page', await dead.pg.locator('#notices .boot-line a[href="recover.html"]').isVisible());
+dead.errs.length = 0;   // the broken app.js was meant to fail
+await dead.pg.click('#notices .boot-line a');
+await dead.pg.waitForLoadState('networkidle');
+check('and it leads to the recovery page, which still lists the plan',
+  dead.pg.url().endsWith('/recover.html') && (await dead.pg.locator('#list [data-key="carcoord:v1"]').count()) === 1, dead.pg.url());
+check('which logs no console errors', dead.errs.length === 0, dead.errs.join(' | '));
+await dead.ctx.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and

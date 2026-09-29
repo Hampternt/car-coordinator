@@ -212,7 +212,9 @@ const Store = (() => {
       trouble = true;
       // Copied now, before any change can overwrite it. Only when that fails
       // does the warning still say the first change will.
-      notices.push({ kind: 'warn', text: text !== null && rescue(text)
+      // The recovery page downloads the unreadable text as it stands, which
+      // matters most when the copy could not be made.
+      notices.push({ kind: 'warn', link: { href: 'recover.html', text: 'Open the recovery page' }, text: text !== null && rescue(text)
         ? 'The data saved in this browser could not be read, so the plan on screen started empty. An untouched copy is kept in Archives on the Data tab; check Backups there too before relying on what is on screen.'
         : 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
     } else if (repaired.length) {

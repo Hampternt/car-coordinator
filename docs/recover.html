@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The same policy as index.html: nothing leaves this PC, and no inline
+       script. The style is inline so this page needs no other file than its
+       one script, which shares no code with the app. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; form-action 'none'; base-uri 'none'">
+  <title>Car Coordinator: recovery</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%231a1c1e'/><rect y='48' width='64' height='16' fill='%23ffd400'/><path d='M8 36V20h26v16zm28-10h10l8 10H36z' fill='%23ffd400'/><circle cx='18' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/><circle cx='44' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/></svg>">
+  <style>
+    body { margin: 0 auto; max-width: 860px; padding: 20px; background: #e6e7e3; color: #1a1c1e; font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+    h1 { font: 700 22px "Bahnschrift", "Segoe UI", sans-serif; border-bottom: 6px solid #ffd400; padding-bottom: 6px; }
+    h2 { font: 600 17px "Bahnschrift", "Segoe UI", sans-serif; margin: 0 0 4px; }
+    .piece { background: #f7f7f4; padding: 12px 16px; margin: 12px 0; }
+    .hint { color: #555; margin: 0 0 6px; }
+    .btn { border: 1px solid #c9cbc5; background: #fff; padding: 4px 10px; cursor: pointer; font: inherit; }
+    .btn:hover { border-color: #1a1c1e; }
+    ul { margin: 6px 0 0; padding-left: 18px; }
+    li { margin: 4px 0; }
+    .warn { border-left: 6px solid #c62828; background: #f7f7f4; padding: 10px 14px; }
+    code { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Car Coordinator: recovery</h1>
+  <p>For when the app itself will not start. This page shares no code with the app and changes nothing: it lists what this browser holds for Car Coordinator, and downloads each piece as a file, exactly as it is stored.</p>
+  <p>A plan, an archive or a backup downloaded here loads again with <b>Import a copy&hellip;</b> on the Data tab, in this browser or another. Everything listed is kept in this browser only: it is gone once this browser&rsquo;s data is cleared, and another browser never had it.</p>
+  <p><a href="./">Back to Car Coordinator</a></p>
+  <div id="list"><p class="warn">Reading this browser&rsquo;s data&hellip; If this stays, this browser is not running this page&rsquo;s script either.</p></div>
+  <script src="recover.js?v=0.3.0"></script>
+</body>
+</html>

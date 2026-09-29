@@ -17,7 +17,7 @@
 //   * docs/updates.js lists unique versions, newest first and newest equal to
 //     APP_VERSION, and sets `must` wherever the wording rules require it.
 //
-// docs/recover.html is checked once it exists. Exit 0 = all agree.
+// Exit 0 = all agree.
 
 import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -101,7 +101,7 @@ export async function checkVersions(root) {
   else if (order[1] >= 0 && order[0] > order[1]) problems.push('docs/index.html loads updates.js after app.js');
   if (appVersion) {
     for (const page of ['docs/index.html', 'docs/recover.html']) {
-      if (!(await exists(at(page)))) continue;
+      if (!(await exists(at(page)))) { problems.push(`${page} is missing`); continue; }
       const html = await readFile(at(page), 'utf8');
       const tags = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g), ...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"/g)]
         .map((m) => m[1]).filter((u) => !/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(u));

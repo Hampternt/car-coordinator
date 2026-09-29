@@ -1101,6 +1101,7 @@ function renderData() {
     <div class="card">
       <h3>This browser</h3>
       <p class="status ${p === 'granted' ? 'on' : 'off'}">${esc(persistText)}</p>
+      <p class="hint">If this page ever won't start, <a href="recover.html">recover.html</a> downloads everything this browser holds.</p>
     </div>
 
     <div class="card" id="shareCard"></div>
@@ -1138,7 +1139,7 @@ function renderNotices() {
     `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
       ? `<ul>${n.lines.map((l) => `<li>${line(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${n.offer
       ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
-      : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`).join('');
+      : ''}${n.link ? `<a class="btn" href="${esc(n.link.href)}">${esc(n.link.text)}</a>` : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`).join('');
 
   // The question just asked, not the first one on screen: with an older
   // question still up, scrolling to the first left the new one out of sight.
@@ -1193,7 +1194,7 @@ function renderSheet() {
     </div>`;
 }
 
-const drainStoreNotices = () => { for (const n of Store.takeNotices()) note(n.kind, n.text); };
+const drainStoreNotices = () => { for (const n of Store.takeNotices()) note(n.kind, n.text, null, [], n.link || null); };
 
 function render() {
   // Anything Store had to say since the last draw — a browser save that
@@ -1597,9 +1598,12 @@ async function dataAction(act, b, fromKeyboard = false) {
    question just sits there waiting. */
 let offerRaised = null;
 
-const note = (kind, text, offer = null, lines = []) => {
+/* A notice can also carry a plain link, { href, text }, drawn beside ✕. It is
+   not an offer: a question asked later drops the offers, and the way out of
+   an unreadable save must stay. */
+const note = (kind, text, offer = null, lines = [], link = null) => {
   notices = notices.filter((n) => n.text !== text);
-  const n = { kind, text, offer, lines };
+  const n = { kind, text, offer, lines, link };
   notices.push(n);
   // The first question raised since the last draw is the one brought into
   // view: at start-up that is the one about the data, which comes first on
