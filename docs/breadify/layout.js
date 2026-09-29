@@ -598,9 +598,6 @@ const Sheet = (() => {
     return low;
   }
 
-  /** A part's tag while its part count is not yet known, and no narrower. */
-  const PART_STAND_IN = 'part 99 of 99';
-
   /**
    * A stop's block, cut across as few pages as it takes — only ever when the
    * alternative is ink off the bottom of the paper.
@@ -613,8 +610,15 @@ const Sheet = (() => {
    * - only an order taller than a part of its own is cut between its lines,
    *   and its first lines take whatever room is left where it starts;
    * - every part is built exactly as it will print and measured before it is
-   *   accepted, with a stand-in tag as wide as `part 99 of 99`, because
-   *   parts differ — only the one an order starts on carries its crates.
+   *   accepted, because parts differ — only the one an order starts on
+   *   carries its crates. Its tag is a stand-in as wide as the stop could
+   *   ever need: no stop has more parts than lines, so `part N of N` for N
+   *   lines is never outgrown.
+   *
+   * A final part that still comes out over its page, holding more than one
+   * line, is a cut this code got wrong, and it throws: the Print step then
+   * says the sheets could not be laid out, rather than printing past the
+   * foot of the paper.
    *
    * Returns one piece when the block fits, which is every real stop in both
    * sample exports — this costs nothing until a file needs it.
@@ -637,8 +641,9 @@ const Sheet = (() => {
       current = [];
     };
     const room = () => (parts.length === 0 ? first : limit);
+    const standIn = `part ${lines} of ${lines}`;
     const fits = (segments, cap) =>
-      measure.height(stopBlock(stop, settings, measure, segments, PART_STAND_IN)) <= cap;
+      measure.height(stopBlock(stop, settings, measure, segments, standIn)) <= cap;
 
     for (const order of stop.orders) {
       const all = whole(order);
@@ -681,12 +686,15 @@ const Sheet = (() => {
         `part ${index + 1} of ${parts.length}`,
       );
       const partHeight = measure.height(part);
-      return {
-        node: part,
-        height: partHeight,
-        keepWithNext: false,
-        over: partHeight > (index === 0 ? first : limit),
-      };
+      const cap = index === 0 ? first : limit;
+      const held = segments.reduce((sum, segment) => sum + segment.to - segment.from, 0);
+      if (partHeight > cap && held > 1) {
+        throw new Error(
+          `the block for ${stop.customer} would still run past the foot of a page ` +
+            `when cut (part ${index + 1} of ${parts.length})`,
+        );
+      }
+      return { node: part, height: partHeight, keepWithNext: false, over: partHeight > cap };
     });
   }
 
