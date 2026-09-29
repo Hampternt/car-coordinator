@@ -2513,7 +2513,12 @@ const newContext = async (setup) => {
   return { ctx, pg, errs };
 };
 
-const upA = await newContext();
+// A picker stub where the browser has none (some headless builds), so the
+// sentence that depends on it reads the same everywhere; the context below
+// without one covers the other sentence.
+const upA = await newContext((ctx) => ctx.addInitScript(() => {
+  if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+}));
 const up = upA.pg;
 const V = await up.evaluate(() => APP_VERSION);
 const listed = await up.evaluate(() => UPDATES.map((u) => u.version));
