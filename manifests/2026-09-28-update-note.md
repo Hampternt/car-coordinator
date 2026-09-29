@@ -326,7 +326,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - `recover.html` lists the plan, backups and archives keys, and downloads each byte for byte;
   - with `app.js` made to throw, the main page shows the static line, and it leads to `recover.html`, which still works;
   - after a normal start the static line is gone.
-- [ ] **10. Screenshots.** Capture the note, the Data tab's new cards, the static line (with `app.js` blocked) and `recover.html`.
+- [x] **10. Screenshots.** Capture the note, the Data tab's new cards, the static line (with `app.js` blocked) and `recover.html`.
   *Done when:* `npm run screens` writes them with no console errors.
 - [ ] **11. The upgrade check as a script.** `scripts/upgrade.mjs ⟨old-checkout⟩` uses:
   - a fixed port and a persistent profile per scenario;
@@ -478,3 +478,11 @@ Written identically in the `updates.js` header, the README and the container's G
     - `recover.html` lists v1, archives and backups first; every key downloads byte for byte (with Æ Ø Å and —), an archive entry downloads alone, and storage is unchanged;
     - with `app.js` answering `throw`, the static line shows, its link opens `recover.html`, which lists the plan, and there are no errors there.
   - **Gate:** `check.sh` OK, with `versions.mjs` now requiring `recover.html` and its `?v=`. Car suite: exit 0, 471 ok, 0 FAIL.
+- Item 10 done, ffc6d3d.
+  - `screens.mjs` writes 12-update-note, 13-data-whats-new-and-archives, 14-app-will-not-start and 15-recovery-page, asserting each.
+  - `screens/` is gitignored, so only the script is committed (see above).
+  - **Found by the pictures, and fixed in this commit:**
+    - the update note's ✕ was white on white, and a smoke check now covers it;
+    - `recover.html` said "1 KB" for tiny values, and now says "under 1 KB".
+  - **Also fixed:** a reload keeps its scroll position, so the shots scroll to the top first.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 472 ok, 0 FAIL. `npm run screens`: "no console errors, 4 warnings raised and asserted".
