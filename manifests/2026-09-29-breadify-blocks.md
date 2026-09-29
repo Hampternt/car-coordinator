@@ -1,6 +1,6 @@
 # Pack: Breadify — one-look marker, one block per customer
 
-**Status:** 🚧 all ten items committed on `breadify-blocks` and the pack gate green (2026-09-29). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
+**Status:** 🚧 all eleven items committed on `breadify-blocks` and the pack gate green (2026-09-29; item 11 added by the owner after the first gate). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
 **Date:** 2026-09-29
 **Branch:** `breadify-blocks`, cut from `dev` and merged back into `dev` through a PR. It shares three files with the review-round packs: README.md, INVENTORY.md and `scripts/check.sh`. In `scripts/check.sh`, item 1 changes only the loop line at :38. update-note edits that file's header and tail, not :38.
 
@@ -391,6 +391,13 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
         - The two 🚧 pointers become ✅ entries.
 
       *Done when:* README names every departure with its D-number, and INVENTORY's Breadify entries describe what shipped, with no 🚧 left from this pack. `grep -rn "one order, one block" docs/breadify/ README.md INVENTORY.md` finds the phrase only where it is named as a departure.
+- [x] **11. Sort each order's breads by supplier, then name.** Added 2026-09-29 at the owner's request, after the pack gate: *"bread on the list within the customer can we sort it by name and supplier? supplier first then name, SB first then BH, and within the supplier it's by alphabet."*
+      - Within each order, one-order blocks included: SB first, then BH, then any other supplier A–Z by its code (then its name), then lines with no supplier. Within a supplier, by bread name with `Intl.Collator('nb')`, so æ ø å come after z. Ties keep the file's order.
+      - Never across orders. The block structure (customer, department sub-headings, orders kept apart) is unchanged, and the marker and crates stay on the order's first line, now the first after sorting. The freezer sheet sorts the same way by its wholesalers' codes.
+      - `fold()` keeps the file's order; `Model.route()` copies each order with its lines in printing order (`printingLines`).
+      - The departure is recorded where the port states the line order (`fold`'s comment), in README and in INVENTORY. The Rust log has no D-number for line order.
+
+      *Done when:* `readSharedBlocks` and a new `readOrderLines` hold every order on both sample days and in the fixture against the suite's own copy of the rule, starting from the file's order. They fail when the sort is removed, and test:breadify passes.
 
 ## Owner questions
 
@@ -533,3 +540,10 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
   - `false-marker-one-order-block.png` and `false-marker-shared-block-line.png`
   - extras: `merged-eight-departments-route13-customer037.png`, `identical-pair-route9-customer092.png`, `freezer-shared-department-route11-customer159.png` and `freezer-mixed-route4-customer017.png`
 - 2026-09-29 · **Scope check.** `git diff --stat d1d1117..HEAD`: 14 files, all under `docs/breadify/` and `scripts/`, plus README.md, INVENTORY.md and this manifest. Nothing under `src-tauri/`, nothing Car Coordinator ships, no `package.json` change, so no update-note entry and no version bump. origin/dev has since moved to 0f9b59a (another session, two review-round manifests); it touches no file this branch touches. D-number sweep over `docs/breadify/` and `scripts/breadify.mjs` for D2, D8, D9, D16, D19, D20 and D21: every citation either still holds (e.g. D20 for one-order headings) or names its departure.
+- 2026-09-29 · **Item 11 done** (6bb0053), requested by the owner after the pack gate, built on top of a873156 while that commit is reviewed separately. `printingLines`/`compareLines` in model.js; `Model.route()` returns order copies with sorted lines, and `fold()` stays in file order. Departure recorded in `fold`'s comment, the new function's comment, README (a paragraph after the D-number list: "no D-number, because the log never set a line order") and INVENTORY (a new ✅ entry). Checked read-only in the Rust repo: `docs/print-layout.md` has no line-order decision, and `src/order.rs` keeps file order.
+  - **Tests:** `printOrder` is the suite's own copy of the rule. `readSharedBlocks` now expects it; a new `readOrderLines` reads every order, one-order blocks by their heading id and parts joined, against `printOrder` of `Model.fold`'s file-order lines. Bread: 148 orders read, the sort moves 60 of them, and 15 listed a BH bread before an SB one in the file. Freezer: 115 read, 45 moved. The fixture is clean. The crowded 250-bakery route now expects code-then-name order. One-giant-stop's names are one bakery and zero-padded, so its order is unchanged.
+  - **Non-vacuity:** with the sort taken out (`return lines.slice()`), 8 checks fail across bread, freezer, the hand-built block, the fixture and the crowded route. Reverted to the commit.
+  - **Sheet counts:** unchanged, bread 28 and freezer 20.
+  - **Gate:** `bash scripts/check.sh`: CHECK OK. `CHROMIUM_PATH=/usr/bin/google-chrome npm test`: exit 0, car `all checks passed` (368 ok), Breadify `all passed` (284 ok), 0 FAIL.
+  - **Look files regenerated** in `breadify-look/`: both PDFs (28 and 20 pages), a fresh `same-bread-orders-route11-customer017.png` (unchanged, since its lines were already in order), and the new `sb-before-bh-within-an-order.png`. That is route order 1000622341, Customer 084. The file lists SB, SB, SB, SB, BH, SB, BH; it prints five SB breads A–Z, then two BH.
+  - **Found while checking, not changed:** the Rust log's **D7** says a department prints as its own block, "not folded into a shared customer heading". Item 8's merged departments depart from D7 as well as D16/D19. D7 is not cited anywhere in the port, so no comment is wrong, but README's departure list does not name it. Left for the coordinator, to keep this item self-contained.
