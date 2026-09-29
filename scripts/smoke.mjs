@@ -2327,8 +2327,10 @@ same('an unreadable save is rescued as it loads', rescued, ['{"routes":[{"name":
 check('and the warning points at Archives', (await un.locator('#notices .notice.warn').innerText()).includes('An untouched copy is kept in Archives on the Data tab'),
   await un.locator('#notices').innerText());
 check('and links to the recovery page', (await un.locator('#notices .notice.warn a[href="recover.html"]').count()) === 1);
+const rescueStored = await un.evaluate(() => localStorage.getItem('carcoord:archives'));
 await un.reload({ waitUntil: 'networkidle' });
-check('a reload on the same unreadable save keeps one copy', (await un.evaluate(() => Store.archives().length)) === 1);
+check('a reload on the same unreadable save keeps one copy, and leaves Archives byte for byte as they were',
+  (await un.evaluate(() => Store.archives().length)) === 1 && (await un.evaluate(() => localStorage.getItem('carcoord:archives'))) === rescueStored);
 await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
 await un.reload({ waitUntil: 'networkidle' });
 same('the first change afterwards leaves the rescue intact',
