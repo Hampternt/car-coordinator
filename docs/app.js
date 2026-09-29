@@ -1185,7 +1185,6 @@ function renderSheet() {
       <thead><tr><th style="text-align:right;padding-right:6mm">Route</th><th>Driver</th><th>Car</th><th>Packing round</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    ${qrCache.svg ? `<div class="qr">${qrCache.svg}<span>Scan to load<br>this list</span></div>` : ''}
     <div class="extra">
       ${found.length ? `<h4>Check before posting</h4>${found.map((t) => `<p>! ${esc(t)}</p>`).join('')}` : ''}
       ${downCars ? `<h4>Cars not available</h4>${downCars}` : ''}
@@ -1206,7 +1205,6 @@ function render() {
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
   renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
-  queueQr();
   renderNotices();
   renderPicker();
   renderTagMenu();
@@ -1334,43 +1332,12 @@ function addFromInput(sel, make) {
 }
 
 async function doPrint() {
-  clearTimeout(qrTimer);
-  await refreshQr();                       // never print a QR for yesterday's plan
   renderSheet();
   try {
     if (window.__TAURI__?.core) { await window.__TAURI__.core.invoke('print_page'); return; }
   } catch (err) { console.warn('native print failed, using window.print()', err); }
   window.print();
 }
-
-/* ---------- QR on the printout ---------- */
-/* The sheet is what gets posted on the pillar, so it carries a link to the
-   day plan as a QR: a phone pointed at the paper opens the list. */
-let qrCache = { key: '', svg: '', error: '' };
-let qrTimer = null;
-
-/* Only the web build can put something scannable on paper: a QR holding a
-   bare share code is meaningless to whoever points a phone at it. */
-const qrUsable = () => location.protocol === 'https:' || location.protocol === 'http:';
-
-async function refreshQr() {
-  if (!state.qrOnSheet || !qrUsable()) {
-    if (qrCache.key) { qrCache = { key: '', svg: '', error: '' }; renderSheet(); }
-    return;
-  }
-  const payload = Share.linkFor(await Share.encode(state, 'day'));
-  if (qrCache.key === payload) return;
-  try {
-    qrCache = { key: payload, svg: QR.svg(payload, { level: 'M' }), error: '' };
-  } catch {
-    // Only happens with an enormous day plan; the sheet drops the QR rather
-    // than printing something that will not scan.
-    qrCache = { key: payload, svg: '', error: 'This day plan is too big to fit in a QR code. The printed sheet will not have one.' };
-  }
-  renderSheet();
-}
-
-const queueQr = () => { clearTimeout(qrTimer); qrTimer = setTimeout(refreshQr, 400); };
 
 /* ---------- sharing ---------- */
 let shareOut = '';                                   // last generated code, shown for manual copying
@@ -1388,13 +1355,6 @@ function renderShare() {
     ${shareOut ? `<p class="hint" style="margin-top:10px">Copied. If the clipboard did not work, take it from here:</p>
       <textarea id="shareOut" class="code" readonly rows="3">${esc(shareOut)}</textarea>
       <p class="hint">${shareOut.length} characters.${shareOut.length > 1800 ? ' That is long for a link \u2014 send the code itself rather than the link.' : ''}</p>` : ''}
-
-    <p class="hint" style="margin-top:14px">
-      ${qrUsable()
-        ? `<label><input type="checkbox" data-kind="meta" data-field="qrOnSheet" ${state.qrOnSheet ? 'checked' : ''}> Put a QR code on the printed sheet, so a phone can open the list from the paper</label>`
-        : 'The printed sheet carries a QR code only in the browser version, where it holds a link a phone can open.'}
-      ${qrCache.error ? `<br><span class="status warn-status" style="padding-left:0">${esc(qrCache.error)}</span>` : ''}
-    </p>
 
     <h3 style="margin-top:18px">Load a list someone sent you</h3>
     <textarea id="shareIn" class="code" rows="3" placeholder="Paste the code (or the whole link) here"></textarea>

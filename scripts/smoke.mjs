@@ -565,53 +565,16 @@ const oldRead = await page.evaluate(async (code) => {
 check('a code from before rounds existed still loads, with a blank round',
   oldRead.round === '' && oldRead.driver === 'Ana' && oldRead.routes === 1, oldRead.error || JSON.stringify(oldRead));
 
-// --- the QR on the printed sheet ---
-// 30mm at 300dpi is ~354px, so decoding at that size is the question that
-// actually matters: will it scan off the paper?
+// --- no QR anywhere ---
+// planA has no qrOnSheet, which every build up to 0.3.0 read as "on". The QR
+// is gone for good: nothing on the sheet, no switch, no encoder, no tag.
 await page.click('[data-act="tab"][data-tab="preview"]');
-await page.waitForSelector('#sheet .qr svg', { timeout: 5000 }).catch(() => {});
-check('the sheet carries a QR code', (await page.locator('#sheet .qr svg').count()) === 1);
-
-// jsQR is a test-only dependency: the app writes QR codes but never reads
-// them, so the decoder does not ship. Serve it from the page's own origin
-// rather than inlining it: the app ships a CSP of script-src 'self', and a
-// test that had to be let through it would be testing a different page.
-await page.route('**/jsqr-test-only.js', async (r) =>
-  r.fulfill({ contentType: 'text/javascript', body: await readFile('node_modules/jsqr/dist/jsQR.js', 'utf8') }));
-await page.addScriptTag({ url: 'jsqr-test-only.js' });
-const qrRead = await page.evaluate(async () => {
-  const svg = document.querySelector('#sheet .qr svg');
-  if (!svg) return { error: 'no qr on the sheet' };
-  const markup = new XMLSerializer().serializeToString(svg);
-  const decodeAt = (px) => new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = px; c.height = px;
-      const ctx = c.getContext('2d', { willReadFrequently: true });
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
-      ctx.drawImage(img, 0, 0, px, px);
-      const d = ctx.getImageData(0, 0, px, px);
-      const r = window.jsQR(d.data, px, px, { inversionAttempts: 'dontInvert' });
-      resolve(r ? r.data : null);
-    };
-    img.onerror = () => resolve(null);
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(markup)));
-  });
-  return { at354: await decodeAt(354), at200: await decodeAt(200) };
-});
-check('the printed-size QR decodes (30mm at 300dpi)', typeof qrRead.at354 === 'string' && qrRead.at354.length > 0, qrRead.error || '');
-check('it still decodes at a rougher 200px scan', typeof qrRead.at200 === 'string');
-
-if (typeof qrRead.at354 === 'string') {
-  const round = await page.evaluate(async (scanned) => {
-    const m = /#d=(.+)$/.exec(scanned);
-    const { share, error } = await Share.decode(m ? decodeURIComponent(m[1]) : scanned);
-    return error ? { error } : { routes: share.r.length, date: share.d, driver: share.r[0][1] };
-  }, qrRead.at354);
-  check('the QR carries the whole day plan', round.routes === 2 && round.date === '2026-09-18' && round.driver === 'Ana', round.error || JSON.stringify(round));
-}
+await page.waitForSelector('#sheet table');
+check('the printed sheet carries no QR code', (await page.locator('#sheet .qr').count()) === 0);
 await page.click('[data-act="tab"][data-tab="data"]');
+check('the Data tab has no QR switch', (await page.locator('[data-field="qrOnSheet"]').count()) === 0);
+check('no QR encoder is loaded', await page.evaluate(() => typeof QR === 'undefined'));
+check('no qr.js script tag', await page.evaluate(() => ![...document.scripts].some((t) => /(^|\/)qr\.js/.test(t.getAttribute('src') || ''))));
 
 // "PC B": different ids, one car in common, one it has never seen.
 const pcB = await browser.newContext();
@@ -1793,8 +1756,8 @@ check('a malformed URL is a 404, not a crash', malformed === 404, String(malform
 check('the server is still alive after it', (await fetch(base).then((r) => r.status, () => 0)) === 200);
 
 // --- the page a phone opens must not scroll sideways ---
-// The QR on the printed sheet exists so a phone can open this page, so phone
-// width is a real use, not a courtesy.
+// Share links open this page on a phone, so phone width is a real use, not a
+// courtesy.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: '2026-09-18', labels: [],

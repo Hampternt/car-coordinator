@@ -211,7 +211,7 @@ await page.click('[data-act="share-cancel"]');
 // --- the printout
 console.log('printout');
 await tab('preview');
-await page.waitForSelector('#sheet .qr svg');
+await page.waitForSelector('#sheet table');
 await shot('10-print-preview');
 await page.pdf({ path: `${OUT}/11-printed-sheet.pdf`, format: 'A4', printBackground: true });
 console.log(`  ${OUT}/11-printed-sheet.pdf`);

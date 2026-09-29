@@ -26,7 +26,6 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 - "Many cars" positions (Garage) can be shared by several routes, and any spot can be used again in a later round.
 - **Labels**: create custom status labels with colours.
 - **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.
-- **QR on the sheet** (browser version): the printed sheet carries a link to the day plan as a QR in the corner, so a phone can read the list off the paper on the pillar. Turn it off on the Data tab to keep the sheet bare.
 - **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
 - **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day. The first time an update is opened, the whole plan and setup is copied unchanged into **Archives** on the Data tab first, and a note says what changed; **What's new** there keeps every note.
 
