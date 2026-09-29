@@ -2379,6 +2379,41 @@ await un.reload({ waitUntil: 'networkidle' });
 same('the first change afterwards leaves the rescue intact',
   await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text)), ['{"routes":[{"name":"lost']);
 
+// The same unreadable text found again by another version is recorded
+// again under this one (with a new time), still as one copy.
+const reRescue = '{"routes":[{"name":"found by an older version';
+await un.evaluate((x) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', x);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'rescue', from: null, to: null, during: '0.0.1', t: '2026-09-01T00:00:00.000Z', text: x }]));
+}, reRescue);
+await un.reload({ waitUntil: 'networkidle' });
+const reRecorded = await un.evaluate(() => ({ v: APP_VERSION, list: Store.archives().map((a) => [a.kind, a.during, a.text, a.t !== '2026-09-01T00:00:00.000Z']) }));
+same('the same unreadable text found by another version is recorded once, under this one',
+  reRecorded.list, [['rescue', reRecorded.v, reRescue, true]]);
+// And with no room even for that, the copy already there still counts:
+// the text is kept, so the warning still says so, and nothing is touched.
+const stillKept = await un.evaluate((x) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', x);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'rescue', during: '0', text: x }]));
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Start of day', json: '{"routes":[]}' }]));
+  try { for (let c = 0; c < 2000; c++) localStorage.setItem(`fill:${c}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 100000; i++) localStorage.setItem(`g${i}`, 'x'.repeat(8)); } catch { /* full to the last few bytes */ }
+  return localStorage.getItem('carcoord:archives');
+}, reRescue);
+await un.reload({ waitUntil: 'networkidle' });
+const stillSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const stillArchives = await un.evaluate(() => localStorage.getItem('carcoord:archives'));
+await un.evaluate(() => {
+  for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  for (let i = 0; i < 100000; i++) localStorage.removeItem(`g${i}`);
+});
+check('with no room to record it again, the copy already kept still counts, untouched',
+  stillArchives === stillKept && stillSaid.includes('An untouched copy is kept in Archives'), `${stillArchives === stillKept} ${stillSaid}`);
+
 // A rescue that only fits once an update copy makes room says so.
 const roomForRescue = await un.evaluate(() => {
   localStorage.clear();
@@ -2533,6 +2568,7 @@ const rules = await un.evaluate(() => {
     rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
     rescueThisVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
     rescueOlderVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.5.0' }] }),
+    rescueThisVersionBackFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
     nothingUsable: A({ usableText: null }),
   };
   out.untouched = all() === before;
@@ -2557,7 +2593,7 @@ same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, n
 same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
 same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
   returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
-  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, nothingUsable: false });
+  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, rescueThisVersionBackFromNewer: true, nothingUsable: false });
 check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
 
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
@@ -2684,6 +2720,13 @@ same(`back to ${V} from ${newerThanV}: a new archive of that step, beside the fi
   stepBack.archives.map((a) => [a.from, a.to, a.sameAsSaved]), [[newerThanV, V, true], ['0.2.4 or earlier', V, false]]);
 await up.reload({ waitUntil: 'networkidle' });
 check('and a reload takes no third', (await opened(up)).archives.length === 2);
+// A rescue this version took long ago, before the browser moved on to a
+// newer build, is not a copy of this step back.
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': newerThanV,
+  'carcoord:archives': JSON.stringify([{ kind: 'rescue', from: null, to: null, during: V, t: '2026-09-01T06:00:00.000Z', text: '{old' }]) });
+await up.reload({ waitUntil: 'networkidle' });
+same(`back to ${V} from ${newerThanV} with an old ${V} rescue kept: the step is still archived`,
+  (await opened(up)).archives.map((a) => [a.kind, a.from, a.to, a.sameAsSaved]), [['update', newerThanV, V, true], ['rescue', null, null, false]]);
 
 // Held loads wait for the next clean open, and leave the marker alone.
 await leaveAs(up, { 'carcoord:v1': '{not json at all' });

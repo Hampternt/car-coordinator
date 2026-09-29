@@ -1639,8 +1639,11 @@ const updatingFrom = (seen) => (typeof seen === 'string' ? seen : '0.2.4 or earl
 /* A rescue taken under this version holds what this browser had before the
    plan it has now, which was typed after the loss. That rescue is this
    version's copy: archiving the new plan as "before" the update would say
-   something that is not so. */
-const rescuedDuring = (a, version) => !!a && a.kind === 'rescue' && a.during === version;
+   something that is not so. Not when the marker is newer, though: then
+   the browser has run a newer build since that rescue, and is stepping back
+   to this one with data the newer build wrote, which needs a copy. */
+const rescuedDuring = (a, version, seen) => !!a && a.kind === 'rescue' && a.during === version
+  && !(typeof seen === 'string' && versionOrder(seen, version) > 0);
 
 /* Whether this open takes an update archive: the saved text is a usable
    plan, this browser has not already run this version (a first run, then a
@@ -1651,7 +1654,7 @@ const rescuedDuring = (a, version) => !!a && a.kind === 'rescue' && a.during ===
 function archiveNeeded({ version, from, usableText, archives, seen }) {
   if (typeof usableText !== 'string') return false;
   if (seen === version) return false;
-  return !(Array.isArray(archives) ? archives : []).some((a) => copyFor(a, version, from) || rescuedDuring(a, version));
+  return !(Array.isArray(archives) ? archives : []).some((a) => copyFor(a, version, from) || rescuedDuring(a, version, seen));
 }
 
 /* Whether this open is a first run: nothing saved in this browser and
@@ -1674,7 +1677,7 @@ function archiveBeforeUpdate() {
   const seen = Store.pref('seenUpdate');
   const from = updatingFrom(seen);
   if (list.some((a) => copyFor(a, APP_VERSION, from))) return { copy: 'kept', dropped: 0 };
-  if (list.some((a) => rescuedDuring(a, APP_VERSION))) return { copy: 'rescued', dropped: 0 };
+  if (list.some((a) => rescuedDuring(a, APP_VERSION, seen))) return { copy: 'rescued', dropped: 0 };
   const text = Store.savedText();
   if (!archiveNeeded({ version: APP_VERSION, from, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
   const { ok, dropped } = Store.archive({ kind: 'update', from, to: APP_VERSION, t: new Date().toISOString(), text });

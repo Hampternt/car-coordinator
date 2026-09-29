@@ -1,6 +1,6 @@
 # Pack: Update note and fail-safe — say what changed, and keep an untouched copy
 
-**Status:** 🚧 all 12 items built and the pack gate green, 2026-09-29, on system Chrome. Waiting on the individual reviews of items 3 and 7, one review pass for the rest, and the browser walkthrough.
+**Status:** 🚧 all 12 items built. The review's findings are fixed and the pack gate is green again (2026-09-29, system Chrome). Waiting on the browser walkthrough.
 **Date:** 2026-09-28. Reworked against `dev` at b0ae257, after the 0.2.5 save-file fix. Revised 2026-09-29 after the plan review (see Ledger).
 **Branch:** `update-note`, cut from `dev` and merged back into `dev` through a PR (the container's Branch line).
 
@@ -546,3 +546,45 @@ Written identically in the `updates.js` header, the README and the container's G
   - `check.sh` OK;
   - car suite: exit 0, 489 ok, 0 FAIL;
   - upgrade from v0.2.4: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+- **Mutation run, to show the review's tests bite.** The suite ran against a scratch copy of `docs/` and `scripts/` with ten mutations applied at once: exit 1, 21 FAIL. Each mutation is caught by the check its fix added:
+
+  | Mutation | Caught by |
+  |---|---|
+  | M1: `copyFor` ignores `from` | the pure archive rule; "back to 0.3.0 from 0.4.0" |
+  | M3: no drain before the note | "…the note says storage is full, last…" |
+  | M4: `archiveNeeded` ignores this version's rescue | the pure archive rule (`rescueThisVersion`) |
+  | M5: recover.js back to UTC | "times on the recovery page are this computer's own" |
+  | M6: rescue rewritten every load | "…leaves Archives byte for byte as they were" |
+  | M7: a failed rescue claimed as kept | "…the first change will overwrite it, with one link…" |
+  | M8: `while (i > 0 && false)` | "…keeps the newer one, and the rescue" (dropped 2) |
+  | M9: only unparseable text is held | "a save of [] / null / 42…", plus the old damaged-save loop |
+  | M10: note step unguarded | "with the note step broken…" (three checks) |
+  | M11: archive after `dailySnapshot` | "the archive is the first thing written at boot…" (got backups first) |
+  | M12: the archive tidies the text | "one update archive, byte for byte the saved plan…" |
+
+  M4 is also masked on the boot path, by `archiveBeforeUpdate`'s own `rescuedDuring` early return, so only the pure-rule case sees it. The scratch copy is deleted.
+- **2026-09-29, pack gate after the review fixes: green, on system Chrome.**
+  - `npm test`: exit 0. It ends "VERSIONS OK", the car suite "all checks passed" (489 ok, 0 FAIL), and Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 15 files.
+  - `npm run upgrade` from `v0.2.4`: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - `npm run upgrade` from `dev` at 0f9b59a (manifests and INVENTORY.md only since 4f0c26f; `docs/` is still 0.2.5): exit 0, 47 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - The scratch worktrees are removed.
+- **Conflict between fixes 1 and 4, found before hand-back and fixed in 27ea5da.**
+  - **The conflict:** a rescue with `during` equal to V stays until a newer rescue replaces it. So a browser that went V, then a newer build, then back to V matched it and skipped the step-back archive fix 1 requires.
+  - **Rule chosen:** a rescue counts as this version's copy only when the marker is not newer than V (`versionOrder(seen, V) <= 0`, or no marker). This applies in both `archiveNeeded` and `archiveBeforeUpdate`.
+  - **Tests:**
+    - the pure rule `rescueThisVersionBackFromNewer` expects true;
+    - the boot case (old V rescue, newer marker) expects `[update newer→V, rescue]`.
+    - Both failed before the change: they got `false` and `[rescue]`.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 490 ok, 0 FAIL.
+- **Tests for fix 4's dedup branches, f55438c.**
+  - **Re-record:** the same text rescued with `during: '0.0.1'` gives, after a reload, one rescue with `during` V and a new `t`. The re-record resets the time.
+  - **No-room fallback:** storage filled to the last bytes with 8-byte grains, an old rescue of the same text. After a reload, `carcoord:archives` is byte-identical and the warning still says "An untouched copy is kept". That can only pass through the fallback.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 492 ok, 0 FAIL.
+- **2026-09-29, final pack gate after the review fixes and the fix 1/fix 4 conflict: green, on system Chrome.**
+  - `npm test`: exit 0. It ends "VERSIONS OK", the car suite "all checks passed" (492 ok, 0 FAIL), and Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 15 files.
+  - `npm run upgrade` from `v0.2.4`: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - `npm run upgrade` from `dev` at 0f9b59a: exit 0, 47 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - The scratch worktrees are removed.
+  - **Flaky, and older than this pack:** "a disarm leaves the page where the user scrolled it — 285" (e5c8472, 2026-09-24) failed on 2 of about 20 car-suite runs this session and passed on each rerun. Not investigated.
