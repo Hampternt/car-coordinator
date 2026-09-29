@@ -328,7 +328,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - after a normal start the static line is gone.
 - [x] **10. Screenshots.** Capture the note, the Data tab's new cards, the static line (with `app.js` blocked) and `recover.html`.
   *Done when:* `npm run screens` writes them with no console errors.
-- [ ] **11. The upgrade check as a script.** `scripts/upgrade.mjs ⟨old-checkout⟩` uses:
+- [x] **11. The upgrade check as a script.** `scripts/upgrade.mjs ⟨old-checkout⟩` uses:
   - a fixed port and a persistent profile per scenario;
   - the old build first, then this one;
   - a build assertion first on every load.
@@ -486,3 +486,8 @@ Written identically in the `updates.js` header, the README and the container's G
     - `recover.html` said "1 KB" for tiny values, and now says "under 1 KB".
   - **Also fixed:** a reload keeps its scroll position, so the shots scroll to the top first.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 472 ok, 0 FAIL. `npm run screens`: "no console errors, 4 warnings raised and asserted".
+- Item 11 done, e04dad5. `npm run upgrade -- ⟨dir⟩`, on port 5199 (or `UPGRADE_PORT`). The profiles are temporary directories, removed afterwards. It ran on system Chrome:
+  - **From `v0.2.4`** (a worktree): 43 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - **From `dev`** (4f0c26f, which is 0.2.5 plus planning manifests only): 43 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - **Pointed at this build:** all five scenarios fail their build assertion ("expected the old build, found APP_VERSION 0.3.0"), exit 1.
+  - **Method:** a real save file is an OPFS handle put in IndexedDB. Scenario (e) serves a temporary copy of the old `docs/` with the new `app.js`, plus a spy on the old `store.js` that records which save-file checks `start()` calls.
