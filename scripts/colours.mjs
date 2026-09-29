@@ -29,12 +29,14 @@ import { startServer } from './serve.mjs';
 const HERE = fileURLToPath(new URL('..', import.meta.url));
 const PORT = Number(process.env.COLOURS_PORT) || 5198;
 const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
+// Screen first: print hides the page around the sheet, and a menu whose row
+// is hidden closes itself a moment later.
 const MODES = {
   'light screen': { media: 'screen', colorScheme: 'light', theme: null },
-  'light print': { media: 'print', colorScheme: 'light', theme: null },
   'dark screen': { media: 'screen', colorScheme: 'dark', theme: null },
-  'dark print': { media: 'print', colorScheme: 'dark', theme: null },
   'forced dark screen': { media: 'screen', colorScheme: 'light', theme: 'dark' },
+  'light print': { media: 'print', colorScheme: 'light', theme: null },
+  'dark print': { media: 'print', colorScheme: 'dark', theme: null },
 };
 
 /* ---------- diff ---------- */
@@ -138,6 +140,7 @@ async function scene(name) {
   for (const [mode, { media, colorScheme, theme }] of Object.entries(MODES)) {
     await page.emulateMedia({ media, colorScheme });
     await page.evaluate((t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }, theme);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
     modes[mode][name] = await record();
   }
   await page.emulateMedia({ media: 'screen', colorScheme: 'light' });
