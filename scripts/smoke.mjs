@@ -1853,7 +1853,10 @@ check('a code with a row missing is reported, not thrown',
 const hostile = 'red;position:fixed;inset:0;z-index:99';
 await readCode(h, rawCode({
   v: 1, d: '2026-09-18', r: [], m: [],
-  l: [['Workshop', hostile]], c: [['AA11111', 'Workshop', '']], p: [], dr: [], dg: [],
+  l: [['Workshop', hostile]], c: [['AA11111', 'Workshop', ''], ['BB22222', '', '']], p: [],
+  // A crew and an untagged car and driver: the app's own colours for these
+  // live in the stylesheet, so nothing but a label colour is written inline.
+  dr: [['Ana', 1], ['Bo', 1]], dg: [['Monday', ['Ana', 'Bo']]],
 }));
 await h.waitForSelector('#shareDlg[open]');
 await h.check('#shareDlg input[value="all"]');
@@ -1866,6 +1869,17 @@ check('a colour out of a share code cannot smuggle CSS into the page',
   styles.slice(0, 4).join(' | '));
 check('and nothing it sent is laid over the page',
   (await h.evaluate(() => [...document.querySelectorAll('*')].every((el) => getComputedStyle(el).position !== 'fixed'))));
+check('a crew and an untagged car and driver are part of that page',
+  await h.evaluate(() => document.querySelectorAll('#tab-drivers .chip').length >= 2 && state.cars.some((c) => !c.labelId) && state.drivers.some((d) => !d.labelId)));
+await h.click('[data-act="tab"][data-tab="plan"]');
+const untagged = await h.evaluate(() => state.cars.find((c) => !c.labelId).id);
+check("the rail's No tag dot writes no colour of its own",
+  await h.evaluate((id) => document.querySelector(`#tab-plan [data-act="tag"][data-kind="car"][data-id="${id}"]`).closest('li').querySelector('.dot').getAttribute('style') === null, untagged));
+await h.click(`#tab-plan [data-act="tag"][data-kind="car"][data-id="${untagged}"]`);
+await h.waitForSelector('#tagMenu:not([hidden])');
+check("and neither does the tag menu's first choice, No tag",
+  await h.evaluate(() => document.querySelector('#tagMenu .tag-choice .dot').getAttribute('style') === null));
+await h.keyboard.press('Escape');
 
 // A date that is not a date printed as "//" across the top of the sheet.
 const dateBefore = await h.evaluate(() => state.date);

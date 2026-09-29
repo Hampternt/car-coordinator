@@ -384,9 +384,9 @@ const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id ===
 function tagMenu(kind, item) {
   const choice = (id, name, color, on) =>
     `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
-      <span class="dot" style="--c:${esc(color)}"></span>${esc(name)}</button>`;
+      <span class="dot"${color ? ` style="--c:${esc(color)}"` : ''}></span>${esc(name)}</button>`;
   return `<div class="tag-choices">
-      ${choice('', 'No tag', '#2e7d32', !item.labelId)}
+      ${choice('', 'No tag', null, !item.labelId)}
       ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
     </div>
     <div class="tag-new">
@@ -472,7 +472,7 @@ function railRow(kind, item, label, where, extra = '', cls = '') {
   return `<li class="rail-row ${cls} ${armed === `del:${item.id}` ? 'arming' : ''}" draggable="true"
       data-drag="${kind}" data-id="${esc(item.id)}" title="${esc(title)}">
     <span class="grip" aria-hidden="true">⠿</span>
-    <span class="dot" style="--c:${esc(lab ? colour(lab.color) : '#2e7d32')}" title="${esc(lab ? labelName(lab) : 'No tag')}"></span>
+    <span class="dot"${lab ? ` style="--c:${esc(colour(lab.color))}"` : ''} title="${esc(lab ? labelName(lab) : 'No tag')}"></span>
     <input class="rail-name" type="text" data-kind="${kind}" data-id="${esc(item.id)}" data-field="${field}"
       value="${esc(item[field])}" aria-label="${label}">
     ${where}
@@ -862,7 +862,7 @@ function driverGroups() {
   const missing = WEEK.filter((day) => !byDay.has(day));
   const cards = state.driverGroups.map((g) => {
     const members = state.drivers.map((d) =>
-      `<button class="chip ${g.driverIds.includes(d.id) ? 'on' : ''}" style="--c:var(--steel)" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
+      `<button class="chip member ${g.driverIds.includes(d.id) ? 'on' : ''}" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
     const day = groupWeekday(g.name);
     const used = day >= 0 && byDay.get(day) === g;
     const badge = day < 0 ? ''

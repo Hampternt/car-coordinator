@@ -21,7 +21,7 @@ const DOCS = fileURLToPath(new URL('../docs/', import.meta.url));
 
 // (file, literal) pairs the shipped scripts may hold.
 export const JS_ALLOWED = {
-  'app.js': ['#c62828', '#ef6c00', '#6a1b9a', '#1565c0', '#2e7d32', 'var(--steel)'],
+  'app.js': ['#c62828', '#ef6c00', '#6a1b9a', '#1565c0'],
   'store.js': ['#c62828'],
   'share.js': ['#c62828'],
 };

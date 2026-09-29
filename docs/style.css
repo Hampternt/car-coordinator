@@ -125,6 +125,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .chip { border: 2px solid var(--c, var(--ink)); background: var(--field); padding: 3px 10px; margin: 2px; cursor: pointer; font-weight: 600; }
 .chip.on { background: var(--c, var(--ink)); color: var(--on-fill); }
 .chip.ok.on { --c: var(--ok-fill); }
+/* a day group's members: the app's own colour, not a label's */
+.chip.member { --c: var(--steel-fill); }
 
 /* car assignment badges */
 .assign { display: inline-block; padding: 2px 8px; margin: 1px 4px 1px 0; font-weight: 600; white-space: nowrap; }
