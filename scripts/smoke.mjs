@@ -2353,6 +2353,30 @@ await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem
 check('a rescue that makes room says which copy went', roomForRescue > 0 && roomSaid.includes('An untouched copy is kept in Archives')
   && roomSaid.includes('To make room, 1 older copy in Archives was removed.') && JSON.stringify(roomKept) === '["rescue"]', `${JSON.stringify(roomKept)} ${roomSaid}`);
 
+// A rescue that cannot fit even then: nothing is touched, and the warning
+// keeps its old words, because the first change really will overwrite it.
+const noFit = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', `{"routes":[${'y'.repeat(300 * 1024)}`);
+  // Today's start-of-day backup is already there, so the load takes none.
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Start of day', json: '{"routes":[]}' }]));
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'a', to: 'b', t: '2026-09-01T00:00:00.000Z', text: '{"routes":[]}' }]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return { chunks, kept: ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)) };
+});
+await un.reload({ waitUntil: 'networkidle' });
+const noFitAfter = await un.evaluate(() => ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)));
+const noFitSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const noFitLinks = await un.locator('#notices a[href="recover.html"]').count();
+await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+same('a rescue that cannot fit leaves the plan, Backups and Archives byte for byte',
+  noFitAfter.map((v, i) => v === noFit.kept[i]), [true, true, true]);
+check('and the warning says the first change will overwrite it, with one link to the recovery page',
+  noFit.chunks > 0 && noFitSaid.includes('the first change you make will overwrite it') && !noFitSaid.includes('An untouched copy is kept') && noFitLinks === 1,
+  `${noFitLinks} links: ${noFitSaid}`);
+
 // Twelve new backups, the whole rolling list, push no archive out.
 const rolled = await un.evaluate(([u1, u2]) => {
   localStorage.setItem('carcoord:archives', JSON.stringify([u2, JSON.parse(localStorage.getItem('carcoord:archives')).find((a) => a.kind === 'rescue'), u1]));
