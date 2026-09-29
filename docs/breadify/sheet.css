@@ -373,9 +373,9 @@
   align-self: center;
 }
 
-/* An order cut across pages, opening its next part: in the place its crates
- * took on the part where it started, so a line with no crates is never read
- * as an order that needs none. As quiet as the part tag it goes with. */
+/* An order cut across pages, opening its next part: says its first lines are
+ * on the page before, so the lines here are not taken for all it has. As
+ * quiet as the part tag it goes with. */
 .bf-order-cont {
   font: 400 8.6pt/1 'IBM Plex Mono', monospace;
   letter-spacing: 0.06em;
@@ -402,9 +402,10 @@
 
 /* ── A stop block ────────────────────────────────────────────────────── */
 
-/* One block = one stop. D16 also makes it one order; the web port gives a
- * customer's several orders at one stop one block between them, each order
- * still its own crate label (the owner, 2026-09-29). */
+/* One block = one stop. D16 also makes it one order and one crate label;
+ * the web port gives a customer's several orders at one stop one block
+ * between them, and each department of theirs one crate label and one crate
+ * count (the owner, 2026-09-29). */
 .bf-block {
   border-top: 1.25pt solid var(--ink);
   padding: 1.7mm 0 1.2mm;
@@ -545,7 +546,7 @@
 }
 
 /* A line in a block of several orders: its order's id at the right, and on
- * the order's first line its crates and marker too, left of the id. Right
+ * the order's first line its marker too, left of the id. Right
  * before the tick boxes, so the ids stand in one column down the block. */
 .bf-row-stamp {
   flex: none;
@@ -556,8 +557,8 @@
 }
 
 /* The name keeps room to be read. A first line that cannot leave it this much
- * sends its crates to the compact form, then onto a line of their own — and
- * only a name that measures can make that call. */
+ * sends its marker onto a line of its own — and only a name that measures can
+ * make that call. */
 .bf-row-shared .bf-product {
   min-width: 30mm;
 }
@@ -571,7 +572,7 @@
   white-space: normal;
 }
 
-/* An order's crates and marker when its first line had no room for them.
+/* An order's marker when its first line had no room for it.
  * Held off the right-hand end by what the order's lines keep there — the
  * M and F boxes (2 × 4.6 mm, 1.5 mm apart) and the line's 3.6 mm gap — so
  * its id stands in the same column as theirs. A check line keeps the M box

@@ -205,21 +205,26 @@ await page.addInitScript(() => {
 
   // Every block of several orders, read back line by line and held against
   // the orders it prints (`orders`: the model's, by id). A marker or a crate
-  // count attached to the wrong order would print wrong without a word, so
-  // this is the check that matters: each order's lines, supplier then name, under
-  // its own department; its crates and its marker once, on its first line.
+  // count attached to the wrong order or group would print wrong without a
+  // word, so this is the check that matters: each order's lines, supplier then
+  // name, under its own department, and its marker once, on its first line;
+  // and each department group's crates once, on its own heading line, packed
+  // together (the owner, 2026-09-29) — never on an order's line.
   // Returns what disagrees, so an empty list is the pass.
   window.readSharedBlocks = (sheets, orders, rules, bread) => {
     const problems = [];
     const seen = new Map();
-    const marks = (rec, holder) => {
+    // A crate label is the customer and the department at one stop.
+    const groupOf = (order) =>
+      [order.route, order.customer, order.deliveryStreet, order.sequence, order.department || ''].join('|');
+    const groupCrates = new Map();
+    const marks = (rec, holder, where) => {
       const marker = holder.querySelector('.bf-marker');
       if (marker) {
         if (holder.querySelector('.bf-order-cont')) rec.continued.push(marker.textContent);
         else rec.markers.push([rec.rows.length - 1, marker.textContent]);
       }
-      const crates = holder.querySelector('.bf-crates');
-      if (crates) rec.crates.push([rec.rows.length - 1, readCrates(crates)]);
+      if (holder.querySelector('.bf-crates')) problems.push(`${rec.order.id}: crates on ${where}`);
     };
 
     let blocks = 0;
@@ -228,25 +233,44 @@ await page.addInitScript(() => {
         if (!block.querySelector('.bf-row-shared')) continue;
         blocks += 1;
         const name = block.querySelector('.bf-name').textContent;
-        // Nothing at the heading's right: the marks belong to the orders, on
-        // their own lines. The name line holds the name and perhaps the part
-        // tag; any other heading line a department box or the tag.
+        // Nothing at the heading's right but crates: markers and ids belong to
+        // the orders, on their own lines. The name line holds the name, and
+        // perhaps the part tag and a group's crates; any other heading line a
+        // department box, the tag or crates.
         Array.from(block.querySelectorAll(':scope > .bf-head-line')).forEach((line, index) => {
-          const allowed = index === 0 ? ['bf-name', 'bf-block-part'] : ['bf-dpt', 'bf-block-part'];
+          const allowed = index === 0
+            ? ['bf-name', 'bf-block-part', 'bf-crates']
+            : ['bf-dpt', 'bf-block-part', 'bf-crates'];
           for (const child of line.children) {
             const kind = child.className.split(' ')[0];
             if (!allowed.includes(kind)) problems.push(`${name}: its heading holds ${kind}`);
           }
-          if (line.querySelector('.bf-crates, .bf-marker, .bf-stamp, .bf-order-id')) {
-            problems.push(`${name}: crates, a marker or an id sit in its heading`);
+          if (line.querySelector('.bf-marker, .bf-stamp, .bf-order-id')) {
+            problems.push(`${name}: a marker or an id sits in its heading`);
           }
         });
-        const boxed = block.querySelector(':scope > .bf-head-line .bf-dpt:not(.bf-dpt-quiet) .bf-dpt-name');
-        let department = boxed ? boxed.textContent : null;
+
+        // Walked in print order. A heading line's crates wait for the first
+        // line printed under that department, whose order names the group.
+        let department = null;
+        let pending = null;
         let last = null;
-        for (const node of block.querySelectorAll('.bf-dpt-sub, .bf-row, .bf-order-extra')) {
-          if (node.classList.contains('bf-dpt-sub')) {
-            department = node.querySelector('.bf-dpt-name').textContent;
+        for (const node of block.querySelectorAll(':scope > .bf-head-line, .bf-row, .bf-order-extra')) {
+          if (node.parentElement === block && node.classList.contains('bf-head-line')) {
+            if (node.classList.contains('bf-dpt-sub')) {
+              department = node.querySelector('.bf-dpt-name').textContent;
+            } else if (node.querySelector('.bf-dpt:not(.bf-dpt-quiet)')) {
+              department = node.querySelector('.bf-dpt-name').textContent;
+            } else if (node.querySelector('.bf-name')) {
+              department = null;
+            }
+            for (const run of node.querySelectorAll('.bf-crates')) {
+              if (pending && pending.department !== department) {
+                problems.push(`${name}: crates for ${pending.department} with no lines under them`);
+              }
+              if (!pending || pending.department !== department) pending = { department, runs: [] };
+              pending.runs.push(readCrates(run));
+            }
             continue;
           }
           if (node.classList.contains('bf-order-extra')) {
@@ -254,13 +278,13 @@ await page.addInitScript(() => {
               const own = node.querySelector('.bf-order-id');
               if (!own || Number(own.textContent) !== last.order.id) {
                 problems.push(
-                  `${name}: a line of crates and a marker says ${own ? own.textContent : 'no id'}, ` +
+                  `${name}: a line of its own for a marker says ${own ? own.textContent : 'no id'}, ` +
                     `under ${last.order.id}`,
                 );
               }
-              marks(last, node);
+              marks(last, node, 'a line of its own');
             } else {
-              problems.push(`${name}: crates and a marker on a line of their own, under no order`);
+              problems.push(`${name}: a marker on a line of its own, under no order`);
             }
             continue;
           }
@@ -279,19 +303,27 @@ await page.addInitScript(() => {
           if ((order.department || null) !== department) {
             problems.push(`${id} printed under department ${department}, belongs to ${order.department}`);
           }
-          if (!seen.has(id)) seen.set(id, { order, rows: [], markers: [], continued: [], crates: [] });
+          if (pending && pending.department === department) {
+            const key = groupOf(order);
+            groupCrates.set(key, [...(groupCrates.get(key) || []), ...pending.runs]);
+            pending = null;
+          }
+          if (!seen.has(id)) seen.set(id, { order, rows: [], markers: [], continued: [] });
           last = seen.get(id);
           last.rows.push([
             Number(node.querySelector('.bf-qty').textContent),
             node.querySelector('.bf-product').textContent,
           ]);
-          marks(last, node.querySelector('.bf-row-stamp'));
+          marks(last, node.querySelector('.bf-row-stamp'), 'an order line');
         }
+        if (pending) problems.push(`${name}: crates for ${pending.department} with no lines under them`);
       }
     }
 
+    const groups = new Set();
     for (const [id, rec] of seen) {
       const { order } = rec;
+      groups.add(groupOf(order));
       // In the owner's order — supplier, then name — never the file's.
       const want = printOrder(order.lines).map((line) => [line.quantity, line.product.name]);
       if (JSON.stringify(rec.rows) !== JSON.stringify(want)) {
@@ -304,13 +336,21 @@ await page.addInitScript(() => {
         problems.push(`${id}: markers ${JSON.stringify(rec.markers)}, wanted "${answer}" once on its first line`);
       }
       if (rec.continued.some((text) => text !== answer)) problems.push(`${id}: a continued marker is wrong`);
-      const count = bread ? Model.crateCount(order, rules) : { large: 0, small: 0 };
-      const wantCrates = count.large + count.small > 0 ? [[0, count]] : [];
-      if (JSON.stringify(rec.crates) !== JSON.stringify(wantCrates)) {
-        problems.push(`${id}: crates ${JSON.stringify(rec.crates)}, wanted ${JSON.stringify(wantCrates)}`);
+    }
+    // One run per group across every part, its orders' breads packed together:
+    // all their lines' room added up and rounded up once.
+    for (const key of groups) {
+      const members = Array.from(orders.values()).filter((order) => groupOf(order) === key);
+      const count = bread
+        ? Model.crateCount({ lines: members.flatMap((order) => order.lines) }, rules)
+        : { large: 0, small: 0 };
+      const want = count.large + count.small > 0 ? [count] : [];
+      const got = groupCrates.get(key) || [];
+      if (JSON.stringify(got) !== JSON.stringify(want)) {
+        problems.push(`${key}: crates ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
       }
     }
-    return { blocks, ids: Array.from(seen.keys()), problems: problems.slice(0, 8) };
+    return { blocks, groups: groups.size, ids: Array.from(seen.keys()), problems: problems.slice(0, 8) };
   };
 
   // A customer's block as it came out across pages, part by part: its
@@ -618,9 +658,12 @@ const bread = await page.evaluate(async ([bytes]) => {
   const kneipp = Model.routeTotal(route11)
     .columns.flatMap((c) => c.lines)
     .find((l) => /Kneipp/i.test(l.product.name));
+  // Crate labels, as the page counts them: each customer-department at a
+  // stop, its orders packed together (the owner, 2026-09-29).
   const c012 = routes
-    .flatMap((r) => r.orders)
-    .filter((s) => s.customer === 'Customer 012');
+    .flatMap((r) => r.stops)
+    .filter((s) => s.customer === 'Customer 012')
+    .flatMap((s) => Model.departmentGroups(s.orders));
 
   return {
     order: routes.map((r) => r.nickname),
@@ -638,10 +681,22 @@ const bread = await page.evaluate(async ([bytes]) => {
     ],
     kneippDots: kneipp.fullTens,
     kneippUnits: kneipp.units,
-    c012: [c012.length, c012.reduce((n, s) => n + Model.crateTotal(Model.crateCount(s, rules)), 0)],
+    c012: [
+      c012.length,
+      c012.reduce((n, g) => n + Model.crateTotal(Model.packedCrateCount(g.orders, rules)), 0),
+    ],
     pallets: routes
       .filter((r) => Model.routeCrates(r, rules) > Model.PALLET_THRESHOLD)
       .map((r) => r.nickname),
+    // Each route's crates counted order by order, as before, and packed per
+    // customer-department, as now — where the two differ.
+    crateShift: routes
+      .map((r) => [
+        r.nickname,
+        r.orders.reduce((n, o) => n + Model.crateTotal(Model.crateCount(o, rules)), 0),
+        Model.routeCrates(r, rules),
+      ])
+      .filter(([, before, now]) => before !== now),
     refusing: routes.flatMap((r) => r.orders).filter((o) => o.acceptAlternatives === false).length,
     stops: stopFigures(routes),
     c017: route11.stops
@@ -724,11 +779,19 @@ check(
 );
 
 // docs/print-spec.md §10: "Customer 012 is 13 crates, not nine." Nine is the
-// department count.
+// department count. Counted per customer-department now (the owner,
+// 2026-09-29), and each of Customer 012's nine departments has one order, so
+// the figure stands.
 same('Customer 012 is nine departments and thirteen crates', bread.c012, [9, 13]);
 
 // D25: more than 16 crates on a route and the page note asks for a pallet.
-same('six routes ask for a pallet', bread.pallets, ['3', '4', '5', '9', '11', '13']);
+// Packing a customer-department's orders together moves some routes' crate
+// counts (before and now, where they differ, in the detail).
+check(
+  'six routes ask for a pallet',
+  JSON.stringify(bread.pallets) === JSON.stringify(['3', '4', '5', '9', '11', '13']),
+  `${JSON.stringify(bread.pallets)}; crates order by order → packed: ${JSON.stringify(bread.crateShift)}`,
+);
 
 // ── 03 Configure ───────────────────────────────────────────────────────────
 
@@ -894,17 +957,26 @@ const sharedReport = (bytes, kind, named) =>
           .filter((s) => s.dataset.route === route)
           .flatMap((s) => Array.from(s.querySelectorAll('.bf-block')))
           .find((n) => n.querySelector('.bf-name').textContent === customer && n.querySelector('.bf-row-shared'));
+        // Heading lines with their crate glyphs — the name line, a boxed
+        // department, a sub-heading — and each order line as [id, quantity].
+        const glyphs = (node) =>
+          Array.from(node.querySelectorAll('.bf-crate'), (c) =>
+            c.classList.contains('bf-crate-full') ? 'full' : 'half',
+          );
         lines[`${route}: ${customer}`] = block
-          ? Array.from(block.querySelectorAll('.bf-dpt-sub, .bf-row')).map((node) =>
+          ? Array.from(block.querySelectorAll(':scope > .bf-head-line, .bf-row')).map((node) =>
               node.classList.contains('bf-dpt-sub')
-                ? ['dpt', node.querySelector('.bf-dpt-name').textContent]
-                : [
-                    Number(node.querySelector('.bf-order-id').textContent),
-                    Number(node.querySelector('.bf-qty').textContent),
-                    Array.from(node.querySelectorAll('.bf-crate'), (c) =>
-                      c.classList.contains('bf-crate-full') ? 'full' : 'half',
-                    ),
-                  ],
+                ? ['dpt', node.querySelector('.bf-dpt-name').textContent, glyphs(node)]
+                : node.classList.contains('bf-head-line')
+                  ? node.querySelector('.bf-name')
+                    ? ['name', glyphs(node)]
+                    : node.querySelector('.bf-dpt')
+                      ? ['box', node.querySelector('.bf-dpt-name').textContent, glyphs(node)]
+                      : ['line', glyphs(node)]
+                  : [
+                      Number(node.querySelector('.bf-order-id').textContent),
+                      Number(node.querySelector('.bf-qty').textContent),
+                    ],
             )
           : null;
       }
@@ -959,24 +1031,28 @@ same(
   [9, []],
 );
 same(
-  'route 11’s Customer 017: 7, 4 and 10 Kneippbrød with crates full, half, full, then Department 09',
+  // Crates per customer-department, packed together (the owner, 2026-09-29):
+  // the three no-department orders' 21 Kneippbrød are two full crates and a
+  // half, on the name line; Department 09's ten breads one full, on its
+  // sub-heading. No order line carries crates.
+  'route 11’s Customer 017: 7, 4 and 10 Kneippbrød under 2 full and 1 half, then Department 09 under 1 full',
   breadShared.lines['11: Customer 017'],
   [
-    [1000619017, 7, ['full']],
-    [1000619019, 4, ['half']],
-    [1000619029, 10, ['full']],
-    ['dpt', 'Department 09'],
-    [1000622398, 3, ['full']],
-    [1000622398, 7, []],
+    ['name', ['full', 'full', 'half']],
+    [1000619017, 7],
+    [1000619019, 4],
+    [1000619029, 10],
+    ['dpt', 'Department 09', ['full']],
+    [1000622398, 3],
+    [1000622398, 7],
   ],
 );
 same(
-  'Customer 092’s two identical orders each carry 2 full and 1 half, not 4 full and 1 half',
-  breadShared.lines['9: Customer 092'].filter((row) => row[2].length > 0),
-  [
-    [1000619939, 12, ['full', 'full', 'half']],
-    [1000619941, 12, ['full', 'full', 'half']],
-  ],
+  // Two orders of 22 breads each, packed together: 44 breads, four full
+  // crates and a half — where counted order by order they were six crates.
+  'Customer 092’s two identical orders share one count: 4 full and 1 half',
+  breadShared.lines['9: Customer 092'].filter((row) => row[0] === 'name' || row[0] === 'line'),
+  [['name', ['full', 'full', 'full', 'full', 'half']]],
 );
 // The owner, 2026-09-29: within each order, Sandnes Bakeri's breads first,
 // then Bakehuset's, each A to Z — never mixing two orders' lines. Held against
@@ -1288,11 +1364,12 @@ check(
   `${handBuilt.noteFields} of ${handBuilt.rows}`,
 );
 
-// An order's first line in a shared block carries its crates, marker and id,
-// which leaves the name its 30 mm and no more. A word longer than that used
-// to spill out of the name's box onto the crate glyphs — "…kker" printed over
-// the first crate — while the line itself measured as fitting. The name has
-// to fit its own box, not just the line.
+// An order's first line in a shared block carries its marker and id, and
+// the name keeps a 30 mm box beside them. A word longer than the room left
+// used to spill out of the name's box onto what sat beside it — "…kker"
+// printed over a crate, when crates were still per order — while the line
+// itself measured as fitting. The name has to fit its own box, not just the
+// line. The group's crates sit on the name line now (the owner, 2026-09-29).
 const crowdedFirstLine = await page.evaluate(() => {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:-10000px;top:0';
@@ -1312,8 +1389,8 @@ const crowdedFirstLine = await page.evaluate(() => {
       loaf(62, 'Loff', 'Bakehuset', 1),
     ]),
     order(1000000032, true, [loaf(63, 'Grovbrød', 'Sandnes Bakeri', 2)]),
-    // Too long even beside the compact crates: its crates and marker take a
-    // line of their own, which must carry its id.
+    // Too long even beside the marker and id: the marker takes a line of its
+    // own, which must carry the id.
     order(1000000033, true, [
       loaf(64, 'Surdeigsrundstykkermedkanelogkardemommeogrosiner', 'Sandnes Bakeri', 20),
       loaf(65, 'Grovbrød', 'Bakehuset', 1),
@@ -1371,9 +1448,9 @@ const crowdedFirstLine = await page.evaluate(() => {
   }
 });
 inspected('a shared first line whose bread name is one long word', crowdedFirstLine.seen);
-same('and no bread name spills out of its box onto the crates', crowdedFirstLine.spilled, []);
+same('and no bread name spills out of its box onto the marker', crowdedFirstLine.spilled, []);
 same('and its orders still print their own lines, crates and marker', crowdedFirstLine.read, []);
-same('a line of its own for crates and a marker carries its order’s id', crowdedFirstLine.extras, [
+same('a line of its own for a marker carries its order’s id', crowdedFirstLine.extras, [
   [1000000033],
 ]);
 // And that id stands in the id column, not at the block's right-hand end.
@@ -1809,7 +1886,8 @@ const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
       lineOrder: readOrderLines(all, orders),
       wide: {
         blocks: wideBlocks.length,
-        compact: !!firstRow(wideBlocks, 7201).querySelector('.bf-crates-compact'),
+        // The long department's 250-plus breads, on its sub-heading.
+        compact: wideBlocks.some((b) => b.querySelector('.bf-dpt-sub .bf-crates-compact')),
         refusing: firstRow(wideBlocks, 7202).querySelector('.bf-marker').textContent,
         subs: subs(wideBlocks),
       },
@@ -1832,7 +1910,7 @@ same('every order in the fixture’s shared blocks prints its own lines, crates 
 same('and every order in the fixture prints its lines by supplier, then name, across its parts',
   manyPrinted.lineOrder.problems, []);
 same(
-  'the wide customer is one block: ×N crates on its 250 breads, its refusing order false, its long department a sub-heading',
+  'the wide customer is one block: its long department a sub-heading carrying ×N crates for its 250-plus breads, its refusing order false',
   manyPrinted.wide,
   { blocks: 1, compact: true, refusing: 'want substitute: false', subs: [WIDE_DEPT] },
 );
@@ -1880,9 +1958,11 @@ same(
   partsOf(7106).slice(1).map((i) => [i, 7106, 1, 0]),
 );
 check(
-  'there is one crate run per order across all the parts',
-  tall.reduce((n, p) => n + p.crates, 0) === TALL_IDS.length,
-  `${tall.reduce((n, p) => n + p.crates, 0)} runs for ${TALL_IDS.length} orders`,
+  // One per department group: the orders with none, Kjøkken, Personalrom and
+  // SFO (the owner, 2026-09-29: crates per customer-department, packed).
+  'there is one crate run per department across all the parts',
+  tall.reduce((n, p) => n + p.crates, 0) === 4,
+  `${tall.reduce((n, p) => n + p.crates, 0)} runs for 4 departments`,
 );
 same('only the two refusing orders read false', tall.flatMap((p) => p.falses), [7107, 7111]);
 
@@ -1938,8 +2018,8 @@ check(
 // millimetre; now the part, and every part after it, is cut again with the
 // real tag. Forced here: the trial tag is empty, and the customer's name
 // fills its line, so every real "part N of M" needs a line of its own. A
-// shared block, because its heading holds nothing else: a one-order block
-// would move its marker onto the tag's line and come out no taller.
+// shared block, because its heading holds no marker: a one-order block would
+// move its marker onto the tag's line and come out no taller.
 const recutParts = await page.evaluate(() => {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:-10000px;top:0';

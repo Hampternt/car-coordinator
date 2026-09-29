@@ -298,8 +298,9 @@ const Sheet = (() => {
    * own, and takes the first that measures. The marker and the id travel
    * together; the crates may travel without them.
    *
-   * A block of several orders has no marks in its heading at all: each order
-   * carries its own on its first line (see orderRows()).
+   * A block of several orders carries only crates in its heading lines — one
+   * count per department group — and each order's marker on the order's own
+   * first line (see sharedBlock() and orderRows()).
    */
   function heading(order, settings, count, measure, tag) {
     const lines = headLines(order.customer, order.department, tag, measure);
@@ -380,28 +381,25 @@ const Sheet = (() => {
    *
    * Every line carries the order's id, small and quiet at its right, because
    * the id is what tells two orders' lines apart — printed whatever "Show the
-   * order ID" says. The order's first line also carries its crates and its
-   * marker, left of the id, so nothing about one order sits where it could be
-   * read as another's. Nothing is added across orders: each keeps its own
-   * lines, crates and marker.
+   * order ID" says. The order's first line also carries its marker, left of
+   * the id, so one order's answer is never read as another's. Its crates are
+   * not here: a customer-department's orders are packed together, so their
+   * one crate count sits on that group's heading line (see sharedBlock()).
    *
    * `segment` is the run of the order's lines this block carries. An order
    * cut across pages opens its next part with a quiet "continued", its marker
-   * and its id, and no crates: those print once, where the order starts.
-   * Without the word it would read as an order that needs no crate.
+   * and its id, so the lines above it on the page before are not taken for
+   * all it has.
    *
-   * The first line is measured, never assumed to fit: full glyphs, then the
-   * compact form (D24); on a check line, whose name does not otherwise wrap,
-   * then a wrapped name; and only then do the crates and marker take a line
-   * of their own under it. Any other check line whose name will not fit
-   * beside its id wraps the name too.
+   * The first line is measured, never assumed to fit, the bread name's own
+   * box included: on a check line, whose name does not otherwise wrap, the
+   * name wraps first; only then does the marker take a line of its own under
+   * it. Any other check line whose name will not fit beside its id wraps the
+   * name too.
    */
   function orderRows(order, settings, measure, segment, from = 0) {
     const bread = settings.kind === Model.BREAD;
     const continued = segment.from > 0;
-    const count =
-      bread && !continued ? Model.crateCount(order, settings.crates) : { large: 0, small: 0 };
-    const total = count.large + count.small;
     const cue = () => (continued ? element('span', 'bf-order-cont', 'continued') : null);
 
     return order.lines.slice(segment.from, segment.to).map((line, index) => {
@@ -418,45 +416,29 @@ const Sheet = (() => {
       }
 
       const mark = marker(order);
+      const lead = cue();
       stamp.insertBefore(mark, stamp.firstChild);
-      const leads = [];
-      if (total > 0 && crateRunWidth(total) <= 194) leads.push(() => crateRun(count));
-      if (total > 0) leads.push(() => crateCompact(count));
-      if (total === 0) leads.push(cue);
+      if (lead) stamp.insertBefore(lead, stamp.firstChild);
       // The line fitting is not enough: the name keeps a 30 mm box, and a
-      // word longer than the box spills out of it onto the crates beside it
+      // word longer than the box spills out of it onto the marker beside it
       // without the line overflowing at all.
       const name = row.querySelector('.bf-product');
-      const fits = () => {
-        for (const make of leads) {
-          const lead = make();
-          if (lead) stamp.insertBefore(lead, stamp.firstChild);
-          if (!measure.overflows(row) && !measure.overflows(name, row)) return true;
-          if (lead) stamp.removeChild(lead);
-        }
-        return false;
-      };
+      const fits = () => !measure.overflows(row) && !measure.overflows(name, row);
       if (fits()) return [row];
       if (!bread) {
         row.classList.add('bf-row-wrap');
         if (fits()) return [row];
       }
 
-      // A line of their own. The crates are never dropped: if even the
-      // compact form will not fit here, it prints anyway and the overflow is
-      // visible, rather than an order going out with no crate count.
+      // A line of their own, under the first, with the id too: a marker on a
+      // line of its own must still say whose it is.
       stamp.removeChild(mark);
+      if (lead) stamp.removeChild(lead);
       const extra = element(
         'div',
         `bf-head-line bf-order-extra${bread ? '' : ' bf-order-extra-check'}`,
       );
-      // The id too, like every line of the order: crates and a marker on a
-      // line of their own must still say whose they are.
-      const markStamp = append(element('span', 'bf-stamp'), cue(), marker(order), orderId(order));
-      extra.appendChild(markStamp);
-      if (total > 0 && !placeCrates(extra, count, markStamp, measure)) {
-        extra.insertBefore(crateCompact(count), markStamp);
-      }
+      extra.appendChild(append(element('span', 'bf-stamp'), cue(), marker(order), orderId(order)));
       return [row, extra];
     }).flat();
   }
@@ -464,17 +446,6 @@ const Sheet = (() => {
   /** All of an order's lines: the segment every uncut block carries. */
   function whole(order) {
     return { order, from: 0, to: order.lines.length };
-  }
-
-  /** An order's department groups, in the order the stop already sorts them. */
-  function departmentGroups(orders) {
-    const groups = [];
-    for (const order of orders) {
-      const last = groups[groups.length - 1];
-      if (last && last.department === order.department) last.orders.push(order);
-      else groups.push({ department: order.department, orders: [order] });
-    }
-    return groups;
   }
 
   /**
@@ -494,6 +465,23 @@ const Sheet = (() => {
   }
 
   /**
+   * A heading line with a group's crates at its right-hand end: full glyphs,
+   * then the compact form (D24), then a line of their own under it. The
+   * crates are never dropped — if even the compact form will not fit there,
+   * it prints anyway, and the overflow shows, rather than a group going out
+   * with no crate count.
+   *
+   * Done before the line joins its block: measuring a line lifts it into the
+   * measuring column.
+   */
+  function withCrates(line, count, measure) {
+    if (!count || placeCrates(line, count, null, measure)) return [line];
+    const spare = element('div', 'bf-head-line');
+    if (!placeCrates(spare, count, null, measure)) spare.appendChild(crateCompact(count));
+    return [line, spare];
+  }
+
+  /**
    * A stop of several orders: one customer at one street and one position in
    * the route, in one block.
    *
@@ -503,6 +491,15 @@ const Sheet = (() => {
    * when every order shares one; otherwise each department is a quiet
    * sub-heading. The zebra restarts under each.
    *
+   * Crates are counted per department group — the crate label is the
+   * customer and the department, and the warehouse packs a group's bread
+   * together whatever orders it came in (the owner, 2026-09-29; D16 counts
+   * them per order). Each group's one count sits at the right of its heading
+   * line: the name line for the orders with no department, the boxed
+   * department's line when every order shares it, or the group's
+   * sub-heading. A block cut across pages prints a group's crates once, on
+   * the part where its first order starts.
+   *
    * `segments` are the runs of the orders' lines this block carries: every
    * order whole, or one part's share of a block cut across pages. A part that
    * starts inside a department opens with that department's sub-heading
@@ -510,9 +507,29 @@ const Sheet = (() => {
    */
   function sharedBlock(stop, segments, settings, measure, tag) {
     const block = element('article', 'bf-block');
-    const groups = departmentGroups(stop.orders);
+    const groups = Model.departmentGroups(stop.orders);
     const shared = groups.length === 1 ? groups[0].department : null;
-    for (const line of headLines(stop.customer, shared, tag, measure)) block.appendChild(line);
+
+    /** A group's crates, or null: none on a freezer sheet, none but where it starts. */
+    const cratesOf = (group) => {
+      if (!group || settings.kind !== Model.BREAD) return null;
+      const starts = segments.some((segment) => segment.order === group.orders[0] && segment.from === 0);
+      if (!starts) return null;
+      const count = Model.packedCrateCount(group.orders, settings.crates);
+      return count.large + count.small > 0 ? count : null;
+    };
+
+    // The heading's own group: the one department every order shares, boxed
+    // on the last heading line; or the orders with no department, on the
+    // name line. A block whose orders all have departments of their own
+    // keeps its crates on the sub-headings.
+    const heads = headLines(stop.customer, shared, tag, measure);
+    const headGroup = shared || groups[0].department === null ? groups[0] : null;
+    const target = shared ? heads.length - 1 : 0;
+    heads.forEach((line, index) => {
+      const count = index === target ? cratesOf(headGroup) : null;
+      for (const node of withCrates(line, count, measure)) block.appendChild(node);
+    });
 
     let lines = null;
     let department;
@@ -527,7 +544,12 @@ const Sheet = (() => {
             `order ${segment.order.id} has no department but would print under another one`,
           );
         }
-        if (department && !shared) block.appendChild(departmentSubHeading(department));
+        if (department && !shared) {
+          const group = groups.find((candidate) => candidate.department === department);
+          for (const node of withCrates(departmentSubHeading(department), cratesOf(group), measure)) {
+            block.appendChild(node);
+          }
+        }
         lines = block.appendChild(element('div', 'bf-lines'));
         from = 0;
       }
@@ -641,7 +663,7 @@ const Sheet = (() => {
    * - only an order taller than a part of its own is cut between its lines,
    *   and its first lines take whatever room is left where it starts;
    * - every part is built exactly as it will print and measured before it is
-   *   accepted, because parts differ — only the one an order starts on
+   *   accepted, because parts differ — only the part a group starts on
    *   carries its crates. Its tag is a stand-in as wide as the stop could
    *   ever need: no stop has more parts than lines, so `part N of N` for N
    *   lines is never outgrown.

@@ -363,13 +363,15 @@ const Model = (() => {
    * printingLines()). What is folded here stays exactly as the file had it.
    *
    * A row is one product on one order; everything else on it belongs to the
-   * order and is repeated onto each line. One order is one crate label (D16):
-   * its crates, its lines and its substitute answer are its own.
+   * order and is repeated onto each line. Its lines and its substitute answer
+   * are its own.
    *
-   * D16 also makes one order one stop and one block. The web port departs
-   * from that, at the owner's request (2026-09-29): a customer's orders at
-   * one stop share a block, and route() groups them. The Rust app still
-   * prints one block per order.
+   * D16 makes one order one stop, one block and one crate label. The web
+   * port departs from all three, at the owner's request (2026-09-29): a
+   * customer's orders at one stop share a block, and route() groups them;
+   * and the orders there that share a department share a crate label and one
+   * crate count (departmentGroups(), packedCrateCount()). The Rust app still
+   * prints one block, and one crate count, per order.
    */
   function fold(rows) {
     const orders = [];
@@ -679,7 +681,9 @@ const Model = (() => {
   }
 
   /**
-   * How many crates of each size an order needs, in the fewest containers.
+   * How many crates of each size an order needs, in the fewest containers —
+   * or anything else with `lines`, such as a group of orders packed together
+   * (see packedCrateCount()).
    *
    * A remainder that fits a small crate takes one; a remainder too big for one
    * takes a large crate rather than two smalls.
@@ -705,12 +709,46 @@ const Model = (() => {
   const PALLET_THRESHOLD = 16;
 
   /**
-   * Every crate a route needs, all orders summed — never per stop, because
-   * two orders at one stop still pack into crates of their own.
+   * A stop's orders grouped by department, in the order the stop already
+   * sorts them: the orders with no department first, then each department.
+   *
+   * One group is one crate label — the customer and the department — and one
+   * crate count (the owner, 2026-09-29). D16 makes every order its own crate
+   * label; the web port departs from it, because the warehouse packs a
+   * customer-department's bread together whatever orders it came in.
+   */
+  function departmentGroups(orders) {
+    const groups = [];
+    for (const order of orders) {
+      const last = groups[groups.length - 1];
+      if (last && last.department === order.department) last.orders.push(order);
+      else groups.push({ department: order.department, orders: [order] });
+    }
+    return groups;
+  }
+
+  /**
+   * The crates a group of orders needs packed together: every line's room
+   * added up first and rounded up once, so two half-slot breads from two
+   * orders share a slot rather than taking one each. For one order it is
+   * that order's crateCount().
+   */
+  function packedCrateCount(orders, rules) {
+    return crateCount({ lines: orders.flatMap((order) => order.lines) }, rules);
+  }
+
+  /**
+   * Every crate a route needs: each stop's department groups, each packed
+   * together, summed. The pallet call follows it (D25).
    */
   function routeCrates(route, rules) {
-    return route.orders.reduce(
-      (sum, order) => sum + crateTotal(crateCount(order, rules)),
+    return route.stops.reduce(
+      (sum, stop) =>
+        sum +
+        departmentGroups(stop.orders).reduce(
+          (count, group) => count + crateTotal(packedCrateCount(group.orders, rules)),
+          0,
+        ),
       0,
     );
   }
@@ -842,6 +880,8 @@ const Model = (() => {
     spokenSize,
     slots,
     crateCount,
+    departmentGroups,
+    packedCrateCount,
     crateTotal,
     PALLET_THRESHOLD,
     routeCrates,

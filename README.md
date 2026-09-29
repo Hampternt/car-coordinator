@@ -20,9 +20,10 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 The port departs from that log in three places, each at the owner's request, and the code says so wherever the D-number is cited. The Rust app is unchanged.
 
 - **The substitute marker has one look** (D8, D21). Every order prints `want substitute: true` or `want substitute: false` in the same quiet type, with only the word **false** in bold. The Rust app prints false in loud capitals.
-- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Five more departures follow from this:
+- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. No order's lines are added to another's: every line carries its order id, and each order keeps its own marker on its first line. Six more departures follow from this:
   - A department no longer prints as a block of its own. It shares its customer's block, still named, under the customer's heading (D7).
-  - Each order has its own crates, marker and id, not one column per block (D20).
+  - Crates are counted per customer and department at a stop, not per order (D16). The owner decided this on 2026-09-29, because the warehouse packs that group's bread together whatever orders it came in. The group's lines are added up and rounded up once, so two orders can share a crate. The count prints at the right of the group's heading: the customer's name, or its department. The Rust app counts crates per order.
+  - Each order has its own marker and id, and each department its own crates, not one column per block (D20).
   - Ties in the delivery order are broken by the customer before the department, so a customer's orders sit together (D2).
   - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
   - On the freezer sheet, a check line in such a block wraps its bread name when the marker and id beside it would push the line off the paper. The freezer log says nothing on a check line wraps (F8).
