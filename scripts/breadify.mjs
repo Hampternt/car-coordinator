@@ -1905,6 +1905,63 @@ check(
   JSON.stringify(giant.slice(1).map((p) => [p.markers, p.headIds])),
 );
 
+// A part cut against one tag and printed with a wider one can come out over
+// its page. That once refused the whole print over a fraction of a
+// millimetre; now the part, and every part after it, is cut again with the
+// real tag. Forced here: the trial tag is empty, and the customer's name
+// fills its line, so every real "part N of M" needs a line of its own. A
+// shared block, because its heading holds nothing else: a one-order block
+// would move its marker onto the tag's line and come out no taller.
+const recutParts = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const name = 'Ekstraordinært Langtnavngitt Storkjøkken og Kantinedrift Avdeling Nord '
+    .repeat(3)
+    .trim();
+  const loaf = (i) => ({
+    product: { id: 700 + i, name: `Brød ${String(i + 1).padStart(3, '0')}`, sku: String(i), supplier: 'Sandnes Bakeri' },
+    quantity: 2,
+  });
+  const order = (id, from) => ({
+    id, customer: name, department: null, deliveryStreet: 'Street 41', route: '1',
+    sequence: 100, acceptAlternatives: true, comment: null,
+    lines: Array.from({ length: 75 }, (_, i) => loaf(from + i)),
+  });
+  const orders = [order(1000000041, 0), order(1000000042, 75)];
+  try {
+    const sheets = Sheet.paginate(
+      Model.route('1', orders),
+      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+      { dates: null, source: 'recut', routeStops: 1, routeLines: 150 },
+      { host, partTagStandIn: '' },
+    );
+    for (const sheet of sheets) host.append(sheet);
+    return {
+      refused: null,
+      seen: inspectSheets(sheets),
+      parts: readParts(sheets, name),
+      read: readSharedBlocks(
+        sheets,
+        new Map(orders.map((o) => [o.id, o])),
+        Model.defaultCrateRules(),
+        true,
+      ).problems,
+    };
+  } catch (error) {
+    return { refused: String(error.message) };
+  } finally {
+    host.remove();
+  }
+});
+check('a part that comes out over its page is cut again, not refused', recutParts.refused === null,
+  recutParts.refused || '');
+if (recutParts.refused === null) {
+  inspected('a block re-cut with its real tags', recutParts.seen);
+  partsHold('a block re-cut with its real tags', recutParts.parts);
+  same('and its orders still print their own 150 lines once each, in order', recutParts.read, []);
+}
+
 // ── Changes to the export's own shape ──────────────────────────────────────
 //
 // The format is unlikely to change, which is why it is worth knowing what

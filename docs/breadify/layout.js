@@ -643,18 +643,21 @@ const Sheet = (() => {
    *   ever need: no stop has more parts than lines, so `part N of N` for N
    *   lines is never outgrown.
    *
-   * A final part that still comes out over its page, holding more than one
-   * line, is a cut this code got wrong, and it throws: the Print step then
-   * says the sheets could not be laid out, rather than printing past the
-   * foot of the paper.
+   * The parts are then built again with their real tags and measured once
+   * more. One that comes out over its page after all is not a reason to
+   * print nothing: it and every part after it are cut again, measured with
+   * the real tags, until each part fits (see recut()). Only a single line
+   * that cannot fit on an empty part throws — there is no cut that helps.
    *
    * Returns one piece when the block fits, which is every real stop in both
    * sample exports — this costs nothing until a file needs it.
    *
    * `first` is the room on the part that opens the stop: less than `limit`
    * right under the unsequenced flag, which must never end a page alone.
+   * `standIn` replaces the trial tag; only the test suite sets it, to force
+   * a real tag wider than the one the parts were cut against.
    */
-  function stopPieces(stop, settings, measure, limit, first = limit) {
+  function stopPieces(stop, settings, measure, limit, first = limit, standIn = null) {
     const node = stopBlock(stop, settings, measure);
     const height = measure.height(node);
     const lines = stop.orders.reduce((sum, order) => sum + order.lines.length, 0);
@@ -662,72 +665,100 @@ const Sheet = (() => {
       return [{ node, height, keepWithNext: false, over: height > limit }];
     }
 
-    const parts = [];
-    let current = [];
-    const close = () => {
-      parts.push(current);
-      current = [];
-    };
-    const room = () => (parts.length === 0 ? first : limit);
-    const standIn = `part ${lines} of ${lines}`;
-    let lastTake = lines;
-    const fits = (segments, cap) =>
-      measure.height(stopBlock(stop, settings, measure, segments, standIn)) <= cap;
+    const capOf = (at) => (at === 0 ? first : limit);
+    const build = (segments, tag) => stopBlock(stop, settings, measure, segments, tag);
+    const trialTag = standIn === null ? `part ${lines} of ${lines}` : standIn;
+    let parts = cut(stop.orders.map(whole), () => trialTag, 0);
 
-    for (const order of stop.orders) {
-      const all = whole(order);
-      if (fits([...current, all], room())) {
-        current.push(all);
-        continue;
+    // Built with their real tags. The part count is known now, so each part
+    // can be measured exactly as it will print. A count that moves in a
+    // re-cut changes every tag, so every part is measured again; tags only
+    // widen as the count grows and narrow as it shrinks, so the count moves
+    // one way until it settles, and never past the line count.
+    for (let round = 0; round <= lines; round += 1) {
+      const count = parts.length;
+      const tagOf = (at) => `part ${at + 1} of ${count}`;
+      const built = parts.map((segments, at) => {
+        const part = build(segments, tagOf(at));
+        return { node: part, height: measure.height(part), at };
+      });
+      const over = built.find((piece) => piece.height > capOf(piece.at));
+      if (!over) {
+        return built.map((piece) => ({ node: piece.node, height: piece.height, keepWithNext: false }));
       }
-      if (current.length > 0 && fits([all], limit)) {
-        close();
-        current.push(all);
-        continue;
-      }
-      // Taller than a part of its own: cut between its lines.
-      let from = 0;
-      while (from < order.lines.length) {
-        const cap = room();
-        const take = mostLines(
-          order.lines.length - from,
-          (count) => fits([...current, { order, from, to: from + count }], cap),
-          lastTake,
-        );
-        if (take > 0) lastTake = take;
-        if (take === 0 && current.length > 0) {
-          close();
+      parts = [...parts.slice(0, over.at), ...recut(parts.slice(over.at), tagOf, over.at)];
+    }
+    throw new Error(`the block for ${stop.customer} could not be cut to fit its pages`);
+
+    /**
+     * Cuts `queue` — runs of the stop's lines, in order — into parts from
+     * part `start` on, measuring each part with `tagOf(its index)`.
+     */
+    function cut(queue, tagOf, start) {
+      const done = [];
+      let current = [];
+      let lastTake = lines;
+      const at = () => start + done.length;
+      const close = () => {
+        done.push(current);
+        current = [];
+      };
+      const fits = (segments, index) =>
+        measure.height(build(segments, tagOf(index))) <= capOf(index);
+
+      for (const segment of queue) {
+        if (fits([...current, segment], at())) {
+          current.push(segment);
           continue;
         }
-        // Not even one line fits an empty part: the furniture has eaten the
-        // page, and one line over is the least wrong thing to print.
-        const to = from + Math.max(take, 1);
-        current.push({ order, from, to });
-        from = to;
-        if (from < order.lines.length) close();
+        if (current.length > 0 && fits([segment], at() + 1)) {
+          close();
+          current.push(segment);
+          continue;
+        }
+        // Taller than a part of its own: cut between its lines.
+        let from = segment.from;
+        while (from < segment.to) {
+          const index = at();
+          const take = mostLines(
+            segment.to - from,
+            (n) => fits([...current, { order: segment.order, from, to: from + n }], index),
+            lastTake,
+          );
+          if (take === 0 && current.length > 0) {
+            close();
+            continue;
+          }
+          if (take === 0) {
+            throw new Error(
+              `a line for ${stop.customer} does not fit on a page even on its own, ` +
+                'so no cut can print it',
+            );
+          }
+          lastTake = take;
+          current.push({ order: segment.order, from, to: from + take });
+          from += take;
+          if (from < segment.to) close();
+        }
       }
+      if (current.length > 0) close();
+      return done;
     }
-    if (current.length > 0) close();
 
-    return parts.map((segments, index) => {
-      const part = stopBlock(
-        stop,
-        settings,
-        measure,
-        segments,
-        `part ${index + 1} of ${parts.length}`,
-      );
-      const partHeight = measure.height(part);
-      const cap = index === 0 ? first : limit;
-      const held = segments.reduce((sum, segment) => sum + segment.to - segment.from, 0);
-      if (partHeight > cap && held > 1) {
-        throw new Error(
-          `the block for ${stop.customer} would still run past the foot of a page ` +
-            `when cut (part ${index + 1} of ${parts.length})`,
-        );
+    /**
+     * The parts from one that came out over its page, cut again with the
+     * real tags. Runs of one order split across those parts are joined first,
+     * so the order is treated as whole wherever it now fits whole.
+     */
+    function recut(rest, tagOf, start) {
+      const queue = [];
+      for (const segment of rest.flat()) {
+        const last = queue[queue.length - 1];
+        if (last && last.order === segment.order && last.to === segment.from) last.to = segment.to;
+        else queue.push({ ...segment });
       }
-      return { node: part, height: partHeight, keepWithNext: false, over: partHeight > cap };
-    });
+      return cut(queue, tagOf, start);
+    }
   }
 
   /**
@@ -1215,7 +1246,9 @@ const Sheet = (() => {
    *
    * `options.wordmark` is the path to the Matvare Expressen mark, and
    * `options.host` an element to measure inside (the measuring column is
-   * removed again before this returns).
+   * removed again before this returns). `options.partTagStandIn` is for the
+   * test suite alone: the tag a block cut across pages is first measured
+   * with, set narrower than the real one to prove the re-cut.
    */
   function paginate(route, settings, context, options) {
     const wordmark = (options && options.wordmark) || 'assets/matvare-expressen.svg';
@@ -1271,6 +1304,9 @@ const Sheet = (() => {
       // its own.
       const pieces = [];
       let flagged = false;
+      // Only the test suite sets this: see stopPieces().
+      const standIn =
+        options && typeof options.partTagStandIn === 'string' ? options.partTagStandIn : null;
       for (const stop of route.stops) {
         let first = limit;
         if (!Model.isSequenced(stop) && !flagged) {
@@ -1280,7 +1316,7 @@ const Sheet = (() => {
           pieces.push({ node: flag, height: flagHeight, keepWithNext: true });
           first = limit - flagHeight;
         }
-        pieces.push(...stopPieces(stop, settings, measure, limit, first));
+        pieces.push(...stopPieces(stop, settings, measure, limit, first, standIn));
       }
       pieces.push(...totalPieces(route, settings, measure, limit));
 

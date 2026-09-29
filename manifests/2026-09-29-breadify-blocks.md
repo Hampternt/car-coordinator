@@ -423,6 +423,12 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 - [x] **R15. Exact spelling.** Two spellings of one customer → two stops, both names printed.
 - [x] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
 
+Follow-ups from the coordinator after the review fixes:
+
+- [x] **F1. Re-cut instead of refusing.** R5's throw becomes a re-cut: a final part over its cap, built with its real tag, is searched again with the real tag, and the parts after it are rebuilt. Only a single line that cannot fit an empty part throws. A test forces a real tag wider than the stand-in. *Done when:* the forced case prints clean, it fails under the old throw, and the samples stay 28 and 20 sheets.
+- [ ] **F2. R2's headline fits every case.** "Order ID is missing or not a valid number on row N", with the two pinned strings updated.
+- [ ] **F3. The spare line's id in the id column.** Pad the right of `.bf-order-extra`; refresh `long-name-and-spare-line-with-id.png`.
+
 ## Owner questions
 
 **Answered by the owner, 2026-09-29, in their words. These override the recommendations below where they differ.**
@@ -610,3 +616,7 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
   - Sheet counts unchanged: bread 28, freezer 20 (route 13 on one sheet).
   - Look files regenerated in `breadify-look/`, where nothing on the samples changed visibly. New crop `long-name-and-spare-line-with-id.png` shows the R1 and R4 hand-built case: the long name wraps beside compact crates, and a spare line carries its order's id.
   - Seen, not changed: a spare line's id sits at the block's right edge, about 14 mm right of the id column on the lines, which stop before the tick boxes. It could be aligned with a right padding on `.bf-order-extra`. Left for the coordinator, since no finding asked for it.
+- 2026-09-29 · **F1 done** (commit "Cut a part again rather than refuse the print"). `stopPieces` cuts as before with the stand-in tag, then builds every part with its real "part N of M" and measures it. If any part is over its cap, that part and every part after it are cut again (`recut`), measured with the real tags. Runs of one order split across those parts are joined first. Every part is then measured again, since a changed count changes every tag. Tags only widen as the count grows and narrow as it shrinks, so the count moves one way and settles; the loop is bounded by the line count, with a throw after it that should never be reached. The old "one line over" fallback is gone: a single line that cannot fit an empty part now throws, as the one true impossibility. New `options.partTagStandIn`, set only by the suite, overrides the trial tag.
+  - **Test:** a shared stop of two 75-line orders under a name that wraps its line, cut with an empty trial tag, so every real tag needs a line of its own. It prints 5 parts with a clean inspection (13.4 mm clearance), one heading and tag each, and each order's lines once in order. A first version used a one-order block and never came out over: that block's real tag line also takes the marker, which the untagged trial had put on a spare line, so the heights matched. The switch to a shared block fixed that.
+  - **Bite:** with the re-cut swapped back for a throw (layout.js backed up and restored), the test fails with "a part came out over its page".
+  - Samples still 28 and 20 sheets. Gate: check.sh OK; test:breadify all passed, 323 ok.
