@@ -421,7 +421,7 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 - [x] **R13. The customer tie-break.** Kafé A (21, 23) and Kafé B (22) at one street and sequence → stops A:21+23, B:22 and one Kafé A block.
 - [x] **R14. Sequence in the key.** Sequences 5 and 0 → two stops with a flag between; 5 and 6 → two stops.
 - [x] **R15. Exact spelling.** Two spellings of one customer → two stops, both names printed.
-- [ ] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
+- [x] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
 
 ## Owner questions
 
@@ -598,3 +598,4 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 
   With the sequence taken out of `sameStop` (scratch model copy) both merged, into "Kafé C:31+32" and "Kafé D:33+34", so the checks bite. Test only. Gate: check.sh OK; test:breadify all passed, 310 ok.
 - 2026-09-29 · **R15 done** (commit "Check two spellings of a customer stay two stops"). New `handRoute` check: "Kafé Sentrum" (41) and "Kafe Sentrum" (42) at one street and position are stops ["Kafe Sentrum:42", "Kafé Sentrum:41"], and both names print. With `sameStop` comparing names loosely (a scratch model copy using `localeCompare(…, 'nb', {sensitivity: 'base'})`) they merged into "Kafe Sentrum:42+41", so the check bites. Test only. Gate: check.sh OK; test:breadify all passed, 311 ok.
+- 2026-09-29 · **R16 done** (commit "Check where a shared line's order id sits, and its size"). `sharedReport` measures every shared line on the preview. The id's left edge must be at or right of the bread name's right edge, its right edge at or left of the tick boxes, and its font size equal to a one-order block's stamp id. Bread: 79 lines. Freezer: 63 lines. Both at 11.0667px (8.3 pt), none wrong. A throwaway CSS mutation giving shared ids 10 pt failed both days (13.3333px); sheet.css was reverted after. Test only. Gate: check.sh OK; test:breadify all passed, 313 ok.

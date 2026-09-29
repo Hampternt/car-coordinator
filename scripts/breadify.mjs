@@ -909,7 +909,23 @@ const sharedReport = (bytes, kind, named) =>
           : null;
       }
       const ids = Array.from(document.querySelectorAll('#preview .bf-row-shared .bf-order-id'));
+      // The id sits after the bread name and before the tick boxes, at the
+      // size a one-order block's id prints at.
+      const single = document.querySelector('#preview .bf-block > .bf-head-line .bf-stamp .bf-order-id');
+      const singleSize = single ? getComputedStyle(single).fontSize : null;
+      const placement = Array.from(document.querySelectorAll('#preview .bf-row-shared')).flatMap((row) => {
+        const idNode = row.querySelector('.bf-row-stamp .bf-order-id');
+        const id = idNode.getBoundingClientRect();
+        const name = row.querySelector('.bf-product').getBoundingClientRect();
+        const ticks = (row.querySelector('.bf-ticks') || row.lastElementChild).getBoundingClientRect();
+        const wrong = [];
+        if (id.left < name.right - 0.5) wrong.push('starts inside the name');
+        if (id.right > ticks.left + 0.5) wrong.push('runs into the tick boxes');
+        if (getComputedStyle(idNode).fontSize !== singleSize) wrong.push(getComputedStyle(idNode).fontSize);
+        return wrong.length ? [`${idNode.textContent}: ${wrong.join(', ')}`] : [];
+      });
       return {
+        idPlacement: { rows: ids.length, singleSize, wrong: placement.slice(0, 5) },
         read,
         lineOrder,
         apart,
@@ -989,6 +1005,15 @@ check(
 same('an order id in a shared block stays quiet: grey, never bold', breadShared.ink, [
   'rgb(156, 156, 156) 400',
 ]);
+
+/** Every shared line's id after its bread name, before its tick boxes, at the one-order size. */
+const idsInPlace = (what, placement) =>
+  check(
+    `${what}: every shared line's id sits after the name, before the boxes, at the one-order size`,
+    placement.rows > 0 && placement.singleSize !== null && placement.wrong.length === 0,
+    JSON.stringify(placement),
+  );
+idsInPlace('the bread day', breadShared.idPlacement);
 check(
   'a department sub-heading is neither a bread line nor a block',
   breadShared.subs > 0 && breadShared.subsMisclassed === 0,
@@ -1556,6 +1581,7 @@ same(
   [freezerShared.read.blocks, freezerShared.apart],
   [10, []],
 );
+idsInPlace('the freezer day', freezerShared.idPlacement);
 // Customer 159's two orders share Department 38, so the boxed department stays
 // in the heading and nothing divides the block. Customer 017 on route 4 mixes
 // a refusing order with three that take substitutes.
