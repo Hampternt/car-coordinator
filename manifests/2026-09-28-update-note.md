@@ -581,3 +581,10 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Re-record:** the same text rescued with `during: '0.0.1'` gives, after a reload, one rescue with `during` V and a new `t`. The re-record resets the time.
   - **No-room fallback:** storage filled to the last bytes with 8-byte grains, an old rescue of the same text. After a reload, `carcoord:archives` is byte-identical and the warning still says "An untouched copy is kept". That can only pass through the fallback.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 492 ok, 0 FAIL.
+- **2026-09-29, final pack gate after the review fixes and the fix 1/fix 4 conflict: green, on system Chrome.**
+  - `npm test`: exit 0. It ends "VERSIONS OK", the car suite "all checks passed" (492 ok, 0 FAIL), and Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 15 files.
+  - `npm run upgrade` from `v0.2.4`: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+  - `npm run upgrade` from `dev` at 0f9b59a: exit 0, 47 ok, "upgrade check passed: 0.2.5 to 0.3.0".
+  - The scratch worktrees are removed.
+  - **Flaky, and older than this pack:** "a disarm leaves the page where the user scrolled it — 285" (e5c8472, 2026-09-24) failed on 2 of about 20 car-suite runs this session and passed on each rerun. Not investigated.
