@@ -257,7 +257,7 @@ Written identically in the `updates.js` header, the README and the container's G
 
   It runs first in `npm test` and inside `check.sh`.
   *Done when:* both pass at 0.2.5. A tried (not committed) mismatch in `tauri.conf.json` fails both and names the file. 0.10.0 above 0.9.0 passes, and the reverse fails.
-- [ ] **2. Store: prefs, load trouble, saved text, version.**
+- [x] **2. Store: prefs, load trouble, saved text, version.**
   - `Store.pref` / `setPref`, with 0.2.5's marker rebuilt on them (same key).
   - `loadTrouble()`.
   - `savedText()`.
@@ -401,3 +401,4 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Upgrade scenario (e)** serves the old `index.html` *and* the old `store.js`, `share.js`, `qr.js` and `style.css`, with the new `app.js`. Only then do "no archive on the mixed open" and "the archive comes on the first fully fresh open" both hold.
   - **`scripts/serve.mjs`** gains an optional `root` for item 11, which is not in Design A's list.
 - Item 1 done, bd7bf31. `scripts/versions.mjs`, run in `check.sh` and first in `npm test`. Gate: `check.sh` CHECK OK ("the five version places agree at 0.2.5", "the identifier is no.m.carcoordinator, with no scheme option"). Tried and reverted: `tauri.conf.json` at 0.2.6 fails both `versions.mjs` and `check.sh`, naming `src-tauri/tauri.conf.json`. In a scratch copy at 0.10.0, `updates.js` listing 0.10.0 above 0.9.0 passes, and the reverse fails.
+- Item 2 done, c9472dd. `pref()` returns `undefined` when storage can't be read (not `null`), and `setPref()` returns whether it stored, so `needsCheck` still fails closed and `markCheck` still falls back to memory. `loadTrouble` is set in `readLocal` only. `init` keeps `version`, but nothing reads it yet: Design A gives a rescue `from: null, to: null`. Gate: `check.sh` OK. Car suite on system Chrome: "all checks passed", every 0.2.5 save-file case included. The counts weren't captured on this run.
