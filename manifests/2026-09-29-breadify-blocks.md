@@ -418,7 +418,7 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 - [x] **R10. One quiet style.** One [family, weight 500, size, colour, no transform, style] across every marker; the `<b>` matches except weight 700.
 - [x] **R11. A shared block's heading holds nothing at its right.** Whitelisted head-line children; no crates, marker, stamp or id.
 - [x] **R12. The crate count on a cut one-order block.** Part 1's crates equal `crateCount` (90 large for one-giant-stop; the crowded route too).
-- [ ] **R13. The customer tie-break.** Kafé A (21, 23) and Kafé B (22) at one street and sequence → stops A:21+23, B:22 and one Kafé A block.
+- [x] **R13. The customer tie-break.** Kafé A (21, 23) and Kafé B (22) at one street and sequence → stops A:21+23, B:22 and one Kafé A block.
 - [ ] **R14. Sequence in the key.** Sequences 5 and 0 → two stops with a flag between; 5 and 6 → two stops.
 - [ ] **R15. Exact spelling.** Two spellings of one customer → two stops, both names printed.
 - [ ] **R16. Order id size and placement.** In every shared row the id sits between the name and the tick boxes, at the one-order id's font size.
@@ -591,3 +591,4 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
   - the 250-line crowded route's part 1 reads {300 large, 0 small}, equal to its `crateCount`.
 
   Before, the checks only counted crate runs, so part 1 showing just its own lines' crates would have passed. Test only. Gate: check.sh OK; test:breadify all passed, 306 ok.
+- 2026-09-29 · **R13 done** (commit "Check the customer tie-break keeps a customer's orders together"). New page helper `handRoute([id, customer, street, sequence]…)` groups and lays out a hand-made route, returning its stops and its sheets' bodies. Kafé A (21, 23) and Kafé B (22), all at Torget 1 and sequence 700, give stops ["Kafé A:21+23", "Kafé B:22"] and one Kafé A block. With the customer taken out of `printingPosition` (scratch model copy, Node, `stopkey.cjs`) the same orders give ["Kafé A:21", "Kafé B:22", "Kafé A:23"], so the check bites. The sample days never exercised this: re-sorting them by D2's key moves nothing. Test only. Gate: check.sh OK; test:breadify all passed, 308 ok.

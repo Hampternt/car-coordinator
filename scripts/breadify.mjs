@@ -393,6 +393,43 @@ await page.addInitScript(() => {
       .map(([name]) => values[name]);
   };
 
+  // A hand-made route of one-line orders, [id, customer, street, sequence]
+  // each, grouped and laid out: its stops as "customer:id+id", and what its
+  // sheets' bodies hold in order — a block by its name, the flag as "flag".
+  window.handRoute = (specs) => {
+    const orders = specs.map(([id, customer, deliveryStreet, sequence]) => ({
+      id, customer, department: null, deliveryStreet, route: '1', sequence,
+      acceptAlternatives: true, comment: null,
+      lines: [{ product: { id: 1, name: 'Grovbrød', sku: '1', supplier: 'Sandnes Bakeri' }, quantity: 2 }],
+    }));
+    const route = Model.route('1', orders);
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-10000px;top:0';
+    document.body.append(host);
+    try {
+      const sheets = Sheet.paginate(
+        route,
+        { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+        { dates: null, source: 'hand', routeStops: route.stops.length, routeLines: orders.length },
+        { host },
+      );
+      return {
+        stops: route.stops.map((s) => `${s.customer}:${s.orders.map((o) => o.id).join('+')}`),
+        body: sheets.flatMap((sheet) =>
+          Array.from(sheet.querySelector('.bf-body').children, (node) =>
+            node.classList.contains('bf-flag')
+              ? 'flag'
+              : node.classList.contains('bf-block')
+                ? node.querySelector('.bf-name').textContent
+                : node.className,
+          ),
+        ),
+      };
+    } finally {
+      host.remove();
+    }
+  };
+
   // How a day's orders group into stops, and which routes the customer's
   // place in the tie-break reorders against D2's own key.
   window.stopFigures = (routes) => {
@@ -1041,6 +1078,24 @@ same(
   [sequenceLeak.stops, sequenceLeak.named],
   [[1, 1, 2], ['Stop 0', 'Stop 1', 'Stop 2']],
 );
+
+// ── What makes a stop ──────────────────────────────────────────────────────
+
+// The customer comes before the order id in the tie-break. Without it, Kafé
+// A's orders 21 and 23 would sort either side of Kafé B's 22 at the same
+// street and position, and print as two Kafé A blocks.
+const tieBreak = await page.evaluate(() =>
+  handRoute([
+    [21, 'Kafé A', 'Torget 1', 700],
+    [22, 'Kafé B', 'Torget 1', 700],
+    [23, 'Kafé A', 'Torget 1', 700],
+  ]),
+);
+same('one customer’s orders at a shared street and position sit together', tieBreak.stops, [
+  'Kafé A:21+23',
+  'Kafé B:22',
+]);
+same('and print as one Kafé A block', tieBreak.body.filter((n) => n === 'Kafé A'), ['Kafé A']);
 
 // acceptance check 7: names print exactly as the file has them (D14).
 const truncated = sheets
