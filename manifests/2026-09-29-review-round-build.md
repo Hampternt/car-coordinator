@@ -44,7 +44,7 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **At the end of the whole run, once:**
   - `CHROMIUM_PATH=/usr/bin/google-chrome npm test`;
   - `npm run screens`;
-  - `npm run upgrade` from `v0.2.4`;
+  - `npm run upgrade` from `v0.2.4`, the build live on `main`. This is the only upgrade check (owner, 2026-09-29): users go straight from what `main` serves to `dev`'s tip, so versions in between on `dev` are never compared. It overrides each part's own "Upgrade check in the pack gate". The same check runs again before `dev` → `main`;
   - one combined review, whose findings are fixed;
   - a browser walkthrough;
   - one PR into `dev`.
