@@ -144,8 +144,8 @@ Decided by the owner in the review threads:
 - Drop the QR code. What goes:
   - The Data tab switch for it.
   - `docs/qr.js` and its script tag (`docs/index.html:65`).
-  - The `.sheet .qr` rules (`docs/style.css:335-338`, `:360`).
-  - The decode test (`scripts/smoke.mjs:559-603`).
+  - The `.sheet .qr` rules (`docs/style.css:337-340`, `:362` at 73dd734).
+  - The decode test (`scripts/smoke.mjs:559-604` at 73dd734).
   - The `jsqr` dev dependency.
   - The README line (`README.md:29`), updated.
 
@@ -157,7 +157,7 @@ Decided by the owner in the review threads:
 **Saved data (migration plan before any code):**
 - Labels gain the tick, which makes this schema v5.
 - Old saves load with the tick at its default. A build that doesn't know the tick warns before saving instead of silently dropping it (`docs/store.js:150`).
-- An absent tick reads as the default everywhere the sheet reads it, not only in `normalise()`. New labels get the field at `docs/app.js:1616` and `:1809`, and in `docs/share.js:179`.
+- An absent tick reads as the default everywhere the sheet reads it, not only in `normalise()`. New labels get the field at add-tag (`docs/app.js:1917`) and add-label (`:2111`) at 0.4.0, and in `docs/share.js:179`. Full plan: `manifests/2026-09-29-sheet-cleanup.md`.
 - `qrOnSheet` is written as a fixed `false`, so an older build that opens v5 data keeps the QR off.
 
 **Decided:**
@@ -267,6 +267,10 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items).
   - "Use for today" on an empty day group sends everyone away.
   - Saving a template under an existing name overwrites the first match, and imported templates can share a name.
 
+- **Found while building pack 2:**
+  - **A tab left open from before an update can write over newer data.** There is no `storage` listener, so its next change writes the older shape over the newer one with no warning, dropping what the newer tab added (a v4 tab drops v5's ticks). This predates the review round and affects all data.
+  - **Import and backup Restore ignore whether their backup was taken** (`Store.snapshot`'s result at `docs/app.js:1855` and `:1525` at 0.4.0). With storage full they go ahead without one. Loading the save file already checks it (`:1488`).
+
 ## Questions for you
 
 All answered by the owner on 2026-09-28, and folded into each pack above. Still open: the hand check of **Choose save file…** in the Windows app (pack 1).
@@ -298,7 +302,7 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   - Build the old app with `git worktree add <dir> v0.2.4`. For the car app it matches today's `main`.
   - Serve both builds on the same fixed port in one persistent browser profile, or carry the storage across. localStorage is per origin, so a random port starts empty.
   - Seed the profile with `scripts/fixtures/dev-data.json` and at most ten backups.
-  - Deep-compare the whole state. The only differences allowed are the ones the packs name: the date moved, `qrOnSheet` fixed to `false`, and labels gaining the tick at its default.
+  - Deep-compare the whole state. The only differences allowed are the ones the packs name: the date moved, `schemaVersion` 4→5, `qrOnSheet` fixed to `false`, and labels gaining the tick at its default.
   - Every earlier backup is present, and an archive holds the v0.2.4 text byte for byte.
   - What's new lists all nine entries, and the note shows the newest three and counts the rest.
 
