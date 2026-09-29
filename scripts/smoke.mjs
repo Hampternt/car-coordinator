@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 import { startServer } from './serve.mjs';
+import { colourGuard } from './colour-guard.mjs';
 
 const server = await startServer();
 const base = server.base;
@@ -3116,6 +3117,12 @@ check('(f) a code naming a ticked label keeps it ticked and changes only its col
   f5.after.onSheet === true && f5.after.color === '#123456' && f5.after.id === f5.was.id && f5.after.name === f5.was.name, JSON.stringify(f5.after));
 check('the schema v5 cases log no console errors', sv.errs.length === 0, sv.errs.join(' | '));
 await sv.ctx.close();
+
+// --- every colour is a token, and the paper is never dark ---
+// style.css writes colours only in custom properties, the scripts only the
+// label colours they are allowed, and no dark block names a paper token.
+const colourProblems = await colourGuard();
+check('every colour in style.css and the scripts is a token or on the list', !colourProblems.length, colourProblems.join(' | '));
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and
