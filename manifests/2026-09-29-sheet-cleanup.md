@@ -1,6 +1,6 @@
 # Pack: Printed sheet cleanup
 
-**Status:** 🚧 building, since 2026-09-29, as part 2 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved.
+**Status:** 🚧 all 7 items built and the pack gate green, 2026-09-29, on `review-round` (combined pack, part 2), at 0.4.0. Waiting on the individual review of item 3, one review for the rest, the browser walkthrough, and pack close.
 **Date:** 2026-09-29. Planned against `dev` at 73dd734, before pack 1 merged.
 **Branch:** cut when execution starts: `sheet-cleanup`, from `dev` after pack 1 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -430,7 +430,7 @@ Dependency edges:
 
   *Done when:* `npm run upgrade -- <v0.2.4 worktree>` passes (a)–(f) with only the named differences. The run from the previous `dev` build happens in the pack gate after item 7. Until then both builds are 0.3.0, so (a) and (d) would see no version jump, and the script's build assertion may not tell the two builds apart.
 
-- [ ] **7. Announce Printed sheet cleanup and cut 0.4.0.** In one commit (pack 1's Design H):
+- [x] **7. Announce Printed sheet cleanup and cut 0.4.0.** In one commit (pack 1's Design H):
   - the 0.4.0 entry goes at the top of `docs/updates.js`, as drafted below. Each claim is re-checked against the shipped code and adjusted to the owner's answers.
   - the six places move to 0.4.0: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and `APP_VERSION`.
   - `?v=0.4.0` goes on every local tag in `index.html` (one tag fewer than in 0.3.0) and in `recover.html`.
@@ -568,3 +568,10 @@ Both answers are needed before item 4 starts. Items 1–3 don't depend on them. 
 - Item 4 done, 5698b98. Design B and C as planned, with the owner's two answers (neither list; parked only). `marked()` is gone: Cars not available is built inline, and Positions not available no longer needs it. Gate: `check.sh` OK. `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", with the three new printout assertions. Car suite: exit 0, 507 ok, 0 FAIL, the Labels tab fitting at 390px with a ticked Printout cell.
 - Item 5 done, b0ec4e8. README, HANDOFF.md and the container as planned. The container's stale style.css and smoke citations now name 73dd734, because those lines are gone at 0.4.0; the add-tag and add-label lines are given at 0.4.0 (app.js:1917, :2111). The two Found-while-planning entries went under a new "Found while building pack 2" heading. `grep -n "QR\|Check before posting\|Positions not available\|unavailable cars/positions" README.md HANDOFF.md` finds only README:16 and HANDOFF.md:40, :41 and :47. Gate: `check.sh` OK.
 - Item 6 done, a994635. As planned, plus one extension. **Extension (deviation):** pack 1's script only knew old builds without release notes or Archives (0.2.x). The combined pack runs every part's upgrade check from the build before it (0.3.0 here), so the `'mixed'` build assertion now expects the old build's own `UPDATES[0]` (or none before 0.3.0), and scenario (b)'s marker check and scenario (e)'s mixed-open check expect the marker the old build left. With an old `store.js` that has Archives, the mixed open's copy is taken at once, and the all-new open keeps it. Scenario (f) is skipped, and says so, when the old build already saves schema 5. Allowed differences are checked on every all-new open: `state` deep-equals the old `carcoord:v1` with `schemaVersion` → `Store.SCHEMA`, `qrOnSheet` → false and each label's `onSheet` → `=== true`. The qr.js 404 variant runs in the same profile as (e), between the mixed open and the all-new one. Console errors now carry their URL. Gate: `check.sh` OK. `npm run upgrade -- <v0.2.4 worktree>` on system Chrome: exit 0, 60 ok, 0 FAIL, "upgrade check passed: 0.2.4 to 0.3.0", scenarios (a)-(f).
+- Item 7 done, 2b02a68. The entry is the draft as written (the owner answered both questions as recommended), `must: true`. The returning-leader smoke check now works out which entries a browser with no marker gets in full from `UPDATES` itself (every `must`, the newest others up to three) and checks that exactly those show: 0.4.0, 0.3.0, 0.2.5. Gate: `check.sh` OK ("docs/updates.js: 3 entries, newest first, newest 0.4.0, must set where required"; "docs/index.html: all 5 local tags ask for ?v=0.4.0"). Car suite: exit 0, 507 ok, 0 FAIL.
+- **2026-09-29, pack gate (part 2): green, on system Chrome (`CHROMIUM_PATH=/usr/bin/google-chrome`).**
+  - `npm test`: exit 0. "VERSIONS OK", the car suite "all checks passed" (507 ok, 0 FAIL), Breadify "all passed".
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted".
+  - `npm run upgrade` from the part's base (771f560, 0.3.0, a scratch worktree, removed afterwards): exit 0, 60 ok, "upgrade check passed: 0.3.0 to 0.4.0". The note shows 0.4.0 in full; the mixed open takes the copy and holds the note.
+  - `npm run upgrade` from `v0.2.4` (a scratch worktree): exit 0, 60 ok, "upgrade check passed: 0.2.4 to 0.4.0". The note shows 0.4.0, 0.3.0 and 0.2.5 in full.
+  - **Awaiting (manager):** the individual review of item 3, one review for the rest, the browser walkthrough, and pack close (INVENTORY ✅ entries, the container's status line), which are not done here.
