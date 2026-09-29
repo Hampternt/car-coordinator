@@ -579,16 +579,39 @@ const Sheet = (() => {
   /**
    * The most lines, up to `left`, that `fit` accepts — 0 if not even one.
    *
-   * Adding a line never makes a part shorter, so this halves down from
-   * everything until something fits, then closes in between the most that
-   * did and the fewest that did not.
+   * Adding a line never makes a part shorter, so one count that fits and one
+   * that does not bracket the answer, and halving the gap between them finds
+   * it. The bracket is found from `guess` — the take of the part before,
+   * which is about what a page of this stop holds — by doubling up until a
+   * count fails, or halving down until one fits. Starting from everything
+   * still left instead built parts of hundreds of lines for every page of a
+   * long order.
    */
-  function mostLines(left, fit) {
-    let high = left + 1;
-    let low = left;
-    while (low > 0 && !fit(low)) {
-      high = low;
-      low = Math.floor(low / 2);
+  function mostLines(left, fit, guess = left) {
+    if (left <= 0) return 0;
+    let low = 0; // fits: nothing added
+    let high = left + 1; // does not: past the end
+    let probe = Math.min(Math.max(guess, 1), left);
+    if (fit(probe)) {
+      low = probe;
+      while (low < left) {
+        probe = Math.min(low * 2, left);
+        if (!fit(probe)) {
+          high = probe;
+          break;
+        }
+        low = probe;
+      }
+    } else {
+      high = probe;
+      while (high > 1) {
+        probe = Math.floor(high / 2);
+        if (fit(probe)) {
+          low = probe;
+          break;
+        }
+        high = probe;
+      }
     }
     while (high - low > 1) {
       const middle = Math.floor((low + high) / 2);
@@ -642,6 +665,7 @@ const Sheet = (() => {
     };
     const room = () => (parts.length === 0 ? first : limit);
     const standIn = `part ${lines} of ${lines}`;
+    let lastTake = lines;
     const fits = (segments, cap) =>
       measure.height(stopBlock(stop, settings, measure, segments, standIn)) <= cap;
 
@@ -660,9 +684,12 @@ const Sheet = (() => {
       let from = 0;
       while (from < order.lines.length) {
         const cap = room();
-        const take = mostLines(order.lines.length - from, (count) =>
-          fits([...current, { order, from, to: from + count }], cap),
+        const take = mostLines(
+          order.lines.length - from,
+          (count) => fits([...current, { order, from, to: from + count }], cap),
+          lastTake,
         );
+        if (take > 0) lastTake = take;
         if (take === 0 && current.length > 0) {
           close();
           continue;
