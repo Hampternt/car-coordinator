@@ -267,7 +267,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - `loadTrouble()` is false on a first run and on good data, true for the corrupt save (smoke.mjs:270) and the `schemaVersion: 99` save (:333), and false after importing newer data;
   - `savedText()` returns the stored string byte for byte, `'{not json'` included;
   - every 0.2.5 save-file case passes unchanged.
-- [ ] **3. ⚠️ Archives in the Store, and the rescue.** `archives()`, `archive(entry)` written whole or not at all, and the rescue in `readLocal` with its new warning wording (Design B).
+- [x] **3. ⚠️ Archives in the Store, and the rescue.** `archives()`, `archive(entry)` written whole or not at all, and the rescue in `readLocal` with its new warning wording (Design B).
   *Done when:* smoke shows all of these:
   - an update archive's `text` is byte-identical to the stored `carcoord:v1`;
   - a fourth update archive drops only the oldest update archive, and the rescue survives;
@@ -402,3 +402,13 @@ Written identically in the `updates.js` header, the README and the container's G
   - **`scripts/serve.mjs`** gains an optional `root` for item 11, which is not in Design A's list.
 - Item 1 done, bd7bf31. `scripts/versions.mjs`, run in `check.sh` and first in `npm test`. Gate: `check.sh` CHECK OK ("the five version places agree at 0.2.5", "the identifier is no.m.carcoordinator, with no scheme option"). Tried and reverted: `tauri.conf.json` at 0.2.6 fails both `versions.mjs` and `check.sh`, naming `src-tauri/tauri.conf.json`. In a scratch copy at 0.10.0, `updates.js` listing 0.10.0 above 0.9.0 passes, and the reverse fails.
 - Item 2 done, c9472dd. `pref()` returns `undefined` when storage can't be read (not `null`), and `setPref()` returns whether it stored, so `needsCheck` still fails closed and `markCheck` still falls back to memory. `loadTrouble` is set in `readLocal` only. `init` keeps `version`, but nothing reads it yet: Design A gives a rescue `from: null, to: null`. Gate: `check.sh` OK. Car suite on system Chrome: "all checks passed", every 0.2.5 save-file case included. The counts weren't captured on this run.
+- Item 3 done, 8adc84f. **Awaiting individual review.** `archive()` drops only old `update` entries, and never the new entry or the kept rescue. Entries of an unknown kind are kept. Smoke, in its own context:
+  - byte-identical copy;
+  - a fourth update archive drops only the oldest, and the rescue stays;
+  - rescue at load, with the Archives wording;
+  - one copy across reloads;
+  - intact after the first change;
+  - 13 snapshots leave the archives untouched;
+  - real quota (73 × 64 KB chunks), with 2 × 200 KB stored: a 450 KB entry leaves `carcoord:archives`, `carcoord:v1` and `carcoord:backups` byte-identical, and a 150 KB entry fits by dropping only the oldest.
+
+  Gate: `check.sh` OK. Car suite on system Chrome: exit 0, 390 ok, 0 FAIL, "all checks passed".
