@@ -21,6 +21,12 @@
   const kb = (s) => (s.length < 1024 ? 'under 1 KB' : `${Math.round(s.length / 1024)} KB`);
   const isJson = (s) => { try { JSON.parse(s); return true; } catch { return false; } };
   const safe = (s) => String(s).replace(/[^a-z0-9.]+/gi, '-').replace(/^-+|-+$/g, '');
+  // In this computer's own time, as the app shows it, and always with the
+  // date: this page is often opened days after the copy was taken.
+  const local = (t) => {
+    const d = new Date(t);
+    return Number.isNaN(d.getTime()) ? String(t || '') : d.toLocaleString([], { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
 
   function save(name, text) {
     const a = document.createElement('a');
@@ -87,7 +93,7 @@
         if (!e || typeof e !== 'object') return;
         const body = k === 'carcoord:archives' ? e.text : e.json;
         if (typeof body !== 'string') return;
-        const when = String(e.t || '').slice(0, 16).replace('T', ' ');
+        const when = local(e.t);
         const label = k === 'carcoord:archives'
           ? (e.kind === 'rescue' ? `Could not be read, kept ${when}` : `Before ${e.to} (from ${e.from}), kept ${when}`)
           : `${e.label || 'Backup'}, ${when}`;

@@ -300,7 +300,10 @@ const Store = (() => {
      opens, and a 'rescue' of saved text that could not be read, taken the
      moment it is found. Newest first:
        [{ kind: 'update' | 'rescue', from, to, t, text }]
-     A rescue has from and to null. The text is never normalised, so a bug in
+     A rescue has from and to null, and `during`: the version that found the
+     text unreadable. The plan typed after that loss is not a plan from
+     before an update, so that version's update note points at the rescue
+     instead of copying the new plan. The text is never normalised, so a bug in
      reading it cannot reach the copy. */
   const ARCHIVE_KEY = 'carcoord:archives';
   const MAX_UPDATE_ARCHIVES = 3;
@@ -344,12 +347,16 @@ const Store = (() => {
     }
   }
 
-  // Once per text: reloading on the same unreadable save keeps one copy.
-  // Returns archive()'s { ok, dropped }.
+  // Once per text and version: reloading on the same unreadable save keeps
+  // one copy. Returns archive()'s { ok, dropped }.
   function rescue(text) {
     const kept = archives().find((a) => a.kind === 'rescue');
-    if (kept && kept.text === text) return { ok: true, dropped: 0 };
-    return archive({ kind: 'rescue', from: null, to: null, t: new Date().toISOString(), text });
+    const same = !!kept && kept.text === text;
+    if (same && kept.during === appVersion) return { ok: true, dropped: 0 };
+    const made = archive({ kind: 'rescue', from: null, to: null, during: appVersion, t: new Date().toISOString(), text });
+    // Found again by a newer version with no room to say so: the text itself
+    // is still kept, under the version that first found it.
+    return made.ok || !same ? made : { ok: true, dropped: 0 };
   }
   // Said wherever a copy took the place of older ones.
   const madeRoom = (n) => (n > 0 ? `To make room, ${n === 1 ? '1 older copy in Archives was' : `${n} older copies in Archives were`} removed.` : '');

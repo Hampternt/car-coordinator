@@ -520,3 +520,29 @@ Written identically in the `updates.js` header, the README and the container's G
     - the fourth-archive case now expects `dropped: 0`.
   - **Gate:** `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
   - **Flaky, not caused by this fix:** the first run failed "a disarm leaves the page where the user scrolled it — 285". That check dates from e5c8472 (2026-09-24), before this pack. The rerun was clean.
+- Fix 3 (update note not last), 9303368. `drainStoreNotices()` right before the note's try, with the earlier drain left as it was. Smoke, storage full: the note is `:last-child`, and "Could not take a backup before "Start of day"" is shown above it. Gate: `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
+- Fix 4 (post-loss plan archived as "Before 0.3.0"), a8c6ff1.
+  - **What changed:**
+    - A rescue now carries `during: appVersion`, which also gives `init`'s `version` a use.
+    - Rescue dedup needs the same text *and* the same `during`. Otherwise it re-records under this version, and if that fails for lack of room, the old rescue of the same text still counts as kept.
+    - `rescuedDuring` makes `archiveNeeded` false, and `archiveBeforeUpdate` return `copy: 'rescued'`, for which the note uses the rescue sentence.
+  - **Deviation from Design A:** the rescue entry gains the field `during`.
+  - **Smoke:**
+    - after corrupt → type → reload, Archives holds only the rescue, `during` equals V, and the note has the rescue sentence and not "copied unchanged";
+    - new pure-rule cases `rescueThisVersion` (false) and `rescueOlderVersion` (true).
+  - **Upgrade (b)** gains the same check.
+  - **Gate:**
+    - `check.sh` OK;
+    - car suite: exit 0, 478 ok, 0 FAIL;
+    - `npm run upgrade` from v0.2.4: exit 0, 44 ok, "upgrade check passed: 0.2.4 to 0.3.0".
+- Fix 5 (recover.html in UTC), d7b5cb9. Times are now shown with `toLocaleString`, always with the date; download names are unchanged. Smoke, in a Pacific/Auckland en-GB context: the rows read "kept 29/09/2026, 17:00", "kept 28/09/2026, 17:00" and "29/09/2026, 18:00" for 04:00Z and 05:00Z. Gate: `check.sh` OK. Car suite: exit 0, 479 ok, 0 FAIL.
+- Fix 6 (the rescue-once check was too weak), 2b998c8. It now also asserts `carcoord:archives` is byte-identical across the reload. Gate: `check.sh` OK. Car suite: exit 0, 479 ok, 0 FAIL. A mutation run is logged below.
+- Fix 7 (no case for a rescue that doesn't fit), 47b9fd6. Storage is filled around a 300 KB unreadable v1, a small update archive, and today's Start of day backup. After a reload, v1, Backups and Archives are byte-identical, the fallback wording shows, and there is exactly one `recover.html` link. Gate: `check.sh` OK. Car suite: exit 0, 481 ok, 0 FAIL on the rerun. The first run hit the same pre-existing flaky scroll check as fix 2 ("a disarm leaves the page where the user scrolled it — 285").
+- Fix 8 (the quota case had no rescue), b48e080. A small rescue sits last, after the two 200 KB update archives. When the 150 KB entry fits by dropping A, the list is `M, B, rescue` with `dropped: 1`. Gate: `check.sh` OK. Car suite: exit 0, 481 ok, 0 FAIL. A mutation run is logged below.
+- Fix 9 (held loads tested too narrowly), 72056f2. `carcoord:v1` of `[]`, `null` and `42` each give one warning, zero update notes, no marker, and a rescue of that exact text. Gate: `check.sh` OK. Car suite: exit 0, 484 ok, 0 FAIL.
+- Fix 10 (the note step's try/catch was never exercised), 3c707bc. A context serves a `store.js` with `Store.loadTrouble` throwing. With a differing OPFS file and the marker, the `differs` hold is raised and drawn, the plan is drawn, a typed change doesn't reach the file, and there is no note and no marker. A `#d=` link opens the dialog. No page errors. Gate: `check.sh` OK. Car suite: exit 0, 488 ok, 0 FAIL.
+- Fix 11 (nothing checked the archive is the first boot write), f50ce47. An init script records every `setItem` key from page start. For a returning leader, the `carcoord:*` writes are `archives, backups, pref:seenUpdate`, and never `v1`. Gate: `check.sh` OK. Car suite: exit 0, 489 ok, 0 FAIL.
+- Fix 12 (byte checks only saw canonical JSON), aed110f. Smoke's `upPlan` is hand-written JSON with reordered keys, spacing and unknown fields. Upgrade (a), (d) and (e) apply `makeOdd` on the old build (keys reversed, `JSON.stringify(…, null, 1)`, `"extra"` first), and `expectKeptAndNoted` first asserts that layout is in place. Gate:
+  - `check.sh` OK;
+  - car suite: exit 0, 489 ok, 0 FAIL;
+  - upgrade from v0.2.4: exit 0, 47 ok, "upgrade check passed: 0.2.4 to 0.3.0".

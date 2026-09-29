@@ -2337,8 +2337,10 @@ same('an unreadable save is rescued as it loads', rescued, ['{"routes":[{"name":
 check('and the warning points at Archives', (await un.locator('#notices .notice.warn').innerText()).includes('An untouched copy is kept in Archives on the Data tab'),
   await un.locator('#notices').innerText());
 check('and links to the recovery page', (await un.locator('#notices .notice.warn a[href="recover.html"]').count()) === 1);
+const rescueStored = await un.evaluate(() => localStorage.getItem('carcoord:archives'));
 await un.reload({ waitUntil: 'networkidle' });
-check('a reload on the same unreadable save keeps one copy', (await un.evaluate(() => Store.archives().length)) === 1);
+check('a reload on the same unreadable save keeps one copy, and leaves Archives byte for byte as they were',
+  (await un.evaluate(() => Store.archives().length)) === 1 && (await un.evaluate(() => localStorage.getItem('carcoord:archives'))) === rescueStored);
 await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
 await un.reload({ waitUntil: 'networkidle' });
 same('the first change afterwards leaves the rescue intact',
@@ -2361,6 +2363,30 @@ await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem
 check('a rescue that makes room says which copy went', roomForRescue > 0 && roomSaid.includes('An untouched copy is kept in Archives')
   && roomSaid.includes('To make room, 1 older copy in Archives was removed.') && JSON.stringify(roomKept) === '["rescue"]', `${JSON.stringify(roomKept)} ${roomSaid}`);
 
+// A rescue that cannot fit even then: nothing is touched, and the warning
+// keeps its old words, because the first change really will overwrite it.
+const noFit = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', `{"routes":[${'y'.repeat(300 * 1024)}`);
+  // Today's start-of-day backup is already there, so the load takes none.
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Start of day', json: '{"routes":[]}' }]));
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'a', to: 'b', t: '2026-09-01T00:00:00.000Z', text: '{"routes":[]}' }]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return { chunks, kept: ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)) };
+});
+await un.reload({ waitUntil: 'networkidle' });
+const noFitAfter = await un.evaluate(() => ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)));
+const noFitSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const noFitLinks = await un.locator('#notices a[href="recover.html"]').count();
+await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+same('a rescue that cannot fit leaves the plan, Backups and Archives byte for byte',
+  noFitAfter.map((v, i) => v === noFit.kept[i]), [true, true, true]);
+check('and the warning says the first change will overwrite it, with one link to the recovery page',
+  noFit.chunks > 0 && noFitSaid.includes('the first change you make will overwrite it') && !noFitSaid.includes('An untouched copy is kept') && noFitLinks === 1,
+  `${noFitLinks} links: ${noFitSaid}`);
+
 // Twelve new backups, the whole rolling list, push no archive out.
 const rolled = await un.evaluate(([u1, u2]) => {
   localStorage.setItem('carcoord:archives', JSON.stringify([u2, JSON.parse(localStorage.getItem('carcoord:archives')).find((a) => a.kind === 'rescue'), u1]));
@@ -2380,6 +2406,9 @@ const fullArchive = await un.evaluate(() => {
   localStorage.setItem('carcoord:archives', JSON.stringify([
     { kind: 'update', from: 'b', to: 'B', t: '2026-09-02T00:00:00.000Z', text: big('b', 200) },
     { kind: 'update', from: 'a', to: 'A', t: '2026-09-01T00:00:00.000Z', text: big('a', 200) },
+    // Last in the list, where a loop that dropped from the end regardless
+    // of kind would take it first.
+    { kind: 'rescue', from: null, to: null, t: '2026-08-31T00:00:00.000Z', text: '{kept' },
   ]));
   let chunks = 0;
   try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
@@ -2390,7 +2419,7 @@ const fullArchive = await un.evaluate(() => {
   const untouched = keys.map((k, i) => localStorage.getItem(k) === before[i]);
   // One that fits once the oldest has made room: the newer one stays.
   const fits = Store.archive({ kind: 'update', from: 'B', to: 'M', t: new Date().toISOString(), text: big('m', 150) });
-  const after = Store.archives().map((a) => a.to);
+  const after = Store.archives().map((a) => (a.kind === 'rescue' ? a.text : a.to));
   for (let i = 0; i < chunks; i++) localStorage.removeItem(`fill:${i}`);
   for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
   return { chunks, tooBig, untouched, fits, after };
@@ -2398,7 +2427,7 @@ const fullArchive = await un.evaluate(() => {
 check('the archive test really did fill this browser up', fullArchive.chunks > 0 && fullArchive.chunks < 2000, `${fullArchive.chunks} chunks`);
 same('an archive that does not fit leaves the archives, the plan and the Backups byte for byte',
   { tooBig: fullArchive.tooBig, untouched: fullArchive.untouched }, { tooBig: { ok: false, dropped: 0 }, untouched: [true, true, true] });
-same('and one that fits once the oldest makes room keeps the newer one', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B'] });
+same('and one that fits once the oldest update copy makes room keeps the newer one, and the rescue', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B', '{kept'] });
 await un.evaluate(() => { localStorage.clear(); });
 
 // --- a notice line can carry a heading, and the update note has a style ---
@@ -2469,6 +2498,8 @@ const rules = await un.evaluate(() => {
     backFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
     olderArchiveOnly: A({ archives: [{ kind: 'update', from: '0.4.0', to: '0.5.0' }] }),
     rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
+    rescueThisVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
+    rescueOlderVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.5.0' }] }),
     nothingUsable: A({ usableText: null }),
   };
   out.untouched = all() === before;
@@ -2493,7 +2524,7 @@ same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, n
 same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
 same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
   returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
-  olderArchiveOnly: true, rescueDoesNotCount: true, nothingUsable: false });
+  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, nothingUsable: false });
 check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
 
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
@@ -2502,8 +2533,16 @@ await pcNote.close();
 // --- opening after an update: the archive first, the note last ---
 // Every case sets up this browser as an older version would have left it,
 // then opens the app. The version is read from the page, never written here.
-const upPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-29', labels: [], positions: [], drivers: [], driverGroups: [], templates: [],
-  cars: [{ id: 'c1', reg: 'UP11111' }], routes: [{ id: 'r1', name: '1', driver: 'Returning Leader', carId: 'c1' }] });
+// Written the way no build writes it (keys reordered, spaced out, fields
+// this build does not know), so a boot that rewrote the plan, or an archive
+// that tidied it, would show as a different string.
+const upPlan = `{
+  "routes": [ { "name": "1", "id": "r1", "carId": "c1", "driver": "Returning Leader" } ],
+  "cars": [ { "reg": "UP11111", "id": "c1", "extra": "kept" } ],
+  "date": "2026-09-29",   "schemaVersion": 4,
+  "labels": [], "positions": [], "drivers": [], "driverGroups": [], "templates": [],
+  "extra": "kept as written"
+}`;
 const otherPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-01', labels: [], positions: [], cars: [], routes: [{ id: 'x', name: 'From the file' }] });
 // A real file in this origin's private file system, linked the way Choose
 // save file links one, so start-up finds it without a stand-in.
@@ -2530,8 +2569,8 @@ const opened = (pg) => pg.evaluate(() => ({
   marker: localStorage.getItem('carcoord:pref:seenUpdate'),
   saved: localStorage.getItem('carcoord:v1'),
 }));
-const newContext = async (setup) => {
-  const ctx = await browser.newContext();
+const newContext = async (setup, options = {}) => {
+  const ctx = await browser.newContext(options);
   if (setup) await setup(ctx);
   const pg = await ctx.newPage();
   const errs = [];
@@ -2546,6 +2585,10 @@ const newContext = async (setup) => {
 // without one covers the other sentence.
 const upA = await newContext((ctx) => ctx.addInitScript(() => {
   if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+  // Every key written to storage from the moment the page starts, in order.
+  const set = Storage.prototype.setItem;
+  window.__writes = [];
+  Storage.prototype.setItem = function (k, v) { window.__writes.push(String(k)); return set.call(this, k, v); };
 }));
 const up = upA.pg;
 const V = await up.evaluate(() => APP_VERSION);
@@ -2562,6 +2605,10 @@ const inFull = await up.evaluate(() => {
 await leaveAs(up, { 'carcoord:v1': upPlan });
 await up.reload({ waitUntil: 'networkidle' });
 const back = await opened(up);
+const bootWrites = await up.evaluate(() => window.__writes.filter((k) => k.startsWith('carcoord:')));
+check('the archive is the first thing written at boot, ahead of the backup and the marker, and the plan is never written',
+  bootWrites[0] === 'carcoord:archives' && bootWrites.includes('carcoord:backups') && bootWrites.includes('carcoord:pref:seenUpdate')
+  && !bootWrites.includes('carcoord:v1'), bootWrites.join(', '));
 check('a returning leader gets exactly one update note, last on the page', back.notes === 1 && back.last, JSON.stringify(back).slice(0, 300));
 check(`and it shows ${inFull.join(', ')} in full`,
   inFull.length >= 2 && inFull.every((v) => back.text.includes(`What's new in ${v}:`))
@@ -2615,6 +2662,22 @@ await up.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(
 await up.reload({ waitUntil: 'networkidle' });
 const afterLoss = await opened(up);
 check('once it is overwritten and the page reloaded, the note comes', afterLoss.notes === 1 && afterLoss.marker === V, JSON.stringify(afterLoss).slice(0, 200));
+same('and it copies nothing typed since the loss, pointing at the rescue instead', {
+  kinds: afterLoss.archives.map((a) => a.kind),
+  during: await up.evaluate(() => Store.archives().map((a) => a.during)),
+  rescueSaid: afterLoss.say.includes('What this browser had saved before could not be read; it is kept unchanged in Archives on the Data tab.'),
+  copiedSaid: afterLoss.say.includes('copied unchanged'),
+}, { kinds: ['rescue'], during: [V], rescueSaid: true, copiedSaid: false });
+// Saved text that is valid JSON but not a plan is held the same way.
+for (const odd of ['[]', 'null', '42']) {
+  await leaveAs(up, { 'carcoord:v1': odd });
+  await up.reload({ waitUntil: 'networkidle' });
+  const held = await opened(up);
+  same(`a save of ${odd}: one warning, no update note, no marker, and a rescue of ${odd}`, {
+    warns: await up.locator('#notices .notice.warn').count(), notes: held.notes, marker: held.marker,
+    rescued: await up.evaluate(() => Store.archives().map((a) => [a.kind, a.text])),
+  }, { warns: 1, notes: 0, marker: null, rescued: [['rescue', odd]] });
+}
 const newer = JSON.stringify({ schemaVersion: 99, date: '2026-09-29', cars: [], positions: [], labels: [], routes: [{ id: 'r1', name: 'Newer' }] });
 await leaveAs(up, { 'carcoord:v1': newer });
 await up.reload({ waitUntil: 'networkidle' });
@@ -2693,8 +2756,9 @@ const filledUp = await fullUp.pg.evaluate((plan) => {
 }, bigPlan);
 await fullUp.pg.reload({ waitUntil: 'networkidle' });
 const noRoom = await opened(fullUp.pg);
-check('with storage full, no archive, and the note says storage is full',
-  filledUp > 0 && noRoom.archives.length === 0 && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
+check('with storage full, no archive, and the note says storage is full, last, under the backup warning',
+  filledUp > 0 && noRoom.archives.length === 0 && noRoom.last
+  && (await fullUp.pg.locator('#notices').innerText()).includes('Could not take a backup before "Start of day"') && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
   `${JSON.stringify(noRoom.archives)} ${noRoom.say}`);
 check('and the saved plan is untouched', noRoom.saved === bigPlan);
 check('no console errors when storage is full', fullUp.errs.length === 0, fullUp.errs.join(' | '));
@@ -2737,6 +2801,32 @@ const brokenNote = await opened(broken.pg);
 check('and the note claims no copy it did not make', brokenNote.notes === 1 && !/Archives|save file/.test(brokenNote.say), brokenNote.say);
 check('no console errors with the archive step broken', broken.errs.length === 0, broken.errs.join(' | '));
 await broken.ctx.close();
+
+// The same for the note's own step: it failing must stop nothing after it.
+const noteBroke = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {
+  const res = await route.fetch();
+  await route.fulfill({ response: res, body: `${await res.text()}\nStore.loadTrouble = () => { throw new Error('note step broke'); };\n` });
+}));
+await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+await linkOpfs(noteBroke.pg, otherPlan);
+await noteBroke.pg.reload({ waitUntil: 'networkidle' });
+await noteBroke.pg.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+check('with the note step broken, the save-file hold is still raised and drawn',
+  (await noteBroke.pg.evaluate(() => Store.file.hold && Store.file.hold.kind)) === 'differs'
+  && (await noteBroke.pg.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused')
+  && (await noteBroke.pg.locator('#tab-plan tbody tr [data-field="driver"]').first().inputValue()) === 'Returning Leader');
+await noteBroke.pg.evaluate(async () => { state.routes[0].driver = 'Typed after start-up'; save(); await Store.flush(); });
+check('and nothing is written to the file, no note is shown and nothing is marked',
+  (await opfsText(noteBroke.pg)) === otherPlan && (await opened(noteBroke.pg)).notes === 0
+  && (await noteBroke.pg.evaluate(() => localStorage.getItem('carcoord:pref:seenUpdate'))) === null);
+const brokeCode = await noteBroke.pg.evaluate(async () => Share.encode(state, 'day'));
+await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan });
+await noteBroke.pg.goto('about:blank');
+await noteBroke.pg.goto(`${base}#d=${brokeCode}`, { waitUntil: 'networkidle' });
+await noteBroke.pg.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+check('and a share link still opens its dialog', (await noteBroke.pg.locator('#shareDlg[open]').count()) === 1);
+check('no page errors with the note step broken', noteBroke.errs.length === 0, noteBroke.errs.join(' | '));
+await noteBroke.ctx.close();
 
 // Missing pieces, as after a deploy with some files still cached: no release
 // notes, and a store.js without archives or prefs.
@@ -2852,7 +2942,8 @@ check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 
 await dataUp.ctx.close();
 
 // --- the recovery page: works when the app does not, and only reads ---
-const rc = await newContext();
+// Somewhere far from UTC, so a time shown in UTC would show.
+const rc = await newContext(null, { timezoneId: 'Pacific/Auckland', locale: 'en-GB' });
 const recoverStore = {
   'carcoord:v1': JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [{ id: 'c1', reg: 'ÆØÅ 12345', note: 'Bremsene — sjekk' }], routes: [{ id: 'r1', name: '1' }] }),
   'carcoord:backups': JSON.stringify([{ t: '2026-09-29T05:00:00.000Z', label: 'Start of day', json: '{"routes":[{"name":"b1"}],"cars":[]}' }]),
@@ -2875,6 +2966,11 @@ check('and downloads each byte for byte', Object.keys(recoverStore).every((k) =>
 const [oneArchive] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.locator('#list li', { hasText: 'Before 0.3.0' }).locator('button').click()]);
 check('an archive on its own downloads as the plan it holds, ready to import',
   (await readFile(await oneArchive.path(), 'utf8')) === '{"routes":[{"name":"a1"}],  "cars":[]}' && oneArchive.suggestedFilename() === 'car-coordinator-before-0.3.0.json', oneArchive.suggestedFilename());
+same('times on the recovery page are this computer\'s own, with the date', await rc.pg.locator('#list li').allInnerTexts(), [
+  'Download Before 0.3.0 (from 0.2.4 or earlier), kept 29/09/2026, 17:00',
+  'Download Could not be read, kept 28/09/2026, 17:00',
+  'Download Start of day, 29/09/2026, 18:00',
+]);
 check('and opening it changed nothing stored', (await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))))) === storeBefore);
 check('the recovery page logs no console errors', rc.errs.length === 0, rc.errs.join(' | '));
 await rc.ctx.close();

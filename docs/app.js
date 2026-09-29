@@ -1634,6 +1634,11 @@ function updateNoteFor({ version, releases, seen, firstRun, trouble, link }) {
 const copyFor = (a, version, from) => !!a && a.kind === 'update' && a.to === version && a.from === from;
 // The version a browser is coming from, as an archive records it.
 const updatingFrom = (seen) => (typeof seen === 'string' ? seen : '0.2.4 or earlier');
+/* A rescue taken under this version holds what this browser had before the
+   plan it has now, which was typed after the loss. That rescue is this
+   version's copy: archiving the new plan as "before" the update would say
+   something that is not so. */
+const rescuedDuring = (a, version) => !!a && a.kind === 'rescue' && a.during === version;
 
 /* Whether this open takes an update archive: the saved text is a usable
    plan, this browser has not already run this version (a first run, then a
@@ -1644,7 +1649,7 @@ const updatingFrom = (seen) => (typeof seen === 'string' ? seen : '0.2.4 or earl
 function archiveNeeded({ version, from, usableText, archives, seen }) {
   if (typeof usableText !== 'string') return false;
   if (seen === version) return false;
-  return !(Array.isArray(archives) ? archives : []).some((a) => copyFor(a, version, from));
+  return !(Array.isArray(archives) ? archives : []).some((a) => copyFor(a, version, from) || rescuedDuring(a, version));
 }
 
 /* Whether this open is a first run: nothing saved in this browser and
@@ -1655,8 +1660,9 @@ let firstRun = false;
 /* The first write at boot: the saved text, byte for byte, into Archives
    before anything else can change it. Returns what the update note can say
    about the copy, { copy, dropped }: copy is 'kept' when one is stored for
-   this step (now, or on an earlier open that held the note back) and 'full'
-   when storage had no room; dropped is how many older copies made room for
+   this step (now, or on an earlier open that held the note back), 'rescued'
+   when this version rescued a save it could not read, and 'full' when
+   storage had no room; dropped is how many older copies made room for
    it. null when there was nothing to copy. An old cached store.js without
    archives skips it: the plan is still drawn, and the copy comes on the
    first open with all the new files. */
@@ -1666,6 +1672,7 @@ function archiveBeforeUpdate() {
   const seen = Store.pref('seenUpdate');
   const from = updatingFrom(seen);
   if (list.some((a) => copyFor(a, APP_VERSION, from))) return { copy: 'kept', dropped: 0 };
+  if (list.some((a) => rescuedDuring(a, APP_VERSION))) return { copy: 'rescued', dropped: 0 };
   const text = Store.savedText();
   if (!archiveNeeded({ version: APP_VERSION, from, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
   const { ok, dropped } = Store.archive({ kind: 'update', from, to: APP_VERSION, t: new Date().toISOString(), text });
@@ -1684,7 +1691,8 @@ function updateNoteText(kept, recovered) {
   else if (copy === 'kept') {
     said.push('Before anything else, your plan and setup (routes, templates, drivers, day groups, cars, positions, labels) were copied unchanged into Archives on the Data tab.');
     if (kept.dropped > 0) said.push(`To make room, ${kept.dropped === 1 ? '1 older copy in Archives was' : `${kept.dropped} older copies in Archives were`} removed.`);
-  } else if (copy === 'full') said.push('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.');
+  } else if (copy === 'rescued') said.push('What this browser had saved before could not be read; it is kept unchanged in Archives on the Data tab.');
+  else if (copy === 'full') said.push('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.');
   // Left out in the Windows app until the owner has checked the file picker
   // works there, and while a hold is up: that has a notice of its own.
   if (!window.__TAURI__ && !f.hold) {
@@ -2601,6 +2609,9 @@ async function start() {
   // should be the one that has to be answered before share codes work again.
   offerSpotRoundSplit();
   offerTodaysTemplate();
+  // What the Store said since the drain above (a start-of-day backup that
+  // would not fit) goes up before the note, so the note stays last.
+  drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
   render();
 
