@@ -322,7 +322,7 @@ Dependency edges:
 
 ## Items
 
-- [ ] **1. Take the QR code off.** Remove everything under "Goes" in Design D:
+- [x] **1. Take the QR code off.** Remove everything under "Goes" in Design D:
   - `docs/qr.js` and its tag;
   - the QR code in `app.js` and `style.css`;
   - `jsqr`, removed with `npm uninstall jsqr`;
@@ -562,3 +562,4 @@ Both answers are needed before item 4 starts. Items 1–3 don't depend on them. 
 ## Ledger
 
 - **2026-09-29, start (combined pack, part 2).** Built on `review-round`, not a `sheet-cleanup` branch, per the combined manifest: it is cut from `update-note` (pack 1, 0.3.0) and merged with `origin/dev` for the plans. Base commit 771f560. Line numbers are re-found by symbol, because pack 1 moved most of `app.js`.
+- Item 1 done, 6c44bb3. The QR block was at app.js:1346-1373 at 0.3.0, the tag at index.html:70. The smoke decode block became four checks on `planA` (no `#sheet .qr`, no QR switch, `QR` undefined, no `qr.js` tag). `npm uninstall jsqr` then `npm ci`: OK. Gate: `check.sh` OK. Car suite on system Chrome: exit 0, 477 ok, 0 FAIL, "all checks passed" (the `#d=` link and phone-width cases included). The first run failed only the known flaky "a disarm leaves the page where the user scrolled it — 285" (pack 1's ledger); the rerun was clean.
