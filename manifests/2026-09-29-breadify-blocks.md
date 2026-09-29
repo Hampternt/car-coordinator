@@ -256,7 +256,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
 
 ## Items
 
-- [ ] **1. The item gate parses Breadify.** `scripts/check.sh` loops over `docs/*.js` only (:38), so no Breadify script is ever parsed. Every item below would pass the gate unchecked. Change that one line to `for f in docs/*.js docs/breadify/*.js; do` and leave the rest of the file alone, because update-note edits its header and tail. Commit `scripts/check.sh` by path.
+- [x] **1. The item gate parses Breadify.** `scripts/check.sh` loops over `docs/*.js` only (:38), so no Breadify script is ever parsed. Every item below would pass the gate unchecked. Change that one line to `for f in docs/*.js docs/breadify/*.js; do` and leave the rest of the file alone, because update-note edits its header and tail. Commit `scripts/check.sh` by path.
       *Done when:* `bash scripts/check.sh` prints `ok` for docs/breadify/app.js, layout.js, model.js, validate.js and xlsx.js. It also fails when one of them is given a syntax error (tried by hand, then reverted).
 - [ ] **2. Check the sample days the way the edge fixtures are checked.** Today the across, overlap and clipping checks (:572, :588-603, :605) and the nonsense scan (:731) run only on fixtures. None of them looks at the marker or the order id.
       - Factor the across, overlap and clipping pass into one function, and run it on the bread and freezer sample sheets too.
@@ -493,3 +493,4 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
   - Design F: the freezer sheet count, if it moves, takes the measured value and is escalated in the report, because the implementer stops before the walkthrough.
   - Items 7–9 done-conditions and the walkthrough list rewritten to match; item 8 gains a check of every several-order block on both days against the model.
 - 2026-09-29 · **Gates "on the go":** the two 🚧 lines moved from Breadify's Considered up under "## The printed sheet" in INVENTORY.md, as pointers to this manifest.
+- 2026-09-29 · **Item 1 done** (61f5455). `bash scripts/check.sh`: CHECK OK, `ok` for docs/breadify/app.js, layout.js, model.js, validate.js, xlsx.js. Trial: `const = ;` appended to model.js gave `FAIL docs/breadify/model.js`, CHECK FAILED, exit 1; reverted with `git checkout --`, gate OK again.
