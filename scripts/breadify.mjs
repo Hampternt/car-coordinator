@@ -186,6 +186,23 @@ await page.addInitScript(() => {
     return { orders: printed.size, reordered, bakehusetFirstInFile, problems: problems.slice(0, 5) };
   };
 
+  // What a printed crate run says: its glyphs counted, or its `×N` groups
+  // read, as { large, small }.
+  window.readCrates = (node) => {
+    const count = { large: 0, small: 0 };
+    if (node.classList.contains('bf-crates-compact')) {
+      for (const group of node.querySelectorAll('.bf-crate-group')) {
+        const n = Number(group.querySelector('.bf-crate-count').textContent.replace('×', ''));
+        if (group.querySelector('.bf-crate-full')) count.large += n;
+        else count.small += n;
+      }
+    } else {
+      count.large = node.querySelectorAll('.bf-crate-full').length;
+      count.small = node.querySelectorAll('.bf-crate-half').length;
+    }
+    return count;
+  };
+
   // Every block of several orders, read back line by line and held against
   // the orders it prints (`orders`: the model's, by id). A marker or a crate
   // count attached to the wrong order would print wrong without a word, so
@@ -195,20 +212,6 @@ await page.addInitScript(() => {
   window.readSharedBlocks = (sheets, orders, rules, bread) => {
     const problems = [];
     const seen = new Map();
-    const readCrates = (node) => {
-      const count = { large: 0, small: 0 };
-      if (node.classList.contains('bf-crates-compact')) {
-        for (const group of node.querySelectorAll('.bf-crate-group')) {
-          const n = Number(group.querySelector('.bf-crate-count').textContent.replace('×', ''));
-          if (group.querySelector('.bf-crate-full')) count.large += n;
-          else count.small += n;
-        }
-      } else {
-        count.large = node.querySelectorAll('.bf-crate-full').length;
-        count.small = node.querySelectorAll('.bf-crate-half').length;
-      }
-      return count;
-    };
     const marks = (rec, holder) => {
       const marker = holder.querySelector('.bf-marker');
       if (marker) {
@@ -334,6 +337,10 @@ await page.addInitScript(() => {
           ),
           products: rows.map((row) => row.querySelector('.bf-product').textContent),
           crates: block.querySelectorAll('.bf-crates').length,
+          crateCount: Array.from(block.querySelectorAll('.bf-crates'), readCrates).reduce(
+            (sum, count) => ({ large: sum.large + count.large, small: sum.small + count.small }),
+            { large: 0, small: 0 },
+          ),
           markers: block.querySelectorAll('.bf-marker').length,
           continued: rows
             .filter((row) => row.querySelector('.bf-order-cont'))
@@ -1738,7 +1745,7 @@ same('only the two refusing orders read false', tall.flatMap((p) => p.falses), [
 // One order of 300 lines: every part carries the heading, the tag and the
 // marker, and the crates print once — they used to print on every part, each
 // counted from that part's lines alone.
-const giant = await page.evaluate(async ([b]) => {
+const giantRead = await page.evaluate(async ([b]) => {
   const host = document.createElement('div');
   host.style.cssText = 'position:absolute;left:-10000px;top:0';
   document.body.append(host);
@@ -1752,11 +1759,15 @@ const giant = await page.evaluate(async ([b]) => {
       { host },
     );
     for (const sheet of sheets) host.append(sheet);
-    return readParts(sheets, 'Customer 001');
+    return {
+      parts: readParts(sheets, 'Customer 001'),
+      want: Model.crateCount(route.orders[0], Model.defaultCrateRules()),
+    };
   } finally {
     host.remove();
   }
 }, [Array.from(await readFile('scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-one-giant-stop.xlsx'))]);
+const giant = giantRead.parts;
 partsHold('one order of 300 lines', giant);
 same(
   // One bakery and zero-padded names, so the owner's order is the file's too.
@@ -1766,6 +1777,12 @@ same(
 );
 same('its crates print once, on its first part', giant.map((p) => p.crates),
   giant.map((_, i) => (i === 0 ? 1 : 0)));
+// Once is not enough: the one run must be the whole order's count, not the
+// first part's lines' — 300 lines of 3 is 900 breads, 90 full crates.
+same('and that run is the whole order’s 90 full crates', [giant[0].crateCount, giantRead.want], [
+  { large: 90, small: 0 },
+  { large: 90, small: 0 },
+]);
 check(
   'and every later part still carries its marker and its id',
   giant.slice(1).every((p) => p.markers === 1 && JSON.stringify(p.headIds) === '[1]'),
@@ -2068,6 +2085,8 @@ const crowded = await page.evaluate(() => {
              saysMore: /\+\d+ more/.test(key),
              parts: parts.length,
              crates: parts.map((p) => p.crates).join(''),
+             firstCrates: parts[0].crateCount,
+             wantCrates: Model.crateCount(route.orders[0], Model.defaultCrateRules()),
              inOrder: products.length === count &&
                // 250 bakeries: in the owner's order, by code, then name.
                JSON.stringify(products) ===
@@ -2098,6 +2117,7 @@ check(
     crowded.many.crates === `1${'0'.repeat(crowded.many.parts - 1)}`,
   JSON.stringify(crowded.many),
 );
+same('and its first part carries the whole order’s crates', crowded.many.firstCrates, crowded.many.wantCrates);
 
 // The flag says the stops below it were never given a position, so it must
 // never end a page alone. An unsequenced stop that fitted a page but not the
