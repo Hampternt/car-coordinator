@@ -88,7 +88,7 @@ await page.addInitScript(() => {
       }
       for (const node of sheet.querySelectorAll(
         '.bf-legend-suppliers, .bf-code, .bf-qty, .bf-total-qty, .bf-name, .bf-total-name, ' +
-          '.bf-stamp, .bf-marker, .bf-order-id, .bf-dpt-sub',
+          '.bf-stamp, .bf-marker, .bf-order-id, .bf-dpt-sub, .bf-product',
       )) {
         if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
       }
@@ -1061,6 +1061,59 @@ check(
   handBuilt.rows === 4 && handBuilt.noteFields === 4,
   `${handBuilt.noteFields} of ${handBuilt.rows}`,
 );
+
+// An order's first line in a shared block carries its crates, marker and id,
+// which leaves the name its 30 mm and no more. A word longer than that used
+// to spill out of the name's box onto the crate glyphs — "…kker" printed over
+// the first crate — while the line itself measured as fitting. The name has
+// to fit its own box, not just the line.
+const crowdedFirstLine = await page.evaluate(() => {
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const loaf = (id, name, supplier, quantity) => ({
+    product: { id, name, sku: String(id), supplier },
+    quantity,
+  });
+  const order = (id, accept, lines) => ({
+    id, customer: 'Kafé 03', department: null, deliveryStreet: 'Street 03', route: '1',
+    sequence: 300, acceptAlternatives: accept, comment: null, lines,
+  });
+  // Loff is Bakehuset's, so the owner's sort keeps the long word first.
+  const orders = [
+    order(1000000031, false, [
+      loaf(61, 'Surdeigsrundstykker Sandnes Bakeri', 'Sandnes Bakeri', 50),
+      loaf(62, 'Loff', 'Bakehuset', 1),
+    ]),
+    order(1000000032, true, [loaf(63, 'Grovbrød', 'Sandnes Bakeri', 2)]),
+  ];
+  try {
+    const sheets = Sheet.paginate(
+      Model.route('1', orders),
+      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+      { dates: null, source: 'test', routeStops: 1, routeLines: 3 },
+      { host },
+    );
+    for (const sheet of sheets) host.append(sheet);
+    return {
+      seen: inspectSheets(sheets),
+      spilled: Array.from(host.querySelectorAll('.bf-row-shared .bf-product'))
+        .filter((n) => n.scrollWidth > n.clientWidth + 1)
+        .map((n) => n.textContent),
+      read: readSharedBlocks(
+        sheets,
+        new Map(orders.map((o) => [o.id, o])),
+        Model.defaultCrateRules(),
+        true,
+      ).problems,
+    };
+  } finally {
+    host.remove();
+  }
+});
+inspected('a shared first line whose bread name is one long word', crowdedFirstLine.seen);
+same('and no bread name spills out of its box onto the crates', crowdedFirstLine.spilled, []);
+same('and its orders still print their own lines, crates and marker', crowdedFirstLine.read, []);
 
 // When the layout does refuse, the Print step says why and prints nothing.
 const laidOutWrong = await page.evaluate(() => {

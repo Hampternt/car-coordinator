@@ -112,11 +112,14 @@ const Sheet = (() => {
         host.removeChild(node);
         return height;
       },
-      /** Whether a nowrap row has more in it than it has room for. */
-      overflows(node) {
-        host.appendChild(node);
+      /**
+       * Whether a nowrap row has more in it than it has room for — or, given
+       * `outer`, whether `node` inside it does, laid out where it will sit.
+       */
+      overflows(node, outer = node) {
+        host.appendChild(outer);
         const over = node.scrollWidth > node.clientWidth + 1;
-        host.removeChild(node);
+        host.removeChild(outer);
         return over;
       },
       destroy() {
@@ -418,11 +421,15 @@ const Sheet = (() => {
       if (total > 0 && crateRunWidth(total) <= 194) leads.push(() => crateRun(count));
       if (total > 0) leads.push(() => crateCompact(count));
       if (total === 0) leads.push(cue);
+      // The line fitting is not enough: the name keeps a 30 mm box, and a
+      // word longer than the box spills out of it onto the crates beside it
+      // without the line overflowing at all.
+      const name = row.querySelector('.bf-product');
       const fits = () => {
         for (const make of leads) {
           const lead = make();
           if (lead) stamp.insertBefore(lead, stamp.firstChild);
-          if (!measure.overflows(row)) return true;
+          if (!measure.overflows(row) && !measure.overflows(name, row)) return true;
           if (lead) stamp.removeChild(lead);
         }
         return false;
