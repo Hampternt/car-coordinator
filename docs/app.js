@@ -1506,6 +1506,61 @@ const note = (kind, text, offer = null, lines = []) => {
    rather than leaving two questions on screen that answer each other. */
 const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
 
+/* ---------- the update note: who sees what ----------
+   Pure, so every rule can be driven by a test with a list made by hand.
+   Versions compare number by number: 0.10.0 is newer than 0.9.0. */
+const versionOrder = (a, b) => {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+};
+
+/* Whether to show a note, and which entries, and whether to mark this
+   version seen. In this order:
+   1. already shown for this version: nothing;
+   2. a first run (nothing saved, nothing recovered): mark only, even when it
+      came by a share link, so the note never greets a new leader;
+   3. a load that could not be read, or came from a newer version: nothing,
+      and the marker left alone, so the note comes on the next clean open;
+   4. opened by a share link: the same, and the share dialog has the screen;
+   5. the marker is newer than this version (a downgrade, or a stale app.js
+      in the cache): nothing;
+   6. the list does not start at this version (a stale updates.js): nothing,
+      and tried again on the next open;
+   7. otherwise every entry this browser has not seen. Every `must` entry is
+      shown in full, the newest others fill up to three, and the rest are
+      counted: users skip versions, and what a `must` entry says about their
+      data cannot be left in a count. */
+function updateNoteFor({ version, releases, seen, firstRun, trouble, link }) {
+  const nothing = { show: null, mark: false };
+  if (seen === version) return nothing;
+  if (firstRun) return { show: null, mark: true };
+  if (trouble || link) return nothing;
+  if (typeof seen === 'string' && versionOrder(seen, version) > 0) return nothing;
+  if (!Array.isArray(releases) || !releases[0] || releases[0].version !== version) return nothing;
+  const at = seen == null ? -1 : releases.findIndex((r) => r && r.version === seen);
+  const unseen = (at < 0 ? releases : releases.slice(0, at)).filter(Boolean);
+  const must = unseen.filter((r) => r.must === true);
+  const fill = unseen.filter((r) => r.must !== true).slice(0, Math.max(0, 3 - must.length));
+  const full = unseen.filter((r) => must.includes(r) || fill.includes(r));
+  return { show: { full, more: unseen.length - full.length }, mark: true };
+}
+
+/* Whether this open takes an update archive: the saved text is a usable
+   plan, this browser has not already run this version (a first run, then a
+   change and a reload, has nothing from before the update to keep), and no
+   update archive is already stored for it. A marker newer than this version
+   is a downgrade, and is archived: an older build is about to rewrite newer
+   data. */
+function archiveNeeded({ version, usableText, archives, seen }) {
+  if (typeof usableText !== 'string') return false;
+  if (seen === version) return false;
+  return !(Array.isArray(archives) ? archives : []).some((a) => a && a.kind === 'update' && a.to === version);
+}
+
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a

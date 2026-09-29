@@ -2366,6 +2366,72 @@ same('an archive that does not fit leaves the archives, the plan and the Backups
 same('and one that fits once the oldest makes room keeps the newer one', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B'] });
 await un.evaluate(() => { localStorage.clear(); });
 
+// --- who sees the note, and who gets an archive: the rules on their own ---
+await un.goto(base, { waitUntil: 'networkidle' });
+const rules = await un.evaluate(() => {
+  const all = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return JSON.stringify(o); };
+  const before = all();
+  const R = (version, must) => ({ version, title: `t${version}`, changed: 'c', affects: 'a', data: 'd', ...(must ? { must: true } : {}) });
+  const list = [R('0.6.0'), R('0.5.0', true), R('0.4.0'), R('0.3.0'), R('0.2.5', true)];
+  const base = { version: '0.6.0', releases: list, seen: null, firstRun: false, trouble: false, link: false };
+  const run = (over) => {
+    const r = updateNoteFor({ ...base, ...over });
+    return { full: r.show && r.show.full.map((e) => e.version), more: r.show && r.show.more, mark: r.mark };
+  };
+  const out = {
+    seenThis: run({ seen: '0.6.0' }),
+    firstRun: run({ firstRun: true }),
+    firstRunByLink: run({ firstRun: true, link: true }),
+    trouble: run({ trouble: true }),
+    troubleAndLink: run({ trouble: true, link: true }),
+    link: run({ link: true }),
+    downgrade: run({ seen: '9.9.9' }),
+    staleList: run({ releases: list.slice(1) }),
+    noList: run({ releases: undefined }),
+    allUnseen: run({}),
+    unknownMarker: run({ seen: '0.1.0' }),
+    fromListed: run({ seen: '0.4.0' }),
+    mustBeyondThree: run({ releases: [R('0.6.0', true), R('0.5.0'), R('0.4.0', true), R('0.3.0', true), R('0.2.5', true)] }),
+    tenAfterNine: run({ version: '0.10.0', releases: [R('0.10.0'), R('0.9.0')], seen: '0.9.0' }),
+    nineIsNotNewer: run({ version: '0.10.0', releases: [R('0.10.0'), R('0.9.0')], seen: '0.10.0' }),
+    tenIsNewerThanNine: run({ version: '0.9.0', releases: [R('0.9.0')], seen: '0.10.0' }),
+  };
+  const A = (over) => archiveNeeded({ version: '0.6.0', usableText: '{"routes":[]}', archives: [], seen: '0.5.0', ...over });
+  out.archive = {
+    returning: A({}),
+    noMarker: A({ seen: null }),
+    downgrade: A({ seen: '9.9.9' }),
+    alreadyShownHere: A({ seen: '0.6.0' }),
+    alreadyArchived: A({ archives: [{ kind: 'update', to: '0.6.0' }] }),
+    olderArchiveOnly: A({ archives: [{ kind: 'update', to: '0.5.0' }] }),
+    rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
+    nothingUsable: A({ usableText: null }),
+  };
+  out.untouched = all() === before;
+  return out;
+});
+const none = { full: null, more: null, mark: false };
+same('the note: already shown for this version, nothing', rules.seenThis, none);
+same('the note: a first run marks and shows nothing', rules.firstRun, { full: null, more: null, mark: true });
+same('the note: a first open by share link marks too', rules.firstRunByLink, { full: null, more: null, mark: true });
+same('the note: a troubled load waits, marker left alone', rules.trouble, none);
+same('the note: trouble ahead of a link still waits', rules.troubleAndLink, none);
+same('the note: opened by a share link waits', rules.link, none);
+same('the note: a downgrade shows nothing', rules.downgrade, none);
+same('the note: a stale list shows nothing and does not mark', rules.staleList, none);
+same('the note: no list at all shows nothing', rules.noList, none);
+same('the note: every must entry in full, the newest others fill to three', rules.allUnseen, { full: ['0.6.0', '0.5.0', '0.2.5'], more: 2, mark: true });
+same('the note: a marker not in the list counts as nothing seen', rules.unknownMarker, rules.allUnseen);
+same('the note: only what came after the marker', rules.fromListed, { full: ['0.6.0', '0.5.0'], more: 0, mark: true });
+same('the note: must entries beyond three are all in full', rules.mustBeyondThree, { full: ['0.6.0', '0.4.0', '0.3.0', '0.2.5'], more: 1, mark: true });
+same('the note: 0.10.0 comes after 0.9.0', rules.tenAfterNine, { full: ['0.10.0'], more: 0, mark: true });
+same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, none);
+same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
+same('the archive: taken for a returning leader, no marker, and a downgrade; not twice, not after this version ran here, not without a usable plan', rules.archive, {
+  returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false,
+  olderArchiveOnly: true, rescueDoesNotCount: true, nothingUsable: false });
+check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
+
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
 await pcNote.close();
 
