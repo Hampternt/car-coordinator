@@ -378,7 +378,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       - No sheet's body ends with `.bf-flag`. This holds on both sample days, on every edge fixture, and across a sweep of 30 to 70 lines on an unsequenced stop that follows one sequenced stop.
 
       **Risky — review individually.** It rewrites the only code standing between a long order and ink off the bottom of the paper.
-- [ ] **10. Record the departures in README and INVENTORY.**
+- [x] **10. Record the departures in README and INVENTORY.**
       - README.md:18 names the departures and why:
         - the marker's single look (D8/D21);
         - one block per customer at a stop (D16), with D20's one column per block and D2's tie-break following from it;
@@ -520,3 +520,6 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
     - Bread route 14's Customer 012: two parts, no order on both, and no longer the interim fallback. The bread day now has 9 shared blocks and no stop printed apart.
     - The flag: `inspectSheets` reports any page ending with the flag, on both sample days, every edge fixture and the hand-built runs. A sweep of 30–70 lines on an unsequenced stop after a sequenced one is clean. With the fix removed, the sweep fails from 39 lines on (flag alone on page 2); the mutation was reverted to the commit.
   - Gate: check.sh OK; test:breadify all passed, 279 ok.
+- 2026-09-29 · **Item 10 done** (d20e8d1). README names the departures with their D-numbers: D8/D21 marker; D16 one block per customer, with D20, D2 and D19 following; D9 cut between orders. It also says why the freezer sample prints on 20 sheets, not 21. INVENTORY: "Nine checks", with impossible quantities, colliding supplier codes and the Order ID named. :58 corrected: blocks and the total split only when taller than a page. :63 rewritten for the one look. Both 🚧 lines are now ✅ entries, plus a "refuses rather than misprints" entry. `grep -rn "one order, one block"` finds only layout.js:486, a departure. No 🚧 from this pack is left.
+  - **Manifest contradiction, resolved:** item 10's text said the tie-break reads "address → department → customer → order id". The Decisions row, Designs B and G and the code all put the customer before the department, so INVENTORY says **address → customer → department → order id**.
+  - Gate: check.sh OK (docs only; no logic touched).
