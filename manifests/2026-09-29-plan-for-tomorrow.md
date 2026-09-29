@@ -471,6 +471,8 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
 
 ## Owner questions
 
+**Answered by the owner, 2026-09-29.** A window left open overnight is **not** moved. The line under the Date warns and offers Set to tomorrow. The date moves by itself only when the app is opened.
+
 **1. A window left open overnight.** You decided the date moves when the app is opened. A window left open overnight, in the Windows app or a browser tab, therefore keeps yesterday's date. When you come back to it, the line under the Date warns and offers Set to tomorrow. Should coming back to such a window also move the date, with the same Keep button? *My recommendation: no, keep the move to opening the app. A date changing under a window you're looking at is more surprising than a warning beside it.*
 
 ## Out of scope

@@ -1,6 +1,6 @@
 # Pack: Parking map
 
-**Status:** 💭 planned — item list awaiting the owner's approval; nothing built.
+**Status:** 💭 planned (owner questions answered) — item list awaiting the owner's approval; nothing built.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `parking-map`, from `dev` after pack 5 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line). Items 1–2 can start earlier, but only on their own branch, `parking-map-model` (Design H).
 
@@ -427,6 +427,10 @@ Playwright locators are strict, and several tests count across the whole Day pla
   *Done when:* `versions.mjs` passes at 0.8.0, smoke reads `UPDATES[0].version === APP_VERSION` with no console errors, and the entry has been re-read against what shipped.
 
 ## Owner questions
+
+**Answered by the owner, 2026-09-29.**
+1. The yard is **as described** in Design E.
+2. The gate's position is named **`Gate`**: the map's gate constant is exactly `Gate`, not `Port 1`.
 
 1. **Is this the yard?**
    - **Top row:** a side room on the left, Spot 5 across the top of the lane, and the gate in the right wall at the top right.

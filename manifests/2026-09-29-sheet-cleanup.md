@@ -471,6 +471,12 @@ Dependency edges:
 
 ## Owner questions
 
+**Answered by the owner, 2026-09-29.** Both as recommended:
+1. A parked car whose label is not ticked prints on **neither list**.
+2. A ticked car that is on a route is **not** listed under Cars not available; only parked cars are.
+
+The items as written already build these.
+
 Both answers are needed before item 4 starts. Items 1–3 don't depend on them. The items as written build the recommendation for each.
 
 1. **A parked car whose label is not ticked: should it print under Free cars, or on neither list?** Your rule says a car is listed as not available only when its label is ticked (INVENTORY.md:84). It doesn't say where the others go.

@@ -590,6 +590,10 @@ Kept and re-run as they are:
 
 ## Owner questions
 
+**Answered by the owner, 2026-09-29.**
+1. **Grey means Away in every column**, as in the Drivers panel.
+2. **Fix "Use for today" on an empty group here** (item 8). Pack 7 drops its duplicate.
+
 1. **Grey in the other columns.** Load sets everyone outside that crew to away. Should the other four columns grey those people too, so grey always means Away as it does in the Drivers panel? Or should only the column for the plan's day show grey? I've planned the first. Either answer is one condition, and the item list doesn't change.
 2. **"Use for today" on an empty group.** Today it sends everyone away. This was found while planning pack 8 and hasn't been scheduled. Should this pack fix it (item 8), so it changes nobody and says why? I've planned yes. Dropping it removes one item and one sentence of the note, and nothing else.
 

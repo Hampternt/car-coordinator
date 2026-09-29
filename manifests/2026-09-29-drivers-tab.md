@@ -328,7 +328,7 @@ Record the row height at 900 in the ledger.
 
 - [ ] **1. Deleting a label clears it from drivers too.** Add `state.drivers` to the label sweep (Design D). The "Deleting a label" backup is unchanged.
       *Done when:* smoke tags a driver and deletes that label with two clicks. The driver's `labelId` is then empty, "Deleting a label" is at the top of Backups, and no repair notice shows after a reload.
-- [ ] **2. Use for today on an empty group changes nothing.** The guard in Design C. If pack 5's Load doesn't reach `apply-group`, move the check into one helper that both call.
+- [ ] ~~**2. Use for today on an empty group changes nothing.** The guard in Design C. If pack 5's Load doesn't reach `apply-group`, move the check into one helper that both call.~~ **Dropped 2026-09-29: pack 5 item 8 does this (owner).**
       *Done when:* smoke presses Use for today on two empty groups: a new Fri group made with Add a crew for, and a group whose only driver was deleted. It also presses pack 5's Load on the empty Fri column, whatever pack 5 shows there. Each time, everyone's in/away, `carcoord:v1` and the Backups stay byte-identical and the notice shows. A group with members still applies as before.
 - [ ] **3. Usual days on each row, showing each weekday's group.** `WORK_WEEK`, the cell, its header, the tooltips and `aria-pressed`, as in Design A. No `data-field`, no `toggle`, no `.bar`.
       *Done when:* on the dev fixture, each driver's Mon–Fri buttons are pressed exactly where that weekday's first group holds them: Tirsdagslaget's 13 on Tue, nobody on Wed or Thu. A click still writes nothing to `carcoord:v1`.
@@ -378,6 +378,10 @@ Record the row height at 900 in the ledger.
       *Done when:* `versions.mjs` passes at 0.9.0, and `npm run upgrade -- ⟨previous dev build⟩` passes every check under Saved data.
 
 ## Owner questions
+
+**Answered by the owner, 2026-09-29.**
+1. The usual-day toggles are **Monday to Friday** only. Weekend groups stay editable on their cards.
+2. "Use for today" on an empty group is fixed in **pack 5** (its item 8), so item 2 here is dropped.
 
 1. **Usual days: Monday to Friday, or all seven?** The container's approved text says seven buttons (:222). I recommend Monday to Friday.
    - Pack 4 ruled out weekend planning.
