@@ -297,7 +297,7 @@ Written identically in the `updates.js` header, the README and the container's G
   *Done when:* `versions.mjs` passes at 0.3.0 and fails with any piece removed, and smoke reads `UPDATES[0].version === APP_VERSION` with no console errors.
 - [x] **6. Notice lines with a heading, and the update style.**
   *Done when:* a synthetic update note with `<b>` in it is escaped, its heading is bold, and ✕ removes it. Every existing notice case passes unchanged.
-- [ ] **7. ⚠️ Wire the start-up.** Design D and E, with the two separate try/catches and the render guards.
+- [x] **7. ⚠️ Wire the start-up.** Design D and E, with the two separate try/catches and the render guards.
   *Done when:* smoke shows all of these, reading the version from the page:
   - **Returning leader** (saved plan, no marker): exactly one `.notice.update`, last, with 0.3.0 and 0.2.5 in full. One update archive, byte-equal to `carcoord:v1`. The marker set. `carcoord:v1` byte-identical across the load.
   - **No note, no new archive:** a second open; a first run (nothing at all); a first run plus one change and a reload.
@@ -435,3 +435,17 @@ Written identically in the `updates.js` header, the README and the container's G
 
   The `must` rule reads `data` as "starts with the Nothing sentence", and treats `affects` as a change unless the sentence naming the printed sheet or share codes says "unchanged". Otherwise 0.3.0 would need `must`, against Design I. Smoke reads `UPDATES[0].version === APP_VERSION`. Gate: `check.sh` OK. Car suite: exit 0, 409 ok, 0 FAIL, no console errors.
 - Item 6 done, 683f9af. Smoke: a synthetic update note keeps `<b>`/`<i>` as text, only the line heading is bold, ink with a hi-vis edge, and ✕ removes it. Existing notice cases are unchanged. Gate: `check.sh` OK. Car suite: exit 0, 412 ok, 0 FAIL.
+- Item 7 done, 3d5ba0a. **Awaiting individual review.** `archiveBeforeUpdate`, `raiseUpdateNote`, `updateNoteText` and `updateNoteLines` are in `app.js`, and `firstRun` is a module-level `let`. Each piece has its own try/catch with `console.warn`. The copy sentence is left out when no copy was made and the plan didn't come from the file.
+  - **Smoke, reading the version from the page. All pass:**
+    - returning leader: one note, last, 0.3.0 and 0.2.5 in full; one archive byte-equal to `carcoord:v1`; marker set; `carcoord:v1` unchanged;
+    - second open, first run, and first run + change + reload: no note, no new archive;
+    - downgrade (`9.9.9`): archive only;
+    - corrupt save: rescue only, no note or marker, then the note after an overwrite and reload;
+    - newer-version save: archive only;
+    - `#d=` link, returning browser: dialog, no note or marker, archived. First open by link: marks;
+    - save-file sentence: Choose save file, Export (picker deleted), written-to (a linked OPFS file), absent under `__TAURI__`, absent while a hold is up;
+    - storage full: no archive, and the note says so;
+    - isolation: with `Store.archive` throwing (patched `store.js`), the `differs` hold is still raised at start-up and the OPFS file is untouched;
+    - missing pieces: empty `updates.js`, no `archive`/`archives`/`pref`/`setPref`: the plan is drawn, the Data tab opens, and there are no errors.
+  - **Method:** a real save file comes from an OPFS handle put in IndexedDB. Pieces are removed with `ctx.route` (200 with an empty body, not 404).
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 445 ok, 0 FAIL.
