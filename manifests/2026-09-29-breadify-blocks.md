@@ -1,6 +1,6 @@
 # Pack: Breadify — one-look marker, one block per customer
 
-**Status:** 💭 planned — the owner asked to plan now and build alongside the review round; item list for approval.
+**Status:** 🚧 go given 2026-09-29 (plan now, build alongside), and both owner questions answered. Building on `breadify-blocks`.
 **Date:** 2026-09-29
 **Branch:** `breadify-blocks`, cut from `dev` and merged back into `dev` through a PR. It shares three files with the review-round packs: README.md, INVENTORY.md and `scripts/check.sh`. In `scripts/check.sh`, item 1 changes only the loop line at :38. update-note edits that file's header and tail, not :38.
 
@@ -383,6 +383,19 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       *Done when:* README names every departure with its D-number, and INVENTORY's Breadify entries describe what shipped, with no 🚧 left from this pack. `grep -rn "one order, one block" docs/breadify/ README.md INVENTORY.md` finds the phrase only where it is named as a departure.
 
 ## Owner questions
+
+**Answered by the owner, 2026-09-29, in their words. These override the recommendations below where they differ.**
+
+1. *"They can share block but they are separated by department, and then below that separated by order number in case of multiple orders."*
+   - One block per customer at a stop, **departments included**.
+   - Inside the block, the orders are grouped **by department**: a quiet department sub-heading, or nothing for orders with no department.
+   - Under each department, the lines are kept **apart by order**: one order's lines, then the next order's. Nothing is summed.
+   - The street and the route position still separate blocks, because the street is never printed.
+2. *"Small text to the right of the bread type, should be visible, not stand out, just something that can be seen if the situation happens where it matters."*
+   - When a block holds more than one order, **each bread line carries its order id as small, quiet text at the right of the bread name**. Use the existing `.bf-order-id` look: small and grey, never bold. There is no order heading line and no rule between orders.
+   - Each order still has its own crates and substitute marker. Put them in the same quiet style on the first line of each order, so the page stays calm and nothing about one order can be read as another's.
+   - A block with one order prints as today. Its order id follows the existing "Show the order ID" setting.
+   - The implementer settles the exact placement against the edge and shape fixtures (no overlap, no clipping, the 10 mm clearance), and the browser look before the PR confirms it with the owner.
 
 1. **Does "the same customer" include the department?** The recommendation is yes: merge only orders from the same customer and the same department (or both with none), at the same street and position. That prints:
    - **Route 11:** Customer 017's three no-department orders (7, 4 and 10 Kneippbrød) in one block, then its Department 09 order in its own block right below. So Customer 017 still shows twice, side by side.
