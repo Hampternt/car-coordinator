@@ -20,7 +20,8 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 The port departs from that log in three places, each at the owner's request, and the code says so wherever the D-number is cited. The Rust app is unchanged.
 
 - **The substitute marker has one look** (D8, D21). Every order prints `want substitute: true` or `want substitute: false` in the same quiet type, with only the word **false** in bold. The Rust app prints false in loud capitals.
-- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Three more departures follow from this:
+- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Four more departures follow from this:
+  - A department no longer prints as a block of its own. It shares its customer's block, still named, under the customer's heading (D7).
   - Each order has its own crates, marker and id, not one column per block (D20).
   - Ties in the delivery order are broken by the customer before the department, so a customer's orders sit together (D2).
   - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
