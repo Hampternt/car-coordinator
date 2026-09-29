@@ -1251,7 +1251,9 @@ document.addEventListener('input', (e) => {
     item[name] = value;
   }
   save();
-  if (el.tagName === 'SELECT' || el.type === 'checkbox') render();
+  // A tick is often pressed with Space, and the next Tab has to go on from it.
+  if (el.type === 'checkbox') renderKeepingFocus();
+  else if (el.tagName === 'SELECT') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
   else { renderSheet(); renderPicker(); }

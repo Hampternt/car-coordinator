@@ -868,6 +868,24 @@ await page.reload({ waitUntil: 'networkidle' });
 await page.click('[data-act="tab"][data-tab="labels"]');
 check('the tick survives a reload', await page.locator('#tab-labels [data-id="L1"][data-field="onSheet"]').isChecked()
   && !(await page.locator('#tab-labels [data-id="L2"][data-field="onSheet"]').isChecked()));
+// From the keyboard: Space ticks it and the focus stays, so Tab goes on to
+// the same row's buttons rather than back to the top of the tab.
+await page.locator('#tab-labels [data-id="L1"][data-field="onSheet"]').focus();
+await page.keyboard.press('Space');
+const afterSpace = await page.evaluate(() => ({
+  on: document.activeElement?.matches('[data-kind="label"][data-id="L1"][data-field="onSheet"]'),
+  ticked: state.labels.find((l) => l.id === 'L1').onSheet,
+}));
+await page.keyboard.press('Tab');
+const afterTab = await page.evaluate(() => {
+  const a = document.activeElement;
+  return { button: a?.tagName === 'BUTTON', row: a?.closest('tr')?.querySelector('[data-field="onSheet"]')?.dataset.id };
+});
+check('Space on a tick keeps the focus on it', afterSpace.on && afterSpace.ticked === false, JSON.stringify(afterSpace));
+check('and Tab goes on to that label\'s buttons', afterTab.button && afterTab.row === 'L1', JSON.stringify(afterTab));
+await page.keyboard.press('Shift+Tab');
+await page.keyboard.press('Space');
+check('Space again ticks it back', await page.evaluate(() => state.labels.find((l) => l.id === 'L1').onSheet === true));
 await page.click('[data-act="tab"][data-tab="preview"]');
 const lists = await page.evaluate(() => ({
   sheet: document.querySelector('#sheet').innerText,
