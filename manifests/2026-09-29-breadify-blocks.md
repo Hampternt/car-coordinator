@@ -359,7 +359,7 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
       - Every edge and shape check passes.
 
       **Risky — review individually.** It changes what every merged stop prints. A marker or crate count attached to the wrong order would print wrong, and only these tests would catch it.
-- [ ] **9. ⚠️ Cut a block taller than a page between orders.** Design D, replacing item 8's fallback.
+- [x] **9. ⚠️ Cut a block taller than a page between orders.** Design D, replacing item 8's fallback.
       - Rewrite `stopPieces` and `stopSlice` over segments.
       - Pass the flag's height into the stop that follows the flag.
       - Rewrite the comments as departures: layout.js:10-15 (D9), :312-320 (`stopSlice`) and :334-343 (`stopPieces`).
@@ -507,3 +507,16 @@ Running the script rewrites every KEEP fixture with new zip timestamps. It also 
   - **Decisions made here:** crate glyphs keep their size on order lines (flagged for the owner's look); the freezer note-field check now counts every sheet, not just the first; any freezer line in a shared block wraps its name when it would overflow. One-order freezer lines were left as they were: a name longer than the whole line can still overflow there, as before this pack.
   - **Working-copy slip, recovered:** reverting the mutation with `git checkout --` also threw away item 8's uncommitted layout.js edits. They were re-applied from the session, and the suite gave the same 244 ok before the freezer-stats check was added.
   - Gate: check.sh OK; test:breadify all passed, 245 ok.
+- 2026-09-29 · **Item 9 done** (34f48dc), ⚠️ review individually. `stopPieces` is rewritten over segments (`{order, from, to}`) and serves one-order and shared stops alike; `orderPieces`/`orderSlice` are gone. `stopBlock`/`orderBlock`/`sharedBlock` take a part's segments and tag. Every trial part is built as it will print, with a `part 99 of 99` stand-in, and measured against its own cap. Crates come only from the part where an order starts. A continued order's first row leads with a quiet `CONTINUED` where its crates were. A part that starts inside a department reopens its sub-heading. `paginate` packs the stop under the flag against `limit − flag`. D9 departure written into the file header and `stopPieces`.
+  - **Deviations from Design D, all within its rules:**
+    - The cut search halves until a count fits, then binary-searches between the most that fit and the fewest that did not; Design D said "halve, then step up". It is still pure measuring, and heights only grow with lines.
+    - An order taller than a page starts in whatever room is left on the part it opens on, rather than always on a fresh part. It uses the paper better and still leaves only that order spanning parts.
+    - The part tag now sits beside the name, and is placed and measured before the marker and crates. Before, it was appended after them unmeasured, at the far right. This changes where the tag prints on one-giant-stop too.
+    - `sharedBlock` throws if a no-department order would ever print after a sub-heading. The sort prevents it; this makes a breach loud.
+  - **Checks added**, all passing:
+    - Tall customer: 9 parts, 304 lines. Each part has one heading and a `part N of 9` tag; no bare sub-heading. Only 7106 spans parts, and it opens each later part with `continued`, its marker and no crates. 14 crate runs for 14 orders. Only 7107 and 7111 read false. The model-joined reader is clean, which also proves every row sits under its own department.
+    - one-giant-stop: its 300 lines once each, in file order. Crates on part 1 only. Every later part keeps its marker and id.
+    - The 250-line crowded route: lines in order, crates on part 1 only.
+    - Bread route 14's Customer 012: two parts, no order on both, and no longer the interim fallback. The bread day now has 9 shared blocks and no stop printed apart.
+    - The flag: `inspectSheets` reports any page ending with the flag, on both sample days, every edge fixture and the hand-built runs. A sweep of 30–70 lines on an unsequenced stop after a sequenced one is clean. With the fix removed, the sweep fails from 39 lines on (flag alone on page 2); the mutation was reverted to the commit.
+  - Gate: check.sh OK; test:breadify all passed, 279 ok.
