@@ -2632,6 +2632,9 @@ async function start() {
   // should be the one that has to be answered before share codes work again.
   offerSpotRoundSplit();
   offerTodaysTemplate();
+  // What the Store said since the drain above (a start-of-day backup that
+  // would not fit) goes up before the note, so the note stays last.
+  drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
   render();
 

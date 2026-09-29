@@ -2674,8 +2674,9 @@ const filledUp = await fullUp.pg.evaluate((plan) => {
 }, bigPlan);
 await fullUp.pg.reload({ waitUntil: 'networkidle' });
 const noRoom = await opened(fullUp.pg);
-check('with storage full, no archive, and the note says storage is full',
-  filledUp > 0 && noRoom.archives.length === 0 && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
+check('with storage full, no archive, and the note says storage is full, last, under the backup warning',
+  filledUp > 0 && noRoom.archives.length === 0 && noRoom.last
+  && (await fullUp.pg.locator('#notices').innerText()).includes('Could not take a backup before "Start of day"') && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
   `${JSON.stringify(noRoom.archives)} ${noRoom.say}`);
 check('and the saved plan is untouched', noRoom.saved === bigPlan);
 check('no console errors when storage is full', fullUp.errs.length === 0, fullUp.errs.join(' | '));
