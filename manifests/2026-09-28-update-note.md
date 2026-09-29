@@ -513,3 +513,10 @@ Written identically in the `updates.js` header, the README and the container's G
   - `screens/` stays untracked, per `.gitignore`;
   - `archiveNeeded` taking `seen` is right.
 - Fix 1 (major, downgrade not archived), 61adbd4. An update archive counts as this open's copy only when both `to === version` and `from ===` this browser's `from` (the marker, or "0.2.4 or earlier"). `copyFor` and `updatingFrom` are shared by `archiveNeeded` (which now takes `from`) and `archiveBeforeUpdate`'s early return. Smoke: with an archive 0.2.4→V and the marker at the next minor, a new archive (next→V) is taken, and a reload adds none. The pure-rule case `backFromNewer` is added. Gate: `check.sh` OK. Car suite: exit 0, 474 ok, 0 FAIL.
+- Fix 2 (a rescue evicting update archives without saying so), 3f3cebc. `archive()`'s `dropped` now counts only the update entries spliced out in the quota loop; cap trimming and a rescue replacing the old one are not counted. `rescue()` returns `{ ok, dropped }`. When `dropped > 0`, the unreadable warning adds "To make room, N older copies in Archives were removed.", and so does the note: `archiveBeforeUpdate` now returns `{ copy, dropped }`.
+  - **Smoke:**
+    - storage near full, an unreadable v1 of 100 KB and one 200 KB update archive: the warning names 1 removed copy, and Archives holds only the rescue;
+    - the same for an update copy: the note says so;
+    - the fourth-archive case now expects `dropped: 0`.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 477 ok, 0 FAIL.
+  - **Flaky, not caused by this fix:** the first run failed "a disarm leaves the page where the user scrolled it — 285". That check dates from e5c8472 (2026-09-24), before this pack. The rerun was clean.
