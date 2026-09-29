@@ -2396,6 +2396,9 @@ const fullArchive = await un.evaluate(() => {
   localStorage.setItem('carcoord:archives', JSON.stringify([
     { kind: 'update', from: 'b', to: 'B', t: '2026-09-02T00:00:00.000Z', text: big('b', 200) },
     { kind: 'update', from: 'a', to: 'A', t: '2026-09-01T00:00:00.000Z', text: big('a', 200) },
+    // Last in the list, where a loop that dropped from the end regardless
+    // of kind would take it first.
+    { kind: 'rescue', from: null, to: null, t: '2026-08-31T00:00:00.000Z', text: '{kept' },
   ]));
   let chunks = 0;
   try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
@@ -2406,7 +2409,7 @@ const fullArchive = await un.evaluate(() => {
   const untouched = keys.map((k, i) => localStorage.getItem(k) === before[i]);
   // One that fits once the oldest has made room: the newer one stays.
   const fits = Store.archive({ kind: 'update', from: 'B', to: 'M', t: new Date().toISOString(), text: big('m', 150) });
-  const after = Store.archives().map((a) => a.to);
+  const after = Store.archives().map((a) => (a.kind === 'rescue' ? a.text : a.to));
   for (let i = 0; i < chunks; i++) localStorage.removeItem(`fill:${i}`);
   for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
   return { chunks, tooBig, untouched, fits, after };
@@ -2414,7 +2417,7 @@ const fullArchive = await un.evaluate(() => {
 check('the archive test really did fill this browser up', fullArchive.chunks > 0 && fullArchive.chunks < 2000, `${fullArchive.chunks} chunks`);
 same('an archive that does not fit leaves the archives, the plan and the Backups byte for byte',
   { tooBig: fullArchive.tooBig, untouched: fullArchive.untouched }, { tooBig: { ok: false, dropped: 0 }, untouched: [true, true, true] });
-same('and one that fits once the oldest makes room keeps the newer one', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B'] });
+same('and one that fits once the oldest update copy makes room keeps the newer one, and the rescue', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B', '{kept'] });
 await un.evaluate(() => { localStorage.clear(); });
 
 // --- a notice line can carry a heading, and the update note has a style ---
