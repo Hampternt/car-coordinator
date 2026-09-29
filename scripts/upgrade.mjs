@@ -64,6 +64,7 @@ const differing = (a, b) => [...new Set([...Object.keys(a || {}), ...Object.keys
 // unless it was ticked, and the QR fixed off.
 function asOpened(oldPlan, schema) {
   const p = JSON.parse(JSON.stringify(oldPlan));
+  delete p.extra;   // makeOdd's field, which no build keeps
   p.schemaVersion = schema;
   p.qrOnSheet = false;
   for (const l of p.labels || []) l.onSheet = l.onSheet === true;
