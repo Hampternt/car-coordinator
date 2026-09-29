@@ -1117,6 +1117,21 @@ same(
 );
 same('and at two positions, two stops', bySequence.twoPlaces.stops, ['Kafé D:33', 'Kafé D:34']);
 
+// Names match exactly as the file spells them. Two spellings of one customer
+// stay two stops, each printed as spelled: that is what printed before
+// blocks were shared, so it is never a wrong print.
+const spellings = await page.evaluate(() =>
+  handRoute([
+    [41, 'Kafé Sentrum', 'Street 4', 400],
+    [42, 'Kafe Sentrum', 'Street 4', 400],
+  ]),
+);
+same(
+  'two spellings of one customer are two stops, both names printed',
+  [spellings.stops, spellings.body.filter((n) => /Sentrum/.test(n)).sort()],
+  [['Kafe Sentrum:42', 'Kafé Sentrum:41'], ['Kafe Sentrum', 'Kafé Sentrum']],
+);
+
 // acceptance check 7: names print exactly as the file has them (D14).
 const truncated = sheets
   .flatMap((s) => s.products)
