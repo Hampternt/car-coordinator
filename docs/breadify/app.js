@@ -365,7 +365,20 @@
       source: Model.sourceLabel(state.filename, dates()),
     };
 
-    built = Sheet.day(chosen, state.settings, context, {});
+    try {
+      built = Sheet.day(chosen, state.settings, context, {});
+    } catch (error) {
+      // The layout throws on a value it cannot print correctly. Nothing
+      // printing is the safe outcome; a sheet with something wrong on it is
+      // not.
+      built = [];
+      $('preview').replaceChildren();
+      const message = error && error.message ? error.message : String(error);
+      $('printSummary').textContent =
+        `The sheets could not be laid out, so nothing will print: ${message}`;
+      $('print').disabled = true;
+      return;
+    }
     $('preview').replaceChildren(...built);
     scalePreview();
 

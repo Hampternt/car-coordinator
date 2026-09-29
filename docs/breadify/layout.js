@@ -163,14 +163,38 @@ const Sheet = (() => {
   // ── The substitute marker (D8, D21) ───────────────────────────────────
 
   /**
-   * Quiet when substitutes are fine, loud when they are not. The words print
-   * in Archivo ExtraBold caps.
+   * One look for both answers: `want substitute: true` or
+   * `want substitute: false`, in the same quiet type, with only the word
+   * false in bold.
+   *
+   * A deliberate departure from D8 and D21, which the Rust app still prints:
+   * quiet for true, and loud Archivo capitals for false. The owner asked for
+   * one look every time (2026-09-29), and every order states its own value,
+   * so nothing relies on the loud form standing out.
+   *
+   * Anything but a real true or false throws rather than printing. A stop
+   * handed in where an order belongs has no answer of its own, and must never
+   * come out as "false".
    */
-  function marker(stop) {
-    if (stop.acceptAlternatives) {
-      return element('span', 'bf-marker', 'want substitute: true');
+  function marker(order) {
+    const answer = order.acceptAlternatives;
+    if (answer === true) return element('span', 'bf-marker', 'want substitute: true');
+    if (answer === false) {
+      const node = element('span', 'bf-marker', 'want substitute: ');
+      node.appendChild(element('b', null, 'false'));
+      return node;
     }
-    return element('span', 'bf-marker-loud', 'WANT SUBSTITUTE: FALSE');
+    throw new Error(
+      `an order's substitute answer reads "${String(answer)}", which is neither true nor false`,
+    );
+  }
+
+  /** An order id, or a throw: a stop has no id of its own to print. */
+  function orderId(order) {
+    if (!Number.isFinite(order.id)) {
+      throw new Error(`an order id reads "${String(order.id)}", which is not a number`);
+    }
+    return element('span', 'bf-order-id', order.id);
   }
 
   /**
@@ -178,12 +202,10 @@ const Sheet = (() => {
    * of telling two otherwise identical stops apart, so it belongs beside the
    * mark rather than adrift on its own line.
    */
-  function stamp(stop, settings) {
+  function stamp(order, settings) {
     const group = element('span', 'bf-stamp');
-    group.appendChild(marker(stop));
-    if (settings.showOrderId) {
-      group.appendChild(element('span', 'bf-order-id', stop.id));
-    }
+    group.appendChild(marker(order));
+    if (settings.showOrderId) group.appendChild(orderId(order));
     return group;
   }
 
@@ -651,8 +673,12 @@ const Sheet = (() => {
   }
 
   /**
-   * One sentence of context on the left, the substitute convention on the
-   * right.
+   * One sentence of context: the route, its stops, and the pallet call.
+   *
+   * The right half used to explain the loud capitals — "want substitute:
+   * true unless marked FALSE". Every order now states its own answer in one
+   * look (see marker()), so the explanation went and the pallet call has the
+   * line to itself.
    *
    * The pallet call is made once for the whole route, so it lives here on
    * every sheet rather than in the total that closes it (D25) — and the line
@@ -664,9 +690,7 @@ const Sheet = (() => {
     const bread = settings.kind === Model.BREAD;
     const note = element('div', 'bf-note');
     const left = element('div');
-    const right = element('div');
-    right.innerHTML = '<em>want substitute: true</em> unless marked FALSE';
-    append(note, left, right);
+    note.appendChild(left);
 
     const unsequenced = Model.unsequencedStops(route).length;
     const what = bread ? 'in full' : 'check list';

@@ -123,6 +123,36 @@ const inspected = (what, seen) => {
   same(`${what}: nothing nonsensical is printed`, seen.nonsense, []);
 };
 
+/**
+ * What every substitute marker in the preview reads. One look for both
+ * answers: the words, and only the word false in bold (a departure from
+ * D8/D21 the owner asked for).
+ */
+const markerReport = () =>
+  page.evaluate(() => {
+    const markers = Array.from(document.querySelectorAll('#preview .bf-marker'));
+    const odd = markers
+      .map((m) => ({
+        text: m.textContent,
+        kids: Array.from(m.children).map(
+          (c) => `${c.tagName}:${c.textContent}:${getComputedStyle(c).fontWeight}`,
+        ),
+      }))
+      .filter(
+        ({ text, kids }) =>
+          !(text === 'want substitute: true' && kids.length === 0) &&
+          !(text === 'want substitute: false' && kids.length === 1 && kids[0] === 'B:false:700'),
+      );
+    return {
+      falses: markers.filter((m) => m.textContent === 'want substitute: false').length,
+      odd: odd.slice(0, 3),
+      loud: document.querySelectorAll('#preview .bf-marker-loud').length,
+      noteSays: Array.from(document.querySelectorAll('#preview .bf-note')).some((n) =>
+        /substitute/i.test(n.textContent),
+      ),
+    };
+  });
+
 await page.goto(`${base}breadify/`, { waitUntil: 'networkidle' });
 
 // Every measurement on the sheet assumes these eight faces. A face that did
@@ -247,6 +277,7 @@ const bread = await page.evaluate(async ([bytes]) => {
     pallets: routes
       .filter((r) => Model.routeCrates(r, rules) > Model.PALLET_THRESHOLD)
       .map((r) => r.nickname),
+    refusing: routes.flatMap((r) => r.stops).filter((o) => o.acceptAlternatives === false).length,
   };
 }, [breadBytes]);
 
@@ -399,6 +430,19 @@ inspected(
   await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
 );
 
+const breadMarkers = await markerReport();
+same('every bread marker reads true or false in the one look', breadMarkers.odd, []);
+check(
+  'every bread order that refuses substitutes prints false: 18 of them',
+  bread.refusing === 18 && breadMarkers.falses === bread.refusing,
+  `${breadMarkers.falses} printed, ${bread.refusing} in the file`,
+);
+check(
+  'no loud marker is left, and the page note explains none',
+  breadMarkers.loud === 0 && !breadMarkers.noteSays,
+  JSON.stringify(breadMarkers),
+);
+
 // The handoff's verified budget: route 8 is 5 stops, 13 lines and its total,
 // on one sheet.
 const route8 = sheets.filter((s) => s.route === '8');
@@ -485,6 +529,77 @@ check(
 check(
   'a route’s last sheet says it ends',
   sheets.filter((s) => s.page === s.of).every((s) => s.footer === `Route ${s.route} — end of route`),
+);
+
+// Nothing is ever printed wrong: a value the layout cannot print correctly is
+// refused out loud instead. A stop handed in where an order belongs has no
+// substitute answer and no id of its own, and must never print as "false" or
+// "undefined".
+const refusals = await page.evaluate(() => {
+  const order = () => ({
+    id: 1000000001, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
+    route: '1', sequence: 100, acceptAlternatives: true, comment: null,
+    lines: [{ product: { id: 1, name: 'Grovbrød', sku: 'x', supplier: 'sandnes bakeri' }, quantity: 3 }],
+  });
+  const attempt = (stop) => {
+    try {
+      Sheet.paginate(
+        { nickname: '1', stops: [stop] },
+        { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+        { dates: null, source: 'test', routeStops: 1, routeLines: 1 },
+        {},
+      );
+      return 'printed';
+    } catch (error) {
+      return String(error.message);
+    }
+  };
+  const noAnswer = order();
+  delete noAnswer.acceptAlternatives;
+  const noId = order();
+  delete noId.id;
+  return { noAnswer: attempt(noAnswer), noId: attempt(noId), whole: attempt(order()) };
+});
+check(
+  'an order with no substitute answer is refused, not printed',
+  /neither true nor false/.test(refusals.noAnswer),
+  refusals.noAnswer,
+);
+check(
+  'an order with no id is refused while ids are shown',
+  /not a number/.test(refusals.noId),
+  refusals.noId,
+);
+check('and a whole order still prints', refusals.whole === 'printed', refusals.whole);
+
+// When the layout does refuse, the Print step says why and prints nothing.
+const laidOutWrong = await page.evaluate(() => {
+  const real = Sheet.day;
+  const tick = document.querySelector('#routes input[type="checkbox"]');
+  Sheet.day = () => {
+    throw new Error('a stand-in failure');
+  };
+  try {
+    tick.click();
+    return {
+      summary: document.getElementById('printSummary').textContent,
+      sheets: document.querySelectorAll('#preview .bf-sheet').length,
+      printDisabled: document.getElementById('print').disabled,
+    };
+  } finally {
+    Sheet.day = real;
+    tick.click();
+  }
+});
+same('a layout that fails says why, shows no sheets and cannot be printed', laidOutWrong, {
+  summary: 'The sheets could not be laid out, so nothing will print: a stand-in failure',
+  sheets: 0,
+  printDisabled: true,
+});
+check(
+  'and the sheets come back once it lays out again',
+  (await page.locator('#preview .bf-sheet').count()) === sheets.length &&
+    !(await page.locator('#print').isDisabled()),
 );
 
 // ── The freezer list ───────────────────────────────────────────────────────
@@ -575,6 +690,25 @@ check(
 inspected(
   'the freezer day',
   await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+);
+
+const freezerRefusing = await page.evaluate(async ([bytes]) => {
+  const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+  return Model.group(Model.fold(Model.readRows(await book.sheet('Data'))))
+    .flatMap((r) => r.stops)
+    .filter((o) => o.acceptAlternatives === false).length;
+}, [freezerBytes]);
+const freezerMarkers = await markerReport();
+same('every freezer marker reads true or false in the one look', freezerMarkers.odd, []);
+check(
+  'every freezer order that refuses substitutes prints false: 10 of them',
+  freezerRefusing === 10 && freezerMarkers.falses === freezerRefusing,
+  `${freezerMarkers.falses} printed, ${freezerRefusing} in the file`,
+);
+check(
+  'the freezer sheets have no loud marker and no convention in the note either',
+  freezerMarkers.loud === 0 && !freezerMarkers.noteSays,
+  JSON.stringify(freezerMarkers),
 );
 
 // F10: flipping the kind re-runs validation on the spot, since what counts as

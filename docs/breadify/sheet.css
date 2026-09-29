@@ -220,12 +220,6 @@
   white-space: nowrap;
 }
 
-.bf-note em {
-  color: var(--ink);
-  font-weight: 500;
-  font-style: normal;
-}
-
 /* ── Legend strip ────────────────────────────────────────────────────── */
 
 /* `nowrap` on the band meant the supplier key could only ever run off the
@@ -472,15 +466,16 @@
   margin-left: 2.3mm;
 }
 
+/* One look for both answers, where D8/D21 print false loud in Archivo
+ * capitals: the same quiet type every time, and only the word false in bold.
+ * Same face, size and ink, so the weight alone carries it. */
 .bf-marker {
   font: 500 9.2pt/1 'IBM Plex Mono', monospace;
   color: var(--ink-quiet);
 }
 
-.bf-marker-loud {
-  font: 800 10.4pt/1 Archivo, sans-serif;
-  letter-spacing: -0.02em;
-  color: var(--ink);
+.bf-marker b {
+  font-weight: 700;
 }
 
 /* Deliberately the quietest thing on the page, but never below ~8 pt: it is
