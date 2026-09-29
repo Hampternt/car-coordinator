@@ -2459,6 +2459,8 @@ const rules = await un.evaluate(() => {
     backFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
     olderArchiveOnly: A({ archives: [{ kind: 'update', from: '0.4.0', to: '0.5.0' }] }),
     rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
+    rescueThisVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
+    rescueOlderVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.5.0' }] }),
     nothingUsable: A({ usableText: null }),
   };
   out.untouched = all() === before;
@@ -2483,7 +2485,7 @@ same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, n
 same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
 same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
   returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
-  olderArchiveOnly: true, rescueDoesNotCount: true, nothingUsable: false });
+  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, nothingUsable: false });
 check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
 
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
@@ -2596,6 +2598,12 @@ await up.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(
 await up.reload({ waitUntil: 'networkidle' });
 const afterLoss = await opened(up);
 check('once it is overwritten and the page reloaded, the note comes', afterLoss.notes === 1 && afterLoss.marker === V, JSON.stringify(afterLoss).slice(0, 200));
+same('and it copies nothing typed since the loss, pointing at the rescue instead', {
+  kinds: afterLoss.archives.map((a) => a.kind),
+  during: await up.evaluate(() => Store.archives().map((a) => a.during)),
+  rescueSaid: afterLoss.say.includes('What this browser had saved before could not be read; it is kept unchanged in Archives on the Data tab.'),
+  copiedSaid: afterLoss.say.includes('copied unchanged'),
+}, { kinds: ['rescue'], during: [V], rescueSaid: true, copiedSaid: false });
 const newer = JSON.stringify({ schemaVersion: 99, date: '2026-09-29', cars: [], positions: [], labels: [], routes: [{ id: 'r1', name: 'Newer' }] });
 await leaveAs(up, { 'carcoord:v1': newer });
 await up.reload({ waitUntil: 'networkidle' });

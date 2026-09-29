@@ -200,6 +200,9 @@ const scenarios = {
     await now.page.waitForTimeout(300);
     const note = await noteOn(now.page);
     check('unreadable save: after one change and a reload, the note', note.count === 1, JSON.stringify(note));
+    check('unreadable save: and it points at the rescue, copying nothing typed since the loss',
+      note.say.includes('What this browser had saved before could not be read') && !note.say.includes('copied unchanged')
+      && JSON.parse(await now.page.evaluate(() => localStorage.getItem('carcoord:archives'))).every((a) => a.kind === 'rescue'), note.say);
     check('unreadable save: the rescue is still there', JSON.parse(await now.page.evaluate(() => localStorage.getItem('carcoord:archives'))).some((a) => a.kind === 'rescue' && a.text === bad));
     check('unreadable save: no console errors', !now.errors.length, now.errors.join(' | '));
     await now.context.close();
