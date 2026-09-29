@@ -310,7 +310,7 @@ Written identically in the `updates.js` header, the README and the container's G
   - **Missing pieces:** with `UPDATES` removed and `Store.archive` / `Store.pref` missing, the plan is drawn, the Data tab opens, and there are no console errors.
 
   **Risky: review individually.** It changes the boot order on every returning leader's first open.
-- [ ] **8. What's new and Archives on the Data tab.** Design F, with `archive-restore` keyed by `t`.
+- [x] **8. What's new and Archives on the Data tab.** Design F, with `archive-restore` keyed by `t`.
   *Done when:* smoke shows all of these:
   - both cards sit above Backups, which is still `.card:last-child`, and smoke.mjs:964 and :1040 pass unchanged with a rescue present;
   - What's new shows the version and the newest entry's four parts;
@@ -449,3 +449,20 @@ Written identically in the `updates.js` header, the README and the container's G
     - missing pieces: empty `updates.js`, no `archive`/`archives`/`pref`/`setPref`: the plan is drawn, the Data tab opens, and there are no errors.
   - **Method:** a real save file comes from an OPFS handle put in IndexedDB. Pieces are removed with `ctx.route` (200 with an empty body, not 404).
   - **Gate:** `check.sh` OK. Car suite: exit 0, 445 ok, 0 FAIL.
+- Item 8 done, db7e648.
+  - **Code:** `planSummary` is factored out of the save-file question, whose wording is unchanged, and reused for archive rows. `parseQuietly` drops the newer-version warning `parseImport` raises when a row is only being drawn. `archive-restore` is keyed `archive:⟨t⟩` and looks the entry up by `t`. `archive-download` looks it up by kind and `t`.
+  - **"Backups full" is read as "no room for the backup".** Twelve backups alone never block Restore, because a snapshot rotates the oldest out. The smoke case removes Backups and fills real quota, so the snapshot truly fails.
+  - **Smoke:**
+    - the card order, with Backups last and the tab's only table;
+    - What's new: the version and the newest entry's four parts;
+    - the update row's summary;
+    - a rescue row offers Download only;
+    - a Backups row armed and then an archive clicked: nothing restored;
+    - Restore: one click changes nothing, two restore it, and the screen goes into Backups first;
+    - Download: byte-equal, named `car-coordinator-before-⟨V⟩.json`, and it imports to the same plan;
+    - rescue download: byte-equal, named `car-coordinator-unreadable-2026-09-28.json`;
+    - a `[]` archive: no Restore;
+    - storage full: Restore does nothing and says why.
+
+    On the main page, a rescue is present when the old Backups-table checks (formerly :964 and :1040) run, and they pass unchanged.
+  - **Gate:** `check.sh` OK. Car suite: exit 0, 460 ok, 0 FAIL.
