@@ -167,6 +167,9 @@ const Model = (() => {
       return {
         excelRow: row.number,
         orderId: integer(cell(COLUMN.orderId)),
+        // A blank or unreadable id reads as 0 above, and every such row would
+        // fold into one order. validate.js says so from this.
+        orderIdExact: exactNumber(cell(COLUMN.orderId)),
         quantity: integer(cell(COLUMN.quantity)),
         quantityExact: exactNumber(cell(COLUMN.quantity)),
         productId: integer(cell(COLUMN.productId)),

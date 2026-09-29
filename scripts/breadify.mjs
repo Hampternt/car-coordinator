@@ -814,7 +814,8 @@ same('a negative quantity blocks the print', quantitySays.negative,
 // two vans — so it is said, not blocked, and the address prints on both.
 const twoRoutes = await page.evaluate(() => {
   const row = (excelRow, orderId, route, department) => ({
-    excelRow, orderId, quantity: 4, quantityExact: 4, productId: 10, productName: 'Grovbrød',
+    excelRow, orderId, orderIdExact: orderId, quantity: 4, quantityExact: 4, productId: 10,
+    productName: 'Grovbrød',
     supplierSku: 'SB-10', position: null, supplier: 'Sandnes Bakeri', customer: 'Hinna skole',
     department, deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: route,
     routeOrdering: 1, acceptAlternatives: false, region: 'Stavanger',
@@ -832,6 +833,30 @@ same('one address on two routes is a notice, not a block', twoRoutes.said,
   [['notice', 'Hinnavegen 1 is on more than one route']]);
 check('and does not stop the print', twoRoutes.blocks === false);
 same('and the address prints on both routes', twoRoutes.printedOn, ['3', '7']);
+
+// A row with no Order ID reads as order 0, so two of them for one customer
+// used to fold quietly into one order and print as one.
+const noOrderId = await page.evaluate(() => {
+  const row = (excelRow, productId) => ({
+    excelRow, orderId: 0, orderIdExact: null, quantity: 4, quantityExact: 4, productId,
+    productName: `Brød ${productId}`, supplierSku: `SB-${productId}`, position: null,
+    supplier: 'Sandnes Bakeri', customer: 'Hinna skole', department: null,
+    deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: '3', routeOrdering: 1,
+    acceptAlternatives: true, region: 'Stavanger',
+  });
+  const findings = Validate.run([row(2, 10), row(3, 11)], Model.BREAD);
+  return {
+    said: findings
+      .filter((f) => f.kind === 'blank-required-field')
+      .map((f) => [f.severity, f.headline]),
+    blocks: Validate.blocks(findings),
+  };
+});
+same('a missing Order ID is said for each row, as blocking', noOrderId.said, [
+  ['blocking', 'Order ID is empty or not a number on row 2'],
+  ['blocking', 'Order ID is empty or not a number on row 3'],
+]);
+check('and it would make the pages wrong', noOrderId.blocks === true);
 
 // 400 of one bread is a school kitchen and prints without comment. Four
 // figures is a decimal point in the wrong place — it still prints, because the
