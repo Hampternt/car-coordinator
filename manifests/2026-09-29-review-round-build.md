@@ -23,10 +23,11 @@ Everything left in the review round for Car Coordinator is built in one continuo
 
 - **One builder, in order, one worktree.** Every part edits `docs/app.js`, so they can't be built in parallel.
 - **Each part keeps what makes it safe:**
-  - its own item gates and one commit per item;
+  - one commit per item, each passing `scripts/check.sh`;
   - its schema migration plan (part 2);
-  - its **Announce and cut** item, with its own version and update-note entry (pack 1's Design G and H);
-  - its upgrade check from the previous build.
+  - its **Announce and cut** item, with its own version and update-note entry (pack 1's Design G and H).
+
+  The full suite, the upgrade check and the review run once, at the end (see below).
 
   Users jump from the build live on `main` straight to `dev`'s tip, so every entry they missed shows, and the `must` ones show in full.
 - **Owner's answers.** Each part's **Owner questions** section holds them, and they override that part's recommendations.
@@ -34,28 +35,20 @@ Everything left in the review round for Car Coordinator is built in one continuo
 - **Parts 8 and 9 were planned before pack 1's rework.** They are re-read against what exists by then, especially the tour's use of pack 1's `firstRun` and `Store.pref('tour')`, and the menus' use of the final Drivers tab row. Deviations go in their Ledgers.
 - **Pack 1's review fixes.** When they land on `update-note`, `update-note` is merged into `review-round` before the next part starts. The manager says when.
 
-## Reviews
+## Reviews and gates: batched at the end (owner, 2026-09-29)
 
-The manager runs these alongside the build and sends back what they confirm:
-- every **⚠️ risky** item, reviewed individually as its part finishes;
-- one review per part;
-- one combined review and a browser walkthrough before the PR into `dev`.
+The owner's rule: the full suite and the multi-agent reviews wait until the run is done. They do not run per change or per part.
 
-## Gates
-
-- **Item gate:**
-  - `bash scripts/check.sh`, which includes `versions.mjs`;
-  - the targeted smoke case when logic is touched (`CHROMIUM_PATH=/usr/bin/google-chrome npm run test:car`);
-  - `npm run test:breadify` only if a part touches shared files.
-- **End of each part:**
+- **Per item:** `bash scripts/check.sh` only (syntax and the version guard, seconds), then commit. No per-item smoke run and no per-part upgrade check. Every item is still its own commit, so a failure found at the end can be bisected to the exact change.
+- **Per part:** its **Announce and cut** item (version and note entry), and its Ledger. Nothing else.
+- **At the end of the whole run, once:**
   - `CHROMIUM_PATH=/usr/bin/google-chrome npm test`;
-  - `npm run upgrade -- ⟨previous build⟩`;
-  - the part's Ledger updated.
-- **End of the combined pack:**
-  - `npm test`;
   - `npm run screens`;
-  - `npm run upgrade` from `v0.2.4` (the build live on `main`) to the final build.
-  - Then the combined review, the walkthrough, and one PR into `dev`.
+  - `npm run upgrade` from `v0.2.4`, the build live on `main`. This is the only upgrade check (owner, 2026-09-29): users go straight from what `main` serves to `dev`'s tip, so versions in between on `dev` are never compared. It overrides each part's own "Upgrade check in the pack gate". The same check runs again before `dev` → `main`;
+  - one combined review, whose findings are fixed;
+  - a browser walkthrough;
+  - one PR into `dev`.
+- **Parts 2 and 3 so far** already had per-item suites, and part 2 its own review, before this rule. Nothing is re-run for them now.
 
 ## Ledger
 

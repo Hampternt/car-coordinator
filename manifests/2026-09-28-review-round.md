@@ -90,7 +90,7 @@ Reconciled with pack 1's reworked manifest on 2026-09-28. The pre-update copy is
 
 - **Version cut.** Merging a pack into `dev` includes cutting a version, so every note entry has its own version. What reaches users is whichever version `dev` holds when it is merged to `main`, and the note shows them every entry they haven't seen. That means five places: `package.json`, `package-lock.json` (twice), `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, as commit 87714d7 did for 0.2.4. Pack 1 adds a sixth: a version constant in `docs/` that the update note keys on. Pack 1 also adds a line to `scripts/check.sh` that fails when these places disagree. Without the cut, every merge would re-upload the v0.2.4 release in place.
 - **Note entry.** Every pack adds its own entry to the update note in plain words: what changed, what it affects, and what happened to your data.
-- **Upgrade check in the pack gate.** Required for packs 1, 2 and 4, and cheap for the rest. A profile saved by the previous `dev` build is opened in the pack's build. **Before every `dev` → `main` merge, it runs again from the build live on `main`**, because that's the one users are upgrading from. All of the following must hold:
+- **Upgrade check: from the build live on `main` only** (owner, 2026-09-29). Pages only changes when `dev` reaches `main`, so the only upgrade real users make is from the build live on `main` to the tip of `dev`. The check opens a profile saved by the live `main` build in `dev`'s tip. It runs at the end of a run, before its PR into `dev`, and **again before every `dev` → `main` merge**. There is no check between versions on `dev` (0.3.0 → 0.4.0 and so on): nobody ever runs those builds. All of the following must hold:
   - The state is identical apart from the changes the pack names.
   - Every backup is still there, and the profile is seeded under the cap of 12.
   - An archive holds the old build's `carcoord:v1` byte for byte.
@@ -307,6 +307,10 @@ All answered by the owner on 2026-09-28, and folded into each pack above. Still 
   - What's new lists all nine entries, and the note shows the newest three and counts the rest.
 
   This check covers the web build only. The exe gets a hand check on install.
+- **Known blocker before `dev` → `main`** (found 2026-09-29, deferred by the owner until they ask for the merge to `main`):
+  - Pack 1's car suite crashes CI's pinned Playwright Chromium (headless shell v1243) at `scripts/smoke.mjs:2734`. That is the update-note case that reloads with a save file linked: "Target page, context or browser has been closed".
+  - It fails on both CI runs of PR #16 and again locally on that same Chromium. On system Chrome it passes.
+  - `main`'s build job runs this suite before it releases, so this must be fixed before `dev` → `main`. It does not block merges into `dev`.
 
 ## Ledger
 
