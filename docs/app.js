@@ -903,7 +903,7 @@ function renderCars() {
     <td class="btns">${moveDel('car', c.id)}</td></tr>`).join('');
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
-    <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning, and they are listed on the printout.</p>
+    <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning. A parked car is listed on the printout when its label has Show on printout ticked, on the Labels tab.</p>
     <p class="counts"><span class="assign yes">${onRoute} on a route</span><span class="assign none">${free} free</span><span class="assign down">${down} parked and marked</span></p>
     <div class="bar">
       <input id="newCar" type="text" placeholder="Registration(s), e.g. SD12345 SE67890">
@@ -932,19 +932,24 @@ function renderPositions() {
 }
 
 function renderLabels() {
+  // A cached older store.js can pair with this app.js after a deploy. It
+  // would save the tick under schema 4, where an older build drops it
+  // without its newer-version warning, so the tick is offered only on 5.
+  const ticks = Store.SCHEMA >= 5;
   const rows = state.labels.map((l) => `<tr>
     <td>${field('label', l.id, 'name', l.name)}</td>
     <td><input type="color" data-kind="label" data-id="${esc(l.id)}" data-field="color" value="${esc(colour(l.color))}"></td>
+    ${ticks ? `<td><label><input type="checkbox" data-kind="label" data-id="${esc(l.id)}" data-field="onSheet" ${l.onSheet === true ? 'checked' : ''}> Show on printout</label></td>` : ''}
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
     <h2>Status labels</h2>
-    <p class="hint">These become the one-click buttons on cars and positions.</p>
+    <p class="hint">These become the one-click buttons on cars, positions and drivers. Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
     <div class="bar">
       <input id="newLabel" type="text" placeholder="Label name, e.g. No fuel card">
       <input id="newLabelColor" type="color" value="#1565c0">
       <button class="btn" data-act="add-label">+ Add label</button>
     </div>
-    <table class="grid"><thead><tr><th>Name</th><th>Colour</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="grid"><thead><tr><th>Name</th><th>Colour</th>${ticks ? '<th>Printout</th>' : ''}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 const when = (d) => {
@@ -1156,6 +1161,11 @@ function renderNotices() {
    "Spot 1/1". A route with no round prints just the spot. */
 const spotCell = (r) => [byId(state.positions, r.positionId)?.name, String(r.round || '').trim()].filter(Boolean).join('/');
 
+/* A label's Show on printout tick. Read as === true here rather than trusted
+   to normalise: a share code, Add label and Add tag put labels on state
+   without passing through it. */
+const printsOnSheet = (labelId) => byId(state.labels, labelId)?.onSheet === true;
+
 function renderSheet() {
   const [y, m, d] = (state.date || today()).split('-');
   // Warnings belong on screen, before printing: the paper shows the plan and
@@ -1169,11 +1179,12 @@ function renderSheet() {
       <td>${dash(spotCell(r))}</td>
     </tr>`).join('');
 
-  const marked = (arr, key) => arr.filter((x) => x.labelId).map((x) =>
-    `<p>${esc(x[key])}: ${esc(byId(state.labels, x.labelId)?.name)}${x.note ? ' (' + esc(x.note) + ')' : ''}</p>`).join('');
   const use = usage();
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).map((c) => esc(c.reg)).join(', ');
-  const downCars = marked(state.cars, 'reg');
+  // Parked cars whose label is ticked. A car on a route is on its row, and a
+  // parked car with an unticked label is on neither list.
+  const downCars = state.cars.filter((c) => c.labelId && printsOnSheet(c.labelId) && !use.cars[c.id]).map((c) =>
+    `<p>${esc(c.reg)}: ${esc(byId(state.labels, c.labelId)?.name)}${c.note ? ' (' + esc(c.note) + ')' : ''}</p>`).join('');
 
   // The weekday in words under the date, from the plan's own date: the sheet
   // on the pillar is read by people checking it is the right day's list.

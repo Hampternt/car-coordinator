@@ -845,6 +845,40 @@ check('the sheet has no warning marks', !clashSheet.includes('!') && (await page
 check('the sheet keeps its pink row and its gap', (await page.locator('#sheet tr.hl').count()) === 1 && (await page.locator('#sheet tr.spacer').count()) === 1);
 check('the sheet lists the free car', /Free cars\s*CC33333/.test(clashSheet), clashSheet);
 
+// --- Cars not available: parked cars whose label has Show on printout ticked ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: '2026-09-18', qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: false }, { id: 'L2', name: 'No fuel card', color: '#1565c0', onSheet: false }],
+  cars: [
+    { id: 'c1', reg: 'PK11111', labelId: 'L1', note: 'Brakes' },   // parked, its label about to be ticked
+    { id: 'c2', reg: 'PK22222', labelId: 'L2' },                   // parked, its label left unticked
+    { id: 'c3', reg: 'PK33333', labelId: '' },                     // parked, no label
+    { id: 'c4', reg: 'PK44444', labelId: 'L1' },                   // on a route, its label ticked
+  ],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: 'c4', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="labels"]');
+check('the Labels tab has a Printout column, unticked', (await page.locator('#tab-labels thead th', { hasText: 'Printout' }).count()) === 1
+  && (await page.locator('#tab-labels [data-field="onSheet"]:checked').count()) === 0);
+await page.locator('#tab-labels [data-kind="label"][data-id="L1"][data-field="onSheet"]').check();
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="labels"]');
+check('the tick survives a reload', await page.locator('#tab-labels [data-id="L1"][data-field="onSheet"]').isChecked()
+  && !(await page.locator('#tab-labels [data-id="L2"][data-field="onSheet"]').isChecked()));
+await page.click('[data-act="tab"][data-tab="preview"]');
+const lists = await page.evaluate(() => ({
+  sheet: document.querySelector('#sheet').innerText,
+  extra: document.querySelector('#sheet .extra').innerText,
+  route: document.querySelector('#sheet tbody').innerText,
+}));
+check('a parked car with a ticked label is under Cars not available', /Cars not available\s*PK11111: Workshop \(Brakes\)/.test(lists.extra), lists.extra);
+check('a parked car whose label is unticked is on neither list', !lists.sheet.includes('PK22222'), lists.extra);
+check('a car with no label stays under Free cars', /Free cars\s*PK33333$/.test(lists.extra.trim()), lists.extra);
+check('a ticked car on a route shows only on its route row', lists.route.includes('PK44444') && !lists.extra.includes('PK44444'), lists.extra);
+await page.click('[data-act="tab"][data-tab="plan"]');
+
 // --- the clash rule is per round, not per spot ---
 // The headline feature. Two routes in one spot are a clash only when they are
 // packed in the same round; in different rounds that is exactly what rounds
@@ -1773,7 +1807,7 @@ check('the server is still alive after it', (await fetch(base).then((r) => r.sta
 // courtesy.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [],
+  schemaVersion: 1, date: '2026-09-18', labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],

@@ -38,13 +38,15 @@ await shot('01-first-run');
 // --- build a fleet, the way you would on day one: paste the lot in at once
 console.log('cars');
 await tab('cars');
-await page.fill('#newCar', 'AA11111 AA22222 AA33333 AA44444 AA55555 AA66666');
+await page.fill('#newCar', 'AA11111 AA22222 AA33333 AA44444 AA55555 AA66666 AA77777 AA88888');
 await page.click('#tab-cars [data-act="add-car"]');
 
 // a car goes to the workshop, with a note — this is the "tags on a car" path
 const row = (reg) => page.locator('#tab-cars tbody tr', { has: page.locator(`[data-field="reg"][value="${reg}"]`) });
 await row('AA33333').locator('.chip', { hasText: 'Workshop' }).click();
 await row('AA33333').locator('[data-field="note"]').fill('Back Friday');
+// and a parked one goes too: it is the one the printout lists
+await row('AA77777').locator('.chip', { hasText: 'Workshop' }).click();
 
 // and one gets its registration corrected — the "change cars" path
 await row('AA66666').locator('[data-field="reg"]').fill('BB99999');
@@ -56,11 +58,15 @@ await tab('labels');
 await page.fill('#newLabel', 'No fuel card');
 await page.fill('#newLabelColor', '#1565c0');
 await page.click('[data-act="add-label"]');
+// Workshop cars are listed on the printout; No fuel card ones are not.
+await page.locator('#tab-labels tbody tr', { has: page.locator('[data-field="name"][value="Workshop"]') })
+  .locator('[data-field="onSheet"]').check();
 await shot('07-labels');
 
 // tag a car with the new label straight away
 await tab('cars');
 await row('AA55555').locator('.chip', { hasText: 'No fuel card' }).click();
+await row('AA88888').locator('.chip', { hasText: 'No fuel card' }).click();
 
 // --- positions: rename one and mark another unavailable
 console.log('positions');
@@ -157,7 +163,7 @@ if (missing.length || extra.length) {
 // reachable to be brought back.
 if ((await page.locator('#tab-plan [data-panel="drivers"] li').count()) !== 9
   || (await page.locator('#tab-plan [data-panel="drivers"] li.away').count()) !== 1
-  || (await page.locator('#tab-plan [data-panel="cars"] li').count()) !== 6) {
+  || (await page.locator('#tab-plan [data-panel="cars"] li').count()) !== 8) {
   console.log('\nthe rail beside the plan is not showing the crew and the fleet');
   process.exit(1);
 }
@@ -212,6 +218,19 @@ await page.click('[data-act="share-cancel"]');
 console.log('printout');
 await tab('preview');
 await page.waitForSelector('#sheet table');
+// The lists under the table: only parked cars whose label is ticked are not
+// available. AA77777 is parked in the workshop; AA88888's label is unticked;
+// AA33333 is in the workshop but on route 6, so it is on its row only.
+const printed = await page.evaluate(() => ({
+  down: [...document.querySelectorAll('#sheet .extra h4')].find((h) => h.textContent === 'Cars not available')
+    ? document.querySelector('#sheet .extra').innerText.split('Free cars')[0] : '',
+  sheet: document.querySelector('#sheet').innerText,
+  extra: document.querySelector('#sheet .extra').innerText,
+}));
+if (!printed.down.includes('AA77777: Workshop') || printed.sheet.includes('AA88888') || printed.extra.includes('AA33333')) {
+  console.log(`\nthe printout's lists are wrong:\n${printed.extra}`);
+  process.exit(1);
+}
 await shot('10-print-preview');
 await page.pdf({ path: `${OUT}/11-printed-sheet.pdf`, format: 'A4', printBackground: true });
 console.log(`  ${OUT}/11-printed-sheet.pdf`);
