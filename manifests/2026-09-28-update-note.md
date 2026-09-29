@@ -250,7 +250,7 @@ Written identically in the `updates.js` header, the README and the container's G
 
 ## Items
 
-- [ ] **1. Version guard.** `scripts/versions.mjs` checks that:
+- [x] **1. Version guard.** `scripts/versions.mjs` checks that:
   - the five existing version places agree;
   - the identifier is `no.m.carcoordinator`, with no scheme option;
   - once they exist: the `APP_VERSION` declaration appears exactly once and agrees; every local tag in `index.html` and `recover.html` carries `?v=⟨APP_VERSION⟩`; `updates.js` (read with `vm`) has unique, strictly descending versions (compared number by number), the newest equals `APP_VERSION`, and `must` is set wherever rule G requires it.
@@ -395,3 +395,9 @@ Written identically in the `updates.js` header, the README and the container's G
     - the rescue-aware warning;
     - the cadence covers every shipped change;
     - the stale `app.js:1134` reference is corrected.
+- **2026-09-29, building (pack-implementer, on `update-note`).** Decisions taken while building, each safe and each flagged in the report:
+  - **`archiveNeeded` also takes `seen`, and is false when `seen === version`.** Design C says it ignores the marker, but then "a first run plus one change and a reload" (item 7) would be archived. With the extra rule every row of Design I still holds: a downgrade (`9.9.9`) is still archived, and a held load or a stale `updates.js` is archived once, because `to === version` dedupes.
+  - **`screens/` is gitignored and untracked** (`.gitignore`: "generated screenshots"; CI uploads it as an artifact). Item 10 commits `scripts/screens.mjs` only, and the pictures stay local.
+  - **Upgrade scenario (e)** serves the old `index.html` *and* the old `store.js`, `share.js`, `qr.js` and `style.css`, with the new `app.js`. Only then do "no archive on the mixed open" and "the archive comes on the first fully fresh open" both hold.
+  - **`scripts/serve.mjs`** gains an optional `root` for item 11, which is not in Design A's list.
+- Item 1 done, bd7bf31. `scripts/versions.mjs`, run in `check.sh` and first in `npm test`. Gate: `check.sh` CHECK OK ("the five version places agree at 0.2.5", "the identifier is no.m.carcoordinator, with no scheme option"). Tried and reverted: `tauri.conf.json` at 0.2.6 fails both `versions.mjs` and `check.sh`, naming `src-tauri/tauri.conf.json`. In a scratch copy at 0.10.0, `updates.js` listing 0.10.0 above 0.9.0 passes, and the reverse fails.
