@@ -508,3 +508,4 @@ Written identically in the `updates.js` header, the README and the container's G
     - `cargo check`, which needs CI's icons.
 
     `versions.mjs` stands in for the last.
+- 0ca3667: the returning-leader context now stubs `showSaveFilePicker` where the browser has none, so its "Choose save file…" check doesn't depend on CI's Chromium. Car suite after the change: exit 0, 472 ok, 0 FAIL. `check.sh` OK. **Not verified on CI's Playwright Chromium:** every new smoke case ran on system Chrome only, and the OPFS-backed cases (linked file, hold, isolation) depend on the browser.
