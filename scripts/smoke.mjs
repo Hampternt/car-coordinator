@@ -2371,6 +2371,7 @@ await un.evaluate(() => { localStorage.clear(); });
 
 // --- a notice line can carry a heading, and the update note has a style ---
 await un.evaluate(() => {
+  notices = [];   // only the made-up note, whatever the last load raised
   note('update', 'Updated to <b>9.9.9</b>.', null, [{ head: 'What\'s new in <i>9.9.9</i>:', text: 'Something <b>bold</b>.' }, 'A plain <b>line</b>.']);
   render();
 });
@@ -2459,6 +2460,219 @@ check('deciding stores nothing: localStorage byte for byte the same', rules.unto
 
 check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
 await pcNote.close();
+
+// --- opening after an update: the archive first, the note last ---
+// Every case sets up this browser as an older version would have left it,
+// then opens the app. The version is read from the page, never written here.
+const upPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-29', labels: [], positions: [], drivers: [], driverGroups: [], templates: [],
+  cars: [{ id: 'c1', reg: 'UP11111' }], routes: [{ id: 'r1', name: '1', driver: 'Returning Leader', carId: 'c1' }] });
+const otherPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-01', labels: [], positions: [], cars: [], routes: [{ id: 'x', name: 'From the file' }] });
+// A real file in this origin's private file system, linked the way Choose
+// save file links one, so start-up finds it without a stand-in.
+const linkOpfs = (pg, text) => pg.evaluate(async (text) => {
+  const dir = await navigator.storage.getDirectory();
+  const h = await dir.getFileHandle('car-coordinator.json', { create: true });
+  const w = await h.createWritable(); await w.write(text); await w.close();
+  await new Promise((res, rej) => {
+    const r = indexedDB.open('carcoord', 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore('kv'); } catch { /* there */ } };
+    r.onsuccess = () => { const tx = r.result.transaction('kv', 'readwrite'); tx.objectStore('kv').put(h, 'fileHandle'); tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); };
+    r.onerror = () => rej(r.error);
+  });
+}, text);
+const opfsText = (pg) => pg.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('car-coordinator.json')).getFile()).text());
+const leaveAs = (pg, items) => pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v); }, items);
+const opened = (pg) => pg.evaluate(() => ({
+  notes: document.querySelectorAll('#notices .notice.update').length,
+  last: !!document.querySelector('#notices .notice:last-child.update'),
+  text: document.querySelector('#notices .notice.update')?.innerText.replace(/\s+/g, ' ') || '',
+  // The note's own sentences, without the entries listed under them.
+  say: document.querySelector('#notices .notice.update .say')?.firstChild.textContent || '',
+  archives: Store.archives().map((a) => ({ kind: a.kind, from: a.from, to: a.to, sameAsSaved: a.text === localStorage.getItem('carcoord:v1') })),
+  marker: localStorage.getItem('carcoord:pref:seenUpdate'),
+  saved: localStorage.getItem('carcoord:v1'),
+}));
+const newContext = async (setup) => {
+  const ctx = await browser.newContext();
+  if (setup) await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  return { ctx, pg, errs };
+};
+
+const upA = await newContext();
+const up = upA.pg;
+const V = await up.evaluate(() => APP_VERSION);
+const listed = await up.evaluate(() => UPDATES.map((u) => u.version));
+
+// A returning leader: a plan saved by an older version, and no marker.
+await leaveAs(up, { 'carcoord:v1': upPlan });
+await up.reload({ waitUntil: 'networkidle' });
+const back = await opened(up);
+check('a returning leader gets exactly one update note, last on the page', back.notes === 1 && back.last, JSON.stringify(back).slice(0, 300));
+check(`and it shows ${listed.slice(0, 2).join(' and ')} in full`,
+  listed.slice(0, 2).every((v) => back.text.includes(`What's new in ${v}:`)) && back.text.includes('What it affects:') && back.text.includes('Your data:'), back.text.slice(0, 400));
+check('and says the plan and setup were copied into Archives first', back.text.includes('copied unchanged into Archives on the Data tab'));
+check('and, with no file linked, offers Choose save file', back.text.includes('use Choose save file… on the Data tab'));
+same('one update archive, byte for byte the saved plan, from before this version', back.archives, [{ kind: 'update', from: '0.2.4 or earlier', to: V, sameAsSaved: true }]);
+check('the marker is set, and the saved plan is byte for byte as it was', back.marker === V && back.saved === upPlan);
+
+// Nothing on the second open, nor on a first run, nor after a first run's
+// first change: nothing from before an update to tell anyone about.
+await up.reload({ waitUntil: 'networkidle' });
+const again = await opened(up);
+check('a second open: no note, no new archive', again.notes === 0 && again.archives.length === 1, JSON.stringify(again).slice(0, 200));
+await leaveAs(up, {});
+await up.reload({ waitUntil: 'networkidle' });
+const first = await opened(up);
+check('a first run: no note, no archive, marker written', first.notes === 0 && first.archives.length === 0 && first.marker === V, JSON.stringify(first).slice(0, 200));
+await up.evaluate(() => { state.routes[0].driver = 'Typed on day one'; save(); });
+await up.reload({ waitUntil: 'networkidle' });
+const firstThen = await opened(up);
+check('a first run, one change and a reload: still no note, no archive', firstThen.notes === 0 && firstThen.archives.length === 0, JSON.stringify(firstThen).slice(0, 200));
+
+// A downgrade: an older build about to rewrite newer data keeps a copy.
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': '9.9.9' });
+await up.reload({ waitUntil: 'networkidle' });
+const down = await opened(up);
+check('a downgrade: no note, but an archive, and the marker left alone',
+  down.notes === 0 && down.archives.length === 1 && down.archives[0].to === V && down.marker === '9.9.9', JSON.stringify(down).slice(0, 200));
+
+// Held loads wait for the next clean open, and leave the marker alone.
+await leaveAs(up, { 'carcoord:v1': '{not json at all' });
+await up.reload({ waitUntil: 'networkidle' });
+const corrupt = await opened(up);
+same('an unreadable save: a rescue only, no note, no marker',
+  { notes: corrupt.notes, kinds: corrupt.archives.map((a) => a.kind), marker: corrupt.marker }, { notes: 0, kinds: ['rescue'], marker: null });
+await up.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
+await up.reload({ waitUntil: 'networkidle' });
+const afterLoss = await opened(up);
+check('once it is overwritten and the page reloaded, the note comes', afterLoss.notes === 1 && afterLoss.marker === V, JSON.stringify(afterLoss).slice(0, 200));
+const newer = JSON.stringify({ schemaVersion: 99, date: '2026-09-29', cars: [], positions: [], labels: [], routes: [{ id: 'r1', name: 'Newer' }] });
+await leaveAs(up, { 'carcoord:v1': newer });
+await up.reload({ waitUntil: 'networkidle' });
+const fromNewer = await opened(up);
+same('a save from a newer version: an archive, no note, no marker',
+  { notes: fromNewer.notes, archives: fromNewer.archives, marker: fromNewer.marker }, { notes: 0, archives: [{ kind: 'update', from: '0.2.4 or earlier', to: V, sameAsSaved: true }], marker: null });
+
+// A share link: the dialog it opens has the screen, and the note waits.
+const shareCode = await up.evaluate(async () => Share.encode(state, 'day'));
+await leaveAs(up, { 'carcoord:v1': upPlan });
+await up.goto('about:blank');
+await up.goto(`${base}#d=${shareCode}`, { waitUntil: 'networkidle' });
+await up.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+const byLink = await opened(up);
+check('a returning browser opened by a share link: the dialog opens, no note, no marker, but the archive',
+  (await up.locator('#shareDlg[open]').count()) === 1 && byLink.notes === 0 && byLink.marker === null && byLink.archives.length === 1, JSON.stringify(byLink).slice(0, 200));
+await up.click('[data-act="share-cancel"]');
+await leaveAs(up, {});
+await up.goto('about:blank');
+await up.goto(`${base}#d=${shareCode}`, { waitUntil: 'networkidle' });
+await up.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+const firstByLink = await opened(up);
+check('a first open by a share link marks, shows no note, and opens the dialog',
+  (await up.locator('#shareDlg[open]').count()) === 1 && firstByLink.notes === 0 && firstByLink.marker === V && firstByLink.archives.length === 0, JSON.stringify(firstByLink).slice(0, 200));
+await up.click('[data-act="share-cancel"]');
+
+// The save-file sentence, linked: written to, and held.
+await leaveAs(up, { 'carcoord:v1': upPlan });
+await linkOpfs(up, upPlan);
+await up.reload({ waitUntil: 'networkidle' });
+const linked = await opened(up);
+check('with a save file linked and allowed, the note says changes are written to it',
+  linked.notes === 1 && linked.text.includes('Changes are also written to your save file, car-coordinator.json.'), linked.text.slice(0, 400));
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+await linkOpfs(up, otherPlan);
+await up.reload({ waitUntil: 'networkidle' });
+await up.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+const held = await opened(up);
+check('while a save-file hold is up, the note leaves the save file out, and the hold is said',
+  held.notes === 1 && !/save file|Export on the Data tab/.test(held.say)
+  && (await up.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'), held.say);
+check('and nothing was written to the file', (await opfsText(up)) === otherPlan);
+check('opening after an update logs no console errors', upA.errs.length === 0, upA.errs.join(' | '));
+await upA.ctx.close();
+
+// No file picker (Firefox, Safari): the note says Export instead.
+const noPicker = await newContext((ctx) => ctx.addInitScript(() => { delete window.showSaveFilePicker; }));
+await leaveAs(noPicker.pg, { 'carcoord:v1': upPlan });
+await noPicker.pg.reload({ waitUntil: 'networkidle' });
+const plain = await opened(noPicker.pg);
+check('with no file picker, the note says Export', plain.text.includes('To keep a copy outside this browser, use Export on the Data tab.'), plain.text.slice(0, 400));
+check('no console errors without a picker', noPicker.errs.length === 0, noPicker.errs.join(' | '));
+await noPicker.ctx.close();
+
+// The Windows app: no save-file sentence until the owner has checked it there.
+const inTauri = await newContext((ctx) => ctx.addInitScript(() => { window.__TAURI__ = {}; }));
+await leaveAs(inTauri.pg, { 'carcoord:v1': upPlan });
+await inTauri.pg.reload({ waitUntil: 'networkidle' });
+const exe = await opened(inTauri.pg);
+check('in the Windows app, the note leaves the save file out', exe.notes === 1 && !/save file|Export on the Data tab/.test(exe.say), exe.say);
+await inTauri.ctx.close();
+
+// Storage full: the copy is not made, and the note says so.
+const fullUp = await newContext();
+fullUp.pg.removeAllListeners('console');
+fullUp.pg.on('console', (m) => m.type() === 'error' && !m.text().includes('localStorage save failed') && fullUp.errs.push(m.text()));
+// Bigger than the last kilobyte the fill can leave, so the copy cannot fit.
+const bigPlan = JSON.stringify({ ...JSON.parse(upPlan), cars: [{ id: 'c1', reg: 'UP11111', note: 'n'.repeat(4096) }] });
+const filledUp = await fullUp.pg.evaluate((plan) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', plan);
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return chunks;
+}, bigPlan);
+await fullUp.pg.reload({ waitUntil: 'networkidle' });
+const noRoom = await opened(fullUp.pg);
+check('with storage full, no archive, and the note says storage is full',
+  filledUp > 0 && noRoom.archives.length === 0 && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
+  `${JSON.stringify(noRoom.archives)} ${noRoom.say}`);
+check('and the saved plan is untouched', noRoom.saved === bigPlan);
+check('no console errors when storage is full', fullUp.errs.length === 0, fullUp.errs.join(' | '));
+await fullUp.ctx.close();
+
+// Isolation: the archive step failing must not switch off 0.2.5's protection.
+const broken = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {
+  const res = await route.fetch();
+  await route.fulfill({ response: res, body: `${await res.text()}\nStore.archive = () => { throw new Error('archive broke'); };\n` });
+}));
+await leaveAs(broken.pg, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+await linkOpfs(broken.pg, otherPlan);
+await broken.pg.reload({ waitUntil: 'networkidle' });
+await broken.pg.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+check('with the archive step broken, the save-file hold is still raised at start-up',
+  (await broken.pg.evaluate(() => Store.file.hold && Store.file.hold.kind)) === 'differs'
+  && (await broken.pg.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'));
+await broken.pg.evaluate(async () => { state.routes[0].driver = 'Typed after start-up'; save(); await Store.flush(); });
+check('and nothing is written to the file', (await opfsText(broken.pg)) === otherPlan);
+const brokenNote = await opened(broken.pg);
+check('and the note claims no copy it did not make', brokenNote.notes === 1 && !/Archives|save file/.test(brokenNote.say), brokenNote.say);
+check('no console errors with the archive step broken', broken.errs.length === 0, broken.errs.join(' | '));
+await broken.ctx.close();
+
+// Missing pieces, as after a deploy with some files still cached: no release
+// notes, and a store.js without archives or prefs.
+const partial = await newContext(async (ctx) => {
+  await ctx.route('**/updates.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+  await ctx.route('**/store.js*', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\ndelete Store.archive; delete Store.archives; delete Store.pref; delete Store.setPref;\n` });
+  });
+});
+await leaveAs(partial.pg, { 'carcoord:v1': upPlan });
+await partial.pg.reload({ waitUntil: 'networkidle' });
+check('with pieces missing, the plan is still drawn', (await partial.pg.locator('#tab-plan tbody tr [data-field="driver"]').first().inputValue()) === 'Returning Leader');
+await partial.pg.click('[data-act="tab"][data-tab="data"]');
+check('and the Data tab opens', await partial.pg.locator('#tab-data h2').isVisible());
+check('and nothing is logged as an error', partial.errs.length === 0, partial.errs.join(' | '));
+check('and localStorage holds no archive and no marker', await partial.pg.evaluate(() =>
+  localStorage.getItem('carcoord:archives') === null && localStorage.getItem('carcoord:pref:seenUpdate') === null));
+await partial.ctx.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and

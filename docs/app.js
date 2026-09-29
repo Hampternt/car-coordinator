@@ -1570,6 +1570,80 @@ function archiveNeeded({ version, usableText, archives, seen }) {
   return !(Array.isArray(archives) ? archives : []).some((a) => a && a.kind === 'update' && a.to === version);
 }
 
+/* Whether this open is a first run: nothing saved in this browser and
+   nothing recovered from the save file. Set once, at start-up, for the tour
+   (pack 9) to read as well. */
+let firstRun = false;
+
+/* The first write at boot: the saved text, byte for byte, into Archives
+   before anything else can change it. Returns what the update note can say
+   about the copy: 'kept' when one is stored for this version (now, or on an
+   earlier open that held the note back), 'full' when storage had no room,
+   null when there was nothing to copy. An old cached store.js without
+   archives skips it: the plan is still drawn, and the copy comes on the
+   first open with all the new files. */
+function archiveBeforeUpdate() {
+  if (!['archive', 'archives', 'savedText', 'pref'].every((f) => typeof Store[f] === 'function')) return null;
+  const list = Store.archives();
+  if (list.some((a) => a && a.kind === 'update' && a.to === APP_VERSION)) return 'kept';
+  const text = Store.savedText();
+  const seen = Store.pref('seenUpdate');
+  if (!archiveNeeded({ version: APP_VERSION, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
+  const { ok } = Store.archive({ kind: 'update', from: typeof seen === 'string' ? seen : '0.2.4 or earlier', to: APP_VERSION, t: new Date().toISOString(), text });
+  return ok ? 'kept' : 'full';
+}
+
+/* What the note says, sentence by sentence: the version, what happened to
+   the saved plan, where else it can be kept, and how to put the note away.
+   Nothing is claimed that did not happen: with no copy made, and no plan
+   read from the save file, the copy sentence is left out. */
+function updateNoteText(copy, recovered) {
+  const f = Store.file;
+  const said = [`Car Coordinator has been updated to ${APP_VERSION}.`];
+  if (recovered) said.push('Your plan was read from your save file, which this update did not change.');
+  else if (copy === 'kept') said.push('Before anything else, your plan and setup (routes, templates, drivers, day groups, cars, positions, labels) were copied unchanged into Archives on the Data tab.');
+  else if (copy === 'full') said.push('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.');
+  // Left out in the Windows app until the owner has checked the file picker
+  // works there, and while a hold is up: that has a notice of its own.
+  if (!window.__TAURI__ && !f.hold) {
+    if (f.handle) {
+      said.push(f.permission === 'granted' ? `Changes are also written to your save file, ${f.name}.` : `Saving to ${f.name} is paused; reconnect it on the Data tab.`);
+    } else if (Store.fileSupported()) said.push('To keep a copy of every change outside this browser, use Choose save file\u2026 on the Data tab.');
+    else said.push('To keep a copy outside this browser, use Export on the Data tab.');
+  }
+  said.push('\u2715 puts this away; What\'s new on the Data tab keeps every note.');
+  return said.join(' ');
+}
+
+function updateNoteLines({ full, more }) {
+  const lines = [];
+  for (const r of full) {
+    lines.push({ head: `What's new in ${r.version}:`, text: `${r.title}. ${r.changed}` });
+    lines.push({ head: 'What it affects:', text: r.affects });
+    lines.push({ head: 'Your data:', text: r.data });
+  }
+  if (more > 0) lines.push(`And ${more} other update${more === 1 ? '' : 's'}, all listed on the Data tab under What's new.`);
+  return lines;
+}
+
+/* The note, raised last so it sits under every question about the data.
+   Anything it cannot work out counts as a reason to wait: no note and no
+   mark, and it is tried again on the next open. */
+function raiseUpdateNote({ link, recovered, copy }) {
+  if (!['pref', 'setPref', 'savedText', 'loadTrouble'].every((f) => typeof Store[f] === 'function')) return;
+  firstRun = Store.savedText() === null && !recovered;
+  const seen = Store.pref('seenUpdate');
+  if (seen === undefined) return;                       // storage could not be read
+  const { show, mark } = updateNoteFor({
+    version: APP_VERSION,
+    releases: typeof UPDATES === 'undefined' ? undefined : UPDATES,
+    seen, firstRun, trouble: Store.loadTrouble(), link,
+  });
+  // Seen once shown, not once dismissed: a reload never brings it back.
+  if (mark) Store.setPref('seenUpdate', APP_VERSION);
+  if (show) note('update', updateNoteText(copy, recovered), null, updateNoteLines(show));
+}
+
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a
@@ -2417,12 +2491,21 @@ function clearOfBar(el) {
 
 async function start() {
   clearTheBar();
+  // Read before Share.readHash() clears it: an open by share link keeps the
+  // update note for the next ordinary open.
+  const link = /^#d=/.test(location.hash || '');
   state = await Store.init(defaults, render, APP_VERSION);
+  // The untouched copy, before anything below can change what is saved. In a
+  // try of its own, and so is the note: whatever goes wrong in either, the
+  // save-file check between them still runs, exactly as in 0.2.5.
+  let copy = null;
+  try { copy = archiveBeforeUpdate(); } catch (e) { console.warn('update archive skipped', e); }
+  let recovered = false;
   // A browser with no data of its own but a linked file (new PC, cleared
   // profile, different Windows user) should come back to what is in the file.
   if (!Store.hasUsableLocalData()) {
     const fromFile = await Store.recoverFromFile(defaults);
-    if (fromFile) { state = fromFile; note('info', `Loaded your data from ${Store.file.name}.`); }
+    if (fromFile) { state = fromFile; recovered = true; note('info', `Loaded your data from ${Store.file.name}.`); }
   // Guarded: for a few minutes after a deploy a browser can pair this app.js
   // with a cached store.js from before, and a missing function here would
   // stop start() before it ever draws the saved plan.
@@ -2436,6 +2519,7 @@ async function start() {
   // should be the one that has to be answered before share codes work again.
   offerSpotRoundSplit();
   offerTodaysTemplate();
+  try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
   render();
 
   const fromLink = Share.readHash();
