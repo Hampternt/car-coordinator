@@ -969,6 +969,9 @@ check('and keeps the name it was given rather than the capitals just typed',
 check('and says so', (await page.locator('#notices .notice').last().innerText()).includes('Replaced the Monday template'),
   await page.locator('#notices .notice').last().innerText());
 await page.click('[data-act="tab"][data-tab="data"]');
+// The damaged saves above left a rescue in Archives. The first table on this
+// tab must still be Backups: the cards above it are rows, not tables.
+check('a rescue is in Archives while the Backups table is read', await page.evaluate(() => Store.archives().some((a) => a.kind === 'rescue')));
 check('the template it replaced is in the backups', (await page.locator('#tab-data table tbody').first().innerText()).includes('Replacing the Monday template'));
 
 await page.click('[data-act="tab"][data-tab="plan"]');
@@ -2673,6 +2676,98 @@ check('and nothing is logged as an error', partial.errs.length === 0, partial.er
 check('and localStorage holds no archive and no marker', await partial.pg.evaluate(() =>
   localStorage.getItem('carcoord:archives') === null && localStorage.getItem('carcoord:pref:seenUpdate') === null));
 await partial.ctx.close();
+
+// --- What's new and Archives on the Data tab ---
+const dataUp = await newContext();
+const dt = dataUp.pg;
+const beforePlan = upPlan;   // what the leader had before the update
+const sincePlan = JSON.stringify({ schemaVersion: 4, date: '2026-10-01', labels: [], positions: [], cars: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'rb', name: 'Changed since' }] });
+const tA = '2026-09-29T06:00:00.000Z', tR = '2026-09-28T06:00:00.000Z';
+const archivesAB = (to) => JSON.stringify([
+  { kind: 'update', from: '0.2.4 or earlier', to, t: tA, text: beforePlan },
+  { kind: 'rescue', from: null, to: null, t: tR, text: '{"routes":[{"name":"half' },
+]);
+await leaveAs(dt, { 'carcoord:v1': sincePlan, 'carcoord:archives': archivesAB(V), 'carcoord:pref:seenUpdate': V });
+await dt.reload({ waitUntil: 'networkidle' });
+await dt.click('[data-act="tab"][data-tab="data"]');
+same('What\'s new and Archives sit above Backups, which is still the last card',
+  await dt.locator('#tab-data .card h3').allInnerTexts(),
+  ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
+check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
+  document.querySelectorAll('#tab-data table').length === 1 && !!document.querySelector('#tab-data .card:last-child table')));
+const news = await dt.locator('#tab-data .card.whatsnew').innerText();
+const newest = await dt.evaluate(() => UPDATES[0]);
+check('What\'s new names the running version and the newest entry\'s four parts',
+  news.includes(`You are running version ${V}.`) && [newest.title, newest.changed, newest.affects, newest.data].every((x) => news.includes(x)), news.slice(0, 300));
+const archRows = dt.locator('#tab-data .arch-row');
+const updRow = archRows.filter({ hasText: `Before ${V}` });
+const rescueRow = archRows.filter({ hasText: 'Could not be read' });
+check('an update row says what it holds before anything is replaced',
+  (await updRow.innerText()).includes(`Before ${V} (from 0.2.4 or earlier)`) && (await updRow.innerText()).includes('1 route, 1 car, 0 drivers, 0 templates, dated 29/09/2026'),
+  await updRow.innerText());
+check('a rescue row offers Download only',
+  (await rescueRow.locator('[data-act="archive-download"]').count()) === 1 && (await rescueRow.locator('[data-act="archive-restore"]').count()) === 0);
+
+// Arming a Backups row and then pressing an Archives row restores nothing.
+const routeNames = () => dt.evaluate(() => state.routes.map((r) => r.name));
+const dtBackupCount = () => dt.evaluate(() => Store.backups().length);
+const nBackups = await dtBackupCount();
+await dt.locator('#tab-data .card:last-child [data-act="restore"]').first().click();
+await updRow.locator('[data-act="archive-restore"]').click();
+check('arming a Backups row, then pressing Restore on an archive, restores nothing',
+  JSON.stringify(await routeNames()) === '["Changed since"]' && (await dtBackupCount()) === nBackups
+  && (await updRow.locator('[data-act="archive-restore"]').innerText()) === 'Sure?');
+await dt.waitForTimeout(3100);   // let the arming lapse
+
+// Restore: two clicks, a backup of the screen first, then the old plan back.
+await dt.evaluate(() => { state.routes[0].driver = 'Typed today'; save(); render(); });
+await updRow.locator('[data-act="archive-restore"]').click();
+check('one click on Restore changes nothing', JSON.stringify(await routeNames()) === '["Changed since"]');
+await updRow.locator('[data-act="archive-restore"]').click();
+const restored = await dt.evaluate(() => ({ routes: state.routes.map((r) => r.name), saved: JSON.parse(localStorage.getItem('carcoord:v1')).routes.map((r) => r.name),
+  backup: Store.backups()[0] && { label: Store.backups()[0].label, drivers: JSON.parse(Store.backups()[0].json).routes.map((r) => r.driver) } }));
+same('the second click puts the archived plan back, after backing up the screen', restored,
+  { routes: ['1'], saved: ['1'], backup: { label: `Restoring the copy from before ${V}`, drivers: ['Typed today'] } });
+
+// Download is the archive's text byte for byte, and imports to the same plan.
+const [archFile] = await Promise.all([dt.waitForEvent('download'), updRow.locator('[data-act="archive-download"]').click()]);
+const archText = await readFile(await archFile.path(), 'utf8');
+check('Download is the archive byte for byte, named for the version', archText === beforePlan && archFile.suggestedFilename() === `car-coordinator-before-${V}.json`, archFile.suggestedFilename());
+await dt.evaluate(() => { state.routes[0].name = 'Changed again'; save(); render(); });
+await dt.setInputFiles('#importFile', { name: archFile.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(archText) });
+check('and it imports to the same plan', await dt.evaluate((t) => JSON.stringify(state) === JSON.stringify(Store.parseImport(t, defaults).state), archText));
+const [rescueFile] = await Promise.all([dt.waitForEvent('download'), rescueRow.locator('[data-act="archive-download"]').click()]);
+check('a rescue downloads byte for byte, named for its day',
+  (await readFile(await rescueFile.path(), 'utf8')) === '{"routes":[{"name":"half' && rescueFile.suggestedFilename() === 'car-coordinator-unreadable-2026-09-28.json', rescueFile.suggestedFilename());
+
+// An update archive that is not a plan offers no Restore.
+await dt.evaluate(() => { localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'x', to: 'not-a-plan', t: '2026-09-27T06:00:00.000Z', text: '[]' }])); render(); });
+const notPlanRow = archRows.filter({ hasText: 'Before not-a-plan' });
+check('an update archive holding [] says it could not be read, and offers no Restore',
+  (await notPlanRow.innerText()).includes('Could not be read') && (await notPlanRow.locator('[data-act="archive-restore"]').count()) === 0
+  && (await notPlanRow.locator('[data-act="archive-download"]').count()) === 1);
+
+// With no room for the backup, Restore does nothing, and says why.
+await dt.evaluate(({ a, b }) => { localStorage.setItem('carcoord:archives', a); state = Store.parseImport(b, defaults).state; save(); render(); }, { a: archivesAB(V), b: sincePlan });
+const filledRestore = await dt.evaluate(() => {
+  // No older backups to make way either: the one that could not be taken
+  // has nothing to trim.
+  localStorage.removeItem('carcoord:backups');
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return chunks;
+});
+await updRow.locator('[data-act="archive-restore"]').click();
+await updRow.locator('[data-act="archive-restore"]').click();
+check('with no room for the backup first, Restore changes nothing and says why',
+  filledRestore > 0 && JSON.stringify(await routeNames()) === '["Changed since"]'
+  && (await dt.locator('#notices').innerText()).includes(`Could not take a backup before "Restoring the copy from before ${V}"`),
+  await dt.locator('#notices').innerText());
+await dt.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 0, dataUp.errs.join(' | '));
+await dataUp.ctx.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and

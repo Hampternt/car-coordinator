@@ -955,6 +955,15 @@ const when = (d) => {
     : t.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
+const plural = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+// What a plan holds, in the words the Data tab uses wherever one plan is
+// weighed up against another: the save-file question, and the archive rows.
+function planSummary(s, templates = false) {
+  const [y, m, d] = String(s.date || '').split('-');
+  return [plural(s.routes.length, 'route'), plural(s.cars.length, 'car'), plural(s.drivers.length, 'driver'),
+    ...(templates ? [plural(s.templates.length, 'template')] : []), `dated ${d}/${m}/${y}`].join(', ');
+}
+
 function fileStatus() {
   const f = Store.file;
   if (!Store.fileSupported()) {
@@ -972,11 +981,8 @@ function fileStatus() {
     if (f.hold.kind === 'checking') return `<p class="status">Checking <b>${esc(f.name)}</b> against the screen\u2026</p>`;
     const stop = '<button class="btn" data-act="unlink-file">Stop using this file</button>';
     if (f.hold.kind === 'differs') {
-      const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
-      const sum = (s) => {
-        const [y, m, d] = String(s.date || '').split('-');
-        return `${n(s.routes.length, 'route')}, ${n(s.cars.length, 'car')}, ${n(s.drivers.length, 'driver')}, dated ${d}/${m}/${y}`;
-      };
+      const n = plural;
+      const sum = (s) => planSummary(s);
       return `<p class="status warn-status"><b>${esc(f.name)}</b> holds a different plan from the one on screen. Nothing has been written to it: choose which one to keep.</p>
         <p class="hint">In the file${f.hold.modified ? ` (last changed ${esc(when(f.hold.modified))})` : ''}: ${esc(sum(f.hold.state))}.<br>On screen: ${esc(sum(state))}.${f.hold.differ ? `<br>${esc(n(f.hold.differ, 'route'))} ${f.hold.differ === 1 ? 'differs' : 'differ'} between the two.` : ''}</p>
         <button class="btn" data-act="file-keep-file">Load the file</button>
@@ -1003,6 +1009,58 @@ function fileStatus() {
     ${f.error ? `<p class="status warn-status">${esc(f.error)}</p>` : ''}
     <button class="btn" data-act="open-file">Open a different file\u2026</button>
     <button class="btn" data-act="unlink-file">Stop using this file</button>`;
+}
+
+/* Every note there has been, newest first: the newest three in full, the
+   older ones a line each, keeping what a `must` entry says it affects. */
+function whatsNewCard() {
+  const releases = typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) ? UPDATES.filter(Boolean) : null;
+  const running = `<p class="hint">You are running version ${esc(APP_VERSION)}.</p>`;
+  if (!releases) return `<div class="card"><h3>What's new</h3>${running}</div>`;
+  const full = releases.slice(0, 3).map((r) => `<div class="release">
+      <h4>${esc(r.version)} \u00b7 ${esc(r.title)}</h4>
+      <p>${esc(r.changed)}</p>
+      <p><b>What it affects:</b> ${esc(r.affects)}</p>
+      <p><b>Your data:</b> ${esc(r.data)}</p>
+    </div>`).join('');
+  const older = releases.slice(3).map((r) => `<p class="older">${esc(r.version)} \u00b7 ${esc(r.title)}. Your data: ${esc(r.data)}${r.must
+    ? `<br>What it affects: ${esc(r.affects)}` : ''}</p>`).join('');
+  return `<div class="card whatsnew"><h3>What's new</h3>${running}${full}${older}</div>`;
+}
+
+/* parseImport, for drawing a row rather than importing: it also warns about
+   text from a newer version, which is right for an import and only noise for
+   a row being drawn, so that warning is taken back out. Anything the Store
+   had queued before is said as usual. */
+function parseQuietly(text) {
+  drainStoreNotices();
+  const r = Store.parseImport(text, defaults);
+  Store.takeNotices();
+  return r;
+}
+
+/* The untouched copies taken before each update, and the rescue of a save
+   that could not be read. Rows, not a table: Backups below is this tab's
+   only table. What an update copy holds is read before it is offered, so
+   Restore is only ever offered for a plan. */
+function archivesCard() {
+  if (typeof Store.archives !== 'function') return '<div class="card"><h3>Archives</h3><p class="empty">Reload the page to see Archives.</p></div>';
+  const rows = Store.archives().map((a) => {
+    const at = esc(when(a.t));
+    const down = actBtn('archive-download', esc(a.kind), a.t, 'Download');
+    if (a.kind === 'rescue') return `<div class="arch-row"><span class="what">Could not be read \u00b7 ${at}</span><span class="btns">${down}</span></div>`;
+    const { state: s, error } = parseQuietly(a.text);
+    const head = `Before ${esc(a.to)} (from ${esc(a.from)}) \u00b7 ${at}`;
+    if (error || !s) return `<div class="arch-row"><span class="what">${head} \u00b7 Could not be read</span><span class="btns">${down}</span></div>`;
+    const key = `archive:${a.t}`;
+    return `<div class="arch-row"><span class="what">${head} \u00b7 ${esc(planSummary(s, true))}</span><span class="btns">${actBtn('archive-restore', 'update', a.t,
+      armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}</span></div>`;
+  }).join('');
+  return `<div class="card">
+      <h3>Archives</h3>
+      <p class="hint">A copy of everything as it was just before each update, kept in this browser like Backups but never pushed out by them. Restore puts that whole plan and setup back, replacing everything changed since; what is on screen goes into Backups first. Download keeps the copy as a file you can Import later or send on.</p>
+      ${rows || '<p class="empty">No archives yet.</p>'}
+    </div>`;
 }
 
 function renderData() {
@@ -1054,6 +1112,10 @@ function renderData() {
       <button class="btn" data-act="import">Import a copy\u2026</button>
       <input id="importFile" type="file" accept="application/json,.json" hidden>
     </div>
+
+    ${whatsNewCard()}
+
+    ${archivesCard()}
 
     <div class="card">
       <h3>Backups</h3>
@@ -1131,12 +1193,14 @@ function renderSheet() {
     </div>`;
 }
 
+const drainStoreNotices = () => { for (const n of Store.takeNotices()) note(n.kind, n.text); };
+
 function render() {
   // Anything Store had to say since the last draw — a browser save that
   // failed, a backup that would not fit, a file it could not write — belongs
   // on screen with everything else. It goes through note(), so a save failing
   // on every keystroke leaves one notice rather than a hundred.
-  for (const n of Store.takeNotices()) note(n.kind, n.text);
+  drainStoreNotices();
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
@@ -1429,6 +1493,17 @@ function noteFileHold() {
     { act: 'show-data', kind: '', id: '', text: 'Open the Data tab' });
 }
 
+// The text exactly as it is, as a file: an archive's Download.
+function downloadText(name, text) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 /* Data-tab actions. These await pickers and disk writes, so they sit outside
    the synchronous switch below. */
 async function dataAction(act, b, fromKeyboard = false) {
@@ -1484,6 +1559,27 @@ async function dataAction(act, b, fromKeyboard = false) {
       note('info', `Restored the backup from ${when(entry.t)}.`);
       save();
       break;
+    }
+    // Found by when it was taken, never by where it sits: a copy taken
+    // between the two clicks would shift every row down by one.
+    case 'archive-restore': {
+      const t = b.dataset.id;
+      if (!confirmTwice(`archive:${t}`, fromKeyboard)) return;
+      const entry = Store.archives().find((a) => a.kind === 'update' && a.t === t);
+      if (!entry) break;
+      const { state: next, error } = Store.parseImport(entry.text, defaults);
+      if (error || !next) { note('warn', 'That archive could not be read, so nothing was changed. Download keeps it as a file.'); break; }
+      if (!Store.snapshot(state, `Restoring the copy from before ${entry.to}`)) break;   // render() shows why
+      state = next;
+      save();
+      note('info', `Restored the copy from before ${entry.to}, taken ${when(entry.t)}. What was on screen is in Backups.`);
+      break;
+    }
+    case 'archive-download': {
+      const entry = Store.archives().find((a) => a.kind === b.dataset.kind && a.t === b.dataset.id);
+      if (!entry) break;
+      downloadText(entry.kind === 'rescue' ? `car-coordinator-unreadable-${String(entry.t).slice(0, 10)}.json` : `car-coordinator-before-${entry.to}.json`, entry.text);
+      return;
     }
     case 'dismiss': notices.splice(Number(b.dataset.index), 1); break;
     default: return;
@@ -2443,7 +2539,7 @@ document.addEventListener('keydown', (e) => {
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag']);
-const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'dismiss']);
+const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
    reached with Tab, a question just asked — would otherwise land under it.
