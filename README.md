@@ -26,6 +26,8 @@ The port departs from that log in three places, each at the owner's request, and
   - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
 - **A block taller than a page is cut rather than run off the paper** (D9). The cut falls between whole orders first, and inside an order only when that order is taller than a page by itself.
 
+One more change has no D-number, because the log never set a line order. The Rust app prints an order's lines in the order the file lists them. The port sorts them within each order, at the owner's request: Sandnes Bakeri (SB) first, then Bakehuset (BH), then any other supplier A to Z by its code. Within a supplier the breads run A to Z in the Norwegian alphabet, so æ, ø and å come last. Two orders' lines are never mixed, and each order's crates and marker stay on its first line.
+
 Because of the second, the freezer sample prints on 20 sheets, not the 21 that `docs/freezer-list.md` states: route 13's Customer 012 now fits on one sheet as one block.
 
 ## Features

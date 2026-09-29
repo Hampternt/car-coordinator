@@ -115,10 +115,81 @@ await page.addInitScript(() => {
     };
   };
 
+  // The owner's order for an order's lines (2026-09-29), written out again
+  // here so the suite does not take the app's word for it: Sandnes Bakeri,
+  // then Bakehuset, then any other supplier A to Z by its code and then its
+  // name, then no supplier; within a supplier, by bread name, Norwegian
+  // alphabet. Ties keep the file's order.
+  window.printOrder = (lines) => {
+    const nb = new Intl.Collator('nb');
+    const key = (line) => {
+      const supplier = String(line.product.supplier || '');
+      const lower = supplier.toLowerCase();
+      if (supplier.trim() === '') return [3, '', ''];
+      if (lower === 'sandnes bakeri') return [0, '', ''];
+      if (lower === 'bakehuset') return [1, '', ''];
+      return [2, Model.supplierCode(supplier), lower];
+    };
+    return lines
+      .map((line, index) => ({ line, index, key: key(line) }))
+      .sort(
+        (a, b) =>
+          a.key[0] - b.key[0] ||
+          nb.compare(a.key[1], b.key[1]) ||
+          nb.compare(a.key[2], b.key[2]) ||
+          nb.compare(a.line.product.name, b.line.product.name) ||
+          a.index - b.index,
+      )
+      .map((entry) => entry.line);
+  };
+
+  // Every order's lines as they printed — a one-order block's by the id in
+  // its heading, a shared block's by the id on each line, parts joined — held
+  // against printOrder() of the file's own lines (`orders`: Model.fold's, by
+  // id, so still in file order). Needs "Show the order ID" on. `reordered`
+  // counts the orders the owner's order actually moved.
+  window.readOrderLines = (sheets, orders) => {
+    const printed = new Map();
+    for (const sheet of sheets) {
+      for (const block of sheet.querySelectorAll('.bf-block')) {
+        const head = block.querySelector(':scope > .bf-head-line .bf-stamp .bf-order-id');
+        for (const row of block.querySelectorAll('.bf-row')) {
+          const id = Number((row.querySelector('.bf-order-id') || head).textContent);
+          if (!printed.has(id)) printed.set(id, []);
+          printed.get(id).push([
+            Number(row.querySelector('.bf-qty').textContent),
+            row.querySelector('.bf-code').textContent,
+            row.querySelector('.bf-product').textContent,
+          ]);
+        }
+      }
+    }
+    const shape = (lines) =>
+      lines.map((l) => [l.quantity, Model.supplierCode(l.product.supplier), l.product.name]);
+    const problems = [];
+    let reordered = 0;
+    let bakehusetFirstInFile = 0;
+    for (const [id, rows] of printed) {
+      const order = orders.get(id);
+      if (!order) {
+        problems.push(`${id}: printed, but no order of this day`);
+        continue;
+      }
+      const want = shape(printOrder(order.lines));
+      if (JSON.stringify(rows) !== JSON.stringify(want)) {
+        problems.push(`${id}: printed ${JSON.stringify(rows.map((r) => r[2]))}, wanted ${JSON.stringify(want.map((w) => w[2]))}`);
+      }
+      if (JSON.stringify(shape(order.lines)) !== JSON.stringify(want)) reordered += 1;
+      const codes = order.lines.map((l) => Model.supplierCode(l.product.supplier));
+      if (codes.indexOf('BH') !== -1 && codes.lastIndexOf('SB') > codes.indexOf('BH')) bakehusetFirstInFile += 1;
+    }
+    return { orders: printed.size, reordered, bakehusetFirstInFile, problems: problems.slice(0, 5) };
+  };
+
   // Every block of several orders, read back line by line and held against
   // the orders it prints (`orders`: the model's, by id). A marker or a crate
   // count attached to the wrong order would print wrong without a word, so
-  // this is the check that matters: each order's lines, in file order, under
+  // this is the check that matters: each order's lines, supplier then name, under
   // its own department; its crates and its marker once, on its first line.
   // Returns what disagrees, so an empty list is the pass.
   window.readSharedBlocks = (sheets, orders, rules, bread) => {
@@ -195,9 +266,12 @@ await page.addInitScript(() => {
 
     for (const [id, rec] of seen) {
       const { order } = rec;
-      const want = order.lines.map((line) => [line.quantity, line.product.name]);
+      // In the owner's order — supplier, then name — never the file's.
+      const want = printOrder(order.lines).map((line) => [line.quantity, line.product.name]);
       if (JSON.stringify(rec.rows) !== JSON.stringify(want)) {
-        problems.push(`${id}: prints ${rec.rows.length} lines, the order has ${want.length} (or not in file order)`);
+        problems.push(
+          `${id}: prints ${rec.rows.length} lines, the order has ${want.length} (or not supplier, then name)`,
+        );
       }
       const answer = `want substitute: ${order.acceptAlternatives}`;
       if (rec.markers.length !== 1 || rec.markers[0][0] !== 0 || rec.markers[0][1] !== answer) {
@@ -652,10 +726,14 @@ const sharedReport = (bytes, kind, named) =>
   page.evaluate(
     async ([b, kind, named]) => {
       const book = await Xlsx.open(new Uint8Array(b).buffer);
-      const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
-      const orders = new Map(routes.flatMap((r) => r.orders).map((o) => [o.id, o]));
+      // The folded orders, not the route's: their lines are still in the
+      // file's order, so the line-order checks below compare against the file.
+      const folded = Model.fold(Model.readRows(await book.sheet('Data')));
+      const routes = Model.group(folded);
+      const orders = new Map(folded.map((o) => [o.id, o]));
       const sheets = Array.from(document.querySelectorAll('#preview .bf-sheet'));
       const read = readSharedBlocks(sheets, orders, Model.defaultCrateRules(), kind === Model.BREAD);
+      const lineOrder = readOrderLines(sheets, orders);
       const printed = new Set(read.ids);
       const apart = routes.flatMap((r) =>
         r.stops
@@ -685,6 +763,7 @@ const sharedReport = (bytes, kind, named) =>
       const ids = Array.from(document.querySelectorAll('#preview .bf-row-shared .bf-order-id'));
       return {
         read,
+        lineOrder,
         apart,
         lines,
         ink: Array.from(
@@ -735,6 +814,19 @@ same(
     [1000619941, 12, ['full', 'full', 'half']],
   ],
 );
+// The owner, 2026-09-29: within each order, Sandnes Bakeri's breads first,
+// then Bakehuset's, each A to Z — never mixing two orders' lines. Held against
+// the file's own lines, so it fails if the sort is ever taken out: it moves
+// real orders on this day, some of them listing Bakehuset before Sandnes.
+same('every bread order prints its lines by supplier, then name', breadShared.lineOrder.problems, []);
+check(
+  'all 148 bread orders are read back, and the sort moves real ones',
+  breadShared.lineOrder.orders === 148 &&
+    breadShared.lineOrder.reordered > 0 &&
+    breadShared.lineOrder.bakehusetFirstInFile > 0,
+  JSON.stringify(breadShared.lineOrder),
+);
+
 const c012Parts = await page.evaluate(() =>
   readParts(Array.from(document.querySelectorAll('#preview .bf-sheet[data-route="14"]')), 'Customer 012'),
 );
@@ -923,7 +1015,7 @@ const handBuilt = await page.evaluate(() => {
       { host },
     );
     for (const sheet of sheets) host.append(sheet);
-    return { route, sheets };
+    return { route, sheets, given: orders };
   };
   try {
     const two = lay(Model.BREAD, [
@@ -943,7 +1035,8 @@ const handBuilt = await page.evaluate(() => {
       order(1000000021, false, null, [long, 'Pitabrød']),
       order(1000000022, true, 'Kjøkken', ['Pitabrød', long]),
     ]);
-    const orders = new Map(freezer.route.orders.map((o) => [o.id, o]));
+    // The orders as handed in, lines still in their given order.
+    const orders = new Map(freezer.given.map((o) => [o.id, o]));
     return {
       markers,
       freezer: inspectSheets(freezer.sheets),
@@ -1178,6 +1271,14 @@ same(
   freezerShared.read.problems,
   [],
 );
+// The freezer's wholesalers are neither house bakery, so its lines go A to Z
+// by supplier code, then by name.
+same('every freezer order prints its lines by supplier, then name', freezerShared.lineOrder.problems, []);
+check(
+  'all 115 freezer orders are read back, and the sort moves real ones',
+  freezerShared.lineOrder.orders === 115 && freezerShared.lineOrder.reordered > 0,
+  JSON.stringify(freezerShared.lineOrder),
+);
 same(
   'every freezer stop of several orders is one block',
   [freezerShared.read.blocks, freezerShared.apart],
@@ -1347,7 +1448,8 @@ const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
   document.body.append(host);
   try {
     const book = await Xlsx.open(new Uint8Array(b).buffer);
-    const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+    const folded = Model.fold(Model.readRows(await book.sheet('Data')));
+    const routes = Model.group(folded);
     const settings = { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() };
     const all = [];
     const byRoute = {};
@@ -1375,9 +1477,10 @@ const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
     const wideBlocks = blocksOf('2', wide);
     const sharedBlocks = blocksOf('3', 'Madla sykehjem');
     const tallBlocks = blocksOf('1', tall);
-    const orders = new Map(routes.flatMap((r) => r.orders).map((o) => [o.id, o]));
+    const orders = new Map(folded.map((o) => [o.id, o]));
     return {
       read: readSharedBlocks(all, orders, settings.crates, true).problems,
+      lineOrder: readOrderLines(all, orders),
       wide: {
         blocks: wideBlocks.length,
         compact: !!firstRow(wideBlocks, 7201).querySelector('.bf-crates-compact'),
@@ -1400,6 +1503,8 @@ const manyPrinted = await page.evaluate(async ([b, tall, wide]) => {
   }
 }, [manyBytes, TALL, WIDE]);
 same('every order in the fixture’s shared blocks prints its own lines, crates and marker', manyPrinted.read, []);
+same('and every order in the fixture prints its lines by supplier, then name, across its parts',
+  manyPrinted.lineOrder.problems, []);
 same(
   'the wide customer is one block: ×N crates on its 250 breads, its refusing order false, its long department a sub-heading',
   manyPrinted.wide,
@@ -1479,7 +1584,8 @@ const giant = await page.evaluate(async ([b]) => {
 }, [Array.from(await readFile('scripts/fixtures/edge/PSR-BREAD-2026-03-04-to-2026-03-04-one-giant-stop.xlsx'))]);
 partsHold('one order of 300 lines', giant);
 same(
-  'its 300 lines print once each, in file order',
+  // One bakery and zero-padded names, so the owner's order is the file's too.
+  'its 300 lines print once each, in order',
   giant.flatMap((p) => p.products),
   Array.from({ length: 300 }, (_, i) => `Bread variety number ${String(i).padStart(3, '0')}`),
 );
@@ -1700,14 +1806,14 @@ const crowded = await page.evaluate(() => {
   ruler.remove();
 
   const measure = (count) => {
+    const lines = Array.from({ length: count }, (_, i) => ({
+      quantity: 12,
+      product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
+                 supplier: `Bakeri Nummer ${i + 1}` },
+    }));
     const route = Model.route('3', [{
       id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
-      route: '3', sequence: 100, acceptAlternatives: true, comment: null,
-      lines: Array.from({ length: count }, (_, i) => ({
-        quantity: 12,
-        product: { id: 500 + i, name: `Brød nummer ${i + 1}`, sku: String(500 + i),
-                   supplier: `Bakeri Nummer ${i + 1}` },
-      })),
+      route: '3', sequence: 100, acceptAlternatives: true, comment: null, lines,
     }]);
     const pages = Sheet.paginate(
       route,
@@ -1737,7 +1843,9 @@ const crowded = await page.evaluate(() => {
              parts: parts.length,
              crates: parts.map((p) => p.crates).join(''),
              inOrder: products.length === count &&
-               products.every((name, i) => name === `Brød nummer ${i + 1}`) };
+               // 250 bakeries: in the owner's order, by code, then name.
+               JSON.stringify(products) ===
+                 JSON.stringify(printOrder(lines).map((line) => line.product.name)) };
   };
 
   try {

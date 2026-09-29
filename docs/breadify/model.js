@@ -333,6 +333,11 @@ const Model = (() => {
    * Folds rows into orders, keeping both the orders and their lines in the
    * order the file lists them.
    *
+   * The Rust app prints each order's lines in that same file order. The web
+   * port departs from it at print time, at the owner's request (2026-09-29):
+   * route() puts every order's lines in supplier-then-name order (see
+   * printingLines()). What is folded here stays exactly as the file had it.
+   *
    * A row is one product on one order; everything else on it belongs to the
    * order and is repeated onto each line. One order is one crate label (D16):
    * its crates, its lines and its substitute answer are its own.
@@ -396,6 +401,51 @@ const Model = (() => {
    */
   function isSequenced(order) {
     return order.sequence !== 0;
+  }
+
+  // ── The lines of an order ──────────────────────────────────────────────
+
+  /** Norwegian alphabetical order, so æ, ø and å come after z. */
+  const NORWEGIAN = new Intl.Collator('nb');
+
+  /**
+   * Where a line's supplier sorts: the house bakeries first, in their own
+   * order (SB, then BH); then any other supplier, A to Z by its code and then
+   * by its name, so two that share a code stay apart; then a line that names
+   * no supplier at all.
+   */
+  function lineSupplierKey(line) {
+    const supplier = String(line.product.supplier || '');
+    if (supplier.trim() === '') return [KNOWN_SUPPLIERS.length + 1, '', ''];
+    const house = KNOWN_SUPPLIERS.findIndex(([name]) => name === supplier.toLowerCase());
+    if (house !== -1) return [house, '', ''];
+    return [KNOWN_SUPPLIERS.length, supplierCode(supplier), supplier.toLowerCase()];
+  }
+
+  function compareLines(left, right) {
+    const [leftRank, leftCode, leftName] = lineSupplierKey(left);
+    const [rightRank, rightCode, rightName] = lineSupplierKey(right);
+    return (
+      leftRank - rightRank ||
+      NORWEGIAN.compare(leftCode, rightCode) ||
+      NORWEGIAN.compare(leftName, rightName) ||
+      NORWEGIAN.compare(left.product.name, right.product.name)
+    );
+  }
+
+  /**
+   * An order's lines in the order the page prints them: by supplier (SB,
+   * then BH, then the rest by code), and within a supplier by bread name, A to
+   * Z with æ, ø and å last. Lines that tie keep the file's order.
+   *
+   * A departure from the Rust app, which prints an order's lines in the order
+   * the file lists them, at the owner's request (2026-09-29). It only ever
+   * sorts within one order: two orders' lines are never mixed, so the order's
+   * crates and marker still sit on its first line — the first after sorting.
+   * A copy is returned; the folded order keeps the file's order.
+   */
+  function printingLines(lines) {
+    return lines.slice().sort(compareLines);
   }
 
   // ── Routes ─────────────────────────────────────────────────────────────
@@ -489,9 +539,15 @@ const Model = (() => {
    * or substitute answer of its own, so nothing can add across two orders by
    * accident, and a stop handed to code that wants an order fails loudly
    * instead of printing.
+   *
+   * Each order comes out as a copy with its lines in printing order (see
+   * printingLines()), so everything that walks a route walks the lines as
+   * they print.
    */
   function route(nickname, orders) {
-    const sorted = sortOrders(orders.slice());
+    const sorted = sortOrders(
+      orders.map((order) => ({ ...order, lines: printingLines(order.lines) })),
+    );
     const stops = [];
     for (const order of sorted) {
       const last = stops[stops.length - 1];
@@ -749,6 +805,7 @@ const Model = (() => {
     naturalKey,
     compare,
     sortOrders,
+    printingLines,
     route,
     group,
     unsequencedStops,
