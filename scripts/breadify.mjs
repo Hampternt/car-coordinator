@@ -254,12 +254,12 @@ const bread = await page.evaluate(async ([bytes]) => {
     .columns.flatMap((c) => c.lines)
     .find((l) => /Kneipp/i.test(l.product.name));
   const c012 = routes
-    .flatMap((r) => r.stops)
+    .flatMap((r) => r.orders)
     .filter((s) => s.customer === 'Customer 012');
 
   return {
     order: routes.map((r) => r.nickname),
-    route8: route8.stops.map((s) => [
+    route8: route8.orders.map((s) => [
       s.sequence,
       s.customer,
       s.deliveryStreet,
@@ -277,7 +277,7 @@ const bread = await page.evaluate(async ([bytes]) => {
     pallets: routes
       .filter((r) => Model.routeCrates(r, rules) > Model.PALLET_THRESHOLD)
       .map((r) => r.nickname),
-    refusing: routes.flatMap((r) => r.stops).filter((o) => o.acceptAlternatives === false).length,
+    refusing: routes.flatMap((r) => r.orders).filter((o) => o.acceptAlternatives === false).length,
   };
 }, [breadBytes]);
 
@@ -479,7 +479,7 @@ const sequenceLeak = await page.evaluate(() => {
   const marks = [811931, 811933, 811937];
   const route = {
     nickname: '1',
-    stops: marks.map((sequence, index) => ({
+    orders: marks.map((sequence, index) => ({
       id: 1000000000 + index,
       customer: `Stop ${index}`,
       department: index === 1 ? 'Kitchen' : null,
@@ -544,7 +544,7 @@ const refusals = await page.evaluate(() => {
   const attempt = (stop) => {
     try {
       Sheet.paginate(
-        { nickname: '1', stops: [stop] },
+        { nickname: '1', orders: [stop] },
         { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
         { dates: null, source: 'test', routeStops: 1, routeLines: 1 },
         {},
@@ -695,7 +695,7 @@ inspected(
 const freezerRefusing = await page.evaluate(async ([bytes]) => {
   const book = await Xlsx.open(new Uint8Array(bytes).buffer);
   return Model.group(Model.fold(Model.readRows(await book.sheet('Data'))))
-    .flatMap((r) => r.stops)
+    .flatMap((r) => r.orders)
     .filter((o) => o.acceptAlternatives === false).length;
 }, [freezerBytes]);
 const freezerMarkers = await markerReport();
@@ -784,7 +784,7 @@ for (const [folder, fixture, what] of EDGE) {
           ...Sheet.paginate(
             route,
             settings,
-            { dates: null, source: 'edge', routeStops: route.stops.length,
+            { dates: null, source: 'edge', routeStops: route.orders.length,
               routeLines: Model.lineCount(route) },
             { host },
           ),
@@ -891,7 +891,7 @@ for (const [fixture, expected, saying] of SHAPES) {
       for (const route of Model.group(Model.fold(rows))) {
         for (const sheet of Sheet.paginate(
           route, settings,
-          { dates: null, source: 'shape', routeStops: route.stops.length,
+          { dates: null, source: 'shape', routeStops: route.orders.length,
             routeLines: Model.lineCount(route) },
           { host },
         )) {
@@ -963,7 +963,7 @@ const twoRoutes = await page.evaluate(() => {
     said: findings.filter((f) => f.kind === 'address-on-two-routes').map((f) => [f.severity, f.headline]),
     blocks: Validate.blocks(findings),
     printedOn: Model.group(Model.fold(rows))
-      .filter((r) => r.stops.some((s) => s.deliveryStreet === 'Hinnavegen 1')).map((r) => r.nickname),
+      .filter((r) => r.orders.some((s) => s.deliveryStreet === 'Hinnavegen 1')).map((r) => r.nickname),
   };
 });
 same('one address on two routes is a notice, not a block', twoRoutes.said,
@@ -1039,7 +1039,7 @@ const crowded = await page.evaluate(() => {
   const measure = (count) => {
     const route = {
       nickname: '3',
-      stops: [{
+      orders: [{
         id: 1, customer: 'Kafé 01', department: null, deliveryStreet: 'Street 01',
         route: '3', sequence: 100, acceptAlternatives: true, comment: null,
         lines: Array.from({ length: count }, (_, i) => ({

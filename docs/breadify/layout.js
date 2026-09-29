@@ -696,8 +696,8 @@ const Sheet = (() => {
     const what = bread ? 'in full' : 'check list';
     const sentence =
       unsequenced === 0
-        ? `Route ${route.nickname} ${what} — ${route.stops.length} stops.`
-        : `Route ${route.nickname} ${what} — ${route.stops.length} stops, ` +
+        ? `Route ${route.nickname} ${what} — ${route.orders.length} stops.`
+        : `Route ${route.nickname} ${what} — ${route.orders.length} stops, ` +
           `${unsequenced} with no position assigned.`;
     left.textContent = sentence;
 
@@ -801,7 +801,7 @@ const Sheet = (() => {
   function supplierKey(route, settings, spelled) {
     const used = Array.from(
       new Set(
-        route.stops.flatMap((stop) => stop.lines).map((line) => line.product.supplier),
+        route.orders.flatMap((stop) => stop.lines).map((line) => line.product.supplier),
       ),
     );
     const house = settings.kind === Model.BREAD ? Model.KNOWN_SUPPLIERS.map(([name]) => name) : [];
@@ -949,7 +949,7 @@ const Sheet = (() => {
       // send the other 255 off the bottom of the paper without a word.
       const pieces = [];
       let flagged = false;
-      for (const stop of route.stops) {
+      for (const stop of route.orders) {
         if (!Model.isSequenced(stop) && !flagged) {
           flagged = true;
           const flag = unsequencedFlag();
@@ -996,7 +996,7 @@ const Sheet = (() => {
         settings,
         {
           ...context,
-          routeStops: route.stops.length,
+          routeStops: route.orders.length,
           routeLines: Model.lineCount(route),
         },
         options,

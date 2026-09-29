@@ -456,9 +456,9 @@ const Model = (() => {
       byNickname.get(order.route).push(order);
     }
 
-    const routes = Array.from(byNickname, ([nickname, stops]) => ({
+    const routes = Array.from(byNickname, ([nickname, orders]) => ({
       nickname,
-      stops: sortStops(stops),
+      orders: sortStops(orders),
     }));
     routes.sort((left, right) =>
       compare(naturalKey(left.nickname), naturalKey(right.nickname)),
@@ -467,11 +467,11 @@ const Model = (() => {
   }
 
   function unsequencedStops(route) {
-    return route.stops.filter((stop) => !isSequenced(stop));
+    return route.orders.filter((stop) => !isSequenced(stop));
   }
 
   function lineCount(route) {
-    return route.stops.reduce((sum, stop) => sum + stop.lines.length, 0);
+    return route.orders.reduce((sum, stop) => sum + stop.lines.length, 0);
   }
 
   // ── Crates (D17, D24, D25) ─────────────────────────────────────────────
@@ -566,7 +566,7 @@ const Model = (() => {
 
   /** Every crate a route needs, all stops summed. */
   function routeCrates(route, rules) {
-    return route.stops.reduce(
+    return route.orders.reduce(
       (sum, stop) => sum + crateTotal(crateCount(stop, rules)),
       0,
     );
@@ -582,7 +582,7 @@ const Model = (() => {
    */
   function routeTotal(route) {
     const byProduct = new Map();
-    for (const stop of route.stops) {
+    for (const stop of route.orders) {
       for (const line of stop.lines) {
         let entry = byProduct.get(line.product.id);
         if (!entry) {
