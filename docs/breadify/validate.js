@@ -107,6 +107,19 @@ const Validate = (() => {
           rows: [row.excelRow],
         });
       }
+      // A blank or unrecognised answer reads as false, and false prints bold
+      // on the sheet: an answer the file never gave.
+      if (row.acceptAlternativesExact !== true && row.acceptAlternativesExact !== false) {
+        findings.push({
+          severity: BLOCKING,
+          kind: 'blank-required-field',
+          headline: `Accept alternatives is empty or not true/false on row ${row.excelRow}`,
+          detail:
+            `Row ${row.excelRow} does not say plainly whether substitutes are fine. ` +
+            'It would print as "want substitute: false", which the file never said.',
+          rows: [row.excelRow],
+        });
+      }
       for (const [column, field] of required) {
         if (row[field] !== '') continue;
         findings.push({

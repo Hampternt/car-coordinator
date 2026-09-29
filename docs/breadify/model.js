@@ -117,6 +117,25 @@ const Model = (() => {
   }
 
   /**
+   * The same answer, but only where the file states it plainly: a real Excel
+   * boolean, 1 or 0, or the words true, false, yes or no. Anything else — a
+   * blank, "ja", "N/A", an error cell — is null, and validate.js says so.
+   *
+   * `boolean()` reads every one of those as false, and false prints bold on
+   * the sheet as "want substitute: false": an answer the file never gave.
+   * It still does, if the leader continues past the finding.
+   */
+  function exactBoolean(cell) {
+    if (!cell || cell.kind === 'error') return null;
+    if (cell.kind === 'boolean') return cell.value;
+    if (cell.kind === 'number') return cell.value === 1 ? true : cell.value === 0 ? false : null;
+    const word = String(cell.value).trim().toLowerCase();
+    if (word === 'true' || word === 'yes' || word === '1') return true;
+    if (word === 'false' || word === 'no' || word === '0') return false;
+    return null;
+  }
+
+  /**
    * Reads the export's one worksheet into raw rows.
    *
    * Throws on anything that makes the columns untrustworthy — a missing
@@ -188,6 +207,7 @@ const Model = (() => {
         routeNickname: text(cell(COLUMN.routeNickname)),
         routeOrdering: integer(cell(COLUMN.routeOrdering)),
         acceptAlternatives: boolean(cell(COLUMN.acceptAlternatives)),
+        acceptAlternativesExact: exactBoolean(cell(COLUMN.acceptAlternatives)),
         region: text(cell(COLUMN.region)),
       };
     });

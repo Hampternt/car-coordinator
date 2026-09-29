@@ -1814,7 +1814,8 @@ const twoRoutes = await page.evaluate(() => {
     productName: 'Grovbrød',
     supplierSku: 'SB-10', position: null, supplier: 'Sandnes Bakeri', customer: 'Hinna skole',
     department, deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: route,
-    routeOrdering: 1, acceptAlternatives: false, region: 'Stavanger',
+    routeOrdering: 1, acceptAlternatives: false, acceptAlternativesExact: false,
+    region: 'Stavanger',
   });
   const rows = [row(2, 501, '3', 'Kantine'), row(3, 502, '7', 'SFO')];
   const findings = Validate.run(rows, Model.BREAD);
@@ -1838,7 +1839,7 @@ const noOrderId = await page.evaluate(() => {
     productName: `Brød ${productId}`, supplierSku: `SB-${productId}`, position: null,
     supplier: 'Sandnes Bakeri', customer: 'Hinna skole', department: null,
     deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: '3', routeOrdering: 1,
-    acceptAlternatives: true, region: 'Stavanger',
+    acceptAlternatives: true, acceptAlternativesExact: true, region: 'Stavanger',
   });
   const findings = Validate.run([row(2, 10), row(3, 11)], Model.BREAD);
   return {
@@ -1874,6 +1875,35 @@ same('a blank or whitespace Order ID cell is said for its row, as blocking', bla
   ['blocking', 'Order ID is empty or not a number on row 2'],
   ['blocking', 'Order ID is empty or not a number on row 3'],
 ]);
+
+// A blank or unrecognised Accept alternatives cell used to read as false and
+// print bold "want substitute: false" with nothing said at Check. The file's
+// own spellings — a real boolean, 1/0, yes/no — still pass.
+const answers = await page.evaluate(() => {
+  const row = (orderId, answer) =>
+    exportRow({ orderId, acceptAlternatives: answer, productId: orderId % 1000, supplierSku: `SB-${orderId}` });
+  const rows = Model.readRows(
+    sheetOf([
+      row(1000000601, null),
+      row(1000000602, 'ja'),
+      row(1000000603, 'no'),
+      row(1000000604, 1),
+      row(1000000605, false),
+    ]),
+  );
+  const findings = Validate.run(rows, Model.BREAD);
+  return {
+    said: findings.filter((f) => /Accept alternatives/.test(f.headline)).map((f) => [f.severity, f.headline]),
+    read: rows.map((r) => r.acceptAlternativesExact),
+    blocks: Validate.blocks(findings),
+  };
+});
+same('a blank or unrecognised substitute answer is said for its row, as blocking', answers.said, [
+  ['blocking', 'Accept alternatives is empty or not true/false on row 2'],
+  ['blocking', 'Accept alternatives is empty or not true/false on row 3'],
+]);
+same('and the plain answers read as the file gives them', answers.read, [null, null, false, true, false]);
+check('and it would make the pages wrong, so Continue anyway is the leader’s call', answers.blocks === true);
 
 // 400 of one bread is a school kitchen and prints without comment. Four
 // figures is a decimal point in the wrong place — it still prints, because the
