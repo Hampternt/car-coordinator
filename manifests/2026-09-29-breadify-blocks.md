@@ -107,7 +107,7 @@ How the items run:
 | One-order blocks | Unchanged apart from the marker. That covers 115 of 123 bread blocks and 84 of 94 freezer blocks. |
 | Data shape | `route.orders` is the flat, sorted list that every sum reads. `route.stops` is the grouped list the page walks. A stop has no `lines`, `id` or marker value of its own, so nothing can add across orders by accident, and a stop passed where an order belongs throws. One constructor builds both: `Model.route(nickname, orders)`. |
 | What "stops" counts | Blocks, everywhere it appears. The bread Check step reads 16 routes, 123 stops and 352 lines; the freezer's reads 94 stops. |
-| A missing Order ID | A new blocking finding: `Order ID is empty or not a number on row N`. Blocking in the house sense (INVENTORY.md:54): the Check step says the pages would be wrong, and **Continue anyway** stays the leader's call. Today such rows read as 0 and quietly fold into one order. |
+| A missing Order ID | A new blocking finding: `Order ID is missing or not a valid number on row N` (reworded in F2: it also catches 0, negative and fractional ids). Blocking in the house sense (INVENTORY.md:54): the Check step says the pages would be wrong, and **Continue anyway** stays the leader's call. Today such rows read as 0 and quietly fold into one order. |
 | Wrong values fail loudly | `marker()` throws on anything but `true` or `false`. The code that prints an id throws on anything but a number. `rebuild()` catches the error: no sheets, Print disabled, and one sentence saying why. A stop passed where an order belongs can then never print "false" or "undefined". |
 | Cutting a block taller than a page | Whole orders go first. Only an order taller than a page by itself is cut between its lines. The rules cover both one-order and several-order blocks (Design D). |
 | Paper use (the owner, 2026-09-29) | *"28 sheets is fine, keep blocks whole."* The bread day's 28 sheets (26 before this pack) are accepted. Blocks stay whole, and a cut block's parts stay page-sized, so nothing lets a block start partway down a page to fill the sheet before it. No layout change. README says this is the chosen behaviour. |
@@ -426,7 +426,7 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
 Follow-ups from the coordinator after the review fixes:
 
 - [x] **F1. Re-cut instead of refusing.** R5's throw becomes a re-cut: a final part over its cap, built with its real tag, is searched again with the real tag, and the parts after it are rebuilt. Only a single line that cannot fit an empty part throws. A test forces a real tag wider than the stand-in. *Done when:* the forced case prints clean, it fails under the old throw, and the samples stay 28 and 20 sheets.
-- [ ] **F2. R2's headline fits every case.** "Order ID is missing or not a valid number on row N", with the two pinned strings updated.
+- [x] **F2. R2's headline fits every case.** "Order ID is missing or not a valid number on row N", with the two pinned strings updated.
 - [ ] **F3. The spare line's id in the id column.** Pad the right of `.bf-order-extra`; refresh `long-name-and-spare-line-with-id.png`.
 
 ## Owner questions
@@ -620,3 +620,4 @@ Follow-ups from the coordinator after the review fixes:
   - **Test:** a shared stop of two 75-line orders under a name that wraps its line, cut with an empty trial tag, so every real tag needs a line of its own. It prints 5 parts with a clean inspection (13.4 mm clearance), one heading and tag each, and each order's lines once in order. A first version used a one-order block and never came out over: that block's real tag line also takes the marker, which the untagged trial had put on a spare line, so the heights matched. The switch to a shared block fixed that.
   - **Bite:** with the re-cut swapped back for a throw (layout.js backed up and restored), the test fails with "a part came out over its page".
   - Samples still 28 and 20 sheets. Gate: check.sh OK; test:breadify all passed, 323 ok.
+- 2026-09-29 · **F2 done** (commit "Word the Order ID finding for every case it catches"). The headline is now "Order ID is missing or not a valid number on row N". The old "empty or not a number" was wrong for 0, negative and fractional ids, which the R2 rule also catches. Both pinned tests updated. The read-through test gained rows with ids 0, −5 and 2.5, each flagged, so the wording is checked against the cases it names. The Decisions row now quotes the new wording. Gate: check.sh OK; test:breadify all passed, 323 ok.

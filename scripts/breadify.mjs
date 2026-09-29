@@ -2125,8 +2125,8 @@ const noOrderId = await page.evaluate(() => {
   };
 });
 same('a missing Order ID is said for each row, as blocking', noOrderId.said, [
-  ['blocking', 'Order ID is empty or not a number on row 2'],
-  ['blocking', 'Order ID is empty or not a number on row 3'],
+  ['blocking', 'Order ID is missing or not a valid number on row 2'],
+  ['blocking', 'Order ID is missing or not a valid number on row 3'],
 ]);
 check('and it would make the pages wrong', noOrderId.blocks === true);
 
@@ -2139,6 +2139,10 @@ const blankIds = await page.evaluate(() =>
         exportRow({ orderId: '' }),
         exportRow({ orderId: '   ' }),
         exportRow({ orderId: 1000000502, productId: 11, productName: 'Loff', supplierSku: 'SB-11' }),
+        // Numbers, but no order id: none, below none, and half of one.
+        exportRow({ orderId: 0, productId: 12, productName: 'Horn', supplierSku: 'SB-12' }),
+        exportRow({ orderId: -5, productId: 13, productName: 'Baguette', supplierSku: 'SB-13' }),
+        exportRow({ orderId: 2.5, productId: 14, productName: 'Rugbrød', supplierSku: 'SB-14' }),
       ]),
     ),
     Model.BREAD,
@@ -2146,9 +2150,12 @@ const blankIds = await page.evaluate(() =>
     .filter((f) => f.kind === 'blank-required-field')
     .map((f) => [f.severity, f.headline]),
 );
-same('a blank or whitespace Order ID cell is said for its row, as blocking', blankIds, [
-  ['blocking', 'Order ID is empty or not a number on row 2'],
-  ['blocking', 'Order ID is empty or not a number on row 3'],
+same('a blank, whitespace, zero, negative or fractional Order ID is said for its row, as blocking', blankIds, [
+  ['blocking', 'Order ID is missing or not a valid number on row 2'],
+  ['blocking', 'Order ID is missing or not a valid number on row 3'],
+  ['blocking', 'Order ID is missing or not a valid number on row 5'],
+  ['blocking', 'Order ID is missing or not a valid number on row 6'],
+  ['blocking', 'Order ID is missing or not a valid number on row 7'],
 ]);
 
 // A blank or unrecognised Accept alternatives cell used to read as false and

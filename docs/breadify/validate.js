@@ -100,7 +100,7 @@ const Validate = (() => {
         findings.push({
           severity: BLOCKING,
           kind: 'blank-required-field',
-          headline: `Order ID is empty or not a number on row ${row.excelRow}`,
+          headline: `Order ID is missing or not a valid number on row ${row.excelRow}`,
           detail:
             `Row ${row.excelRow} has no Order ID that reads as a whole number above zero. ` +
             'Every row without one would be printed as part of the same single order.',
