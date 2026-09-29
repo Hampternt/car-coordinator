@@ -427,7 +427,7 @@ Follow-ups from the coordinator after the review fixes:
 
 - [x] **F1. Re-cut instead of refusing.** R5's throw becomes a re-cut: a final part over its cap, built with its real tag, is searched again with the real tag, and the parts after it are rebuilt. Only a single line that cannot fit an empty part throws. A test forces a real tag wider than the stand-in. *Done when:* the forced case prints clean, it fails under the old throw, and the samples stay 28 and 20 sheets.
 - [x] **F2. R2's headline fits every case.** "Order ID is missing or not a valid number on row N", with the two pinned strings updated.
-- [ ] **F3. The spare line's id in the id column.** Pad the right of `.bf-order-extra`; refresh `long-name-and-spare-line-with-id.png`.
+- [x] **F3. The spare line's id in the id column.** Pad the right of `.bf-order-extra`; refresh `long-name-and-spare-line-with-id.png`.
 
 ## Owner questions
 
@@ -621,3 +621,4 @@ Follow-ups from the coordinator after the review fixes:
   - **Bite:** with the re-cut swapped back for a throw (layout.js backed up and restored), the test fails with "a part came out over its page".
   - Samples still 28 and 20 sheets. Gate: check.sh OK; test:breadify all passed, 323 ok.
 - 2026-09-29 · **F2 done** (commit "Word the Order ID finding for every case it catches"). The headline is now "Order ID is missing or not a valid number on row N". The old "empty or not a number" was wrong for 0, negative and fractional ids, which the R2 rule also catches. Both pinned tests updated. The read-through test gained rows with ids 0, −5 and 2.5, each flagged, so the wording is checked against the cases it names. The Decisions row now quotes the new wording. Gate: check.sh OK; test:breadify all passed, 323 ok.
+- 2026-09-29 · **F3 done** (commit "Line a spare line's order id up with the rest"). `.bf-order-extra` is padded 14.3 mm on the right: the M and F boxes (2 × 4.6 mm, 1.5 mm apart) plus the line's 3.6 mm gap. A freezer spare line (`.bf-order-extra-check`, set by `orderRows`) is padded 8.2 mm, for the M box alone. New checks measure each spare line's id against the id on the line above it. The R1/R4 hand-built block reads 0 mm on bread and 0 mm on a freezer layout of the same orders, where the 48-letter word also forces a spare line; the freezer layout also passes the full inspection. Before, the id sat at the block's right-hand end, about 14 mm further right. `long-name-and-spare-line-with-id.png` refreshed. Gate: check.sh OK; test:breadify all passed, 331 ok.

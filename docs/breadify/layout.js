@@ -446,7 +446,10 @@ const Sheet = (() => {
       // compact form will not fit here, it prints anyway and the overflow is
       // visible, rather than an order going out with no crate count.
       stamp.removeChild(mark);
-      const extra = element('div', 'bf-head-line bf-order-extra');
+      const extra = element(
+        'div',
+        `bf-head-line bf-order-extra${bread ? '' : ' bf-order-extra-check'}`,
+      );
       // The id too, like every line of the order: crates and a marker on a
       // line of their own must still say whose they are.
       const markStamp = append(element('span', 'bf-stamp'), cue(), marker(order), orderId(order));

@@ -1319,15 +1319,39 @@ const crowdedFirstLine = await page.evaluate(() => {
       loaf(65, 'Grovbrød', 'Bakehuset', 1),
     ]),
   ];
-  try {
+  const ruler = document.createElement('div');
+  ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+  document.body.append(ruler);
+  const perPx = 100 / ruler.getBoundingClientRect().width;
+  ruler.remove();
+  // How far each line-of-its-own's id ends from the id on the line above it,
+  // in millimetres: 0 when it stands in the id column.
+  const offsets = () =>
+    Array.from(host.querySelectorAll('.bf-order-extra'), (line) => {
+      const own = line.querySelector('.bf-order-id').getBoundingClientRect();
+      const above = line.previousElementSibling.querySelector('.bf-order-id').getBoundingClientRect();
+      return Math.round((own.right - above.right) * perPx * 10) / 10;
+    });
+  const lay = (kind) => {
     const sheets = Sheet.paginate(
       Model.route('1', orders),
-      { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+      { kind, showOrderId: true, crates: Model.defaultCrateRules() },
       { dates: null, source: 'test', routeStops: 1, routeLines: 3 },
       { host },
     );
     for (const sheet of sheets) host.append(sheet);
+    return sheets;
+  };
+  try {
+    const freezer = lay(Model.FREEZER);
+    const freezerOffsets = offsets();
+    const freezerSeen = inspectSheets(freezer);
+    host.innerHTML = '';
+    const sheets = lay(Model.BREAD);
     return {
+      freezerOffsets,
+      freezerSeen,
+      offsets: offsets(),
       seen: inspectSheets(sheets),
       extras: Array.from(host.querySelectorAll('.bf-order-extra'), (line) =>
         Array.from(line.querySelectorAll('.bf-order-id'), (n) => Number(n.textContent)),
@@ -1352,6 +1376,10 @@ same('and its orders still print their own lines, crates and marker', crowdedFir
 same('a line of its own for crates and a marker carries its order’s id', crowdedFirstLine.extras, [
   [1000000033],
 ]);
+// And that id stands in the id column, not at the block's right-hand end.
+same('and it lines up with the ids on the order’s other lines', crowdedFirstLine.offsets, [0]);
+inspected('the same block on a freezer sheet', crowdedFirstLine.freezerSeen);
+same('where a line of its own lines its id up too', crowdedFirstLine.freezerOffsets, [0]);
 
 // When the layout does refuse, the Print step says why and prints nothing.
 const laidOutWrong = await page.evaluate(() => {

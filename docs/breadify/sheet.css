@@ -571,9 +571,17 @@
   white-space: normal;
 }
 
-/* An order's crates and marker when its first line had no room for them. */
+/* An order's crates and marker when its first line had no room for them.
+ * Held off the right-hand end by what the order's lines keep there — the
+ * M and F boxes (2 × 4.6 mm, 1.5 mm apart) and the line's 3.6 mm gap — so
+ * its id stands in the same column as theirs. A check line keeps the M box
+ * alone. */
 .bf-order-extra {
-  padding: 0.3mm 0 0.5mm;
+  padding: 0.3mm 14.3mm 0.5mm 0;
+}
+
+.bf-order-extra-check {
+  padding-right: 8.2mm;
 }
 
 /* ── A bread line ────────────────────────────────────────────────────── */
