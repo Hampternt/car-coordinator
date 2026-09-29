@@ -264,7 +264,7 @@ await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 4 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 5 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -2850,6 +2850,133 @@ check('and it leads to the recovery page, which still lists the plan',
   dead.pg.url().endsWith('/recover.html') && (await dead.pg.locator('#list [data-key="carcoord:v1"]').count()) === 1, dead.pg.url());
 check('which logs no console errors', dead.errs.length === 0, dead.errs.join(' | '));
 await dead.ctx.close();
+
+// --- schema v5: the Show on printout tick, and a QR fixed off ---
+// A v4 plan converts in memory. carcoord:v1 keeps its old text, byte for byte,
+// until the leader's first real change, and only then is written as v5.
+const sameShape = (a, b) => {
+  const sort = (v) => Array.isArray(v) ? v.map(sort)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort(v[k])])) : v;
+  return JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+};
+const v4Plan = {
+  schemaVersion: 4, date: '2026-09-24', qrOnSheet: true,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }, { id: 'L2', name: 'No fuel card', color: '#1565c0' }],
+  cars: [{ id: 'c1', reg: 'VF11111', labelId: 'L1', note: 'Brakes' }, { id: 'c2', reg: 'VF22222', labelId: '', note: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true, labelId: 'L2', note: '' }], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: false, gapBefore: false }],
+};
+const v4Text = JSON.stringify(v4Plan);
+const sv = await newContext();
+const s5 = sv.pg;
+const loaded5 = async () => s5.evaluate(() => ({
+  schemaVersion: state.schemaVersion, qrOnSheet: state.qrOnSheet,
+  ticks: state.labels.map((l) => l.onSheet),
+  saved: localStorage.getItem('carcoord:v1'),
+  repairs: [...document.querySelectorAll('#notices .notice')].filter((n) => n.innerText.includes('Repaired')).length,
+}));
+
+// (a) a v4 save loads unticked, with the QR off, and is not written at boot.
+await leaveAs(s5, { 'carcoord:v1': v4Text });
+const beforeLoad = await s5.evaluate(() => localStorage.getItem('carcoord:v1'));
+await s5.reload({ waitUntil: 'networkidle' });
+const a5 = await loaded5();
+check('(a) a v4 save loads with every label unticked', a5.ticks.length === 2 && a5.ticks.every((t) => t === false), JSON.stringify(a5.ticks));
+check('(a) with the QR off and schemaVersion 5', a5.qrOnSheet === false && a5.schemaVersion === 5, JSON.stringify(a5).slice(0, 120));
+check('(a) and no repair notice', a5.repairs === 0);
+check('(a) carcoord:v1 is byte for byte the v4 text across the load', beforeLoad === v4Text && a5.saved === v4Text);
+
+// (b) one real change writes v5: every label unticked, the QR off, the rest as it was.
+await s5.click('[data-act="tab"][data-tab="plan"]');
+await s5.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Bea');
+const b5 = JSON.parse(await s5.evaluate(() => localStorage.getItem('carcoord:v1')));
+const want5 = JSON.parse(v4Text);
+want5.schemaVersion = 5; want5.qrOnSheet = false;
+for (const l of want5.labels) l.onSheet = false;
+want5.routes[0].driver = 'Bea';
+check('(b) after one change the saved plan is v5, and otherwise the input plus that change', sameShape(b5, want5), JSON.stringify(b5).slice(0, 300));
+
+// (c) a v5 save with a ticked label keeps the tick through a reload, an Export and a re-Import.
+const ticked = JSON.parse(JSON.stringify(want5));
+ticked.labels[0].onSheet = true;
+await leaveAs(s5, { 'carcoord:v1': JSON.stringify(ticked) });
+await s5.reload({ waitUntil: 'networkidle' });
+check('(c) a ticked label is still ticked after a reload', JSON.stringify((await loaded5()).ticks) === '[true,false]');
+await s5.click('[data-act="tab"][data-tab="data"]');
+const [dl5] = await Promise.all([s5.waitForEvent('download'), s5.click('[data-act="export"]')]);
+const out5 = JSON.parse(await readFile(await dl5.path(), 'utf8'));
+check('(c) the Export carries the tick', out5.schemaVersion === 5 && out5.labels[0].onSheet === true && out5.labels[1].onSheet === false && out5.qrOnSheet === false);
+await s5.evaluate(() => localStorage.clear());
+await s5.reload({ waitUntil: 'networkidle' });
+await s5.click('[data-act="tab"][data-tab="data"]');
+await s5.setInputFiles('#importFile', { name: 'v5.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(out5)) });
+await s5.waitForFunction(() => state.labels.length === 2);
+const c5 = await loaded5();
+check('(c) and a re-Import brings it back, into the saved plan too',
+  JSON.stringify(c5.ticks) === '[true,false]' && JSON.parse(c5.saved).labels[0].onSheet === true, JSON.stringify(c5.ticks));
+
+// (d) restoring a v4 backup turns the tick off.
+await s5.evaluate((json) => {
+  const list = JSON.parse(localStorage.getItem('carcoord:backups') || '[]');
+  list.unshift({ t: new Date().toISOString(), label: 'A v4 copy', json });
+  localStorage.setItem('carcoord:backups', JSON.stringify(list));
+}, v4Text);
+await s5.reload({ waitUntil: 'networkidle' });
+await s5.click('[data-act="tab"][data-tab="data"]');
+const at4 = await s5.evaluate(() => Store.backups().findIndex((b) => b.label === 'A v4 copy'));
+await s5.click(`[data-act="restore"][data-id="${at4}"]`);
+await s5.click(`[data-act="restore"][data-id="${at4}"]`);
+const d5 = await loaded5();
+check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify(d5.ticks) === '[false,false]' && JSON.parse(d5.saved).schemaVersion === 5, `${at4} ${JSON.stringify(d5.ticks)}`);
+
+// (e) every way a label is made gives onSheet: false, written out.
+await s5.evaluate(() => localStorage.clear());
+await s5.reload({ waitUntil: 'networkidle' });
+check('(e) a first run starts every label unticked', await s5.evaluate(() => state.labels.length === 3 && state.labels.every((l) => l.onSheet === false)));
+await s5.click('[data-act="tab"][data-tab="labels"]');
+await s5.fill('#newLabel', 'Spare key');
+await s5.click('[data-act="add-label"]');
+check('(e) Add label makes it unticked', await s5.evaluate(() => state.labels.find((l) => l.name === 'Spare key')?.onSheet === false));
+await s5.click('[data-act="tab"][data-tab="cars"]');
+await s5.fill('#newCar', 'VE11111');
+await s5.click('#tab-cars [data-act="add-car"]');
+await s5.click('[data-act="tab"][data-tab="plan"]');
+await s5.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="tag"]').click();
+await s5.fill('#newTagName', 'Flat tyre');
+await s5.click('[data-act="add-tag"]');
+check('(e) Add tag makes it unticked', await s5.evaluate(() => state.labels.find((l) => l.name === 'Flat tyre')?.onSheet === false));
+const e5 = await s5.evaluate(async () => {
+  const from = JSON.parse(JSON.stringify(state));
+  from.labels.push({ id: 'far', name: 'From afar', color: '#2e7d32', onSheet: true });
+  const { share, error } = await Share.decode(await Share.encode(from, 'all'));
+  if (error) return { error };
+  const { state: next } = Share.apply(state, share, { mode: 'all', addMissing: true });
+  return { onSheet: next.labels.find((l) => l.name === 'From afar')?.onSheet };
+});
+check('(e) an everything code that brings a new label makes it unticked', e5.onSheet === false, JSON.stringify(e5));
+
+// (f) the tick never travels in a share code, and never changes on arrival.
+const f5 = await s5.evaluate(async () => {
+  const from = JSON.parse(JSON.stringify(state));
+  from.labels.forEach((l) => { l.onSheet = true; });
+  const { share } = await Share.decode(await Share.encode(from, 'all'));
+  const here = JSON.parse(JSON.stringify(state));
+  const w = here.labels.find((l) => l.name === 'Workshop');
+  w.onSheet = true;
+  const src = JSON.parse(JSON.stringify(here));
+  src.labels.forEach((l) => { l.onSheet = false; });
+  src.labels.find((l) => l.name === 'Workshop').color = '#123456';
+  const { share: coloured } = await Share.decode(await Share.encode(src, 'all'));
+  const { state: next } = Share.apply(here, coloured, { mode: 'all', addMissing: true });
+  const after = next.labels.find((l) => l.name === 'Workshop');
+  return { rows: share.l.map((r) => r.length), after, was: w };
+});
+check('(f) every label row in an everything code is [name, colour]', f5.rows.length >= 3 && f5.rows.every((n) => n === 2), JSON.stringify(f5.rows));
+check('(f) a code naming a ticked label keeps it ticked and changes only its colour',
+  f5.after.onSheet === true && f5.after.color === '#123456' && f5.after.id === f5.was.id && f5.after.name === f5.was.name, JSON.stringify(f5.after));
+check('the schema v5 cases log no console errors', sv.errs.length === 0, sv.errs.join(' | '));
+await sv.ctx.close();
 
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and

@@ -6,7 +6,7 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 4;
+  const SCHEMA = 5;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
@@ -36,7 +36,7 @@ const Store = (() => {
 
     const labels = arr(raw.labels, 'labels')
       .filter((l) => l && typeof l === 'object')
-      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: /^#[0-9a-f]{6}$/i.test(str(l.color)) ? l.color : '#c62828' }));
+      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: /^#[0-9a-f]{6}$/i.test(str(l.color)) ? l.color : '#c62828', onSheet: bool(l.onSheet) }));
 
     const cars = arr(raw.cars, 'cars')
       .filter((c) => c && typeof c === 'object')
@@ -136,7 +136,10 @@ const Store = (() => {
 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? raw.date : defaults().date;
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
-    const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
+    // The QR code is gone from the sheet, but the field stays, fixed off:
+    // every build from v0.1.0 to 0.3.0 reads a missing qrOnSheet as on, so
+    // dropping it would turn the QR back on in every older copy.
+    const qrOnSheet = false;
 
     return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups, templates }, repaired, usable: true };
   }
@@ -165,6 +168,10 @@ const Store = (() => {
     // v4 is a driver's own status and note, and it is the same argument: a
     // build without them meeting a roster that has them would drop what the
     // other manager typed without a word.
+    //
+    // v5 is a label's Show on printout tick (onSheet). A build without the
+    // tick meeting data that has it would drop it without a word, and
+    // qrOnSheet is fixed off so older builds keep the QR off.
     return normalise(raw, defaults);
   }
 

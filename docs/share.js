@@ -176,7 +176,7 @@ const Share = (() => {
       for (const [name, color] of share.l) {
         const at = next.labels.find((l) => key(l.name) === key(name));
         if (at) at.color = colour(color);
-        else next.labels.push({ id: uid(), name: str(name), color: colour(color) });
+        else next.labels.push({ id: uid(), name: str(name), color: colour(color), onSheet: false });
       }
     }
 

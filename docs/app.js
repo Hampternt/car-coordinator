@@ -96,15 +96,15 @@ function defaults() {
   return {
     schemaVersion: Store.SCHEMA,
     date: today(),
-    qrOnSheet: true,
+    qrOnSheet: false,
     // Just the spots. The number after the slash on the pillar sheet is the
     // round, not part of the spot's name, so it lives in the route's own round
     // field and the two are joined back together for the printout.
     positions: ['Spot 1', 'Spot 2', 'Spot 3', 'Spot 4', 'Spot 5', 'Garage'].map(pos),
     labels: [
-      { id: uid(), name: 'Out of service', color: '#c62828' },
-      { id: uid(), name: 'Unavailable', color: '#ef6c00' },
-      { id: uid(), name: 'Workshop', color: '#6a1b9a' },
+      { id: uid(), name: 'Out of service', color: '#c62828', onSheet: false },
+      { id: uid(), name: 'Unavailable', color: '#ef6c00', onSheet: false },
+      { id: uid(), name: 'Workshop', color: '#6a1b9a', onSheet: false },
     ],
     cars: [],
     drivers: [],
@@ -1903,7 +1903,7 @@ document.addEventListener('click', (e) => {
     case 'add-tag': {
       const name = $('#newTagName').value.trim();
       if (!name) { $('#newTagName').focus(); return; }
-      const label = { id: uid(), name, color: $('#newTagColor').value };
+      const label = { id: uid(), name, color: $('#newTagColor').value, onSheet: false };
       state.labels.push(label);
       list[i].labelId = label.id;
       tagFor = null;
@@ -2097,7 +2097,7 @@ document.addEventListener('click', (e) => {
       if (!addFromInput('#newPos', (name) => state.positions.push({ id: uid(), name, multi: false, labelId: '', note: '' }))) return;
       break;
     case 'add-label':
-      if (!addFromInput('#newLabel', (name) => state.labels.push({ id: uid(), name, color: $('#newLabelColor').value }))) return;
+      if (!addFromInput('#newLabel', (name) => state.labels.push({ id: uid(), name, color: $('#newLabelColor').value, onSheet: false }))) return;
       break;
     default: return;
   }
