@@ -214,8 +214,9 @@ const Store = (() => {
       // does the warning still say the first change will.
       // The recovery page downloads the unreadable text as it stands, which
       // matters most when the copy could not be made.
-      notices.push({ kind: 'warn', link: { href: 'recover.html', text: 'Open the recovery page' }, text: text !== null && rescue(text)
-        ? 'The data saved in this browser could not be read, so the plan on screen started empty. An untouched copy is kept in Archives on the Data tab; check Backups there too before relying on what is on screen.'
+      const kept = text !== null ? rescue(text) : { ok: false, dropped: 0 };
+      notices.push({ kind: 'warn', link: { href: 'recover.html', text: 'Open the recovery page' }, text: kept.ok
+        ? ['The data saved in this browser could not be read, so the plan on screen started empty. An untouched copy is kept in Archives on the Data tab; check Backups there too before relying on what is on screen.', madeRoom(kept.dropped)].filter(Boolean).join(' ')
         : 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
     } else if (repaired.length) {
       notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
@@ -309,7 +310,9 @@ const Store = (() => {
      the oldest update copies make room one at a time; the new entry and the
      rescue never do, and neither do the plan or the Backups, which are not
      touched here at all. Returns { ok, dropped }: whether the entry is now
-     stored, and how many older archives are no longer kept. */
+     stored, and how many update copies were removed to make room for it.
+     That count is said on screen; the usual trimming to three, and a new
+     rescue replacing the old one, are not in it. */
   function archive(entry) {
     const old = archives();
     const list = [entry];
@@ -320,24 +323,29 @@ const Store = (() => {
       else if (a.kind === 'rescue') { if (!rescued) { list.push(a); rescued = true; } }
       else list.push(a);   // a kind a later version added: not ours to drop
     }
+    let dropped = 0;
     for (;;) {
       try {
         localStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
-        return { ok: true, dropped: old.length - (list.length - 1) };
+        return { ok: true, dropped };
       } catch { /* full: make room below, or give up */ }
       let i = list.length - 1;
       while (i > 0 && list[i].kind !== 'update') i--;
       if (i === 0) return { ok: false, dropped: 0 };
       list.splice(i, 1);
+      dropped++;
     }
   }
 
   // Once per text: reloading on the same unreadable save keeps one copy.
+  // Returns archive()'s { ok, dropped }.
   function rescue(text) {
     const kept = archives().find((a) => a.kind === 'rescue');
-    if (kept && kept.text === text) return true;
-    return archive({ kind: 'rescue', from: null, to: null, t: new Date().toISOString(), text }).ok;
+    if (kept && kept.text === text) return { ok: true, dropped: 0 };
+    return archive({ kind: 'rescue', from: null, to: null, t: new Date().toISOString(), text });
   }
+  // Said wherever a copy took the place of older ones.
+  const madeRoom = (n) => (n > 0 ? `To make room, ${n === 1 ? '1 older copy in Archives was' : `${n} older copies in Archives were`} removed.` : '');
 
   /* ---------- IndexedDB (one key: the save-file handle) ---------- */
   /* Every path out of here has to resolve. init() awaits this before the first

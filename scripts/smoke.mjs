@@ -2315,7 +2315,7 @@ const fourth = await un.evaluate(([u1, u2, r, u3, u4]) => {
   const res = Store.archive(u4);
   return { res, kept: Store.archives().map((a) => a.kind === 'rescue' ? 'rescue' : a.to) };
 }, [arch('update', 'u1'), arch('update', 'u2'), arch('rescue', null, '{broken'), arch('update', 'u3'), arch('update', 'u4')]);
-same('a fourth update archive drops only the oldest, and the rescue stays', fourth, { res: { ok: true, dropped: 1 }, kept: ['u4', 'u3', 'rescue', 'u2'] });
+same('a fourth update archive drops only the oldest, and the rescue stays; trimming to three is not counted as making room', fourth, { res: { ok: true, dropped: 0 }, kept: ['u4', 'u3', 'rescue', 'u2'] });
 const newRescue = await un.evaluate(([r2]) => { Store.archive(r2); return Store.archives().map((a) => a.kind === 'rescue' ? a.text : a.to); }, [arch('rescue', null, '{broken again')]);
 same('a new rescue replaces the old one and keeps every update archive', newRescue, ['{broken again', 'u4', 'u3', 'u2']);
 
@@ -2333,6 +2333,23 @@ await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(
 await un.reload({ waitUntil: 'networkidle' });
 same('the first change afterwards leaves the rescue intact',
   await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text)), ['{"routes":[{"name":"lost']);
+
+// A rescue that only fits once an update copy makes room says so.
+const roomForRescue = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', `{"routes":[${'x'.repeat(100 * 1024)}`);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'a', to: 'b', t: '2026-09-01T00:00:00.000Z', text: 'u'.repeat(200 * 1024) }]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return chunks;
+});
+await un.reload({ waitUntil: 'networkidle' });
+const roomSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const roomKept = await un.evaluate(() => Store.archives().map((a) => a.kind));
+await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+check('a rescue that makes room says which copy went', roomForRescue > 0 && roomSaid.includes('An untouched copy is kept in Archives')
+  && roomSaid.includes('To make room, 1 older copy in Archives was removed.') && JSON.stringify(roomKept) === '["rescue"]', `${JSON.stringify(roomKept)} ${roomSaid}`);
 
 // Twelve new backups, the whole rolling list, push no archive out.
 const rolled = await un.evaluate(([u1, u2]) => {
@@ -2663,6 +2680,25 @@ check('with storage full, no archive, and the note says storage is full',
 check('and the saved plan is untouched', noRoom.saved === bigPlan);
 check('no console errors when storage is full', fullUp.errs.length === 0, fullUp.errs.join(' | '));
 await fullUp.ctx.close();
+
+// An update copy that only fits once an older one makes room: the note says so.
+const roomUp = await newContext();
+roomUp.pg.removeAllListeners('console');
+roomUp.pg.on('console', (m) => m.type() === 'error' && !m.text().includes('localStorage save failed') && roomUp.errs.push(m.text()));
+await roomUp.pg.evaluate((plan) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', plan);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: '0.0.1', to: '0.0.2', t: '2026-09-01T00:00:00.000Z', text: 'u'.repeat(200 * 1024) }]));
+  try { for (let c = 0; c < 2000; c++) localStorage.setItem(`fill:${c}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+}, bigPlan);
+await roomUp.pg.reload({ waitUntil: 'networkidle' });
+const madeRoomNote = await opened(roomUp.pg);
+check('an update copy that makes room says so in the note',
+  madeRoomNote.say.includes('copied unchanged into Archives') && madeRoomNote.say.includes('To make room, 1 older copy in Archives was removed.')
+  && JSON.stringify(madeRoomNote.archives.map((a) => a.to)) === JSON.stringify([V]), `${JSON.stringify(madeRoomNote.archives)} ${madeRoomNote.say}`);
+check('no console errors when a copy makes room', roomUp.errs.length === 0, roomUp.errs.join(' | '));
+await roomUp.ctx.close();
 
 // Isolation: the archive step failing must not switch off 0.2.5's protection.
 const broken = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {

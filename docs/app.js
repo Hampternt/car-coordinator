@@ -1685,9 +1685,10 @@ let firstRun = false;
 
 /* The first write at boot: the saved text, byte for byte, into Archives
    before anything else can change it. Returns what the update note can say
-   about the copy: 'kept' when one is stored for this version (now, or on an
-   earlier open that held the note back), 'full' when storage had no room,
-   null when there was nothing to copy. An old cached store.js without
+   about the copy, { copy, dropped }: copy is 'kept' when one is stored for
+   this step (now, or on an earlier open that held the note back) and 'full'
+   when storage had no room; dropped is how many older copies made room for
+   it. null when there was nothing to copy. An old cached store.js without
    archives skips it: the plan is still drawn, and the copy comes on the
    first open with all the new files. */
 function archiveBeforeUpdate() {
@@ -1695,23 +1696,26 @@ function archiveBeforeUpdate() {
   const list = Store.archives();
   const seen = Store.pref('seenUpdate');
   const from = updatingFrom(seen);
-  if (list.some((a) => copyFor(a, APP_VERSION, from))) return 'kept';
+  if (list.some((a) => copyFor(a, APP_VERSION, from))) return { copy: 'kept', dropped: 0 };
   const text = Store.savedText();
   if (!archiveNeeded({ version: APP_VERSION, from, usableText: Store.hasUsableLocalData() ? text : null, archives: list, seen })) return null;
-  const { ok } = Store.archive({ kind: 'update', from, to: APP_VERSION, t: new Date().toISOString(), text });
-  return ok ? 'kept' : 'full';
+  const { ok, dropped } = Store.archive({ kind: 'update', from, to: APP_VERSION, t: new Date().toISOString(), text });
+  return { copy: ok ? 'kept' : 'full', dropped: ok ? dropped : 0 };
 }
 
 /* What the note says, sentence by sentence: the version, what happened to
    the saved plan, where else it can be kept, and how to put the note away.
    Nothing is claimed that did not happen: with no copy made, and no plan
    read from the save file, the copy sentence is left out. */
-function updateNoteText(copy, recovered) {
+function updateNoteText(kept, recovered) {
   const f = Store.file;
+  const copy = kept && kept.copy;
   const said = [`Car Coordinator has been updated to ${APP_VERSION}.`];
   if (recovered) said.push('Your plan was read from your save file, which this update did not change.');
-  else if (copy === 'kept') said.push('Before anything else, your plan and setup (routes, templates, drivers, day groups, cars, positions, labels) were copied unchanged into Archives on the Data tab.');
-  else if (copy === 'full') said.push('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.');
+  else if (copy === 'kept') {
+    said.push('Before anything else, your plan and setup (routes, templates, drivers, day groups, cars, positions, labels) were copied unchanged into Archives on the Data tab.');
+    if (kept.dropped > 0) said.push(`To make room, ${kept.dropped === 1 ? '1 older copy in Archives was' : `${kept.dropped} older copies in Archives were`} removed.`);
+  } else if (copy === 'full') said.push('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.');
   // Left out in the Windows app until the owner has checked the file picker
   // works there, and while a hold is up: that has a notice of its own.
   if (!window.__TAURI__ && !f.hold) {
