@@ -1,6 +1,6 @@
 # Pack: Breadify — one-look marker, one block per customer
 
-**Status:** 🚧 all eleven items committed on `breadify-blocks` and the pack gate green (2026-09-29; item 11 added by the owner after the first gate). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
+**Status:** 🚧 all eleven items and the review's 18 fixes (R1–R16) committed on `breadify-blocks`, pack gate green (2026-09-29). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
 **Date:** 2026-09-29
 **Branch:** `breadify-blocks`, cut from `dev` and merged back into `dev` through a PR. It shares three files with the review-round packs: README.md, INVENTORY.md and `scripts/check.sh`. In `scripts/check.sh`, item 1 changes only the loop line at :38. update-note edits that file's header and tail, not :38.
 
@@ -599,3 +599,14 @@ One commit per fix, each with its ledger line in the same commit, item-gated wit
   With the sequence taken out of `sameStop` (scratch model copy) both merged, into "Kafé C:31+32" and "Kafé D:33+34", so the checks bite. Test only. Gate: check.sh OK; test:breadify all passed, 310 ok.
 - 2026-09-29 · **R15 done** (commit "Check two spellings of a customer stay two stops"). New `handRoute` check: "Kafé Sentrum" (41) and "Kafe Sentrum" (42) at one street and position are stops ["Kafe Sentrum:42", "Kafé Sentrum:41"], and both names print. With `sameStop` comparing names loosely (a scratch model copy using `localeCompare(…, 'nb', {sensitivity: 'base'})`) they merged into "Kafe Sentrum:42+41", so the check bites. Test only. Gate: check.sh OK; test:breadify all passed, 311 ok.
 - 2026-09-29 · **R16 done** (commit "Check where a shared line's order id sits, and its size"). `sharedReport` measures every shared line on the preview. The id's left edge must be at or right of the bread name's right edge, its right edge at or left of the tick boxes, and its font size equal to a one-order block's stamp id. Bread: 79 lines. Freezer: 63 lines. Both at 11.0667px (8.3 pt), none wrong. A throwaway CSS mutation giving shared ids 10 pt failed both days (13.3333px); sheet.css was reverted after. Test only. Gate: check.sh OK; test:breadify all passed, 313 ok.
+- 2026-09-29 · **Review fixes: pack gate green.** Commits in order:
+  - R1 8f308c9, R2 ca8821d, R3 203eb2a, R4 de4e39b, R5 1667cad, R6 067f9aa, R7 ad66928
+  - R8a a6def12, R8b 3e9c146, R8c b3bdf2c
+  - R9 9089c44, R10 fd8c44e, R11 ccec0be, R12 fd1fa14, R13 96308dc, R14 05144bd, R15 c73b362, R16 64814b4
+
+  Each carries its own ledger line. R1's first commit left its line out; it was amended in before anything built on it.
+  - Gate: `bash scripts/check.sh`: CHECK OK. `CHROMIUM_PATH=/usr/bin/google-chrome npm test`: exit 0, car `all checks passed` (368 ok), Breadify `all passed` (313 ok), 0 FAIL, on system Chrome.
+  - Item 11's sort held through every fix: `readOrderLines` passed on every run, with bread 148 read and 60 moved, freezer 115 read and 45 moved.
+  - Sheet counts unchanged: bread 28, freezer 20 (route 13 on one sheet).
+  - Look files regenerated in `breadify-look/`, where nothing on the samples changed visibly. New crop `long-name-and-spare-line-with-id.png` shows the R1 and R4 hand-built case: the long name wraps beside compact crates, and a spare line carries its order's id.
+  - Seen, not changed: a spare line's id sits at the block's right edge, about 14 mm right of the id column on the lines, which stop before the tick boxes. It could be aligned with a right padding on `.bf-order-extra`. Left for the coordinator, since no finding asked for it.
