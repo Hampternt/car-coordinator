@@ -23,10 +23,11 @@ Everything left in the review round for Car Coordinator is built in one continuo
 
 - **One builder, in order, one worktree.** Every part edits `docs/app.js`, so they can't be built in parallel.
 - **Each part keeps what makes it safe:**
-  - its own item gates and one commit per item;
+  - one commit per item, each passing `scripts/check.sh`;
   - its schema migration plan (part 2);
-  - its **Announce and cut** item, with its own version and update-note entry (pack 1's Design G and H);
-  - its upgrade check from the previous build.
+  - its **Announce and cut** item, with its own version and update-note entry (pack 1's Design G and H).
+
+  The full suite, the upgrade check and the review run once, at the end (see below).
 
   Users jump from the build live on `main` straight to `dev`'s tip, so every entry they missed shows, and the `must` ones show in full.
 - **Owner's answers.** Each part's **Owner questions** section holds them, and they override that part's recommendations.
