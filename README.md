@@ -17,6 +17,17 @@ They share the routes and nothing else: no data passes between them, and each st
 
 Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Breadify), which still ships its own `.exe` and is still the source of truth for the printed page. The port follows that repo's `docs/print-spec.md` and the decision log `D1`–`D25` / `F1`–`F10`; `scripts/breadify.mjs` checks the output against the figures those documents state.
 
+The port departs from that log in three places, each at the owner's request, and the code says so wherever the D-number is cited. The Rust app is unchanged.
+
+- **The substitute marker has one look** (D8, D21). Every order prints `want substitute: true` or `want substitute: false` in the same quiet type, with only the word **false** in bold. The Rust app prints false in loud capitals.
+- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. Nothing is added together: every line carries its order id, and each order keeps its own crates and marker on its first line. Three more departures follow from this:
+  - Each order has its own crates, marker and id, not one column per block (D20).
+  - Ties in the delivery order are broken by the customer before the department, so a customer's orders sit together (D2).
+  - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
+- **A block taller than a page is cut rather than run off the paper** (D9). The cut falls between whole orders first, and inside an order only when that order is taller than a page by itself.
+
+Because of the second, the freezer sample prints on 20 sheets, not the 21 that `docs/freezer-list.md` states: route 13's Customer 012 now fits on one sheet as one block.
+
 ## Features
 - **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A working rail beside the table holds the roster and the fleet: **add, rename, tag and delete** there, **drag a name or a registration straight onto the route it is driving**, and drag within the rail to reorder it. Everything in it is saved as you do it, and the Drivers and Cars tabs are still the full editors.
 - **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Drivers carry a status label of their own, from the same list cars and positions use. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
