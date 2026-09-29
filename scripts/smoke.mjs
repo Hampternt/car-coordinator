@@ -2394,6 +2394,11 @@ check('it looks like the top bar: ink, with a hi-vis edge', await synth.evaluate
   const cs = getComputedStyle(n);
   return cs.backgroundColor === 'rgb(26, 28, 30)' && cs.borderLeftColor === 'rgb(255, 212, 0)';
 }));
+// The note's white text must not reach its white \u2715 button.
+check('and its \u2715 can be read', await synth.evaluate((n) => {
+  const b = getComputedStyle(n.querySelector('[data-act="dismiss"]'));
+  return b.color !== b.backgroundColor;
+}));
 await synth.locator('[data-act="dismiss"]').click();
 check('and \u2715 takes it away', (await un.locator('#notices .notice.update').count()) === 0);
 

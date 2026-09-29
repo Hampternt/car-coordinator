@@ -18,7 +18,7 @@
     if (cls) e.className = cls;
     return e;
   };
-  const kb = (s) => `${Math.max(1, Math.round(s.length / 1024))} KB`;
+  const kb = (s) => (s.length < 1024 ? 'under 1 KB' : `${Math.round(s.length / 1024)} KB`);
   const isJson = (s) => { try { JSON.parse(s); return true; } catch { return false; } };
   const safe = (s) => String(s).replace(/[^a-z0-9.]+/gi, '-').replace(/^-+|-+$/g, '');
 

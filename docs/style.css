@@ -107,6 +107,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    reads as the app telling you about itself rather than about the plan */
 .notice.update { background: var(--ink); color: #fff; border-left-color: var(--hivis); }
 .notice.update .say b { color: var(--hivis); }
+.notice.update .btn { color: var(--ink); }
 /* a notice that offers something carries two buttons: the offer, then the
    dismiss beside it. They sit in one box so they wrap as a pair, kept to the
    right, rather than the ✕ being left alone under the text; a long offer

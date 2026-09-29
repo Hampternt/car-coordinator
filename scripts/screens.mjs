@@ -216,6 +216,46 @@ await shot('10-print-preview');
 await page.pdf({ path: `${OUT}/11-printed-sheet.pdf`, format: 'A4', printBackground: true });
 console.log(`  ${OUT}/11-printed-sheet.pdf`);
 
+// --- the next open after an update: the note, and the Data tab's new cards.
+// The marker is taken away, so this browser opens as one the update has not
+// reached yet: its plan goes into Archives first and the note comes last.
+console.log('after an update');
+await page.evaluate(() => localStorage.removeItem('carcoord:pref:seenUpdate'));
+await page.reload({ waitUntil: 'networkidle' });
+await page.evaluate(() => window.scrollTo(0, 0));   // a reload keeps the scroll it had
+if ((await page.locator('#notices .notice.update').count()) !== 1) {
+  console.log(`\nexpected one update note after the marker was taken away, got ${await page.locator('#notices .notice.update').count()}`);
+  process.exit(1);
+}
+await shot('12-update-note');
+await tab('data');
+if ((await page.locator('#tab-data .arch-row [data-act="archive-restore"]').count()) !== 1) {
+  console.log('\nthe Data tab shows no archive to restore after the update');
+  process.exit(1);
+}
+await page.evaluate(() => window.scrollTo(0, 0));
+await shot('13-data-whats-new-and-archives');
+
+// --- when the app will not start: the plain line, and the recovery page.
+// On a page of its own, because the broken app.js is meant to fail.
+console.log('when the app will not start');
+const dead = await browser.newPage({ viewport: { width: 1360, height: 500 }, deviceScaleFactor: 2 });
+await dead.route('**/app.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'throw new Error("app.js broken on purpose");' }));
+await dead.goto(server.base, { waitUntil: 'networkidle' });
+if (!(await dead.locator('#notices .boot-line').isVisible())) {
+  console.log('\nwith app.js broken, the line pointing at the recovery page is not there');
+  process.exit(1);
+}
+await dead.screenshot({ path: `${OUT}/14-app-will-not-start.png` });
+console.log(`  ${OUT}/14-app-will-not-start.png`);
+await dead.close();
+await page.goto(`${server.base}recover.html`, { waitUntil: 'networkidle' });
+if ((await page.locator('#list [data-key="carcoord:v1"]').count()) !== 1) {
+  console.log('\nthe recovery page does not list the plan');
+  process.exit(1);
+}
+await shot('15-recovery-page');
+
 await browser.close();
 server.close();
 
