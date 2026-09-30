@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.6.0',
+    must: true,
+    title: 'The day plan is for the next working day',
+    changed: 'Opening the app moves a passed date to the next working day; Keep puts it back. Clear uses that day. Any other date shows a warning.',
+    affects: 'Day plan and template offers. Printed sheets and share codes carry the new date. On a copy not yet updated, set the date by hand.',
+    data: 'Opening the app leaves your saved plan as it was. Your next change saves the new date. An older copy shows the date as saved.',
+  },
+  {
     version: '0.5.0',
     must: true,
     title: 'Dark mode',
