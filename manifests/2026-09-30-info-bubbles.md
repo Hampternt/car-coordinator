@@ -51,7 +51,7 @@ Each is one or two short sentences: what it is, then how to use it.
   - it is hidden in print.
 
   Done: the suite passes.
-- [ ] **7. Announce and cut 0.14.0,** `must: false`: "Small ⓘ buttons explain each part of the app; the tour is gone." Done: the version guard passes.
+- [x] **7. Announce and cut 0.14.0,** `must: false`: "Small ⓘ buttons explain each part of the app; the tour is gone." Done: the version guard passes.
 
 ## Gates
 
@@ -69,3 +69,4 @@ Each is one or two short sentences: what it is, then how to use it.
 - 2026-09-30: item 4 done. `offerInfoHint(link)` raises "New here? Click any ⓘ to see what that part does." where `offerTour` ran, on its conditions (first run, no share link, no warning, no save file linked), and only when HELP is loaded and `Store.pref('infoHint') === null`. The `dismiss` act sets `infoHint` to `done` when the notice put away is that very notice. screens.mjs checks a first open shows the hint alone, and takes `33-info-bubble` (the Drivers panel's bubble on the Day plan, window-sized). check.sh: CHECK OK.
 - 2026-09-30: item 5 done. INVENTORY: the ✅ first-use tour entry is gone and the 🚧 entry says the bubbles and the first-open line replace it. README gains an ⓘ line at the head of Features (it never mentioned the tour). No hint text in the app pointed at the tour; `grep -i tour` over docs/, README, INVENTORY and HANDOFF finds only docs/updates.js (the 0.11.0 note, kept) and the top bar's measurement comment. check.sh: CHECK OK.
 - 2026-09-30: item 6 done. The builder stopped mid-item with its smoke.mjs edits uncommitted (last change 15:21), and the main session finished the pack from its own worktree (`claude/feature-status-branches-d37f1d`, fast-forwarded to `info-bubbles` with that diff applied unchanged). smoke.mjs gains an info-bubble block: every ⓘ opens its own words beside itself inside the window at 1680, 1280, 900 and 390; one bubble at a time; the same ⓘ, an outside press, its ✕ and a tab switch shut it; Enter, Escape, Tab and focus; right-click menus shut it; nothing saved; the hint once and gone for good after ✕; every help key has a title and text; no ⓘ inside `[data-act]`; the app still works when help.js is a 404; an open bubble is not printed. check.sh: CHECK OK. The suite is proved at the end gates.
+- 2026-09-30: item 7 done. docs/updates.js gains 0.14.0, `must: false` ("Info buttons instead of the tour"; nothing saved changes, the sheet and share codes are unchanged), and the six version places and every `?v=` move to 0.14.0. check.sh: CHECK OK, VERSIONS OK.
