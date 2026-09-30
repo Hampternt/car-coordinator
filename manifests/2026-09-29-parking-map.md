@@ -1,6 +1,6 @@
 # Pack: Parking map
 
-**Status:** 🚧 building, since 2026-09-30, as part 6 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (the yard as drawn; the gate is named `Gate`).
+**Status:** 🚧 all 9 items built on `review-round` (combined pack, part 6), cut at 0.8.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 4 individually) and the walkthrough.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `parking-map`, from `dev` after pack 5 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line). Items 1–2 can start earlier, but only on their own branch, `parking-map-model` (Design H).
 
@@ -401,7 +401,7 @@ Playwright locators are strict, and several tests count across the whole Day pla
   - **README:** one line for the map in Features (README.md:21-31 today), and `npm run test:map` under Tests (:51-58).
 
   *Done when:* `npm run screens` exits 0 with those assertions and no console errors, and the README has both lines.
-- [ ] **9. Announce Parking map and cut 0.8.0.** Pack 1's Design H, in one commit:
+- [x] **9. Announce Parking map and cut 0.8.0.** Pack 1's Design H, in one commit:
   - the entry below goes at the top of `docs/updates.js`;
   - the six version places move to 0.8.0 (re-check that pack 5 took 0.7.0).
 
@@ -487,3 +487,5 @@ Playwright locators are strict, and several tests count across the whole Day pla
 - Item 6 done, c25022e. `renderMap()` refills `#parkingDrawing` and `#parkingList` from `mapParts(usage())`, and the input handler's last branch calls it. Smoke (layout context, the dev fixture): a route name, a round moved from 1 to 3 on route 1 (the dev fixture uses round 2 in every spot, so 1 to 2 would clash), a registration typed in the rail, and a route on Port 1 (listed under the owner's `Gate`) each update the map with focus and caret kept; the drawing's sideways scroll survives a keystroke at 390; the missing-tag and throwing-map contexts type into a route name and a round and still save. Gate: `check.sh` OK.
 - Item 7 done, 8e596a4. The sentence as planned, appended to the Positions hint; smoke checks it on the tab, and the existing phone-width loop covers the tab at 390. Gate: `check.sh` OK.
 - Item 8 done, 2c0afe4. screens.mjs asserts the map right after shot 03 and the week shots, reading the gate from `ParkingMap.GATE_NAMES`, and writes 27-parking-map (an element shot of the card). README: a Parking map bullet under Features, and `npm run test:map` under Tests (the `npm test` line now says it runs every suite but the screenshots and the upgrade check). Runs at the end. Gate: `check.sh` OK.
+- Item 9 done, 1d135d8. The drafted entry with `Port 1` replaced by "the Gate" (owner question 2); "under the route list" still reads true of part 5's slot (under the templates and the week). `must: false`. `versions.mjs`: "7 entries, newest first, newest 0.8.0, must set where required". Gate: `check.sh` OK.
+- **Part 6 closed (0.8.0), under the batched rule.** `map.mjs`, smoke and screens run at the end of part 9; the upgrade check only from v0.2.4 (the archive-seeding scenario from 0.7.0 is not added, since that check is dropped). Then the combined review (item 4 individually) and the walkthrough. **Pack close is left for the manager:** INVENTORY's ✅ entry, the container's status line, and the pre-existing finding (the rail's "Route N" badges going stale while a route name is typed) for the container's list.
