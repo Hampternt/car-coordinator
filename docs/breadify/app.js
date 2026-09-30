@@ -175,6 +175,8 @@
   // ── Steps ──────────────────────────────────────────────────────────────
 
   function go(step) {
+    // A tick's update still waiting lands while its preview can be laid out.
+    if (state.step === 'print') flush();
     state.step = step;
     state.reached.add(step);
     for (const name of STEPS) {
@@ -417,7 +419,33 @@
 
   let built = [];
 
+  /**
+   * Each route's sheets once laid out, by nickname, so a tick lays out only
+   * the route it adds and an untick lays out nothing (the owner, 2026-10-01:
+   * "it takes a long time to load after unselected a route"). Every tick used
+   * to lay the whole day out again, about 130 ms on the bread sample.
+   *
+   * Emptied whenever the Print step is entered: the file, the kind, the crate
+   * sizes and the Pay attention marks can only change on the other steps, and
+   * every one of them changes what a sheet says.
+   */
+  const laid = new Map();
+
+  /**
+   * Quick clicks gather into one update: the tick shows at once, and the
+   * preview follows after this pause, so ten unticks lay out nothing ten
+   * times. Printing never waits it out — it brings the update forward.
+   */
+  const PREVIEW_PAUSE = 150;
+  let pending = null;
+
+  /** How much the preview draws the sheets down to fit the window. */
+  let scale = 1;
+
   function renderPrint() {
+    laid.clear();
+    clearTimeout(pending);
+    pending = null;
     const routes = $('routes');
     routes.replaceChildren(
       ...state.routes.map((route) => {
@@ -430,7 +458,7 @@
         tick.onchange = () => {
           if (tick.checked) state.selected.add(route.nickname);
           else state.selected.delete(route.nickname);
-          rebuild();
+          later();
         };
 
         const name = document.createElement('span');
@@ -449,18 +477,52 @@
       }),
     );
     rebuild();
+    scalePreview();
   }
 
-  /** Re-lays the selected routes out and shows them. */
+  /** A tick changed: the preview follows after the pause, once for a run of clicks. */
+  function later() {
+    clearTimeout(pending);
+    pending = setTimeout(() => {
+      pending = null;
+      rebuild();
+    }, PREVIEW_PAUSE);
+    $('printSummary').textContent = 'Updating preview…';
+  }
+
+  /** Brings a waiting update forward, so what prints is what is ticked. */
+  function flush() {
+    if (pending === null) return;
+    clearTimeout(pending);
+    pending = null;
+    rebuild();
+  }
+
+  /**
+   * Lays out the ticked routes it does not already have — all of them in one
+   * go — and shows the ticked ones.
+   *
+   * A route's sheets do not depend on any other route's (D1: each starts a
+   * fresh page), so the ones already laid out are exactly what a full
+   * rebuild would make.
+   */
   function rebuild() {
+    clearTimeout(pending);
+    pending = null;
     const chosen = state.routes.filter((route) => state.selected.has(route.nickname));
+    const missing = chosen.filter((route) => !laid.has(route.nickname));
     const context = {
       dates: dates(),
       source: Model.sourceLabel(state.filename, dates()),
     };
 
     try {
-      built = Sheet.day(chosen, state.settings, context, {});
+      if (missing.length > 0) {
+        const sheets = Sheet.day(missing, state.settings, context, {});
+        const byRoute = new Map(missing.map((route) => [route.nickname, []]));
+        for (const sheet of sheets) byRoute.get(sheet.dataset.route).push(sheet);
+        for (const [nickname, own] of byRoute) laid.set(nickname, own);
+      }
     } catch (error) {
       // The layout throws on a value it cannot print correctly. Nothing
       // printing is the safe outcome; a sheet with something wrong on it is
@@ -473,8 +535,8 @@
       $('print').disabled = true;
       return;
     }
-    $('preview').replaceChildren(...built);
-    scalePreview();
+    built = chosen.flatMap((route) => laid.get(route.nickname));
+    showSheets();
 
     const routeWord = chosen.length === 1 ? 'route' : 'routes';
     const sheetWord = built.length === 1 ? 'sheet' : 'sheets';
@@ -484,8 +546,33 @@
   }
 
   /**
+   * Puts `built` in the preview, touching only what changed: an unticked
+   * route's sheets are taken out and a ticked one's put in at its place, and
+   * every other sheet stays where it is, never laid out again.
+   */
+  function showSheets() {
+    const preview = $('preview');
+    const wanted = new Set(built);
+    for (const node of Array.from(preview.children)) {
+      if (!wanted.has(node)) node.remove();
+    }
+    let at = preview.firstElementChild;
+    for (const sheet of built) {
+      if (sheet === at) {
+        at = at.nextElementSibling;
+        continue;
+      }
+      sheet.style.zoom = scale === 1 ? '' : String(scale);
+      preview.insertBefore(sheet, at);
+    }
+  }
+
+  /**
    * Fits the sheets to the window without re-typesetting them: the drawing is
    * scaled, the type is not. A preview that re-flowed would stop being one.
+   *
+   * Measured when the step opens and when the window changes size; a sheet
+   * put in by a tick takes the scale already found.
    */
   function scalePreview() {
     const preview = $('preview');
@@ -498,13 +585,22 @@
     probe.remove();
 
     const room = preview.clientWidth;
-    const scale = room > 0 && sheetWidth > room ? room / sheetWidth : 1;
+    scale = room > 0 && sheetWidth > room ? room / sheetWidth : 1;
     for (const sheet of built) sheet.style.zoom = scale === 1 ? '' : String(scale);
+  }
+
+  /** The Print button and Ctrl+P alike: a waiting update first, then the dialog. */
+  function printNow() {
+    flush();
+    window.print();
   }
 
   // Printing takes the sheets out of the preview so the page can be hidden
   // wholesale, and puts them back afterwards. One set of nodes, never two.
+  // A print from the browser's own menu bypasses printNow(), so the waiting
+  // update is brought forward here too.
   window.addEventListener('beforeprint', () => {
+    flush();
     for (const sheet of built) sheet.style.zoom = '';
     $('sheets').replaceChildren(...built);
   });
@@ -578,7 +674,14 @@
       };
     }
 
-    $('print').onclick = () => window.print();
+    $('print').onclick = printNow;
+    // Ctrl+P is taken over so it waits exactly as the button does.
+    window.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        printNow();
+      }
+    });
     window.addEventListener('resize', () => {
       if (state.step === 'print') scalePreview();
     });

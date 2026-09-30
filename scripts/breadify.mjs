@@ -1571,14 +1571,16 @@ inspected('the same block on a freezer sheet', crowdedFirstLine.freezerSeen);
 same('where a line of its own lines its id up too', crowdedFirstLine.freezerOffsets, [0]);
 
 // When the layout does refuse, the Print step says why and prints nothing.
+// Entering the step lays every route out afresh, so that is where it is made
+// to fail: a tick lays out only a route the step has not laid out yet.
 const laidOutWrong = await page.evaluate(() => {
   const real = Sheet.day;
-  const tick = document.querySelector('#routes input[type="checkbox"]');
+  const enter = document.querySelector('#steps [data-step="print"]');
   Sheet.day = () => {
     throw new Error('a stand-in failure');
   };
   try {
-    tick.click();
+    enter.click();
     return {
       summary: document.getElementById('printSummary').textContent,
       sheets: document.querySelectorAll('#preview .bf-sheet').length,
@@ -1586,7 +1588,7 @@ const laidOutWrong = await page.evaluate(() => {
     };
   } finally {
     Sheet.day = real;
-    tick.click();
+    enter.click();
   }
 });
 same('a layout that fails says why, shows no sheets and cannot be printed', laidOutWrong, {
@@ -1599,6 +1601,138 @@ check(
   (await page.locator('#preview .bf-sheet').count()) === sheets.length &&
     !(await page.locator('#print').isDisabled()),
 );
+
+// ── Ticking routes (the owner, 2026-10-01) ─────────────────────────────────
+// "it takes a long time to load after unselected a route": every tick used to
+// lay the whole day out again. Now a tick lays out only a route the step has
+// not laid out yet, an untick lays out nothing, and quick clicks gather into
+// one update after a short pause. What the preview then shows must be exactly
+// what laying the day out afresh makes, and printing never goes ahead of it.
+const ticking = await page.evaluate(async () => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const preview = document.getElementById('preview');
+  const ticks = () => Array.from(document.querySelectorAll('#routes input[type="checkbox"]'));
+  const enter = () => document.querySelector('#steps [data-step="print"]').click();
+  const shown = () => [...new Set(Array.from(preview.querySelectorAll('.bf-sheet'), (s) => s.dataset.route))];
+  const snapshot = () =>
+    Array.from(preview.querySelectorAll('.bf-sheet'), (sheet) => {
+      const copy = sheet.cloneNode(true);
+      copy.removeAttribute('style'); // the preview's zoom, not the sheet
+      return copy.outerHTML;
+    });
+  // Ten clicks 30 ms apart: quick, but not all in one go.
+  const clickAll = async (boxes) => {
+    for (const box of boxes) {
+      box.click();
+      await pause(30);
+    }
+  };
+
+  const real = Sheet.day;
+  const realPrint = window.print;
+  let layouts = [];
+  Sheet.day = (routes, ...rest) => {
+    layouts.push(routes.length);
+    return real(routes, ...rest);
+  };
+  let updates = 0;
+  const watch = new MutationObserver(() => {
+    updates += 1;
+  });
+  watch.observe(preview, { childList: true });
+  let printed = null;
+  window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    printed = [...new Set(Array.from(document.querySelectorAll('#sheets .bf-sheet'), (s) => s.dataset.route))];
+    window.dispatchEvent(new Event('afterprint'));
+  };
+
+  try {
+    const first = ticks()[3];
+    first.click();
+    const atOnce = {
+      ticked: first.checked,
+      summary: document.getElementById('printSummary').textContent,
+      sheets: preview.querySelectorAll('.bf-sheet').length,
+    };
+    first.click();
+    await pause(400);
+
+    const ten = ticks().slice(3, 13);
+    layouts = [];
+    updates = 0;
+    await clickAll(ten);
+    await pause(400);
+    const unticked = { layouts: [...layouts], updates, routes: shown().length };
+
+    layouts = [];
+    updates = 0;
+    await clickAll(ten);
+    await pause(400);
+    const reticked = { layouts: [...layouts], updates, routes: shown().length };
+
+    // The same sheets, byte for byte, as entering the step makes afresh.
+    const kept = snapshot();
+    enter();
+    const fresh = snapshot();
+    const sameSheets = kept.length === fresh.length && kept.every((html, index) => html === fresh[index]);
+
+    // Ten unticked, the step entered again, then all ten ticked back: one
+    // layout, of just those ten.
+    await clickAll(ticks().slice(3, 13));
+    await pause(400);
+    layouts = [];
+    enter();
+    const entered = [...layouts];
+    await pause(0); // the step's own update is observed here, not below
+    layouts = [];
+    updates = 0;
+    await clickAll(ticks().slice(3, 13));
+    await pause(400);
+    const laidOnce = { layouts: [...layouts], updates, routes: shown().length };
+
+    // Print straight after an untick, by the button and by Ctrl+P: the
+    // update comes first, so the unticked route does not print.
+    const route = shown()[0];
+    ticks()[0].click();
+    document.getElementById('print').click();
+    const button = { waited: !printed.includes(route), routes: printed.length };
+    ticks()[0].click();
+    await pause(400);
+    printed = null;
+    ticks()[0].click();
+    const key = new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(key);
+    const keyboard = { waited: !!printed && !printed.includes(route), routes: printed ? printed.length : 0, taken: key.defaultPrevented };
+    ticks()[0].click();
+    await pause(400);
+
+    return { atOnce, unticked, reticked, sameSheets, sheets: fresh.length, entered, laidOnce, button, keyboard,
+             after: preview.querySelectorAll('.bf-sheet').length };
+  } finally {
+    Sheet.day = real;
+    window.print = realPrint;
+    watch.disconnect();
+  }
+});
+same('an untick shows at once and says the preview is updating, before it changes', ticking.atOnce, {
+  ticked: false,
+  summary: 'Updating preview…',
+  sheets: sheets.length,
+});
+same('ten quick unticks make one update and lay nothing out', ticking.unticked, { layouts: [], updates: 1, routes: 6 });
+same('ticking them back lays nothing out either: the step already has them', ticking.reticked, {
+  layouts: [],
+  updates: 1,
+  routes: 16,
+});
+check('and the sheets are byte for byte the ones a fresh layout makes', ticking.sameSheets && ticking.sheets === sheets.length,
+  `${ticking.sheets} sheets`);
+same('entering the step lays the ticked routes out in one go', ticking.entered, [6]);
+same('and ten quick ticks after it lay out just those ten, once', ticking.laidOnce, { layouts: [10], updates: 1, routes: 16 });
+same('Print right after an untick waits for the update', ticking.button, { waited: true, routes: 15 });
+same('and so does Ctrl+P, which the page takes over', ticking.keyboard, { waited: true, routes: 15, taken: true });
+check('every route is ticked again afterwards', ticking.after === sheets.length, String(ticking.after));
 
 // "Show the order ID" is for one-order blocks. In a block of several orders
 // the id is what tells them apart, so it prints on every line regardless.
