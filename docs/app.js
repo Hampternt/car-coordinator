@@ -908,8 +908,26 @@ function driverUsage() {
    and tagged, and someone who is away has to be reachable to be brought back.
    The away ones are dimmed and sorted under the ones who are in, so the day's
    crew still reads first. */
+/* A driver's usual days in the Drivers panel, short: "Mon Tue", with a run
+   of three or more joined ("Mon–Wed", "Mon–Fri"). Read from the weekday
+   groups, as the Drivers tab's day buttons and the week read them. Nothing
+   for a driver in no weekday's group. */
+function railDays(d, byDay) {
+  const on = WORK_WEEK.filter((day) => byDay.get(day)?.driverIds.includes(d.id));
+  if (!on.length) return '';
+  const runs = [];
+  for (const day of on) {
+    const last = runs[runs.length - 1];
+    if (last && day === last[1] + 1) last[1] = day; else runs.push([day, day]);
+  }
+  const short = (day) => WEEKDAYS[day].slice(0, 3);
+  const text = runs.map(([a, b]) => (b - a >= 2 ? `${short(a)}\u2013${short(b)}` : a === b ? short(a) : `${short(a)} ${short(b)}`)).join(' ');
+  return `<span class="rail-days" title="Usual days: ${esc(andList(on.map((day) => WEEKDAYS[day])))}">${text}</span>`;
+}
+
 function railDrivers() {
   const assigned = driverUsage();
+  const { byDay: usual } = dayCrews();
   const inToday = state.drivers.filter((d) => d.available);
   const ordered = [...state.drivers].sort((a, b) => Number(b.available) - Number(a.available));
   const rows = ordered.map((d) => {
@@ -922,7 +940,7 @@ function railDrivers() {
     // Someone marked away who is still written into a route keeps the route
     // badge — that is the fact worth seeing, and the one most likely to be a
     // mistake — so the row itself carries the away state, not the badge.
-    return railRow('driver', d, 'Driver name', where, inOut, d.available ? '' : 'away');
+    return railRow('driver', d, 'Driver name', railDays(d, usual) + where, inOut, d.available ? '' : 'away');
   }).join('');
   const away = state.drivers.length - inToday.length;
   const { byDay } = dayCrews();

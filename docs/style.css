@@ -342,6 +342,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-list li:last-child { border-bottom: 0; }
 .rail-list b { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-list .assign { margin: 0; padding: 1px 6px; font-size: 12px; }
+/* A driver's usual days beside the name: small and quiet, never wrapped. */
+.rail-days { flex: none; font-size: 11px; color: var(--quiet); white-space: nowrap; }
 .rail-list .assign.away { color: var(--quiet); border: 1px dashed var(--line); }
 /* Off the day's crew: still on the roster, still draggable, just quieter —
    and still showing the route they are written into, which is the thing most
