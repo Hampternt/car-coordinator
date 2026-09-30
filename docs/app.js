@@ -1384,34 +1384,59 @@ function templateContents(t) {
   </div>`;
 }
 
-function renderTemplates() {
+/* The shelf, laid out as the week under it is (owner, 2026-10-01): Monday to
+   Friday in five columns, each day's template in its day's column, found by
+   its name the way the week finds a crew. A weekday with no template shows an
+   empty slot; every other template (a second one for a day, Saturday,
+   "Standard weekday") follows on the rows after, in shelf order. Each card is
+   display: contents, so an open one's table is a grid item of its own that
+   spans the whole row under the cards: nothing moves across to make room. */
+function templateCard(t) {
+  const open = tplOpen === t.id;
+  const n = t.routes.length;
   // An empty template (the weekday ones, until Update from plan) has nothing
   // to load, so it has no Load: loading it would only empty the plan.
-  const shelf = state.templates.map((t) => `<div class="tpl ${tplOpen === t.id ? 'open' : ''}">
+  return `<div class="tpl${open ? ' open' : ''}${n ? '' : ' empty'}">
       <div class="tpl-head">
-      ${t.routes.length
-        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
-      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}`
-        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet \u2014 Update from plan fills it</span>`}
-      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', armed === `resave:${t.id}` ? 'armed' : '',
+      ${n
+        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish tpl-load', 'title="Put this template back over the plan"')}
+      ${actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'} ${open ? '▴' : '▾'}`, 'tpl-peek', `title="${open ? 'Hide' : 'Show'} what is in this template"`)}`
+        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet</span>`}
+      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', `tpl-update${armed === `resave:${t.id}` ? ' armed' : ''}`,
         `title="Make this template the ${state.routes.length} routes on the plan now; its name and day stay"`)}
-      <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
-        <option value="">Never offer it</option>
-        ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
-      </select>
-      ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
+      <div class="tpl-foot">
+        <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
+          <option value="">Never offer it</option>
+          ${WEEKDAYS.map((d, i) => `<option value="${i}" ${t.weekday === String(i) ? 'selected' : ''}>On ${d}s</option>`).join('')}
+        </select>
+        ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
       </div>
-      ${tplOpen === t.id ? templateContents(t) : ''}
-    </div>`).join('');
+      </div>
+      ${open ? templateContents(t) : ''}
+    </div>`;
+}
+
+function renderTemplates() {
+  const slot = new Map();
+  const rest = [];
+  for (const t of state.templates) {
+    const day = groupWeekday(t.name);
+    if (WORK_WEEK.includes(day) && !slot.has(day)) slot.set(day, t);
+    else rest.push(t);
+  }
+  const days = WORK_WEEK.map((day) => (slot.has(day) ? templateCard(slot.get(day))
+    : `<div class="tpl-none"><span class="tpl-name">${WEEKDAYS[day]}</span><span class="tpl-empty">No template</span></div>`)).join('');
   return `<section id="planTemplates" class="templates">
-    <h3>Day templates${infoBtn('plan-templates')}</h3>
-    <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
-    <div class="bar">
-      <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
-      <button class="btn" data-act="save-template">Save as template</button>
+    <div class="tpl-top">
+      <h3>Day templates${infoBtn('plan-templates')}</h3>
+      <div class="bar">
+        <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
+        <button class="btn" data-act="save-template">Save as template</button>
+      </div>
     </div>
-    ${shelf ? `<div class="shelf">${shelf}</div>
-      <p class="hint" style="margin:8px 0 0">A template can offer itself when the plan is for its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+    <p class="hint">Click a template's name to load it; it asks which parts to take first. Update from plan fills it with the plan on screen.</p>
+    ${state.templates.length ? `<div class="shelf" data-keep-scroll="templates">${days}${rest.map(templateCard).join('')}</div>`
+      : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
   </section>`;
 }
 

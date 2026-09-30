@@ -1214,7 +1214,8 @@ check('dismissing the question takes the question, not the notice beside it',
 
   // An empty card: its name and what fills it, and nothing to load.
   const tue = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-2"]') });
-  check('an empty template reads "Not saved yet — Update from plan fills it"', (await tue.innerText()).includes('Not saved yet — Update from plan fills it'));
+  check('an empty template reads "Not saved yet", above its Update from plan', (await tue.locator('.tpl-empty').innerText()) === 'Not saved yet'
+    && (await tue.locator('[data-act="resave-template"]').count()) === 1);
   check('and has no Load and no contents to show',
     (await tue.locator('[data-act="ask-template"]').count()) === 0 && (await tue.locator('[data-act="peek-template"]').count()) === 0);
   await page.evaluate(() => { askTemplate(state.templates[1]); render(); });
@@ -1445,9 +1446,20 @@ check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
 check('a template is closed on the shelf to begin with', (await page.locator('.tpl-body').count()) === 0);
+// Laid out as the week under it is (owner, 2026-10-01): Monday to Friday in
+// five columns on one row, in day order, and every other template after.
+const tplCards = () => page.evaluate(() => [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
+  const r = c.getBoundingClientRect();
+  return { name: c.querySelector('.tpl-load, .tpl-name').textContent.trim(), at: `${Math.round(r.left)},${Math.round(r.top)}` };
+}));
+const cardsBefore = await tplCards();
+same('the shelf puts Monday to Friday first, in day order', cardsBefore.slice(0, 5).map((c) => c.name), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+check('side by side on one row, as the week\'s columns are', new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[1])).size === 1
+  && new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[0])).size === 5, JSON.stringify(cardsBefore));
 await page.locator('[data-act="peek-template"]').first().click();
 check('opening one lists the routes it would put on the plan',
   (await page.locator('.tpl-body tbody tr').count()) === 15);
+same('and moves no card in its row: its table goes under them', (await tplCards()).slice(0, 5).map((c) => c.at), cardsBefore.slice(0, 5).map((c) => c.at));
 check('with the driver and car each route was saved with',
   (await page.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
   await page.locator('.tpl-body tbody tr').nth(2).innerText());
