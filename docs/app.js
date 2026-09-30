@@ -692,17 +692,39 @@ function ctxTakeOff(on, take, was) {
 // "route 7", "2 routes": the routes half of a cost line.
 const ctxRouteCount = (on) => (on.length === 1 ? `route ${on[0].r.name.trim() || '-'}` : `${on.length} routes`);
 
+/* Put on route N, in the rail: for a driver or car on no route yet, the
+   routes still missing one, in plan order, as a drop onto the row would set
+   them. Four at most, and past that a line saying how many more. */
+function ctxPutOn(take, value) {
+  const free = state.routes.filter((r) => (take === 'driver' ? !fold(r.driver) : !r.carId));
+  const out = free.slice(0, 4).map((r) => ({ act: 'put-on', data: { kind: 'route', id: r.id, take, value }, text: `Put on route ${r.name.trim() || '-'}` }));
+  if (free.length > 4) out.push({ off: true, text: `${free.length - 4} more route${free.length - 4 === 1 ? '' : 's'} without one` });
+  return out;
+}
+
 /* A driver, in the rail or on the Drivers tab. Deleting one takes it out of
-   every day group, and only that: the day plan keeps the name typed in. */
+   every day group, and only that: the day plan keeps the name typed in. In
+   the rail it also offers a free route, the driver's usual days (the Drivers
+   tab's day buttons, crew-day) and the way to its Drivers tab row, since the
+   rail is where the plan is made (owner, 2026-09-30). */
 function ctxDriver(d, surface) {
   const d0 = { kind: 'driver', id: d.id };
   const on = driverUsage()[fold(d.name)] || [];
   const groups = state.driverGroups.filter((g) => g.driverIds.includes(d.id)).length;
+  const rail = surface === 'rail';
+  const { byDay } = dayCrews();
   return [[
     { act: 'toggle', data: { ...d0, field: 'available' }, text: d.available ? 'Set away' : 'Bring back in' },
     // The tag menu opens at the rail row's tag button, so only there.
-    surface === 'rail' && { act: 'tag', data: d0, text: 'Tag\u2026' },
-  ].filter(Boolean), ctxRoutes(on, 'driver'), ctxTakeOff(on, 'driver', d.name), [
+    rail && { act: 'tag', data: d0, text: 'Tag\u2026' },
+  ].filter(Boolean), [
+    ...(rail && !on.length ? ctxPutOn('driver', d.name) : ctxRoutes(on, 'driver')),
+    rail && ctxGo(`Go to ${d.name.trim() || '-'} on the Drivers tab`, 'drivers', 'driver', d.id, 'name'),
+  ].filter(Boolean), ctxTakeOff(on, 'driver', d.name),
+  rail ? WORK_WEEK.map((day) => {
+    const works = !!byDay.get(day)?.driverIds.includes(d.id);
+    return { act: 'crew-day', data: { ...d0, day: String(day) }, text: `${works ? '\u2713 ' : ''}Works ${WEEKDAYS[day]}s` };
+  }) : [], [
     { act: 'del', data: d0, arm: `del:${d.id}`, text: 'Delete driver',
       cost: `${groups ? `Taken out of ${plural(groups, 'day group')}` : 'In no day group'}. Routes keep the name.` },
   ]];
@@ -716,10 +738,18 @@ function ctxCar(c, surface) {
   const tpl = state.templates.filter((t) => t.routes.some((r) => r.carId === c.id)).length;
   const cost = on.length && tpl ? `On ${ctxRouteCount(on)} and in ${plural(tpl, 'template')}`
     : on.length ? `On ${ctxRouteCount(on)}` : tpl ? `In ${plural(tpl, 'template')}` : 'Not used anywhere';
+  const rail = surface === 'rail';
+  // In the rail, its status in one click (the Cars tab's chips, setLabel),
+  // with the one it has ticked; Tag… is still there for a new tag.
+  const status = rail ? [
+    { act: 'setLabel', data: { ...c0, label: '' }, text: `${c.labelId ? '' : '\u2713 '}OK` },
+    ...state.labels.map((l) => ({ act: 'setLabel', data: { ...c0, label: l.id }, text: `${c.labelId === l.id ? '\u2713 ' : ''}${labelName(l)}` })),
+    { act: 'tag', data: c0, text: 'Tag\u2026' },
+  ] : [];
   return [
-    surface === 'rail' ? [{ act: 'tag', data: c0, text: 'Tag\u2026' }] : [],
-    // Its note and status can only be changed on the Cars tab.
-    [...ctxRoutes(on, 'carId'), surface === 'rail' && ctxGo(`Go to ${c.reg} on the Cars tab`, 'cars', 'car', c.id, 'reg')].filter(Boolean),
+    status,
+    // Its note can only be changed on the Cars tab.
+    [...(rail && !on.length ? ctxPutOn('carId', c.id) : ctxRoutes(on, 'carId')), rail && ctxGo(`Go to ${c.reg} on the Cars tab`, 'cars', 'car', c.id, 'reg')].filter(Boolean),
     ctxTakeOff(on, 'carId', c.id),
     [{ act: 'del', data: c0, arm: `del:${c.id}`, text: 'Delete car', cost }],
   ];
@@ -2608,6 +2638,16 @@ document.addEventListener('click', (e) => {
       if (tab !== 'plan') note('info', `Took ${what || 'it'} off route ${r.name.trim() || '-'}.`);
       break;
     }
+    // A rail menu's Put on route N: only while that route is still missing
+    // one, and only an item that still exists. The same field a drop sets.
+    case 'put-on': {
+      const r = list[i];
+      const f = b.dataset.take, v = b.dataset.value || '';
+      const free = f === 'driver' ? !fold(r.driver) : f === 'carId' ? !r.carId : false;
+      if (!free || !v || (f === 'carId' && !byId(state.cars, v))) { render(); return; }
+      r[f] = v;
+      break;
+    }
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
       state.routes.push(newRoute(String(nums.length ? Math.max(...nums) + 1 : 1)));
@@ -3339,7 +3379,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'resave-template']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
