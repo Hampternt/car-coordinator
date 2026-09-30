@@ -240,7 +240,6 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    older browser without color-mix() draws the colour as picked. */
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .chip { --c-shown: color-mix(in srgb, var(--c, var(--ink)), var(--ink) var(--lift)); border-color: var(--c-shown); }
-  .dot { --c-shown: color-mix(in srgb, var(--c, var(--ok)), var(--ink) var(--lift)); background: var(--c-shown); }
 }
 
 /* car assignment badges */
@@ -422,6 +421,12 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-saved { margin: 0; color: var(--quiet); font-size: 12px; text-align: center; }
 /* the status colour itself, small enough not to shout */
 .dot { flex: none; width: 10px; height: 10px; background: var(--c, var(--ok)); border: 1px solid var(--dot-edge); }
+/* Lifted on a dark screen as a chip's border is (see .chip above). After the
+   rule it overrides: written before it, the plain colour won and a dark
+   label's dot vanished on a dark rail. */
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .dot { --c-shown: color-mix(in srgb, var(--c, var(--ok)), var(--ink) var(--lift)); background: var(--c-shown); }
+}
 .rail-empty { margin: 0; color: var(--muted); font-size: 13px; }
 /* the "not in today" cross: present, but not competing with the name */
 .rail-list .btn { flex: none; padding: 0 5px; font-size: 11px; color: var(--muted); }
