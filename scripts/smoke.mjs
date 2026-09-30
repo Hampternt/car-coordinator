@@ -4385,7 +4385,9 @@ await loadWeek();
     const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:v1') window.__w++; return set.call(this, k, v); };
   });
   // Everything but the groups, and who is in, which this test itself changes.
-  const groupsOnly = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.driverGroups; delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(p); });
+  // Top-level keys sorted: the fixture was written in its own order, and the
+  // app's first save writes the plan in the app's.
+  const groupsOnly = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.driverGroups; delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(Object.fromEntries(Object.entries(p).sort(([a], [b]) => (a < b ? -1 : 1)))); });
   const wed = '#planWeek .week-col[data-day="3"]';
   await loadWeek();
   const allIn = (await lp.locator(`${wed} [data-act="save-day-crew"]`).innerText()).trim();
