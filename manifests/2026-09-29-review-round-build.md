@@ -68,3 +68,5 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **Part 4 start.** Base e557e29 (0.5.0). `update-note` had not moved.
 - **Part 4 done** (plan for tomorrow, 0.6.0): start 45107e6; items 1-10 at 91140b7, d4327d5, 9dffb1d, 5a54f6d, **2c73957 ⚠️**, eb9db4c, **a881efe ⚠️**, 8fa7557, 084ab3c, fd99353. `check.sh` per item.
 - **Part 5 start.** Base eaccb92 (0.6.0). `update-note` and `origin/dev` had not moved.
+- **Part 5 done** (day plan layout, 0.7.0): start b3a443f; items 1-12 at f28d86d, 9b1de92, 9f64d58, 0ee12df, 283384c, **fbc5fe8 ⚠️**, 9185da6, 83a1c0a, 37e519f, 443f23f, fa81461, 5791df1. `check.sh` per item.
+- **Part 6 start.** Base ab6a206 (0.7.0). `update-note` and `origin/dev` had not moved.
