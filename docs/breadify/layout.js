@@ -343,8 +343,9 @@ const Sheet = (() => {
    *
    * The bread list writes a pick line: `P` box, quantity, code, name, then the
    * missing and fixed boxes at the right. The freezer list writes a check line
-   * (F8): a *checked* box on the left, a dotted field for a note in the slack
-   * after the name, and only the *missing* box on the right.
+   * (F8): a *checked* box on the left — and beside it a *delivered* box, which
+   * F8 does not have (the owner, 2026-09-30) — a dotted field for a note in
+   * the slack after the name, and only the *missing* box on the right.
    *
    * The bread line has the dotted field too, a departure from F8, which gives
    * it to the check line alone (the owner, 2026-09-30: "a neat place to write
@@ -363,6 +364,9 @@ const Sheet = (() => {
     append(
       row,
       tickBox(bread ? 'P' : 'C'),
+      // The freezer line's second box, D for delivered, beside C (the owner,
+      // 2026-09-30; a departure from F8, which has C alone at the left).
+      bread ? null : tickBox('D'),
       element('span', 'bf-qty', line.quantity),
       element('span', 'bf-code', Model.supplierCode(line.product.supplier)),
     );
@@ -1122,6 +1126,9 @@ const Sheet = (() => {
         ]
       : [
           ['C', 'Checked'],
+          // Not in F7/F8, which have C and M alone: the owner asked for a box
+          // for delivered beside the checked one (2026-09-30).
+          ['D', 'Delivered'],
           ['M', 'Missing'],
         ];
 

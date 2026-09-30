@@ -1619,6 +1619,31 @@ const freezer = await page.evaluate(() => {
     lines: all.reduce((n, s) => n + s.querySelectorAll('.bf-row').length, 0),
     tens: all.reduce((n, s) => n + s.querySelectorAll('.bf-total-dots .bf-dot').length, 0),
     route13: all.filter((s) => s.dataset.route === '13').length,
+    // The legend's boxes, letter and word, in order.
+    boxes: Array.from(first.querySelectorAll('.bf-legend-group'))[0]
+      ? Array.from(first.querySelectorAll('.bf-legend-group')[0].querySelectorAll('.bf-tick, .bf-legend-word'))
+          .map((n) => n.textContent)
+      : [],
+    // Every check line read left to right: C, D, quantity, code, name, and
+    // M at the right-hand end — the boxes where the checker's pen expects
+    // them. Anything else is listed.
+    lineOrder: (() => {
+      const wrong = [];
+      let rows = 0;
+      for (const row of all.flatMap((s) => Array.from(s.querySelectorAll('.bf-row')))) {
+        rows += 1;
+        const kids = Array.from(row.children);
+        const kind = (n) => n.className.split(' ')[0] + (n.classList.contains('bf-tick') ? `:${n.textContent}` : '');
+        const head = kids.slice(0, 5).map(kind).join(' ');
+        const last = kind(kids[kids.length - 1]);
+        const lefts = kids.map((n) => n.getBoundingClientRect().left);
+        const inOrder = lefts.every((left, i) => i === 0 || left >= lefts[i - 1]);
+        if (head !== 'bf-tick:C bf-tick:D bf-qty bf-code bf-product' || last !== 'bf-tick:M' || !inOrder) {
+          wrong.push(`${head} … ${last}${inOrder ? '' : ' (out of order on the page)'}`);
+        }
+      }
+      return { rows, wrong: Array.from(new Set(wrong)).slice(0, 5) };
+    })(),
   };
 });
 
@@ -1641,13 +1666,20 @@ check(
 );
 // F7/F8: `P Picked` becomes `C Checked`, `F` is gone, and there is no crate key.
 check(
-  'the freezer legend reads C Checked · M Missing with no crates',
-  freezer.legend.includes('Checked') &&
-    freezer.legend.includes('Missing') &&
+  // The owner, 2026-09-30: a D for delivered beside the C (F7/F8 have C and
+  // M alone).
+  'the freezer legend reads C Checked · D Delivered · M Missing with no crates',
+  JSON.stringify(freezer.boxes) ===
+    JSON.stringify(['C', 'Checked', 'D', 'Delivered', 'M', 'Missing']) &&
     !freezer.legend.includes('Fixed') &&
     !freezer.legend.includes('CRATES') &&
     !/Crates/i.test(freezer.legend),
-  freezer.legend,
+  `${JSON.stringify(freezer.boxes)} / ${freezer.legend}`,
+);
+check(
+  'every freezer line reads C, D, quantity, code, name, with M at the right',
+  freezer.lineOrder.rows === freezer.lines && freezer.lineOrder.wrong.length === 0,
+  JSON.stringify(freezer.lineOrder),
 );
 // F4: a checker counts nothing into crates, and F9 drops the tray dots too.
 check('a freezer sheet draws no crate glyphs', freezer.crates === 0, String(freezer.crates));
