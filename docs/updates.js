@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.11.0',
+    must: false,
+    title: 'A short tour of the app',
+    changed: 'A Tour button, right of Print in the top bar, walks through the app one thing at a time. In a narrower window the tabs sit on a row of their own.',
+    affects: 'The top bar, on every tab. The tour does not touch your plan. Share codes and the printed sheet are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.10.0',
     must: false,
     title: 'Right-click menus',
