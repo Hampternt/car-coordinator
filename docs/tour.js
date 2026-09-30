@@ -105,8 +105,13 @@ const Tour = (() => {
     const seen = !!a && a.width > 0 && a.height > 0;
     const vw = document.documentElement.clientWidth, vh = window.innerHeight;
     const bar = barBottom();
-    c.hidden = false;
+    // Moved to the top of the screen before it is shown and measured, and
+    // the ring moved before it is shown: either one left where the last step
+    // put it, further down a longer tab, stretched the page for a moment,
+    // and the browser moved the page with it.
+    c.style.top = `${window.scrollY}px`;
     c.style.maxHeight = '';
+    c.hidden = false;
     const w = c.offsetWidth, h = c.offsetHeight;
     let left, top, tall;
     if (seen) {
@@ -137,11 +142,11 @@ const Tour = (() => {
     const x1 = Math.max(0, a.left - 4), y1 = Math.max(ceiling, a.top - 4);
     const x2 = Math.min(vw, a.right + 4), y2 = Math.min(vh, a.bottom + 4);
     if (x2 - x1 < 1 || y2 - y1 < 1) { r.hidden = true; return; }
-    r.hidden = false;
     r.style.left = `${x1 + window.scrollX}px`;
     r.style.top = `${y1 + window.scrollY}px`;
     r.style.width = `${x2 - x1}px`;
     r.style.height = `${y2 - y1}px`;
+    r.hidden = false;
   }
 
   function start(opener) {
