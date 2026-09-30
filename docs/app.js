@@ -1364,7 +1364,7 @@ function renderTemplates() {
     </div>`).join('');
   return `<section id="planTemplates" class="templates">
     <h3>Day templates</h3>
-    <p class="hint">A saved copy of the routes as they stand — drivers, cars, positions, rounds and marks, but never the date. Save the way Monday usually runs once, and put it back next Monday.</p>
+    <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
     <div class="bar">
       <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
       <button class="btn" data-act="save-template">Save as template</button>
