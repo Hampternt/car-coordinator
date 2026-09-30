@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.10.0',
+    must: false,
+    title: 'Right-click menus',
+    changed: 'Right-click a route, a Drivers or Cars panel row, a row on the other tabs, or a day template for what you can do to it. Shift+F10 opens it too.',
+    affects: 'Day plan, Drivers, Cars, Positions and Labels tabs. Text boxes keep copy and paste. Share codes and the printed sheet are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.9.0',
     must: false,
     title: 'Usual days, tags and notes for drivers',
