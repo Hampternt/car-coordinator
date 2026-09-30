@@ -607,6 +607,9 @@ const CTX_ROWS = [
   ['route', '#tab-plan tr[data-route]'],
   ['rail', '#tab-plan .rail-row'],
   ['drivers', '#tab-drivers tbody tr'],
+  ['cars', '#tab-cars tbody tr'],
+  ['positions', '#tab-positions tbody tr'],
+  ['labels', '#tab-labels tbody tr'],
 ];
 // The only inputs a right-click opens the page's menu on. Any other box is
 // typed in, and keeps the browser's own Cut, Copy and Paste.
@@ -717,6 +720,36 @@ function ctxCar(c, surface) {
   ];
 }
 
+/* A position. Its Go to entries are the only place that says which routes use
+   it. Many cars is the tab's own tick: turning it off can bring clash
+   warnings back, which warn and never block. */
+function ctxPosition(p) {
+  const p0 = { kind: 'position', id: p.id };
+  const on = usage().pos[p.id] || [];
+  const tpl = state.templates.filter((t) => t.routes.some((r) => r.positionId === p.id)).length;
+  const used = [on.length && ctxRouteCount(on), tpl && plural(tpl, 'template')].filter(Boolean);
+  return [
+    [{ act: 'toggle', data: { ...p0, field: 'multi' }, text: p.multi ? 'Stop allowing many cars' : 'Allow many cars' }],
+    ctxRoutes(on, 'positionId'),
+    ctxTakeOff(on, 'positionId', p.id),
+    [{ act: 'del', data: p0, arm: `del:${p.id}`, text: 'Delete position', cost: used.length ? `Used by ${andList(used)}` : 'Not used anywhere' }],
+  ];
+}
+
+/* A label: its printout tick, offered where the tab offers it, and its delete,
+   which takes it off every car, position and driver wearing it. */
+function ctxLabel(l) {
+  const l0 = { kind: 'label', id: l.id };
+  const counts = [['car', state.cars], ['position', state.positions], ['driver', state.drivers]]
+    .map(([word, list]) => [word, list.filter((x) => x.labelId === l.id).length]).filter(([, n]) => n);
+  const total = counts.reduce((sum, [, n]) => sum + n, 0);
+  const cost = total ? `${andList(counts.map(([word, n]) => plural(n, word)))} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
+  return [
+    Store.SCHEMA >= 5 ? [{ act: 'toggle', data: { ...l0, field: 'onSheet' }, text: l.onSheet === true ? 'Stop showing on the printout' : 'Show on the printout' }] : [],
+    [{ act: 'del', data: l0, arm: `del:${l.id}`, text: 'Delete label', cost }],
+  ];
+}
+
 // Each surface's menu: the header's name, and the entries in groups that a
 // separator divides.
 const CTX_MENUS = {
@@ -725,6 +758,9 @@ const CTX_MENUS = {
     ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail') }
     : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
   drivers: (d) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers') }),
+  cars: (c) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars') }),
+  positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
+  labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),
 };
 
 /* Drawn from `state` on every render, so its words, its "Sure?" and its

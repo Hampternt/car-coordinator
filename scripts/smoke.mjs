@@ -5282,6 +5282,67 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('and so does its note box', (await cmNative()) === true && await cmMenu.isHidden());
 }
 
+// The Cars, Positions and Labels tabs' rows, opened from the row's buttons.
+{
+  await cmOpen();
+  const cmTabRow = (tabName, field, value) => cm.locator(`#tab-${tabName} tbody tr`, { has: cm.locator(`[data-field="${field}"][value="${value}"]`) });
+  const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+
+  await cm.click('[data-act="tab"][data-tab="cars"]');
+  const car = cmTabRow('cars', 'reg', reg7);
+  await cmRight(car.locator('[data-act="up"]'));
+  same('a Cars tab row opens the car\'s menu, with no Tag… and no jump to its own tab', await cmEntries(), ['Go to route 7', 'Take off route 7', 'Delete car']);
+  await cmMenu.locator('[data-act="take-off"]').click();
+  check('its Take off empties route 7\'s car and says so', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').carId)) === ''
+    && (await cm.locator('#notices .notice', { hasText: `Took ${reg7} off route 7.` }).count()) === 1);
+  await cmRight(car.locator('[data-field="reg"]'));
+  check('the reg box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(car.locator('[data-field="note"]'));
+  check('and so does the car\'s note box', (await cmNative()) === true && await cmMenu.isHidden());
+
+  await cm.click('[data-act="tab"][data-tab="positions"]');
+  const port = cmTabRow('positions', 'name', 'Port 1');
+  await cmRight(port.locator('[data-act="del"]'));
+  same('a Positions tab row opens the position\'s menu', await cmEntries(),
+    ['Allow many cars', 'Go to route 7', 'Go to route HAU 2', 'Take off route 7', 'Take off route HAU 2', 'Delete position']);
+  const posCost = await cm.evaluate(() => {
+    const t = state.templates.filter((x) => x.routes.some((r) => r.positionId === 'pos-port1')).length;
+    return `Used by 2 routes${t ? ` and ${t} template${t === 1 ? '' : 's'}` : ''}`;
+  });
+  same('its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), posCost);
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Allow many cars ticks the row\'s Many cars', await cm.evaluate(() => state.positions.find((p) => p.id === 'pos-port1').multi === true)
+    && await port.locator('[data-field="multi"]').isChecked());
+  await cmRight(port.locator('[data-field="multi"]'));
+  same('a right-click on the Many cars tick opens the menu too, now offering to stop', (await cmEntries())[0], 'Stop allowing many cars');
+  await cm.keyboard.press('Escape');
+  await cmRight(port.locator('[data-field="name"]'));
+  check('the position\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+
+  await cm.click('[data-act="tab"][data-tab="labels"]');
+  const course = cmTabRow('labels', 'name', 'Course');
+  await cmRight(course.locator('[data-act="down"]'));
+  same('a Labels tab row opens the label\'s menu, the printout tick above its delete', await cmEntries(), ['Show on the printout', 'Delete label']);
+  const labelCost = await cm.evaluate(() => {
+    const n = (list, word) => { const k = list.filter((x) => x.labelId === 'lbl-course').length; return k ? [k, `${k} ${word}${k === 1 ? '' : 's'}`] : null; };
+    const bits = [n(state.cars, 'car'), n(state.positions, 'position'), n(state.drivers, 'driver')].filter(Boolean);
+    const total = bits.reduce((s, [k]) => s + k, 0);
+    const words = bits.map(([, w]) => w);
+    const list = words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+    return total ? `${list} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
+  });
+  same('its delete counts the tagged drivers with the cars and positions', await cmMenu.locator('[data-act="del"] small').textContent(), labelCost);
+  check('with a driver among them', /driver/.test(labelCost), labelCost);
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Show on the printout ticks the label\'s printout box', await cm.evaluate(() => state.labels.find((l) => l.id === 'lbl-course').onSheet === true)
+    && await course.locator('[data-field="onSheet"]').isChecked());
+  await cmRight(course.locator('[data-field="name"]'));
+  check('the label\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(course.locator('[data-field="color"]'));
+  check('and so does its colour box', (await cmNative()) === true && await cmMenu.isHidden());
+  await cm.click('[data-act="tab"][data-tab="plan"]');
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();
