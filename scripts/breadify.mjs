@@ -211,6 +211,63 @@ await page.addInitScript(() => {
     return { orders: printed.size, reordered, bakehusetFirstInFile, problems: problems.slice(0, 5) };
   };
 
+  // Each page's Notes lines (the owner, 2026-09-30), against its dead space:
+  // a page with notes has them below its last block, above the footer's
+  // 10 mm, two lines or more; a page without has less room than the smallest
+  // Notes (heading and two lines) needs. `min` is that smallest height, taken
+  // from a real Notes block's own measurements.
+  window.readNotes = (sheets) => {
+    const ruler = document.createElement('div');
+    ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+    document.body.append(ruler);
+    const perPx = 100 / ruler.getBoundingClientRect().width;
+    ruler.remove();
+
+    const withNotes = [];
+    const without = [];
+    const wrong = [];
+    let min = null;
+    for (const sheet of sheets) {
+      const where = `${sheet.dataset.route}/${sheet.dataset.page}`;
+      const body = sheet.querySelector('.bf-body');
+      const floor = sheet.querySelector('.bf-footer').getBoundingClientRect().top - 10 / perPx;
+      const notes = body.querySelector(':scope > .bf-notes');
+      if (notes) {
+        const lines = notes.querySelectorAll('.bf-notes-line');
+        const box = notes.getBoundingClientRect();
+        const above = notes.previousElementSibling;
+        const top = above ? above.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
+        if (notes !== body.lastElementChild) wrong.push(`${where}: something follows its Notes`);
+        if (lines.length < 2) wrong.push(`${where}: ${lines.length} Notes line(s)`);
+        if (box.top < top - 0.5) wrong.push(`${where}: Notes overlap the block above`);
+        if (box.bottom > floor + 0.5) wrong.push(`${where}: Notes reach into the footer's 10 mm`);
+        const style = getComputedStyle(notes);
+        const pitch = lines[0].getBoundingClientRect().height;
+        const own = box.height + parseFloat(style.marginTop) - (lines.length - 2) * pitch;
+        min = min === null ? own : Math.min(min, own);
+        withNotes.push([where, lines.length, Math.round(pitch * perPx * 10) / 10]);
+      } else {
+        const last = body.lastElementChild;
+        const room = floor - (last ? last.getBoundingClientRect().bottom : body.getBoundingClientRect().top);
+        without.push([where, room]);
+      }
+    }
+    // A page without Notes must be one that could not hold even two lines.
+    for (const [where, room] of without) {
+      if (min !== null && room >= min + 1 / perPx) {
+        wrong.push(`${where}: ${Math.round(room * perPx)} mm free and no Notes`);
+      }
+    }
+    return {
+      withNotes: withNotes.length,
+      without: without.length,
+      minMm: min === null ? null : Math.round(min * perPx * 10) / 10,
+      freeMm: without.map(([where, room]) => [where, Math.round(room * perPx * 10) / 10]),
+      pitches: Array.from(new Set(withNotes.map(([, , pitch]) => pitch))),
+      wrong: wrong.slice(0, 5),
+    };
+  };
+
   // What a printed crate run says: its glyphs counted, or its `×N` groups
   // read, as { large, small }.
   window.readCrates = (node) => {
@@ -921,6 +978,27 @@ check(
   breadSeen.fields.lines === 352 && breadSeen.fields.shown > 300,
   JSON.stringify(breadSeen.fields),
 );
+
+/**
+ * The owner, 2026-09-30: Notes lines in each page's dead space. A page with
+ * room gets them below its last block, above the footer's 10 mm, at 7.5 mm;
+ * a full page gets none. They are added after the pages are shared out, so
+ * the sheet counts cannot move.
+ */
+const notesHold = (what, notes) => {
+  same(`${what}: every page's Notes sit in its dead space, and only a full page has none`, notes.wrong, []);
+  check(
+    `${what}: some pages have room for Notes and some are full`,
+    notes.withNotes > 0 && notes.without > 0 && JSON.stringify(notes.pitches) === '[7.5]',
+    JSON.stringify(notes),
+  );
+};
+notesHold(
+  'the bread day',
+  await page.evaluate(() => readNotes(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+);
+// The owner accepted 28 (2026-09-29); the Notes lines must not move it.
+check('the bread day still prints on 28 sheets', sheets.length === 28, `${sheets.length} sheets`);
 
 const breadMarkers = await markerReport();
 same('every bread marker reads true or false in the one look', breadMarkers.odd, []);
@@ -1693,6 +1771,10 @@ check(
 inspected(
   'the freezer day',
   await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+);
+notesHold(
+  'the freezer day',
+  await page.evaluate(() => readNotes(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
 );
 
 const freezerModel = await page.evaluate(async ([bytes]) => {

@@ -1233,6 +1233,37 @@ const Sheet = (() => {
     return bar;
   }
 
+  // ── Notes in a page's dead space ──────────────────────────────────────
+
+  /** The distance between write-on lines: a comfortable handwriting pitch. */
+  const NOTES_PITCH = 7.5;
+
+  /** Fewer write-on lines than this is not worth a heading. */
+  const NOTES_MIN_LINES = 2;
+
+  /**
+   * A quiet "Notes" heading and dotted write-on lines, for the empty space
+   * below a page's last block (the owner, 2026-09-30: "use dead space … as a
+   * impromptu comment field"). Not in the Rust app's print spec.
+   *
+   * It is added after the page's contents are settled and fills only room
+   * `room` millimetres tall that is already empty, so it can never move a
+   * page break, change a sheet count or put anything on another page. As many
+   * lines as measure into the room, and nothing at all if fewer than two do.
+   */
+  function notesBlock(room, measure) {
+    if (!(room > 0)) return null;
+    for (let count = Math.floor(room / NOTES_PITCH); count >= NOTES_MIN_LINES; count -= 1) {
+      const notes = element('section', 'bf-notes');
+      notes.appendChild(element('div', 'bf-notes-title', 'Notes'));
+      for (let line = 0; line < count; line += 1) {
+        notes.appendChild(element('div', 'bf-notes-line', '.'.repeat(120)));
+      }
+      if (measure.height(notes) <= room) return notes;
+    }
+    return null;
+  }
+
   // ── Sharing the pieces out between sheets ─────────────────────────────
 
   /**
@@ -1333,10 +1364,9 @@ const Sheet = (() => {
       // pages, each still spilling, and said nothing about it. A floor makes
       // the last sheet overfull instead — visibly wrong on one page rather
       // than invisibly wrong across hundreds.
-      const limit = Math.max(
-        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE,
-        MIN_BODY_HEIGHT,
-      );
+      const budget =
+        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+      const limit = Math.max(budget, MIN_BODY_HEIGHT);
 
       // Every piece the route puts on paper, in order: its stops, the flag
       // above the unsequenced ones, and the total that closes it. The limit is
@@ -1376,6 +1406,12 @@ const Sheet = (() => {
 
         const body = element('div', 'bf-body');
         for (const piece of indices) body.appendChild(pieces[piece].node);
+        // The page is shared out; now its dead space, if any, gets Notes lines.
+        // Only the real budget counts — never the floor that lets furniture
+        // overfill a page — so the 10 mm above the footer is never touched.
+        const used = indices.reduce((sum, piece) => sum + pieces[piece].height, 0);
+        const notes = notesBlock(budget - used, measure);
+        if (notes) body.appendChild(notes);
 
         append(
           sheet,
