@@ -597,6 +597,9 @@ function placeTagMenu(scrolled = false) {
    in a layer of its own (#ctxMenu) for the same reason: opening or closing
    one saves nothing. */
 let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, room } }
+// Where a keyboard open's focus goes back to: a selector, never an element,
+// since a redraw replaces them all.
+let ctxReturn = null;
 
 // Where a menu opens, tried in this order; the item is the one the row's ✕
 // deletes, so no row needs markup of its own.
@@ -1637,10 +1640,11 @@ function confirmTwice(key, fromKeyboard = false) {
    the Drivers tab both have a ✕ for driver d3, and only one is showing. */
 function renderKeepingFocus() {
   const el = document.activeElement;
-  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, dialog');
-  // The tag menu and the route picker put their own focus back, by the very
-  // choice it was on; a second guess here could only be worse.
-  const own = area && (area.id === 'tagMenu' || area.id === 'picker');
+  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, #ctxMenu, dialog');
+  // The tag menu, the route picker and the right-click menu put their own
+  // focus back, by the very choice it was on; a second guess here could only
+  // be worse.
+  const own = area && (area.id === 'tagMenu' || area.id === 'picker' || area.id === 'ctxMenu');
   // Every data-* attribute, not a chosen few: the rail's Mark and Gap share
   // an act, kind and id and differ only in data-field, the tag choices only in
   // data-label, the day buttons in data-day — and a near match puts the focus
@@ -2912,14 +2916,14 @@ window.addEventListener('resize', () => {
   }
 });
 
-/* A right-click on a row opens its menu. Everywhere else, in any box that is
-   typed in, with Shift held, over selected text or while the share dialog is
-   open, the browser's own menu stays. */
+/* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
+   key on a control in one. Everywhere else, in any box that is typed in, with
+   Shift held, over selected text or while the share dialog is open, the
+   browser's own menu stays. */
 document.addEventListener('contextmenu', (e) => {
   const t = e.target;
   const layer = $('#ctxMenu');
   if (layer.contains(t)) { e.preventDefault(); return; }
-  if (e.button !== 2) return;
   if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
   if (t.closest('textarea, a') || (t.tagName === 'INPUT' && !CTX_INPUTS.has(t.type))) return;
   const hit = ctxHit(t);
@@ -2931,31 +2935,97 @@ document.addEventListener('contextmenu', (e) => {
   // shuts itself.
   closePicker();
   closeTagMenu();
+  // Only a mouse's right button opens at the pointer; the keyboard's menu
+  // keys open against the control that has the focus, brought out from
+  // under the top bar first.
+  const keyboard = e.button !== 2;
+  if (keyboard) clearOfBar(t);
+  const section = t.closest('section.tab');
+  ctxReturn = !keyboard ? null
+    : t.id ? `#${CSS.escape(t.id)}`
+      : section && Object.keys(t.dataset).length ? `#${section.id} ${dataSelector(t)}` : null;
   // Only the layer is drawn: a full render would take the caret out of a
   // box being typed in elsewhere on the page.
-  ctx = { surface: hit.surface, kind: hit.kind, id: hit.id, part: hit.part, tab, keyboard: false, at: null };
+  ctx = { surface: hit.surface, kind: hit.kind, id: hit.id, part: hit.part, tab, keyboard, at: null };
   renderCtxMenu();
-  placeCtxMenu({ left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
-  layer.focus({ preventScroll: true });
+  placeCtxMenu(keyboard ? t.getBoundingClientRect() : { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
+  // No key pressed after opening can arm or confirm anything: the keyboard
+  // starts on the first entry that is not destructive, the mouse on the menu.
+  const first = keyboard && layer.querySelector('[role="menuitem"]:not([aria-disabled]):not([data-arm])');
+  (first || layer).focus({ preventScroll: true });
 });
+
+// Back to the control a keyboard open came from.
+function ctxFocusBack(sel) {
+  const el = sel && document.querySelector(sel);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  clearOfBar(el);
+}
 
 /* A choice in the menu shuts it, before the dispatcher runs the act, except
    the first click on a destructive entry, which arms it and leaves the menu
    open on "Sure?". The redraw the act makes then hides the layer. */
-let ctxClosed = false;
+let ctxClosed = null;   // { keyboard, back }, for the listener after the dispatcher
 $('#ctxMenu').addEventListener('click', (e) => {
-  ctxClosed = false;
+  ctxClosed = null;
   const b = e.target.closest('[data-act]');
   if (!b || !ctx) return;
   if (b.dataset.arm && b.dataset.arm !== armed) return;
-  ctxClosed = true;
+  ctxClosed = { keyboard: e.detail === 0, back: ctx.keyboard ? ctxReturn : null };
   ctx = null;
 });
-// After the dispatcher: an act that drew nothing still hides the menu.
-document.addEventListener('click', () => {
-  if (!ctxClosed) return;
-  ctxClosed = false;
+/* After the dispatcher: an act that drew nothing still hides the menu. And a
+   choice made from the keyboard, in a menu the keyboard opened, hands the
+   focus back to where it came from, unless the act put it somewhere itself
+   or the entry was a confirming one. */
+document.addEventListener('click', (e) => {
+  const was = ctxClosed;
+  ctxClosed = null;
+  if (!was) return;
   if (!ctx && !$('#ctxMenu').hidden) renderCtxMenu();
+  if (!was.keyboard || !was.back || e.target.classList?.contains('armed')) return;
+  const f = document.activeElement;
+  if (f && f !== document.body && f.isConnected) return;
+  ctxFocusBack(was.back);
+});
+
+// Hovering an entry focuses it, as a keyboard user's arrows would, but never a
+// destructive one: a key pressed next must not be able to arm it.
+$('#ctxMenu').addEventListener('mouseover', (e) => {
+  const entry = e.target.closest('[role="menuitem"]');
+  if (!entry || entry.dataset.arm || entry.hasAttribute('aria-disabled') || entry === document.activeElement) return;
+  entry.focus({ preventScroll: true });
+});
+
+/* The menu's keys, in it or on the page itself: a mouse arming lets go of the
+   focus, so it can be on the page. Up and down wrap, Home and End go to the
+   ends; Enter and Space press an entry as they press any button. Escape and
+   Tab disarm an entry armed here, shut the menu, and hand a keyboard open's
+   focus back. While it is open, the page does not scroll under it. */
+document.addEventListener('keydown', (e) => {
+  const layer = $('#ctxMenu');
+  if (!ctx || layer.hidden) return;
+  const t = e.target;
+  if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); return; }
+  if (t !== document.body && !layer.contains(t)) return;
+  if (e.key === 'Escape' || e.key === 'Tab') {
+    e.preventDefault();
+    const back = ctx.keyboard ? ctxReturn : null;
+    if (armed && layer.querySelector(`[data-arm="${CSS.escape(armed)}"]`)) { armed = null; renderKeepingFocus(); }
+    closeCtxMenu();
+    ctxFocusBack(back);
+    return;
+  }
+  const entries = [...layer.querySelectorAll('[role="menuitem"]:not([aria-disabled])')];
+  const i = entries.indexOf(t);
+  const to = { ArrowDown: i + 1, ArrowUp: i < 0 ? -1 : i - 1, Home: 0, End: entries.length - 1 }[e.key];
+  if (to !== undefined) {
+    e.preventDefault();
+    if (entries.length) entries[(to + entries.length) % entries.length].focus({ preventScroll: true });
+    return;
+  }
+  if (e.key === ' ' && i < 0) e.preventDefault();
 });
 
 // Any press outside it, a wheel (unless it is scrolling the menu itself), the

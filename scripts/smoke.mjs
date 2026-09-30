@@ -4923,6 +4923,56 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.setViewportSize({ width: 1366, height: 768 });
 }
 
+// The keyboard: Shift+F10 and the Menu key open the same menu against the
+// focused control, on its first entry; Escape and a choice hand the focus back.
+{
+  await cmOpen();
+  const mark = cmRoute('7').locator('[data-field="highlight"]');
+  const cmFocused = () => cm.evaluate(() => {
+    const f = document.activeElement;
+    if (f === document.body) return 'body';
+    if (f.id === 'ctxMenu') return 'menu:itself';
+    if (f.closest('#ctxMenu')) return `menu:${f.querySelector('span').textContent}`;
+    return `${f.dataset.id || f.id}:${f.dataset.field || f.dataset.act || ''}`;
+  });
+  await mark.focus();
+  await cm.keyboard.press('Shift+F10');
+  check('Shift+F10 on a focused Mark opens the menu on its first entry', await cmMenu.isVisible() && (await cmFocused()) === 'menu:Mark pink on the printout', await cmFocused());
+  await cm.keyboard.press('ArrowDown');
+  const second = await cmFocused();
+  await cm.keyboard.press('ArrowDown');
+  const wrapped = await cmFocused();
+  await cm.keyboard.press('ArrowUp');
+  const back = await cmFocused();
+  await cm.keyboard.press('End');
+  const end = await cmFocused();
+  await cm.keyboard.press('Home');
+  same('the arrows wrap, and Home and End go to the ends', [second, wrapped, back, end, await cmFocused()],
+    ['menu:Add a blank line above', 'menu:Mark pink on the printout', 'menu:Add a blank line above', 'menu:Add a blank line above', 'menu:Mark pink on the printout']);
+  await cm.keyboard.press('Escape');
+  check('Escape shuts it and puts the focus back on Mark', await cmMenu.isHidden() && (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  await cm.keyboard.press('ContextMenu');
+  check('the Menu key opens it too, on its first entry', await cmMenu.isVisible() && (await cmFocused()) === 'menu:Mark pink on the printout', await cmFocused());
+  await cm.keyboard.press('Enter');
+  check('Enter on the first entry marks the route and shuts the menu', (await cmFlags('7'))?.highlight === true && await cmMenu.isHidden());
+  check('with the focus back on Mark', (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('Tab');
+  check('Tab shuts it too, and the focus goes back to Mark', await cmMenu.isHidden() && (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  // A mouse open starts on the menu itself, and hands nothing back.
+  await cmRight(mark);
+  check('a mouse open focuses the menu itself', (await cmFocused()) === 'menu:itself', await cmFocused());
+  const y = await cm.evaluate(() => scrollY);
+  await cm.keyboard.press('PageDown');
+  await cm.keyboard.press(' ');
+  check('PageDown and Space do not scroll the page under an open menu', (await cm.evaluate(() => scrollY)) === y && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  check('and Escape after a mouse open shuts it without taking the focus anywhere', await cmMenu.isHidden() && !(await cmFocused()).startsWith('rt-07'), await cmFocused());
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();
