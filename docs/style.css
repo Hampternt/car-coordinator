@@ -191,7 +191,12 @@ h2 { font: 700 20px var(--head); margin: 0 0 12px; }
    own date field sits out of sight at the box's foot, only for its calendar,
    which then opens under the box. */
 .date-box { position: relative; display: inline-flex; align-items: center; gap: 4px; }
-#date { width: 8.5em; padding: 5px 6px; border: 1px solid var(--line); background: var(--field); font-variant-numeric: tabular-nums; }
+#date { width: 7.5em; padding: 5px 8px; border: 1px solid var(--line); background: var(--field); font: 700 18px var(--head); font-variant-numeric: tabular-nums; }
+/* The plan's day, large, and how far away it is: the one thing on the page
+   that must not be misread. */
+.date-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: -4px 0 10px; }
+.date-big { font: 700 26px var(--head); line-height: 1.15; }
+.date-away { padding: 2px 10px; background: var(--hivis); color: var(--on-bright); font: 700 15px var(--head); white-space: nowrap; }
 .date-cal { padding: 3px 7px; line-height: 1.2; }
 #datePick { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 /* What day the plan is for, under the Date. Quiet when it is the next working

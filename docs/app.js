@@ -158,9 +158,36 @@ function dateLine() {
 const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off
   ? ` <button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>` : ''}`;
 const dateLineHtml = () => { const l = dateLine(); return `<p id="dateLine" class="date-line${l.off ? ' off' : ''}">${dateLineInner(l)}</p>`; };
-/* Only the line, never the Date box beside it: redrawing the box would take
-   the focus out of it mid-typing. */
+
+/* Above the line: the plan's day, large, and how far it is from today, so the
+   day being planned is plain at a glance (owner, 2026-10-01): "Thursday
+   01/10/2026" and "Planning tomorrow". Calendar days on the leader's own
+   clock; both days are built at noon, so a clock change still rounds right. */
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function daysFromToday(s) {
+  const d = parseDay(s), t = parseDay(today());
+  return d && t ? Math.round((d - t) / 86400000) : null;
+}
+function planningWords(n) {
+  if (n === 0) return 'Planning today';
+  if (n === 1) return 'Planning tomorrow';
+  if (n === -1) return 'Planning yesterday';
+  const w = Math.abs(n) <= 10 ? NUMBER_WORDS[Math.abs(n)] : String(Math.abs(n));
+  return n > 0 ? `Planning ${w} days ahead` : `Planning ${w} days ago`;
+}
+function dateHeadInner() {
+  const d = parseDay(state.date);
+  if (!d) return '<span class="date-big">No date set</span>';
+  return `<span class="date-big">${WEEKDAYS[d.getDay()]} ${esc(dmyOf(state.date))}</span>`
+    + `<span class="date-away">${esc(planningWords(daysFromToday(state.date)))}</span>`;
+}
+const dateHeadHtml = () => `<div id="dateHead" class="date-head">${dateHeadInner()}</div>`;
+
+/* Only the day and the line, never the Date box above them: redrawing the box
+   would take the focus out of it mid-typing. */
 function drawDateLine() {
+  const head = document.getElementById('dateHead');
+  if (head) head.innerHTML = dateHeadInner();
   const el = document.getElementById('dateLine');
   if (!el) return;
   const l = dateLine();
@@ -1317,6 +1344,7 @@ function renderPlan() {
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
+    ${dateHeadHtml()}
     ${dateLineHtml()}
     <div class="plan">
       <div class="plan-main">

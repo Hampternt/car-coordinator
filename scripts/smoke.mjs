@@ -4103,6 +4103,16 @@ for (const [seededAt, wantNew, what] of [
     check(`and the focus stays in the Date box (${typed || 'nothing'})`, await pg.evaluate(() => document.activeElement?.id === 'date'));
   }
   check('typing a date leaves the warnings and stripes as they were', (await pg.locator('#tab-plan tbody tr.warn').count()) === 0);
+  // Above the line, the plan's day large, and how far it is from today
+  // (owner, 2026-10-01). Today here is Tuesday 29/09.
+  const head = () => pg.locator('#dateHead').evaluate((el) => el.innerText.replace(/\s+/g, ' ').trim());
+  for (const [typed, want] of [['30/09/2026', 'Wednesday 30/09/2026 Planning tomorrow'], ['29/09/2026', 'Tuesday 29/09/2026 Planning today'],
+    ['28/09/2026', 'Monday 28/09/2026 Planning yesterday'], ['02/10/2026', 'Friday 02/10/2026 Planning three days ahead'],
+    ['25/09/2026', 'Friday 25/09/2026 Planning four days ago'], ['20/10/2026', 'Tuesday 20/10/2026 Planning 21 days ahead'], ['', 'No date set']]) {
+    await pg.fill('#date', typed);
+    same(`typing ${typed || 'nothing'}, the day above the line reads`, await head(), want);
+  }
+  check('in larger type than the page', await pg.locator('#dateHead .date-big').evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 24));
   await pg.click('[data-act="set-tomorrow"]');
   check('Set to tomorrow sets the date and saves it', (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-09-30,2026-09-30');
   check('and the Date box shows it as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
