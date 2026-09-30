@@ -550,7 +550,7 @@ Kept and re-run as they are:
   - a stub renderer returning `<p id="stubMap">x</p>` appears in it and survives a redraw from a tab click. The stub patches `ParkingMap.render` if `ParkingMap` exists, otherwise creates `window.ParkingMap`, and restores it afterwards;
   - a stub that throws leaves the plan drawn, with a console warning and no console error;
   - with the stub in place, `JSON.stringify(state)` and every `carcoord:*` key are identical across `render()` and a switch to another tab and back, and `setItem` is never called.
-- [ ] **10. Screenshots.**
+- [x] **10. Screenshots.**
   - Retake `03-day-plan-with-warnings`, with the shelf and the week under the table and the Monday crew lit.
   - Add a shot of the week at 1280, and one at 390.
   - Keep screens.mjs's rail and route counts (:158-167, :186).
@@ -652,3 +652,4 @@ Kept and re-run as they are:
 - Item 7 done, 9185da6. Design I's badges and titles, and the hint's middle sentence; the "Use for today" sentence is left for part 7 as pack 4 left it. `add-day-group` keeps all seven days. Smoke: the Monday badge "Mon column" with its title, "Monday twice", the hint, a Saturday crew badged "Sat · own button", the rename badged "Thu column" as typed, and the add-a-crew row unchanged. Gate: `check.sh` OK.
 - Item 8 done, 83a1c0a (owner question 2: yes). The guard is the first thing in `apply-group`: `crewIds(g).size === 0` redraws and returns, with the notice only when pressed outside `#tab-plan`. Smoke (layout context): "Use for today" on an empty group, on a plan of this version and on a schemaVersion 99 save, leaves everyone in, counts no `Store.save` or `carcoord:v1` `setItem`, leaves `carcoord:v1` byte for byte, and shows the notice. Part 7 drops its duplicate of this fix. Gate: `check.sh` OK.
 - Item 9 done, 37e519f. Design G: `<div id="planMap" class="plan-map">${mapSlot(use)}</div>` right after `renderWeek()` (with no whitespace inside, so `:empty` holds), `.plan-map:empty { display: none }`, and `mapSlot(use)` with its try/catch and `console.warn`. The contract is in the container's pack 6 section (start commit). Smoke (layout context): the slot after `#planWeek` with no height; a stand-in map drawn, surviving a tab trip, with `state` and every `carcoord:*` key unchanged and no `setItem`; a throwing one leaving the plan drawn and a warning. The stand-in is swapped in without `new Function()`, which the page's CSP forbids. Gate: `check.sh` OK.
+- Item 10 done, 443f23f. Shot 03 is retaken by the same step (full page: routes, templates, the week with Monday lit), and the run now fails unless Monday's Load is lit. New: 25-week-at-1280 and 26-week-on-a-phone, element shots of `#planWeek`. The rail and route counts are untouched. Runs at the end. Gate: `check.sh` OK.
