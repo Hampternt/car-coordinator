@@ -48,9 +48,9 @@ const UPDATES = [
   {
     version: '0.14.1',
     must: false,
-    title: 'Dates as dd/mm/yyyy, and plainer day templates',
-    changed: 'The Date box shows dd/mm/yyyy, with the day large under it and how far away it is. Templates sit in weekday columns with Load and Save, and no longer offer themselves.',
-    affects: 'The Day plan, and a route\'s right-click menu, which now offers its driver\'s tag or car\'s status. Share codes and the printed sheet are unchanged. An older copy still offers a template set for a day.',
+    title: 'The date as dd/mm/yyyy, its crew with it, and plainer templates',
+    changed: 'Click the date for a calendar, or step it with \u00ab \u2039 \u203a \u00bb. Setting it brings that weekday\'s crew in, as Load does. Templates show their routes on hover, with Load and Save.',
+    affects: 'The Day plan, and a route\'s right-click menu (its driver\'s tag, its car\'s status). Share codes and the printed sheet are unchanged. An older copy still offers a template set for a day.',
     data: 'Nothing in your saved plan changes.',
   },
   {
