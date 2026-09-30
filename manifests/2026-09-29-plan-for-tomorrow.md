@@ -1,6 +1,6 @@
 # Pack: Plan for tomorrow
 
-**Status:** 💭 planned. The item list is waiting for the owner's approval, and nothing is built.
+**Status:** 🚧 building, since 2026-09-30, as part 4 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and the owner question approved (a window left open overnight is not moved).
 **Date:** 2026-09-29.
 **Branch:** cut when execution starts. It is `plan-for-tomorrow`, cut from `dev` after pack 3 has merged into `dev`. It merges back into `dev` through a PR (the container's Branch line).
 
@@ -519,3 +519,5 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
     - that after a move, the save-file question can come from the date alone.
 
 ## Ledger
+
+- **2026-09-30, start (combined pack, part 4).** Built on `review-round`, base 2088fb9 (0.5.0). Line numbers are re-found by symbol. The start notes are in: INVENTORY's 💭 line is a 🚧 pointer under Day plan; the container's pack 7 section, the context-menus manifest and the tour manifest each carry one line on this pack's wording and `#dateLine`. **Confirmed:** pack 1's `archive-restore` installs a new state object (`state = next` from `Store.parseImport`), so Keep's staleness check catches it. **Batched rule:** items are gated by `check.sh` only; their smoke cases, screens and the one upgrade check (from v0.2.4) run at the end of part 9. Item 8's run "from the previous dev build" is dropped by that rule.

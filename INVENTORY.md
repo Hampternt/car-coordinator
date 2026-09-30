@@ -16,6 +16,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Driver roster** — an editable list of drivers, offered to the day plan's driver box as suggestions while it stays free text. Starts empty.
 - ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in today.
 - ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself on its weekday, but that is off unless you turn it on, and even then it only asks.
+- 🚧 **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for. `manifests/2026-09-29-plan-for-tomorrow.md`.
 
 ## Fleet
 - ✅ **Round split out of old spot names** — for lists made when the round was written into the spot's name (`Spot 1/1`). Offered on load, never applied: it states every rename and merge line by line, says how many routes gain a round and how many keep the one already typed, names any setting the merging spots disagree about, and takes a backup before it touches anything. Dismissing changes nothing and it asks again next time.
@@ -84,7 +85,6 @@ stays where it is and stays the source of truth for the printed page.
 Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
-- 💭 **Plan for tomorrow by default** — the date moves to tomorrow when the app opens, and the day plan warns when the date on it is not tomorrow.
 - 💭 **Day templates straight under the route list**, not pushed below the drivers and cars beside it.
 - 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
 - 💭 **The week on the day plan** — a column per weekday listing that day's usual drivers, with a button above each column to load that day.

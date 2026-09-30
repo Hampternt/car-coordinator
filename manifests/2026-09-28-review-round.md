@@ -225,6 +225,8 @@ Decided by the owner in the review threads:
 - Tag and Note columns, as on the Cars tab. Decided by the owner: one tag per driver, from the one shared list, so any tag can go on anyone, and both stay until removed. Drivers have had `labelId` and `note` since schema v4.
 
 **Decided:** a tag is only a label and never sets Away; the crew cards stay; driver tags and notes stay on this PC and are not sent in share codes.
+
+The Drivers tab's "today" wording follows pack 4's rule: who is in belongs to the plan, not the calendar (`manifests/2026-09-29-plan-for-tomorrow.md`, Decisions).
 </details>
 
 <details>

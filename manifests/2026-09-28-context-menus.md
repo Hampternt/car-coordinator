@@ -48,7 +48,7 @@ Read first, in this order:
 - pack 1's update note and version constant;
 - pack 2's label tick;
 - pack 3's colour tokens;
-- pack 4's "today" wording;
+- pack 4's "today" wording: the rail entries read "Set away" / "Bring back in", never "today" (`manifests/2026-09-29-plan-for-tomorrow.md`, Decisions);
 - pack 5's template position;
 - pack 7's Drivers-tab row.
 
