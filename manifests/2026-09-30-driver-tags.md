@@ -44,7 +44,7 @@ It is applied, not offered, because it is lossless: every driver keeps exactly t
 ## Items
 
 - [x] **1. ⚠ Store: schema 6 and the move-over.** `driverTags` and `tagId` in `normalise`, the move-over above, a repair for a `tagId` pointing at nothing, and `readable()` (the save-file comparison) naming driver tags too. Done: a v5 plan with Petter on Holiday and Randi on Course loads as v6 with driver tags Holiday, Course, Sick, Vacation, Special situation; Petter and Randi keep theirs; `labels` is byte-identical; and loading the result again changes nothing.
-- [ ] **2. New installs.** `defaults()` gets the five ready-made driver tags. Done: a first run's Labels tab lists them under Driver tags.
+- [x] **2. New installs.** `defaults()` gets the five ready-made driver tags. Done: a first run's Labels tab lists them under Driver tags.
 - [ ] **3. Drivers use driver tags everywhere.** The Drivers tab chips, the rail's tag menu (and its Add, which makes a driver tag), the rail dot, and the driver picker's dot and note. Done: a driver's tag menu lists only driver tags, and a car's only labels.
 - [ ] **4. The Labels tab in two sections.** "Car and position labels" as now, then "Driver tags": name, colour, reorder, delete and add. Deleting a label no longer touches drivers; deleting a driver tag clears it from the drivers who have it, after the usual backup. Done: both sections work, and each delete sweeps only its own kind.
 - [ ] **5. Right-click menus.** Driver-tag rows get a menu whose Delete says how many drivers have the tag. A label's Delete stops counting drivers. Done: both menus read right.
@@ -63,3 +63,4 @@ It is applied, not offered, because it is lossless: every driver keeps exactly t
 - 2026-09-30: planned, with the owner's three answers. Waiting for the go.
 - 2026-09-30: go from the owner; build started on `driver-tags`.
 - 2026-09-30: item 1 done. `SCHEMA` 6; move-over in `normalise` when `raw.driverTags` is not a list (fresh `uid()` ids, so the upgrade check compares tags by name); ready-made list lives in store.js as `Store.readyTags()`; colour-guard allowlist for store.js gains the four new tag colours. Scratch harness: dev fixture gives Holiday #1565c0, Course #2e7d32, Sick, Vacation, Special situation, Petter=Holiday, Randi=Course, labels unchanged, reload changes nothing, no repair notices; v5 with a dangling labelId repairs it once; deleted ready-made stays deleted. check.sh: CHECK OK. Awaiting the main session's review.
+- 2026-09-30: item 2 done. `defaults()` takes `Store.readyTags()`, behind `ownDriverTags()` (`Store.SCHEMA >= 6`), so a store.js cached from before schema 6 never gets a driverTags list saved under its schema. The Labels tab shows them from item 4. check.sh: CHECK OK.

@@ -155,6 +155,15 @@ function newRoute(name, gapBefore = false) {
   return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
 }
 
+/* Drivers wear tags from a list of their own from schema 6 on. A store.js
+   cached from before it can pair with this app.js after a deploy: its drivers
+   still wear the labels, and a driverTags list saved under its older schema
+   would stop the move-over from ever running. So until store.js is fresh too,
+   drivers keep the labels and no driverTags list is made. */
+function ownDriverTags() {
+  return Store.SCHEMA >= 6;
+}
+
 function defaults() {
   const pos = (name) => ({ id: uid(), name, multi: name === 'Garage', labelId: '', note: '' });
   return {
@@ -172,6 +181,7 @@ function defaults() {
     ],
     cars: [],
     drivers: [],
+    ...(ownDriverTags() ? { driverTags: Store.readyTags() } : {}),
     driverGroups: [],
     templates: [],
     routes: [
