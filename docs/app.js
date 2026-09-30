@@ -269,16 +269,23 @@ const moveDel = (kind, id) =>
   actBtn('down', kind, id, '↓', '', 'title="Move down"') +
   actBtn('del', kind, id, armed === `del:${id}` ? 'Sure?' : '✕', armed === `del:${id}` ? 'armed' : '', 'title="Delete"');
 
+/* Where a thing's tag comes from, and the field that holds it: a driver
+   wears a driver tag, a car or a position a label. */
+const tagList = (kind) => (kind === 'driver' && ownDriverTags() ? state.driverTags || [] : state.labels);
+const tagField = (kind) => (kind === 'driver' && ownDriverTags() ? 'tagId' : 'labelId');
+const tagOf = (kind, item) => byId(tagList(kind), item[tagField(kind)]);
+
 function labelChips(kind, item) {
-  const ok = `<button class="chip ok ${item.labelId ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
-  return ok + state.labels.map((l) =>
-    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(colour(l.color))}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
+  const on = item[tagField(kind)];
+  const ok = `<button class="chip ok ${on ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
+  return ok + tagList(kind).map((l) =>
+    `<button class="chip ${on === l.id ? 'on' : ''}" style="--c:${esc(colour(l.color))}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
   ).join('');
 }
 
 /* Everything a driver is, minted in one place so the rail, the tab and an
    applied group cannot drift apart on what a new one starts as. */
-const newDriver = (name) => ({ id: uid(), name, available: true, labelId: '', note: '' });
+const newDriver = (name) => ({ id: uid(), name, available: true, [tagField('driver')]: '', note: '' });
 
 /* ---------- the clash rule ----------
    Two routes can share a packing spot as long as they are packed in different
@@ -509,7 +516,8 @@ let tagSettling = false;
 
 const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
 
-/* The tag menu: every label, the way off, and a box to make a new one.
+/* The tag menu: every tag the thing can wear (a driver's from the driver
+   tags, a car's from the labels), the way off, and a box to make a new one.
 
    It used to be drawn inside the row it belongs to, and the rows sit in a
    list that scrolls — and a scrolling box cuts off whatever crosses its edge.
@@ -522,8 +530,8 @@ function tagMenu(kind, item) {
     `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
       <span class="dot"${color ? ` style="--c:${esc(color)}"` : ''}></span>${esc(name)}</button>`;
   return `<div class="tag-choices">
-      ${choice('', 'No tag', null, !item.labelId)}
-      ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+      ${choice('', 'No tag', null, !item[tagField(kind)])}
+      ${tagList(kind).map((l) => choice(l.id, labelName(l), colour(l.color), item[tagField(kind)] === l.id)).join('')}
     </div>
     <div class="tag-new">
       <input id="newTagName" type="text" placeholder="New tag…" aria-label="Name for a new tag">
@@ -917,7 +925,7 @@ function ctxHit(t) {
 /* One row of the rail: grip, status dot, the name as an editable box, where
    it is today, and the two buttons that act on it. */
 function railRow(kind, item, label, where, extra = '', cls = '') {
-  const lab = byId(state.labels, item.labelId);
+  const lab = tagOf(kind, item);
   const field = kind === 'car' ? 'reg' : 'name';
   const title = [item[field], lab && labelName(lab), item.note].filter(Boolean).join(' · ');
   return `<li class="rail-row ${cls} ${armed === `del:${item.id}` ? 'arming' : ''}" draggable="true"
@@ -2571,9 +2579,9 @@ document.addEventListener('click', (e) => {
     case 'up': if (i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]]; break;
     case 'down': if (i >= 0 && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]]; break;
     case 'toggle': list[i][b.dataset.field] = !list[i][b.dataset.field]; break;
-    case 'setLabel': list[i].labelId = b.dataset.label; break;
-    // The rail's quick tag: the same labelId the Cars and Positions tabs set
-    // with their chips, reached without leaving the plan.
+    case 'setLabel': list[i][tagField(kind)] = b.dataset.label; break;
+    // The rail's quick tag: the same tag the Drivers, Cars and Positions tabs
+    // set with their chips, reached without leaving the plan.
     case 'tag':
       tagFor = tagOpenFor(kind, id) ? null : { kind, id };
       render();
@@ -2585,19 +2593,23 @@ document.addEventListener('click', (e) => {
       if (tagFor) ($('#tagMenu .tag-choice.on') || $('#tagMenu .tag-choice'))?.focus();
       return;
     case 'set-tag':
-      list[i].labelId = b.dataset.label;
+      list[i][tagField(kind)] = b.dataset.label;
       tagFor = null;
       if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
       break;
     case 'add-tag': {
       const name = $('#newTagName').value.trim();
       if (!name) { $('#newTagName').focus(); return; }
-      const label = { id: uid(), name, color: $('#newTagColor').value, onSheet: false };
-      state.labels.push(label);
-      list[i].labelId = label.id;
+      // A driver's new tag is a driver tag; a car's is a label, onSheet and all.
+      const driverTag = tagList(kind) !== state.labels;
+      const made = { id: uid(), name, color: $('#newTagColor').value, ...(driverTag ? {} : { onSheet: false }) };
+      tagList(kind).push(made);
+      list[i][tagField(kind)] = made.id;
       tagFor = null;
       if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
-      note('info', `Tagged ${list[i].reg || list[i].name} ${name}. The tag is on the Labels tab now, for everything else.`);
+      note('info', driverTag
+        ? `Tagged ${list[i].name} ${name}. The tag is under Driver tags on the Labels tab now, for every driver.`
+        : `Tagged ${list[i].reg || list[i].name} ${name}. The label is on the Labels tab now, for every car and position.`);
       break;
     }
     case 'del':
@@ -2719,9 +2731,7 @@ document.addEventListener('click', (e) => {
       // Commas and newlines only: a driver's name has spaces in it, unlike a
       // registration, so splitting on whitespace would make two of everyone.
       if (!addFromInput(b.dataset.from || '#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
-        if (!state.drivers.some((d) => fold(d.name) === fold(name))) {
-          state.drivers.push({ id: uid(), name, available: true, labelId: '', note: '' });
-        }
+        if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push(newDriver(name));
       }))) return;
       break;
     case 'add-group':
@@ -3043,7 +3053,7 @@ function pickChoices(r, at) {
     .filter((d) => !want || fold(d.name).includes(want))
     .sort((a, b) => collate(a.name, b.name))
     .map((d) => {
-      const lab = byId(state.labels, d.labelId);
+      const lab = tagOf('driver', d);
       const others = elsewhere(by[fold(d.name)], at);
       const on = !!fold(r.driver) && fold(d.name) === fold(r.driver);
       const notes = [!d.available && 'Away', lab && esc(labelName(lab)), others.length && `Route ${routeNames(others)}`].filter(Boolean);
