@@ -81,11 +81,46 @@ function dayCrews() {
   return { byDay, others };
 }
 
+/* ---------- the calendar ----------
+   Local days throughout: a plan is for a day on the leader's own calendar,
+   not a UTC one. Days are built at local noon, so a clock change can never
+   slip one. */
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayString = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
 function today() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return dayString(new Date());
 }
+
+/* A local Date at noon for a YYYY-MM-DD that is a real day, or null. The
+   string has to come back out exactly, which rejects 2026-02-30, and a year
+   below 100 that Date would read as 19xx. */
+function parseDay(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(typeof s === 'string' ? s : '');
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);
+  return dayString(d) === s ? d : null;
+}
+
+/* The next working day: tomorrow, or Monday after a Friday, Saturday or
+   Sunday. The warehouse works Monday to Friday; public holidays are not
+   skipped. */
+function nextWorkingDay(now = new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return dayString(d);
+}
+
+/* 'Wednesday 30/09', with the year when it is not this one. */
+function dayLabel(s) {
+  const d = parseDay(s);
+  if (!d) return String(s || '');
+  const year = d.getFullYear() === new Date().getFullYear() ? '' : `/${d.getFullYear()}`;
+  return `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}${year}`;
+}
+
+// The weekday of the plan's own date, 0 for Sunday, or -1 when it is not a day.
+const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
 
 function newRoute(name, gapBefore = false) {
   return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
@@ -95,7 +130,7 @@ function defaults() {
   const pos = (name) => ({ id: uid(), name, multi: name === 'Garage', labelId: '', note: '' });
   return {
     schemaVersion: Store.SCHEMA,
-    date: today(),
+    date: nextWorkingDay(),
     qrOnSheet: false,
     // Just the spots. The number after the slash on the pillar sheet is the
     // round, not part of the spot's name, so it lives in the route's own round
@@ -2004,7 +2039,7 @@ document.addEventListener('click', (e) => {
       if (!confirmTwice('clear', e.detail === 0)) return;
       Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
-      state.date = today();
+      state.date = nextWorkingDay();
       break;
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);

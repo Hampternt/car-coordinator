@@ -3737,6 +3737,72 @@ check('the Data tab fits a phone screen with the switch', await sw.evaluate(() =
 check('the Colours switch logs no console errors', swErrors.length === 0, swErrors.join(' | '));
 await swCtx.close();
 
+// --- the calendar: plans are for the next working day, on the local calendar ---
+// A context of its own in Oslo, where the clocks change, and every instant is
+// written with its Oslo offset. The shared page never gets a frozen clock: it
+// would give every backup the same time.
+const calCtx = await browser.newContext({ timezoneId: 'Europe/Oslo' });
+const calErrors = [];
+const calOpen = async (instant, items = null, { install = false } = {}) => {
+  const pg = await calCtx.newPage();
+  pg.on('console', (m) => m.type() === 'error' && calErrors.push(m.text()));
+  pg.on('pageerror', (e) => calErrors.push(String(e)));
+  if (install) await pg.clock.install({ time: new Date(instant) });
+  else await pg.clock.setFixedTime(new Date(instant));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  if (items) {
+    await pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v); }, items);
+    await pg.reload({ waitUntil: 'networkidle' });
+  }
+  // The clock was set before start() ran: today() is the instant's Oslo day.
+  const want = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Oslo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(instant));
+  const got = await pg.evaluate(() => today());
+  check(`the calendar page's clock reads ${want}`, got === want, got);
+  return pg;
+};
+const plan4 = (date, extra = {}) => JSON.stringify({
+  schemaVersion: 5, date, qrOnSheet: false, labels: [], cars: [], positions: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
+  ...extra,
+});
+
+// Item 1: the helper at every calendar edge, and the two places that use it.
+{
+  const pg = await calOpen('2026-09-28T09:00:00+02:00');
+  const edges = await pg.evaluate(() => [
+    ['2026-09-28T09:00:00+02:00', '2026-09-29'],
+    ['2026-10-02T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-03T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-04T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-24T23:30:00+02:00', '2026-10-26'],
+    ['2026-10-25T00:30:00+02:00', '2026-10-26'],
+    ['2026-03-27T09:00:00+01:00', '2026-03-30'],
+    ['2026-10-30T09:00:00+01:00', '2026-11-02'],
+    ['2026-12-31T09:00:00+01:00', '2027-01-01'],
+    ['2027-12-31T09:00:00+01:00', '2028-01-03'],
+  ].map(([at, want]) => ({ at, want, got: nextWorkingDay(new Date(at)) })));
+  const wrong = edges.filter((e) => e.got !== e.want);
+  check('the next working day is right at every calendar edge', !wrong.length, JSON.stringify(wrong));
+  const rejected = await pg.evaluate(() => ['2026-13-45', '2026-02-30', '0020-01-01', '', 'x', null].map((s) => parseDay(s)));
+  check('parseDay rejects days that are not real', rejected.every((d) => d === null));
+  check('and reads one that is, at local noon', await pg.evaluate(() => { const d = parseDay('2026-10-25'); return d && d.getHours() === 12 && d.getDate() === 25; }));
+  await pg.close();
+}
+{
+  const pg = await calOpen('2026-10-02T09:00:00+02:00', {});
+  check('a Friday first run dates the plan Monday', (await pg.evaluate(() => state.date)) === '2026-10-05', await pg.evaluate(() => state.date));
+  await pg.evaluate((t) => { localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, plan4('2026-10-01'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  await pg.click('[data-act="clear-day"]');
+  await pg.click('[data-act="clear-day"]');
+  check('and so does a Friday Clear the day', (await pg.evaluate(() => state.date)) === '2026-10-05', await pg.evaluate(() => state.date));
+  await pg.close();
+}
+
+// --- the calendar: done ---
+check('the calendar cases log no console errors', calErrors.length === 0, calErrors.join(' | '));
+await calCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
