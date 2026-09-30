@@ -141,7 +141,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 }
 .brand { font: 700 22px var(--head); letter-spacing: .5px; }
 .tabs { display: flex; gap: 4px; flex: 1; }
-.tabs button { background: none; border: 0; padding: 8px 14px; color: var(--tab-idle); cursor: pointer; font-family: var(--head); font-size: 16px; }
+.tabs button { background: none; border: 0; padding: 8px 14px; color: var(--tab-idle); cursor: pointer; font-family: var(--head); font-size: 16px; white-space: nowrap; }
 .tabs button.active { color: var(--on-bright); background: var(--hivis); }
 button.primary { background: var(--hivis); color: var(--on-bright); border: 0; padding: 9px 16px; font: 700 15px var(--head); cursor: pointer; }
 /* The swap across to Breadify, beside the brand. It was set in the same grey
@@ -164,6 +164,17 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
   color: var(--on-bar); font: 700 14px var(--head); white-space: nowrap; flex: none; cursor: pointer;
 }
 .tour-btn:hover, .tour-btn:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
+/* Below 1300px the bar has no room for the tabs beside everything else: a
+   tab name went onto two lines, and at 900 (the Windows app's smallest
+   window) the page scrolled sideways. The tabs take a row of their own
+   instead, scrolling inside it on a phone, and Print and Tour stay right.
+   1300 rather than the 1245 measured in headless Chrome, to leave room for
+   fonts that draw wider than the test browser's. */
+@media (max-width: 1300px) {
+  .topbar { flex-wrap: wrap; gap: 10px 16px; }
+  .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .topbar .primary { margin-left: auto; }
+}
 
 /* 1200 was right when the plan was a table with a narrow rail beside it. The
    rail is a working panel now and lives to the right of the table, so the page
@@ -310,7 +321,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    content's minimum, and a row of grip, name box, badge and three buttons has
    a minimum wider than the rail. The column grew to 387 inside a 320 aside and
    the buttons went off the edge. */
-.rail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; position: sticky; top: 78px; align-content: start; }
+/* It sticks under the top bar, whose height (--bar, measured by the app)
+   changes when the tabs take a row of their own. */
+.rail { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; position: sticky; top: var(--bar, 78px); align-content: start; }
 .rail-panel { background: var(--panel); padding: 10px 12px; }
 .rail-panel h3 { font: 600 15px var(--head); margin: 0 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rail-count { font: 400 12px var(--body); color: var(--muted); }
@@ -322,7 +335,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    when its row leaves its own list's edges. Stacked at 1180px and below, the
    rail keeps its old shape. */
 @media (min-width: 1181px) {
-  .rail { display: flex; flex-direction: column; max-height: calc(100vh - 90px); }
+  .rail { display: flex; flex-direction: column; max-height: calc(100vh - var(--bar, 78px) - 12px); }
   .rail-panel { display: flex; flex-direction: column; min-height: 0; }
   .rail-list { flex: 0 1 auto; min-height: 5em; }
 }
@@ -628,9 +641,6 @@ body.show-sheet .sheet {
    hold together at phone width: the wide tables scroll inside their own
    container instead of pushing the whole page sideways. */
 @media (max-width: 760px) {
-  .topbar { flex-wrap: wrap; gap: 10px 16px; }
-  .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
-  .tabs button { white-space: nowrap; }
   main { padding: 16px; }
   .tab { overflow-x: auto; }
   table.grid { min-width: 700px; }

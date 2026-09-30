@@ -218,6 +218,33 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
   await ctx.close();
 }
 
+// Room in the top bar, with the Tour button in it: no sideways scroll and no
+// tab name on two lines at any of these widths, and above 1180, where the
+// rail sticks beside the plan, it sticks below the bar.
+{
+  let oneLine = null;
+  for (const width of [1680, 1250, 1180, 1024, 900]) {
+    const { ctx, pg } = await openPage({ plan: devPlan, width, height: 800 });
+    const m = await pg.evaluate(() => {
+      const tabs = [...document.querySelectorAll('.tabs button')].map((b) => b.getBoundingClientRect().height);
+      const bar = document.querySelector('.topbar').getBoundingClientRect();
+      const rail = document.querySelector('#tab-plan .rail');
+      return {
+        sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        tallest: Math.max(...tabs),
+        railTop: parseFloat(getComputedStyle(rail).top),
+        railSticks: getComputedStyle(rail).position === 'sticky',
+        barHeight: bar.height,
+      };
+    });
+    if (oneLine === null) oneLine = m.tallest;
+    check(`at ${width}, with the Tour button in the bar, the page does not scroll sideways`, m.sideways <= 0, `${m.sideways}px`);
+    check(`at ${width}, no tab name goes onto two lines`, m.tallest <= oneLine + 0.5, `${m.tallest}px against ${oneLine}px`);
+    if (width > 1180) check(`at ${width}, the rail sticks below the bar`, m.railSticks && m.railTop >= m.barHeight, JSON.stringify(m));
+    await ctx.close();
+  }
+}
+
 // --- tour: done ---
 check('the tour cases log no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();
