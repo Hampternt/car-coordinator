@@ -2003,6 +2003,11 @@ document.addEventListener('click', (e) => {
   // A button pressed from the keyboard is replaced by the redraw it causes;
   // the acts that know where the focus belongs next say so here.
   let refocus = null;
+  // What the plan was before the press: a press that changes nothing saves
+  // nothing, so "saved with your next change" stays true, and a press never
+  // rewrites the save file for no reason. One guard rather than a list of
+  // acts, which would miss one or mistake a real edit for a no-op.
+  const before = JSON.stringify(state);
 
   switch (act) {
     // Switching tabs changes nothing that is saved, so it saves nothing. It
@@ -2249,7 +2254,7 @@ document.addEventListener('click', (e) => {
       break;
     default: return;
   }
-  save();
+  if (JSON.stringify(state) !== before) save();
   render();
   if (refocus) document.querySelector(refocus)?.focus();
 });
@@ -2324,6 +2329,7 @@ document.addEventListener('drop', (e) => {
   dragging = null;
   if (!item) { render(); return; }
 
+  const was = JSON.stringify(state);
   if (route) {
     const r = byId(state.routes, route.dataset.route);
     if (!r) { render(); return; }
@@ -2341,7 +2347,7 @@ document.addEventListener('drop', (e) => {
     const at = list.findIndex((x) => x.id === sibling.dataset.id);
     list.splice(after ? at + 1 : at, 0, moved);
   }
-  save();
+  if (JSON.stringify(state) !== was) save();
   render();
 });
 
@@ -2518,9 +2524,10 @@ document.addEventListener('click', (e) => {
   const r = b && picking && byId(state.routes, picking.routeId);
   if (!r) return;
   const { field, routeId } = picking;
+  const was = field === 'carId' ? r.carId : r.driver;
   if (field === 'carId') r.carId = b.dataset.pick; else r.driver = b.dataset.pick;
   picking = null;
-  save();
+  if ((field === 'carId' ? r.carId : r.driver) !== was) save();
   render();
   // Chosen from the keyboard (a click with no pointer behind it): hand the
   // focus back to the box, so Tab carries on along the row.

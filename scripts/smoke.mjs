@@ -3903,6 +3903,83 @@ for (const [at, date, what] of [
 check('the calendar cases log no console errors', calErrors.length === 0, calErrors.join(' | '));
 await calCtx.close();
 
+// --- a press that changes nothing saves nothing ---
+// With a save file linked and allowed, every press below leaves carcoord:v1
+// byte for byte and writes nothing to the file, while still doing what it
+// shows. Presses that do change something still save to both.
+const noCtx = await browser.newContext();
+const np = await noCtx.newPage();
+const npErrors = [];
+np.on('console', (m) => m.type() === 'error' && npErrors.push(m.text()));
+np.on('pageerror', (e) => npErrors.push(String(e)));
+await np.goto(base, { waitUntil: 'networkidle' });
+const npPlan = await np.evaluate(() => {
+  const date = nextWorkingDay();
+  return JSON.stringify({
+    schemaVersion: 5, date, qrOnSheet: false,
+    labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: false }],
+    cars: [{ id: 'c1', reg: 'NP11111', labelId: 'L1', note: '' }, { id: 'c2', reg: 'NP22222', labelId: '', note: '' }],
+    positions: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false }] }],
+    drivers: [{ id: 'd1', name: 'Ana', available: true, labelId: '', note: '' }, { id: 'd2', name: 'Bo', available: true, labelId: '', note: '' }],
+    driverGroups: [{ id: 'g1', name: WEEKDAYS[parseDay(date).getDay()], driverIds: ['d1', 'd2'] }, { id: 'g2', name: 'Reserves', driverIds: ['d1'] }],
+    routes: [
+      { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false },
+      { id: 'r2', name: '2', driver: 'Bo', carId: 'c2', positionId: '', round: '', highlight: false, gapBefore: false },
+    ],
+  });
+});
+await np.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, npPlan);
+await np.reload({ waitUntil: 'networkidle' });
+await linkStandIn(np, npPlan, { perm: 'granted' });
+const npSaved = () => np.evaluate(async () => { await Store.flush(); return { v1: localStorage.getItem('carcoord:v1'), writes: window.__disk.writes }; });
+const npStart = await npSaved();
+const noop = async (what, act) => {
+  const was = await npSaved();
+  await act();
+  const now = await npSaved();
+  check(`a press that changes nothing saves nothing: ${what}`, now.v1 === was.v1 && now.writes === was.writes, `${was.writes} -> ${now.writes} writes`);
+};
+await noop('Up on the first row', () => np.locator('#tab-plan tbody tr').first().locator('[data-act="up"]').click());
+await noop('Down on the last row', () => np.locator('#tab-plan tbody tr').last().locator('[data-act="down"]').click());
+await noop('All when everyone is in', () => np.click('#tab-plan [data-act="all-in"]'));
+await noop('the lit day', () => np.click('#tab-plan .day-bar .day.on[data-act="apply-group"]'));
+await noop('a tag to the tag it has', async () => {
+  await np.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c1"]');
+  await np.click('#tagMenu .tag-choice.on');
+});
+await noop('a label chip that is already on', async () => {
+  await np.click('[data-act="tab"][data-tab="cars"]');
+  await np.locator('#tab-cars .chip.on[data-label="L1"]').first().click();
+  await np.click('[data-act="tab"][data-tab="plan"]');
+});
+await noop('adding a car that is already there', async () => {
+  await np.click('[data-act="tab"][data-tab="cars"]');
+  await np.fill('#newCar', 'NP11111');
+  await np.click('#tab-cars [data-act="add-car"]');
+  await np.click('[data-act="tab"][data-tab="plan"]');
+});
+await noop('picking the car already chosen', async () => {
+  await np.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').click();
+  await np.click('#picker .pick.on');
+});
+await noop('asking to load a template', () => np.click('#tab-plan .tpl [data-act="ask-template"]'));
+check('and the question is still asked', (await np.locator('#notices .notice.warn [data-act="load-template"]').count()) === 1);
+check('nothing was written in all of that', (await npSaved()).writes === npStart.writes && (await npSaved()).v1 === npStart.v1);
+// And a press that changes something still saves both.
+for (const [what, act] of [
+  ['Mark', () => np.locator('#tab-plan tbody tr').first().locator('[data-act="toggle"][data-field="highlight"]').click()],
+  ['Add route', () => np.click('#tab-plan [data-act="add-route"]')],
+  ['another crew', () => np.click('#tab-plan .rail-groups [data-act="apply-group"]')],
+]) {
+  const was = await npSaved();
+  await act();
+  await np.waitForFunction((n) => window.__disk.writes > n, was.writes, { timeout: 3000 }).catch(() => {});
+  const now = await npSaved();
+  check(`a press that changes something still saves: ${what}`, now.v1 !== was.v1 && now.writes > was.writes, `${was.writes} -> ${now.writes} writes`);
+}
+check('the no-op cases log no console errors', npErrors.length === 0, npErrors.join(' | '));
+await noCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
