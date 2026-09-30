@@ -1,0 +1,63 @@
+# Pack: Info bubbles instead of the tour
+
+**Status:** PROPOSED. Owner's answers taken 2026-09-30; waiting for the go.
+**Branch:** its own, `info-bubbles`, cut from `dev` **after `weekday-templates` is merged**, since both rewrite parts of `app.js`. Merged back into `dev` when green. Ships as 0.14.0.
+
+Observable: a small ⓘ sits beside each part of the app. Clicking one opens a short bubble right next to it, saying what that part does and how to use it. The Tour button and the "Show me around" offer are gone.
+
+Agents: build 1 (medium; app.js is shared) · review 1 lens (correctness) + verify.
+
+## Decisions (owner, 2026-09-30)
+
+| Question | Answer |
+|---|---|
+| Why | "the positioning of the info boxes can be confusing instead of a tour have it have information bubbles that can be clicked to help users understand a function / how to use it" |
+| The tour | **Removed:** the Tour button, the first-open offer, `tour.js` and its markup. The bubbles reuse what the tour explained. |
+| Visibility | **Always there, small:** a quiet ⓘ beside what it explains. One click opens its bubble beside it; a click elsewhere, Esc or another ⓘ closes it. |
+| First open | **A one-line hint:** "New here? Click any ⓘ to see what that part does." It is dismissable and never shown again in this browser (a per-browser pref, like the tour's). |
+
+## Saved data
+
+None. The bubbles are text. The hint's "seen" is a per-browser pref, `carcoord:pref:infoHint`, kept off the plan. The old `carcoord:pref:tour` is left in place and unused. No schema change, and no upgrade-check change beyond the note.
+
+## Where the bubbles go
+
+Each is one or two short sentences: what it is, then how to use it.
+
+| Tab | Bubbles |
+|---|---|
+| **Day plan** | the Date and its line (next working day, Set to tomorrow, Keep) · the warnings box (never blocks) · the route table (a row is a sheet line; Mark, Gap, rounds; drag names in; right-click for more) · the Drivers panel (In/Away, crews, usual days, drag onto a route) · the Cars panel (Free/out, status, drag) · Day templates (save, Update from plan, loading in parts) · the week (each weekday's crew, Load) · the parking map (spots by name, rounds, red) |
+| **Drivers** | usual days · tags and notes (driver tags) · day groups |
+| **Cars** | status labels and notes · Assigned to |
+| **Positions** | Many cars · status · the map finds spots by name |
+| **Labels** | car and position labels with Show on printout · driver tags |
+| **Data** | the save file · sending the list · your own copy · What's new and Archives · Backups · Colours |
+| **Print preview** | what is on the paper |
+
+## Items
+
+- [ ] **1. The bubble.** A `help.js` holds every text by key (one top-level name, as `map.js` and `tour.js` do), and an `infoBtn(key)` in app.js draws the ⓘ. A layer app.js makes on first use opens beside its ⓘ, placed the way the menus are, and one at a time. It closes on Esc, an outside click or another ⓘ, is keyboard reachable, is never printed, and saves nothing. A cached index.html without help.js simply draws no ⓘ. Done: every key opens its own text beside its button, and nothing is written.
+- [ ] **2. The ⓘ in place** at every spot in the table above. Done: every key in help.js has exactly one visible ⓘ on its tab, and every ⓘ has a text.
+- [ ] **3. Remove the tour:** `tour.js`, `#tour` and `#tourRing`, the Tour button, `offerTour`, `scripts/tour.mjs`, its npm script, and its screenshot. The top bar's 1300px wrap rule stays if it is still needed without the Tour button; re-measure it. Done: no reference to Tour is left; the suite and screens pass.
+- [ ] **4. The first-open hint**, where the tour offer was raised (a first run, no share link, no warning, no save file linked), with the `infoHint` pref. Done: it shows once and never again after ✕.
+- [ ] **5. Words:** the README, the INVENTORY entry for the tour, and any hint text that pointed at the tour. Done: nothing mentions the tour except update notes already written.
+- [ ] **6. Tests:**
+  - every ⓘ opens beside itself, inside the window, at 1680, 1280, 900 and 390;
+  - one bubble at a time;
+  - Esc and outside clicks close it;
+  - the keyboard reaches it;
+  - it saves nothing;
+  - the hint appears once;
+  - it is hidden in print.
+
+  Done: the suite passes.
+- [ ] **7. Announce and cut 0.14.0,** `must: false`: "Small ⓘ buttons explain each part of the app; the tour is gone." Done: the version guard passes.
+
+## Gates
+
+- Per item: `bash scripts/check.sh`.
+- At the end, once: `CHROMIUM_PATH=/usr/bin/google-chrome npm test`, `npm run screens`, and the upgrade check from the live build (the note changes).
+
+## Ledger
+
+- 2026-09-30: planned with the owner's three answers. It waits for `weekday-templates` to merge.

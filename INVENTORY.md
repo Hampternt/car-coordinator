@@ -47,6 +47,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - ✅ **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start.
 - ✅ **A first-use tour** — a first-ever open offers "Show me around", a short walk through cars, spots, drivers, a route, warnings, printing, sending the list, the save file and backups, reopened any time from a Tour button in the top bar. It only points; it never changes the plan.
+- 🚧 **Info bubbles instead of the tour** — a small ⓘ beside each part of the app opens a short explanation next to it; the tour goes. `manifests/2026-09-30-info-bubbles.md`.
 
 ## Packaging
 - ✅ **GitHub Pages** — the primary delivery; `docs/` is the published folder.
