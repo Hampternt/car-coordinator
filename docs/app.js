@@ -785,6 +785,9 @@ const CTX_MENUS = {
    redraw never moves it. */
 function renderCtxMenu() {
   const layer = $('#ctxMenu');
+  // An index.html cached from before the menus has no layer: no menu, and
+  // the page draws as it did.
+  if (!layer) { ctx = null; return; }
   const item = ctx && ctx.tab === tab && byId(listFor(ctx.kind) || [], ctx.id);
   if (!item) {
     ctx = null;
@@ -3157,6 +3160,7 @@ window.addEventListener('resize', () => {
 document.addEventListener('contextmenu', (e) => {
   const t = e.target;
   const layer = $('#ctxMenu');
+  if (!layer) return;
   if (layer.contains(t)) { e.preventDefault(); return; }
   if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
   if (t.closest('textarea, a') || (t.tagName === 'INPUT' && !CTX_INPUTS.has(t.type))) return;
@@ -3201,7 +3205,7 @@ function ctxFocusBack(sel) {
    the first click on a destructive entry, which arms it and leaves the menu
    open on "Sure?". The redraw the act makes then hides the layer. */
 let ctxClosed = null;   // { keyboard, back }, for the listener after the dispatcher
-$('#ctxMenu').addEventListener('click', (e) => {
+$('#ctxMenu')?.addEventListener('click', (e) => {
   ctxClosed = null;
   const b = e.target.closest('[data-act]');
   if (!b || !ctx) return;
@@ -3217,7 +3221,7 @@ document.addEventListener('click', (e) => {
   const was = ctxClosed;
   ctxClosed = null;
   if (!was) return;
-  if (!ctx && !$('#ctxMenu').hidden) renderCtxMenu();
+  if (!ctx && $('#ctxMenu')?.hidden === false) renderCtxMenu();
   if (!was.keyboard || !was.back || e.target.classList?.contains('armed')) return;
   const f = document.activeElement;
   if (f && f !== document.body && f.isConnected) return;
@@ -3228,7 +3232,7 @@ document.addEventListener('click', (e) => {
 // destructive one: a key pressed next must not be able to arm it. Only a
 // pointer that moved: the browser also reports one when a menu is drawn under
 // a pointer resting where it was, and that took a keyboard user's place.
-$('#ctxMenu').addEventListener('mousemove', (e) => {
+$('#ctxMenu')?.addEventListener('mousemove', (e) => {
   if (!e.movementX && !e.movementY) return;
   const entry = e.target.closest('[role="menuitem"]');
   if (!entry || entry.dataset.arm || entry.hasAttribute('aria-disabled') || entry === document.activeElement) return;

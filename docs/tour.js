@@ -179,6 +179,9 @@ const Tour = (() => {
   const shown = (sel) => { const el = document.querySelector(sel); return !!el && !el.hidden; };
 
   function init(h) {
+    // A page without the card (an index.html from before the tour) has no
+    // tour: every call stays a no-op, and start() carries on.
+    if (!card() || !ring()) return;
     hooks = h;
     card().addEventListener('click', (e) => {
       const b = e.target.closest('[data-tour]');
