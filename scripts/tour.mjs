@@ -274,7 +274,9 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
   const cases = [
     ['a saved plan', async (p) => { await p.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:v1', t); }, devPlan); await p.reload({ waitUntil: 'networkidle' }); }],
     ['an unreadable save', async (p) => { await p.evaluate(() => { localStorage.clear(); localStorage.setItem('carcoord:v1', '{"schemaVersion":4, broken'); }); await p.reload({ waitUntil: 'networkidle' }); }],
-    ['a share link', async (p) => { await p.evaluate(() => localStorage.clear()); await p.goto(`${base}#d=CC1notarealcode`, { waitUntil: 'networkidle' }); }],
+    // Through a blank page: from the app's own address, a new hash alone is
+    // not a new load, and start() would never see it.
+    ['a share link', async (p) => { await p.evaluate(() => localStorage.clear()); await p.goto('about:blank'); await p.goto(`${base}#d=CC1notarealcode`, { waitUntil: 'networkidle' }); }],
   ];
   for (const [what, open] of cases) {
     const { ctx, pg: p } = await openPage();
