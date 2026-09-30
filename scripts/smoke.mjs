@@ -44,6 +44,10 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(base, { waitUntil: 'networkidle' });
+// The day a plan opened now is for. Fixtures that are not about dates are
+// dated this day, so a passed date never moves under them and raises Keep.
+const PLAN_DAY = await page.evaluate(() => nextWorkingDay());
+const PLAN_DMY = PLAN_DAY.split('-').reverse().join('/');
 
 // --- first run ---
 // The tab's own empty message, not the template shelf's further down it.
@@ -293,7 +297,7 @@ check('a repaired but usable save is no load trouble', await page.evaluate(() =>
 // The fields v1 never wrote must arrive at their defaults, quietly: a leader
 // opening the new build on Monday should see nothing at all happen.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
 })));
@@ -307,7 +311,7 @@ check('v1 data gains round, drivers and driver groups', await page.evaluate(() =
 // Same story one version on: the plan a leader already has must open with an
 // empty template shelf and nothing to read about it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 2, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
   drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
@@ -320,7 +324,7 @@ check('v2 data loads with an empty template list and no repair notice',
 // A template is stored state like any other, so it goes through the same
 // repair: a car deleted since it was saved must not come back as a ghost id.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 2, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1' }],
   templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
@@ -416,7 +420,7 @@ check('and its own routes are left alone, rather than being given a round out of
 // baked into the spot name, two of those names meaning one spot, and a round
 // already typed onto one route by hand.
 const oldNames = {
-  schemaVersion: 3, date: '2026-09-18', qrOnSheet: false,
+  schemaVersion: 3, date: PLAN_DAY, qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Out of service', color: '#c62828' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }],
   positions: [
@@ -512,7 +516,7 @@ check('restoring the backup brings the old names, and the routes, back', await p
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
 const planA = {
-  schemaVersion: 2, date: '2026-09-18',
+  schemaVersion: 2, date: PLAN_DAY,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
   drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
@@ -585,7 +589,7 @@ b.on('console', (m) => m.type() === 'error' && bErrors.push(m.text()));
 b.on('pageerror', (e) => bErrors.push(String(e)));
 await b.goto(base, { waitUntil: 'networkidle' });
 await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
   positions: [{ id: 'yyy', name: 'Spot 1', multi: false, labelId: '', note: '' }],
   drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
@@ -594,7 +598,7 @@ await b.reload({ waitUntil: 'networkidle' });
 await b.click('[data-act="tab"][data-tab="data"]');
 await readCode(b, dayCode);
 const preview = await b.locator('#shareDlg').innerText();
-check('preview names the date and route count', preview.includes('18/09/2026') && preview.includes('2 routes'));
+check('preview names the date and route count', preview.includes(PLAN_DMY) && preview.includes('2 routes'));
 check('preview flags what PC B is missing', preview.includes('BB22222') && preview.includes('Garage'));
 await b.click('[data-act="share-apply"]');
 
@@ -612,7 +616,7 @@ check('added the car it did not have', (await rowsB.nth(1).locator('[data-field=
 await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
-check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
+check('sheet on PC B shows the shared date', sheetB.includes(PLAN_DMY));
 check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/2'));
 await b.click('[data-act="tab"][data-tab="drivers"]');
 check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
@@ -667,7 +671,7 @@ await pcC.close();
 // what the offer warns about, and it is worth failing here on purpose so the
 // warning cannot quietly stop being true.
 const oldNamesB = {
-  schemaVersion: 3, date: '2026-01-01', qrOnSheet: false, labels: [],
+  schemaVersion: 3, date: PLAN_DAY, qrOnSheet: false, labels: [],
   cars: [{ id: 'bc1', reg: 'AA11111', labelId: '', note: '' }],
   positions: [
     { id: 'b1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
@@ -730,7 +734,7 @@ await page.reload({ waitUntil: 'networkidle' });
 // Duplicate route ids come from imported files; identifying rows by id made
 // the banner count clashes that no row was flagged for.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18',
+  schemaVersion: 1, date: nextWorkingDay(),
   labels: [{ id: 'L1', name: '', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: 'L1' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
@@ -755,7 +759,7 @@ check('on a route + free + parked equals the fleet', counts[0] + counts[1] + cou
 
 // --- a shared position survives a day-plan-only share ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Garage', multi: true }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
@@ -772,7 +776,7 @@ const d = await pcD.newPage();
 d.on('pageerror', (e) => bErrors.push(String(e)));
 await d.goto(base, { waitUntil: 'networkidle' });
 await d.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-01-01', labels: [], cars: [], positions: [], routes: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [], positions: [], routes: [],
 })));
 await d.reload({ waitUntil: 'networkidle' });
 await d.click('[data-act="tab"][data-tab="data"]');
@@ -796,7 +800,7 @@ for (const bad of ['42', '"hello"', 'true', 'null', '[]', '{oops']) {
 
 // --- a hostile imported file cannot execute or brick the app ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
   cars: [{ id: '"><img src=x onerror="window.__pwned=1">', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '"><img src=x onerror="window.__pwned=1">', positionId: 'p1' }],
 })));
@@ -805,7 +809,7 @@ const injected = await page.evaluate(() => ({ pwned: !!window.__pwned, imgs: doc
 check('an id from an imported file cannot inject markup', !injected.pwned && injected.imgs === 0, JSON.stringify(injected));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], positions: [],
   cars: [{ id: '__proto__', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '__proto__' }],
 })));
@@ -818,7 +822,7 @@ check('a car id of __proto__ does not brick the app', (await page.locator('#tab-
 // c3 and p3 raise no screen warning: a marked position only warns when a route
 // uses it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
+  schemaVersion: 1, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }, { id: 'c3', reg: 'CC33333', labelId: '' }],
   positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }, { id: 'p3', name: 'Spot 9', labelId: 'L1' }],
@@ -848,7 +852,7 @@ check('the sheet lists the free car', /Free cars\s*CC33333/.test(clashSheet), cl
 
 // --- Cars not available: parked cars whose label has Show on printout ticked ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 5, date: '2026-09-18', qrOnSheet: false,
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: false }, { id: 'L2', name: 'No fuel card', color: '#1565c0', onSheet: false }],
   cars: [
     { id: 'c1', reg: 'PK11111', labelId: 'L1', note: 'Brakes' },   // parked, its label about to be ticked
@@ -903,7 +907,7 @@ await page.click('[data-act="tab"][data-tab="plan"]');
 // packed in the same round; in different rounds that is exactly what rounds
 // are for, and warning about it would train the leader to ignore the box.
 const spotPlan = (routes) => ({
-  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
+  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [], cars: [],
   positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Garage', multi: true }],
   routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
 });
@@ -957,7 +961,7 @@ check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 // A template is the route list as it stands minus the date. Saving is not
 // destructive; saving over a name already used is, so that one is snapshotted.
 const templatePlan = {
-  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
+  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [],
   cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
   positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Spot 2' }],
   routes: [
@@ -1071,7 +1075,7 @@ check('loading replaces every route field the template carries', await page.eval
 }));
 check('the day plan on screen is the template', (await page.locator('#tab-plan tbody tr').count()) === 3
   && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Weekday One');
-check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === '2026-09-18');
+check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === PLAN_DAY);
 check('and the question is answered rather than left on screen',
   (await page.locator('#notices .notice.warn').count()) === 0
   && (await page.locator('#notices .notice.info').innerText()).includes('Loaded the Monday template: 3 routes'));
@@ -1301,7 +1305,7 @@ const cutOff = (sel) => page.locator(sel).evaluate((box) => {
   return out;
 });
 const railFixture = (drivers, labels) => page.evaluate(([drivers, labels]) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false,
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false,
   labels: labels.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }], positions: [],
   routes: [{ id: 'r1', name: '1', driver: drivers[0], carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
@@ -1382,7 +1386,7 @@ same('a group is matched to its day the way people write them',
   [1, 1, 1, 1, 1, 2, 3, 6, 0, -1, -1, -1]);
 await page.setViewportSize({ width: 1600, height: 940 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
   drivers: ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
   driverGroups: [
     { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
@@ -1434,7 +1438,7 @@ same('more of the ways a day gets written are read as that day',
   await page.evaluate(() => ['Mondays.', "Monday's crew", 'Monday team', 'Monday-crew', 'Mandager', 'Søndager'].map((n) => groupWeekday(n))),
   [1, 1, 1, 1, 1, 0]);
 const weekFixture = (extra = {}) => page.evaluate((extra) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [],
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false, labels: [], cars: [], positions: [],
   routes: Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, name: String(i + 1), driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
   drivers: Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, name: `Driver ${String(i + 1).padStart(2, '0')}`, available: true, labelId: '', note: '' })),
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1', 'd2'] }],
@@ -1827,7 +1831,7 @@ check('the server is still alive after it', (await fetch(base).then((r) => r.sta
 // courtesy.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
@@ -1970,7 +1974,7 @@ await pcFull.close();
 const pickNames = ['Zara Moe', 'Bo Lind', 'Hana Sol', 'Ana Ruiz', 'Ida Ngo', 'Cai Mensah', 'Efe Yilmaz',
   'Dee Okafor', 'Gus Hald', 'Fia Berg', 'Jon Kvam', 'Kai Lund', 'Liv Dahl'];
 await page.evaluate((names) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-23', qrOnSheet: false,
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#c62828' }],
   cars: [['c1', 'EL10002'], ['c2', 'AB12345'], ['c3', 'CD55555'], ['c4', 'AA11111']]
     .map(([id, reg]) => ({ id, reg, labelId: id === 'c3' ? 'L1' : '', note: '' })),
@@ -2469,7 +2473,7 @@ check('twelve new backups leave every archive in place', rolled.backups === 12 &
 // written at all, and nothing else is touched to make room.
 const fullArchive = await un.evaluate(() => {
   localStorage.clear();
-  localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [], routes: [] }));
+  localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 4, date: nextWorkingDay(), cars: [], routes: [] }));
   localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Kept', json: '{"routes":[]}' }]));
   const big = (c, n) => c.repeat(n * 1024);
   localStorage.setItem('carcoord:archives', JSON.stringify([
@@ -2928,7 +2932,7 @@ await partial.ctx.close();
 const dataUp = await newContext();
 const dt = dataUp.pg;
 const beforePlan = upPlan;   // what the leader had before the update
-const sincePlan = JSON.stringify({ schemaVersion: 4, date: '2026-10-01', labels: [], positions: [], cars: [], drivers: [], driverGroups: [], templates: [],
+const sincePlan = JSON.stringify({ schemaVersion: 4, date: PLAN_DAY, labels: [], positions: [], cars: [], drivers: [], driverGroups: [], templates: [],
   routes: [{ id: 'rb', name: 'Changed since' }] });
 const tA = '2026-09-29T06:00:00.000Z', tR = '2026-09-28T06:00:00.000Z';
 const archivesAB = (to) => JSON.stringify([
@@ -3076,7 +3080,7 @@ const sameShape = (a, b) => {
   return JSON.stringify(sort(a)) === JSON.stringify(sort(b));
 };
 const v4Plan = {
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: true,
+  schemaVersion: 4, date: PLAN_DAY, qrOnSheet: true,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }, { id: 'L2', name: 'No fuel card', color: '#1565c0' }],
   cars: [{ id: 'c1', reg: 'VF11111', labelId: 'L1', note: 'Brakes' }, { id: 'c2', reg: 'VF22222', labelId: '', note: '' }],
   positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
@@ -3214,7 +3218,7 @@ pp.on('console', (m) => m.type() === 'error' && ppErrors.push(m.text()));
 pp.on('pageerror', (e) => ppErrors.push(String(e)));
 await pp.goto(base, { waitUntil: 'networkidle' });
 await pp.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
   cars: [{ id: 'c1', reg: 'PA11111', labelId: '' }, { id: 'c2', reg: 'PA22222', labelId: 'L1', note: 'Brakes' }, { id: 'c3', reg: 'PA33333', labelId: '' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
@@ -3489,7 +3493,7 @@ lc.on('console', (m) => m.type() === 'error' && lcErrors.push(m.text()));
 lc.on('pageerror', (e) => lcErrors.push(String(e)));
 await lc.goto(base, { waitUntil: 'networkidle' });
 await lc.evaluate((colours) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
   labels: colours.map((color, i) => ({ id: `L${i}`, name: `Label ${i}`, color, onSheet: false })),
   cars: colours.map((c, i) => ({ id: `c${i}`, reg: `LC1111${i}`, labelId: `L${i}`, note: '' })),
   positions: [], drivers: [], driverGroups: [], templates: [],
