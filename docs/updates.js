@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.14.1',
+    must: false,
+    title: 'Dates as dd/mm/yyyy, and a tidier template shelf',
+    changed: 'The Date box shows dd/mm/yyyy, with a calendar button. Day templates sit in weekday columns, as the week does. Right-clicking a route\'s driver or car offers its tag or status.',
+    affects: 'The Day plan: the Date box, Day templates and a route\'s right-click menu. Share codes and the printed sheet are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.14.0',
     must: false,
     title: 'Info buttons instead of the tour',
