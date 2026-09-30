@@ -184,7 +184,7 @@ check('a group holds the drivers ticked into it', (await group('Monday').locator
 await group('Monday').locator('[data-act="apply-group"]').click();
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('applying a group sets who is in today', (await crew()) === '2 in · 1 away', await crew());
-check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in today, 1 away'),
+check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in, 1 away'),
   await page.locator('#notices .notice').last().innerText());
 
 // The one that matters: applying a second group must take the first group's
@@ -1434,7 +1434,7 @@ check('the Drivers tab says where each group is on the day plan',
   (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon column'
   && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').getAttribute('title')) === 'This group is the Monday column under the route list'
   && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Mon"]') }).locator('.day-badge').innerText()) === 'Monday twice');
-same('and offers the days that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri', 'Sat', 'Sun']);
+same('and offers the weekdays that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri']);
 check("its hint names the column under the route list", (await page.locator('#tab-drivers .hint', { hasText: 'column under the route list' }).count()) === 1);
 await page.evaluate(() => { state.driverGroups.push({ id: 'gs', name: 'Lørdag', driverIds: ['d0'] }); render(); });
 check('a Saturday crew is badged as its own button in the Drivers panel',
@@ -4779,6 +4779,20 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
     && (await gainedRow.locator('.chip.on').innerText()) === 'OK');
   check('the receiving browser logs no console errors', !rxErrors.length, rxErrors.join(' | '));
   await rxCtx.close();
+}
+
+// The words on the tab match the row: no phrase the old day row used, and
+// no "today" (who is in belongs to the plan's day).
+{
+  await dvOpen(devPlan);
+  const words = await dv.evaluate(() => {
+    const tab = document.getElementById('tab-drivers');
+    return [tab.innerText, ...[...tab.querySelectorAll('[title]')].map((e) => e.title)].join('\n');
+  });
+  const stale = ['button beside the day plan', 'under the week', 'In today', 'in today'].filter((p) => words.includes(p));
+  check('the Drivers tab says nothing the old day row said, and no "in today"', !stale.length, stale.join(', '));
+  check("its hint says what a usual day does, and that a tag never sets anyone Away",
+    words.includes("Tick a driver's usual days to put them in that day's group under Day groups.") && words.includes('A tag or a note never sets anyone Away.'));
 }
 
 // --- the Drivers tab: done ---

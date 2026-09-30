@@ -1034,7 +1034,7 @@ function renderDrivers() {
     return `<tr class="${d.available ? '' : 'away'}">
       <td>${field('driver', d.id, 'name', d.name, 'style="width:200px"')}</td>
       <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
-      <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In today' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
+      <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
       <td>${usualDays(d, byDay)}</td>
       <td class="driver-tags">${labelChips('driver', d)}</td>
       <td>${field('driver', d.id, 'note', d.note, 'placeholder="Note (e.g. back Monday)"')}</td>
@@ -1042,13 +1042,13 @@ function renderDrivers() {
   }).join('');
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
-    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in today.</p>
+    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups. A tag or a note never sets anyone Away.</p>
     <div class="bar">
       <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
     ${state.drivers.length
-      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th>Usual days</th><th>Tag</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Route</th><th>In or away</th><th>Usual days</th><th>Tag</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
     ${driverGroups()}`;
 }
@@ -1058,7 +1058,9 @@ function renderDrivers() {
    shows; it says nothing about which route anyone drives. */
 function driverGroups() {
   const { byDay } = dayCrews();
-  const missing = WEEK.filter((day) => !byDay.has(day));
+  // Monday to Friday, as the usual days are; a weekend group is still made by
+  // typing its name.
+  const missing = WORK_WEEK.filter((day) => !byDay.has(day));
   const cards = state.driverGroups.map((g) => {
     const members = state.drivers.map((d) =>
       `<button class="chip member ${g.driverIds.includes(d.id) ? 'on' : ''}" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
@@ -1075,14 +1077,14 @@ function driverGroups() {
     return `<div class="group">
       <div class="bar">
         ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}${badge}
-        ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Set who is in today to this group"')}
+        ${actBtn('apply-group', 'driverGroup', g.id, 'Use for today', 'primary-ish', 'title="Make exactly this group the ones in; everyone else goes to away"')}
         ${moveDel('driverGroup', g.id)}
       </div>
       ${state.drivers.length ? `<div class="chips">${members}</div>` : '<p class="hint" style="margin:0">Add drivers above, then tick them into this group.</p>'}
     </div>`;
   }).join('');
   return `<h2 style="margin-top:22px">Day groups</h2>
-    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a weekday and it becomes that day's column under the route list; Saturday and Sunday crews get a button in the Drivers panel. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a weekday and it becomes that day's column under the route list; Saturday and Sunday crews get a button in the Drivers panel. "Use for today" makes exactly those drivers the ones in; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
       <button class="btn" data-act="add-group">+ Add group</button>
@@ -2382,7 +2384,7 @@ document.addEventListener('click', (e) => {
         break;
       }
       const inToday = state.drivers.filter((d) => d.available).length;
-      note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in today, ${state.drivers.length - inToday} away.`);
+      note('info', `${g.name.trim() || 'That group'}: ${inToday} driver${inToday === 1 ? '' : 's'} in, ${state.drivers.length - inToday} away.`);
       break;
     }
     // The offer's button, and the only way in. The snapshot is what makes it
