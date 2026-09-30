@@ -21,28 +21,32 @@ const Tour = (() => {
      edge. The words name what is on screen exactly as it reads there.
 
      ANY CHANGE THAT MOVES OR RENAMES A TARGET UPDATES THESE STEPS IN THE SAME
-     COMMIT. The ids they use (#addCarBar, #addDriverBar, #planBar, #fileCard,
-     #backupsCard) are there for the tour; scripts/tour.mjs fails as soon as a
+     COMMIT. The ids they use (#addCarBar, #addDriverBar, #planBar, #planTemplates,
+     #planMap, #fileCard, #backupsCard) are there for the tour; scripts/tour.mjs fails as soon as a
      selector stops matching exactly one thing that can be seen. */
   const STEPS = [
-    { tab: 'cars', target: '#addCarBar', title: 'Start with your cars',
-      text: 'Paste the whole fleet into this box at once, with spaces between registrations, and press + Add car. A Workshop or Out of service label keeps a car pickable, but the plan warns when it is used.' },
-    { tab: 'positions', target: '#tab-positions tbody tr:first-child', title: 'Your packing spots',
-      text: 'The app starts you with Spot 1 to 5 and a Garage; rename them to match your yard. Tick Many cars for a spot several routes share, like the Garage.' },
-    { tab: 'drivers', target: '#addDriverBar', title: 'Your drivers',
-      text: 'Type names separated by commas; In or Away on each row says who is working. Tick a driver\'s usual days to make each weekday\'s crew, which the week under the route list puts in with one click.' },
-    { tab: 'plan', target: '#tab-plan .plan-table tbody tr:first-child', title: 'Filling a route',
-      text: 'Each row is one line of the sheet on the pillar: pick the driver, car, position and round, or drag a name in from the Drivers and Cars lists. Mark prints the row pink, Gap leaves a blank line above it, a right-click on a row shows what else it can do, and Day templates under the routes keep a plan you use again.' },
-    { tab: 'plan', target: '#planBar', title: 'Warnings, never blocks',
-      text: 'Set the date here; it prints at the top of the sheet, and the line under it offers Set to tomorrow when the plan is not for the next working day. A car on two routes or a spot used twice in a round shows in an amber box above and in red on the parking map further down, but nothing is ever blocked.' },
+    { tab: 'cars', target: '#addCarBar', title: 'Cars',
+      text: 'Your fleet. Every registration here becomes a choice for a route on the day plan. A status label such as Workshop or Out of service marks a car that should stay home: it can still be picked, but the plan warns about it, and the printed sheet can list it under Cars not available.' },
+    { tab: 'positions', target: '#tab-positions tbody tr:first-child', title: 'Positions',
+      text: 'The packing spots where cars are loaded: Spot 1 to 5, the Gate and the Garage to begin with. Many cars marks a spot several routes can share. A spot can carry a status too, such as closed for resurfacing.' },
+    { tab: 'drivers', target: '#addDriverBar', title: 'Drivers',
+      text: 'The people who drive. In or Away says who is working today. Usual days (Mon to Fri) make up each weekday\'s crew. A driver tag, such as Sick, Holiday or Course, with a note, says why someone is off; driver tags are their own list, apart from the car labels.' },
+    { tab: 'plan', target: '#tab-plan .plan-table tbody tr:first-child', title: 'The day plan',
+      text: 'Each row is one line of the sheet on the pillar: the route, its driver, car, packing position and round. Mark prints the row pink and Gap leaves a blank line above it. Right-click a row, a driver or a car for everything else it can do, such as moving a route to a free spot.' },
+    { tab: 'plan', target: '#planBar', title: 'The date and the warnings',
+      text: 'The date prints at the top of the sheet and is normally the next working day; the line under it says when it is not. A car on two routes, a spot taken twice in one round, or a car marked Workshop is listed in amber above the plan. Nothing is ever blocked: sometimes it is meant.' },
+    { tab: 'plan', target: '#planTemplates', title: 'Templates and the week',
+      text: 'A day template is a saved copy of a whole plan, such as how Monday usually runs, ready to load again. Under the templates, the week shows each weekday\'s crew; Load makes that crew the ones in today.' },
+    { tab: 'plan', target: '#planMap .parking', title: 'The parking map',
+      text: 'The yard as it is laid out, with the routes packed at each spot, round by round. A spot taken twice in one round turns red. Positions the map does not know are listed under it.' },
     { tab: 'preview', target: '.topbar [data-act="print"]', title: 'Printing',
-      text: 'Print preview shows exactly what goes on paper. Print / save PDF opens the print dialog; pick Microsoft Print to PDF for a file.' },
+      text: 'Print preview shows exactly what goes on paper: the routes, the date with its weekday, and the free cars. Print / save PDF opens the print dialog; Microsoft Print to PDF makes a file.' },
     { tab: 'data', target: '#shareCard > h3:first-child', align: 'right', title: 'Sending the list to another PC',
-      text: 'Copy the day plan makes a code to paste into a chat or an email; nothing is uploaded. The other PC pastes it under Load a list someone sent you, presses Read the list, sees what it holds and presses Load it, and a backup is taken there first.' },
+      text: 'Copy the day plan turns the list into a code to paste into a chat or an email; nothing is uploaded, the code is the list. The other PC pastes it under Load a list someone sent you and sees what it holds before anything changes.' },
     { tab: 'data', target: '#fileCard > h3', align: 'right', title: 'Where your data lives',
-      text: 'New here: Choose save file… (OneDrive, a network drive, a stick) and your changes are also written there; after a restart this card asks you to Reconnect first. Already have a file, on a new PC, a cleared browser or the other version of the app: use Open an existing file…, because Choose writes the plan on screen over the file you pick. The web version and the Windows app keep separate lists.' },
-    { tab: 'data', target: '#backupsCard > h3', align: 'right', title: 'Backups',
-      text: 'A copy is taken the first time the app is opened each day and before anything is cleared or deleted; the last 12 are kept, so a lot of deleting pushes the older ones out. Restore saves what is on screen first; for a copy you want to keep, use Export a copy… on this tab.' },
+      text: 'Everything is kept in this browser, on this PC. A save file (OneDrive, a network drive, a stick) keeps a second copy of every change outside the browser. After a restart the card asks to Reconnect; on a new PC, Open an existing file brings the plan back.' },
+    { tab: 'data', target: '#backupsCard > h3', align: 'right', title: 'Backups and Archives',
+      text: 'A backup is taken the first time the app opens each day and before anything is cleared or deleted; the last 12 are kept, and Restore puts one back. Archives, above, keep an untouched copy from before every update. Export a copy is the way to keep one for good.' },
   ];
 
   let hooks = null;     // from app.js: showTab, tab, closeLayers, besideAnchor, setPref

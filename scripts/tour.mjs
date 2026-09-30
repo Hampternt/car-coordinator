@@ -196,7 +196,7 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
       return { step: i + 1, target: s.target, tabOk: tabs.includes(s.tab), seen: seen.length };
     }), TABS);
     const bad = found.filter((f) => !f.tabOk || f.seen !== 1);
-    check(`at ${width}, on ${what}, every step's selector matches exactly one thing on a real tab`, !bad.length && found.length === 9,
+    check(`at ${width}, on ${what}, every step's selector matches exactly one thing on a real tab`, !bad.length && found.length === 11,
       bad.map((f) => `step ${f.step} ${f.target}: ${f.tabOk ? '' : 'no such tab, '}${f.seen} seen`).join('; '));
     await ctx.close();
   }

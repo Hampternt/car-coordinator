@@ -1824,7 +1824,7 @@ function renderData() {
     </tr>`;
   }).join('');
 
-  // #fileCard and #backupsCard are the tour's steps 8 and 9 (tour.js).
+  // #fileCard and #backupsCard are the tour's steps 10 and 11 (tour.js).
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
     <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>

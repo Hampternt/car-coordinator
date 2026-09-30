@@ -126,3 +126,8 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - A Chrome run passed: EK 20877 set to Out of service from the flyout, and its chip lights; no errors.
     - **Drivers wait for the driver-tags pack:** their status list must be driver tags, not the shared labels. It is added to the rail and the Drivers tab when that pack is merged into `dev`.
   - **The version in a footer, on `dev`** (owner: "have version of the web app page be written in the footer somewhere"). A quiet footer, "Car Coordinator ⟨APP_VERSION⟩ · What's new", is drawn by app.js at start-up (so a cached older index.html shows it too) as the page's last element. What's new is `show-data`, and the footer is hidden in print. A Chrome check passed: the text reads "Car Coordinator 0.12.0 · What's new"; it sits under the sheet on Print preview; What's new opens the Data tab; it is hidden in print; no errors.
+  - **The tour explains rather than instructs, on `dev`** (owner): "dont have the tour be a do this type thing but more so explaining what various features does at least the important ones and the basics of it".
+    - Every step is rewritten to say what the thing is and what it does.
+    - Two steps are added: Templates and the week (`#planTemplates`), and The parking map (`#planMap .parking`). That makes 11 steps.
+    - The last step becomes Backups and Archives. The day plan step names right-click, and the Drivers step names driver tags.
+    - `tour.mjs` pins 11. `node scripts/tour.mjs` gives "all tour checks passed", with every selector matching one visible thing at 1680, 1280, 1024 and 900, on a first open and on the fixture.
