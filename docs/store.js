@@ -6,12 +6,21 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 5;
+  const SCHEMA = 6;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
   const str = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
   const bool = (v) => v === true;
+  const hex = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v : '#c62828');
+
+  // The driver tags every plan starts with: a new install's, and the ones the
+  // move-over to schema 6 adds. A new install's get fresh ids; see normalise
+  // for the move-over's.
+  const READY_TAGS = [['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']];
+  const readyTags = (id = uid) => READY_TAGS.map(([name, color]) => ({ id: id(name), name, color }));
+  // Two tag names are the same tag when they differ only in case and spacing.
+  const sameName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
 
   /* ---------- validation ----------
      localStorage can hold anything: a half-written blob, data from an older
@@ -36,7 +45,7 @@ const Store = (() => {
 
     const labels = arr(raw.labels, 'labels')
       .filter((l) => l && typeof l === 'object')
-      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: /^#[0-9a-f]{6}$/i.test(str(l.color)) ? l.color : '#c62828', onSheet: bool(l.onSheet) }));
+      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: hex(l.color), onSheet: bool(l.onSheet) }));
 
     const cars = arr(raw.cars, 'cars')
       .filter((c) => c && typeof c === 'object')
@@ -56,21 +65,52 @@ const Store = (() => {
         highlight: bool(r.highlight), gapBefore: bool(r.gapBefore),
       }));
 
+    // A driver's tags are a list of their own: Sick and Holiday mean nothing
+    // on a car, Workshop nothing on a driver. Up to schema 5 drivers wore the
+    // car labels, so a plan without the list gets the move-over, once: each
+    // label a driver wears becomes a driver tag of the same name and colour,
+    // in the Labels tab's order, then the ready-made tags whose names are not
+    // there yet. A plan that has the list is left as it is, so a ready-made
+    // tag its owner deleted stays deleted.
+    // The move-over's ids come from what each tag is made from, not uid():
+    // until the first change the plan is moved over again on every load, and
+    // the same saved text must read as the same plan each time (an import
+    // weighed against the screen, a backup against the one before it).
+    const moved = !Array.isArray(raw.driverTags);
+    const tagFor = new Map();   // label id -> the driver tag the move-over made from it
+    let driverTags;
+    if (moved) {
+      const worn = new Set((Array.isArray(raw.drivers) ? raw.drivers : [])
+        .filter((d) => d && typeof d === 'object').map((d) => str(d.labelId)).filter(Boolean));
+      // Once per label id: two labels sharing one would otherwise make two
+      // tags sharing one.
+      driverTags = labels.filter((l, i) => worn.has(l.id) && labels.findIndex((x) => x.id === l.id) === i).map((l) => {
+        const t = { id: `from-${l.id}`, name: l.name, color: l.color };
+        tagFor.set(l.id, t.id);
+        return t;
+      });
+      for (const t of readyTags((name) => `ready-${name.toLowerCase().replace(/\s+/g, '-')}`)) if (!driverTags.some((x) => sameName(x.name, t.name))) driverTags.push(t);
+    } else {
+      driverTags = raw.driverTags
+        .filter((t) => t && typeof t === 'object')
+        .map((t) => ({ id: str(t.id) || uid(), name: str(t.name, 'Tag'), color: hex(t.color) }));
+    }
+
     // The roster: who drives, kept apart from the day plan because it outlives
     // any one day. `available` is who is in today, so a driver saved before
     // that field existed counts as available rather than silently vanishing
     // from the rail.
     const drivers = arr(raw.drivers, 'drivers')
       .filter((d) => d && typeof d === 'object')
-      .map((d) => ({
-        id: str(d.id) || uid(), name: str(d.name),
-        available: d.available === undefined ? true : bool(d.available),
-        // A driver carries a status the same way a car does — on holiday, on
-        // a course, new and not yet cleared for the long routes. The labels
-        // are the same list, because a warehouse has one vocabulary for
-        // "why is this not usable today" and it should not fork by kind.
-        labelId: str(d.labelId), note: str(d.note),
-      }))
+      .map((d) => {
+        const driver = {
+          id: str(d.id) || uid(), name: str(d.name),
+          available: d.available === undefined ? true : bool(d.available),
+          tagId: moved ? tagFor.get(str(d.labelId)) || '' : str(d.tagId), note: str(d.note),
+        };
+        if (moved && str(d.labelId) && !driver.tagId && driver.name) repaired.push(`${driver.name} pointed at a missing label`);
+        return driver;
+      })
       .filter((d) => d.name);
 
     // A group is a named set of drivers ("Monday"), nothing more: it holds
@@ -110,7 +150,7 @@ const Store = (() => {
     const has = (list, id) => !id || list.some((x) => x.id === id);
     for (const c of cars) if (!has(labels, c.labelId)) { c.labelId = ''; repaired.push(`${c.reg} pointed at a missing label`); }
     for (const p of positions) if (!has(labels, p.labelId)) { p.labelId = ''; repaired.push(`${p.name} pointed at a missing label`); }
-    for (const d of drivers) if (!has(labels, d.labelId)) { d.labelId = ''; repaired.push(`${d.name} pointed at a missing label`); }
+    for (const d of drivers) if (!has(driverTags, d.tagId)) { d.tagId = ''; repaired.push(`${d.name} pointed at a missing driver tag`); }
     for (const r of routes) {
       if (!has(cars, r.carId)) { r.carId = ''; repaired.push(`route ${r.name} pointed at a missing car`); }
       if (!has(positions, r.positionId)) { r.positionId = ''; repaired.push(`route ${r.name} pointed at a missing position`); }
@@ -141,7 +181,7 @@ const Store = (() => {
     // dropping it would turn the QR back on in every older copy.
     const qrOnSheet = false;
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups, templates }, repaired, usable: true };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverTags, driverGroups, templates }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -172,6 +212,12 @@ const Store = (() => {
     // v5 is a label's Show on printout tick (onSheet). A build without the
     // tick meeting data that has it would drop it without a word, and
     // qrOnSheet is fixed off so older builds keep the QR off.
+    //
+    // v6 is the driver tags: driverTags, and a driver's tagId in place of its
+    // labelId. Loading needs no bump, since normalise moves any plan without
+    // the list over. The bump is for an older build meeting a v6 plan: it
+    // knows no tagId, so its drivers show no tag and lose it on its next save,
+    // and the v > SCHEMA branch above says so first.
     return normalise(raw, defaults);
   }
 
@@ -674,7 +720,7 @@ const Store = (() => {
      version adds is compared without anyone having to list it here. */
   function readable(s) {
     const names = new Map();
-    for (const [list, key] of [['cars', 'reg'], ['positions', 'name'], ['labels', 'name'], ['drivers', 'name']]) {
+    for (const [list, key] of [['cars', 'reg'], ['positions', 'name'], ['labels', 'name'], ['drivers', 'name'], ['driverTags', 'name']]) {
       for (const x of s[list] || []) names.set(x.id, `${list}:${x[key]}`);
     }
     return (v) => JSON.stringify(v, (k, x) => (k === 'id' ? undefined : typeof x === 'string' && names.has(x) ? names.get(x) : x));
@@ -696,7 +742,7 @@ const Store = (() => {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
+    SCHEMA, readyTags, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
     pref, setPref,
     save(state) { writeLocal(state); queueFileWrite(state); },
     // This browser only, leaving the file as it is until the next real change.

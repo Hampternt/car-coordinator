@@ -77,6 +77,16 @@ const leaked = await page.evaluate(() => {
 // becomes an element, so leaked.text is empty even when this fails.
 check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts with <${leaked.first}> ${leaked.text}`);
 
+// A first run's Labels tab: the car and position labels, then the five
+// ready-made driver tags in a section of their own.
+await page.click('[data-act="tab"][data-tab="labels"]');
+same("a first run's Labels tab has two sections", await page.locator('#tab-labels h2').allInnerTexts(), ['Car and position labels', 'Driver tags']);
+same('and the ready-made driver tags under Driver tags',
+  await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
+  ['Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
+same('with the car labels as before', await page.locator('#labelList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
+  ['Out of service', 'Unavailable', 'Workshop']);
+
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');
 await page.fill('#newCar', 'AA11111 BB22222 CC33333');
@@ -275,7 +285,7 @@ await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 5 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 6 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -1266,20 +1276,34 @@ await page.click('[data-act="add-tag"]');
 check('a tag made in the rail is applied to the row it was made on',
   (await page.locator('#tab-plan [data-panel="cars"] li').first().getAttribute('title')).includes('No fuel card'));
 await page.click('[data-act="tab"][data-tab="labels"]');
-check('and joins the labels every other list uses',
-  (await page.locator('#tab-labels tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)))
-    .includes('No fuel card'));
+check('and joins the car and position labels, not the driver tags',
+  (await page.locator('#labelList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value))).includes('No fuel card')
+  && !(await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value))).includes('No fuel card'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
-// Drivers carry a tag of their own now, which they did not before.
+// Drivers carry a tag of their own, from the driver tags: never a car label.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
-await page.locator('.tag-menu .tag-choice', { hasText: 'Workshop' }).click();
+same("a driver's tag menu offers the driver tags only",
+  await page.locator('.tag-menu .tag-choice').allInnerTexts().then((t) => t.map((x) => x.trim())),
+  ['No tag', 'Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
+await page.locator('.tag-menu .tag-choice', { hasText: 'Holiday' }).click();
 check('a driver can be tagged too',
-  (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Holiday'));
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('[data-act="tag"]').click();
+await page.fill('#newTagName', 'Nights');
+await page.click('[data-act="add-tag"]');
+check("a tag made in a driver's menu is a driver tag, and no label",
+  await page.evaluate(() => state.driverTags.some((t) => t.name === 'Nights') && !state.labels.some((l) => l.name === 'Nights')
+    && state.drivers[1].tagId === state.driverTags.find((t) => t.name === 'Nights').id));
+await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="tag"]').click();
+check("and a car's tag menu offers the labels only",
+  !(await page.locator('.tag-menu .tag-choice').allInnerTexts()).some((t) => /Holiday|Nights|Sick/.test(t))
+  && (await page.locator('.tag-menu .tag-choice', { hasText: 'Workshop' }).count()) === 1);
+await page.keyboard.press('Escape');
 
 await page.reload({ waitUntil: 'networkidle' });
 same('none of it disappears on a reload', await railNames('drivers'), orderNow);
-check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Holiday'));
 
 // A template says what is in it, not only what it is called.
 await page.fill('#newTemplate', 'Monday');
@@ -1310,14 +1334,17 @@ const cutOff = (sel, pg = page) => pg.locator(sel).evaluate((box) => {
   }
   return out;
 });
-const railFixture = (drivers, labels) => page.evaluate(([drivers, labels]) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false,
-  labels: labels.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+// The drivers' menu lists the driver tags, so the tags go there, and in the
+// labels too for the car.
+const railFixture = (drivers, tags) => page.evaluate(([drivers, tags]) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false,
+  labels: tags.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+  driverTags: tags.map((name, i) => ({ id: `T${i}`, name, color: '#1565c0' })),
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }], positions: [],
   routes: [{ id: 'r1', name: '1', driver: drivers[0], carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
-  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, tagId: '', note: '' })),
   driverGroups: [], templates: [],
-})), [drivers, labels]);
+})), [drivers, tags]);
 const tagButton = (n) => page.locator('#tab-plan [data-panel="drivers"] li').nth(n).locator('[data-act="tag"]');
 
 await page.setViewportSize({ width: 1600, height: 940 });
@@ -1514,12 +1541,14 @@ await page.evaluate(() => { notices = []; render(); });
 // column's Save sits where it was pressed and asks nothing anywhere else.
 await page.evaluate(() => { window.scrollTo(0, 0); });
 
-// A click into a box while a tag menu is open lands in the box.
+// A click into a box while a tag menu is open lands in the box. The click
+// is at the box's middle, so the caret can land inside the name rather than
+// after it, depending on how wide the rail draws: the X only has to arrive.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
 await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').click();
 await page.keyboard.type('X');
 check('a click into a text box with a tag menu open is not lost',
-  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).endsWith('X'));
+  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).includes('X'));
 
 // Templates: each keeps its own place in its list.
 await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
@@ -1572,7 +1601,7 @@ await page.keyboard.type('Nights');
 await page.keyboard.press('Enter');
 check('Enter in the new-tag box adds the tag and the menu stays shut, with the focus back on its button',
   await page.locator('#tagMenu').isHidden()
-  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].labelId === state.labels.find((l) => l.name === 'Nights')?.id));
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].tagId === state.driverTags.find((t) => t.name === 'Nights')?.id));
 
 await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
 check('an empty group in the chip line sends nobody away, and says why',
@@ -1912,7 +1941,7 @@ check('a colour out of a share code cannot smuggle CSS into the page',
 check('and nothing it sent is laid over the page',
   (await h.evaluate(() => [...document.querySelectorAll('*')].every((el) => getComputedStyle(el).position !== 'fixed'))));
 check('a crew and an untagged car and driver are part of that page',
-  await h.evaluate(() => document.querySelectorAll('#tab-drivers .chip').length >= 2 && state.cars.some((c) => !c.labelId) && state.drivers.some((d) => !d.labelId)));
+  await h.evaluate(() => document.querySelectorAll('#tab-drivers .chip').length >= 2 && state.cars.some((c) => !c.labelId) && state.drivers.some((d) => !d.tagId)));
 await h.click('[data-act="tab"][data-tab="plan"]');
 const untagged = await h.evaluate(() => state.cars.find((c) => !c.labelId).id);
 check("the rail's No tag dot writes no colour of its own",
@@ -3075,6 +3104,9 @@ const filledRestore = await dt.evaluate(() => {
   let chunks = 0;
   try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
   try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  // Then crumbs, down to one character: what a 1 KB grain leaves over can
+  // still hold a small plan's backup, and whether it does moved with the plan's size.
+  for (const n of [256, 64, 16, 4, 1]) { try { for (let i = 0; i < 100000; i++) localStorage.setItem(`crumb:${n}:${i}`, 'x'.repeat(n)); } catch { /* full */ } }
   return chunks;
 });
 await updRow.locator('[data-act="archive-restore"]').click();
@@ -3083,7 +3115,11 @@ check('with no room for the backup first, Restore changes nothing and says why',
   filledRestore > 0 && JSON.stringify(await routeNames()) === '["Changed since"]'
   && (await dt.locator('#notices').innerText()).includes(`Could not take a backup before "Restoring the copy from before ${V}"`),
   await dt.locator('#notices').innerText());
-await dt.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+await dt.evaluate(() => {
+  for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  for (const k of Object.keys(localStorage)) if (k.startsWith('crumb:')) localStorage.removeItem(k);
+});
 check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 0, dataUp.errs.join(' | '));
 await dataUp.ctx.close();
 
@@ -3138,7 +3174,8 @@ await dead.ctx.close();
 
 // --- schema v5: the Show on printout tick, and a QR fixed off ---
 // A v4 plan converts in memory. carcoord:v1 keeps its old text, byte for byte,
-// until the leader's first real change, and only then is written as v5.
+// until the leader's first real change, and only then is written, now as v6
+// (the driver tags' schema, so its move-over is part of the change too).
 const sameShape = (a, b) => {
   const sort = (v) => Array.isArray(v) ? v.map(sort)
     : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort(v[k])])) : v;
@@ -3168,22 +3205,35 @@ const beforeLoad = await s5.evaluate(() => localStorage.getItem('carcoord:v1'));
 await s5.reload({ waitUntil: 'networkidle' });
 const a5 = await loaded5();
 check('(a) a v4 save loads with every label unticked', a5.ticks.length === 2 && a5.ticks.every((t) => t === false), JSON.stringify(a5.ticks));
-check('(a) with the QR off and schemaVersion 5', a5.qrOnSheet === false && a5.schemaVersion === 5, JSON.stringify(a5).slice(0, 120));
+check('(a) with the QR off and schemaVersion 6', a5.qrOnSheet === false && a5.schemaVersion === 6, JSON.stringify(a5).slice(0, 120));
 check('(a) and no repair notice', a5.repairs === 0);
 check('(a) carcoord:v1 is byte for byte the v4 text across the load', beforeLoad === v4Text && a5.saved === v4Text);
 
-// (b) one real change writes v5: every label unticked, the QR off, the rest as it was.
+// (b) one real change writes v6: every label unticked, the QR off, Ana's
+// label moved over to a driver tag, the rest as it was.
 await s5.click('[data-act="tab"][data-tab="plan"]');
 await s5.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Bea');
 const b5 = JSON.parse(await s5.evaluate(() => localStorage.getItem('carcoord:v1')));
 const want5 = JSON.parse(v4Text);
-want5.schemaVersion = 5; want5.qrOnSheet = false;
+want5.schemaVersion = 6; want5.qrOnSheet = false;
 for (const l of want5.labels) l.onSheet = false;
 want5.routes[0].driver = 'Bea';
-check('(b) after one change the saved plan is v5, and otherwise the input plus that change', sameShape(b5, want5), JSON.stringify(b5).slice(0, 300));
+want5.driverTags = [['No fuel card', '#1565c0'], ['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']]
+  .map(([name, color]) => ({ name, color }));
+want5.drivers[0].tagId = 'No fuel card';
+delete want5.drivers[0].labelId;
+// Driver tags by name: their ids are the build's own business.
+const tagsByName = (plan) => {
+  const p = JSON.parse(JSON.stringify(plan));
+  const names = new Map(p.driverTags.map((t) => [t.id, t.name]));
+  for (const d of p.drivers) if (d.tagId) d.tagId = names.get(d.tagId);
+  p.driverTags = p.driverTags.map(({ name, color }) => ({ name, color }));
+  return p;
+};
+check('(b) after one change the saved plan is v6, and otherwise the input plus that change', sameShape(tagsByName(b5), want5), JSON.stringify(b5).slice(0, 300));
 
-// (c) a v5 save with a ticked label keeps the tick through a reload, an Export and a re-Import.
-const ticked = JSON.parse(JSON.stringify(want5));
+// (c) a saved plan with a ticked label keeps the tick through a reload, an Export and a re-Import.
+const ticked = JSON.parse(JSON.stringify(b5));
 ticked.labels[0].onSheet = true;
 await leaveAs(s5, { 'carcoord:v1': JSON.stringify(ticked) });
 await s5.reload({ waitUntil: 'networkidle' });
@@ -3191,7 +3241,7 @@ check('(c) a ticked label is still ticked after a reload', JSON.stringify((await
 await s5.click('[data-act="tab"][data-tab="data"]');
 const [dl5] = await Promise.all([s5.waitForEvent('download'), s5.click('[data-act="export"]')]);
 const out5 = JSON.parse(await readFile(await dl5.path(), 'utf8'));
-check('(c) the Export carries the tick', out5.schemaVersion === 5 && out5.labels[0].onSheet === true && out5.labels[1].onSheet === false && out5.qrOnSheet === false);
+check('(c) the Export carries the tick', out5.schemaVersion === 6 && out5.labels[0].onSheet === true && out5.labels[1].onSheet === false && out5.qrOnSheet === false);
 await s5.evaluate(() => localStorage.clear());
 await s5.reload({ waitUntil: 'networkidle' });
 await s5.click('[data-act="tab"][data-tab="data"]');
@@ -3213,7 +3263,7 @@ const at4 = await s5.evaluate(() => Store.backups().findIndex((b) => b.label ===
 await s5.click(`[data-act="restore"][data-id="${at4}"]`);
 await s5.click(`[data-act="restore"][data-id="${at4}"]`);
 const d5 = await loaded5();
-check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify(d5.ticks) === '[false,false]' && JSON.parse(d5.saved).schemaVersion === 5, `${at4} ${JSON.stringify(d5.ticks)}`);
+check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify(d5.ticks) === '[false,false]' && JSON.parse(d5.saved).schemaVersion === 6, `${at4} ${JSON.stringify(d5.ticks)}`);
 
 // (e) every way a label is made gives onSheet: false, written out.
 await s5.evaluate(() => localStorage.clear());
@@ -4204,9 +4254,9 @@ const layPlan = (extra = {}) => lp.evaluate((extra) => {
   localStorage.clear();
   localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
   localStorage.setItem('carcoord:v1', JSON.stringify({
-    schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false, labels: [], positions: [],
+    schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false, labels: [], driverTags: [], positions: [],
     cars: Array.from({ length: 17 }, (_, i) => ({ id: `c${i}`, reg: `LY${10000 + i}`, labelId: '', note: '' })),
-    drivers: Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, name: `Driver ${i + 1}`, available: true, labelId: '', note: '' })),
+    drivers: Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, name: `Driver ${i + 1}`, available: true, tagId: '', note: '' })),
     driverGroups: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [] }],
     routes: ['1', '2', '3'].map((name) => ({ id: `r${name}`, name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
     ...extra,
@@ -4231,7 +4281,7 @@ await lp.reload({ waitUntil: 'networkidle' });
 // The week fixture: five drivers, all in, and crews for Monday, Tuesday
 // (stored out of roster order, Bo in Monday too), a weekend crew, a second
 // Monday, Saturday, and an empty Sunday.
-const weekDrivers = ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' }));
+const weekDrivers = ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, tagId: '', note: '' }));
 const weekGroups = [
   { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
   { id: 'g2', name: 'Tuesdays', driverIds: ['d3', 'd1', 'd2'] },
@@ -4661,16 +4711,47 @@ const dvOpen = async (text) => {
   await dv.click('[data-act="tab"][data-tab="drivers"]');
 };
 const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[data-field="name"][value="${name}"]`) });
-// Deleting a label takes it off drivers too: no repair notice after a reload.
+// The move-over, on the dev fixture as a 0.2.4 browser holds it: each label
+// a driver wears becomes a driver tag of the same name and colour, then the
+// ready-made ones; the labels themselves are not touched.
+const tagOfDriver = (name) => dv.evaluate((n) => { const d = state.drivers.find((x) => x.name === n); return d && state.driverTags.find((t) => t.id === d.tagId)?.name; }, name);
 {
   await dvOpen(devPlan);
-  const randi = await dv.evaluate(() => state.drivers.find((d) => d.labelId === 'lbl-course')?.name);
+  same('the dev fixture moves over to these driver tags, in this order',
+    await dv.evaluate(() => state.driverTags.map((t) => `${t.name} ${t.color}`)),
+    ['Holiday #1565c0', 'Course #2e7d32', 'Sick #c62828', 'Vacation #00897b', 'Special situation #ef6c00']);
+  check('Petter keeps Holiday and Randi keeps Course', (await tagOfDriver('Petter')) === 'Holiday' && (await tagOfDriver('Randi')) === 'Course');
+  check('the other drivers wear no tag, and no driver keeps a labelId',
+    await dv.evaluate(() => state.drivers.filter((d) => d.tagId).length === 2 && state.drivers.every((d) => !('labelId' in d))));
+  same('the labels are as they were', await dv.evaluate(() => state.labels.map(({ id, name, color }) => ({ id, name, color }))), JSON.parse(devPlan).labels);
+  check('the move-over is not reported as a repair', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
+  check('and nothing is written until a change', (await dv.evaluate(() => localStorage.getItem('carcoord:v1'))) === devPlan);
+  // One change saves the moved-over plan; loading it again changes nothing.
+  await dvRow('Petter').locator('[data-field="note"]').fill('Back Monday');
+  const saved = await dv.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('a saved moved-over plan loads back exactly as it was saved',
+    JSON.parse(saved).schemaVersion === 6 && (await dv.evaluate(() => JSON.stringify(state))) === saved);
+  await dv.evaluate(() => { state.driverTags = state.driverTags.filter((t) => t.name !== 'Sick'); save(); });
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('and a ready-made tag deleted from it stays deleted', await dv.evaluate(() => !state.driverTags.some((t) => t.name === 'Sick')));
+}
+
+// Each delete sweeps its own kind only: the Course label leaves Randi's
+// Course driver tag alone, and the Course driver tag comes off Randi.
+{
+  await dvOpen(devPlan);
   await dv.click('[data-act="tab"][data-tab="labels"]');
-  const del = dv.locator('#tab-labels tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
+  const delLabel = dv.locator('#labelList tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
+  await delLabel.click();
+  await delLabel.click();
+  check('deleting a label leaves the driver wearing a driver tag of that name alone', (await tagOfDriver('Randi')) === 'Course');
+  const del = dv.locator('#driverTagList tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
   await del.click();
   await del.click();
-  check('deleting a label takes it off the driver wearing it', !!randi && await dv.evaluate((n) => state.drivers.find((d) => d.name === n).labelId === '', randi));
-  check('after the usual backup', (await dv.evaluate(() => Store.backups()[0].label)) === 'Deleting a label');
+  check('deleting a driver tag takes it off the driver wearing it', await dv.evaluate(() => state.drivers.find((d) => d.name === 'Randi').tagId === ''));
+  check('after the usual backup', (await dv.evaluate(() => Store.backups()[0].label)) === 'Deleting a driver tag');
+  check('and the cars keep their labels', await dv.evaluate(() => state.cars.filter((c) => c.labelId).length === 3));
   await dv.reload({ waitUntil: 'networkidle' });
   check('and no repair notice comes after a reload', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
 }
@@ -4737,7 +4818,7 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   const after = await dv.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')));
   const rest = (p) => JSON.stringify({ ...p, driverGroups: undefined, date: undefined });
   check('the saved plan differs only in its day groups', rest(after) === rest(before));
-  check('and every driver still has exactly its own five fields', after.drivers.every((d) => Object.keys(d).sort().join() === 'available,id,labelId,name,note'));
+  check('and every driver still has exactly its own five fields', after.drivers.every((d) => Object.keys(d).sort().join() === 'available,id,name,note,tagId'));
   await dv.focus(day('drv-camilla', 4));
   await dv.keyboard.press('Enter');
   check("a day pressed from the keyboard keeps the focus on the same driver's same day", await dv.evaluate(() =>
@@ -4767,7 +4848,7 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   await dvRow('Camilla').locator('.chip', { hasText: 'Holiday' }).click();
   await dvRow('Camilla').locator('[data-field="note"]').fill('Back Thursday');
   const cam = await dv.evaluate(() => state.drivers.find((d) => d.id === 'drv-camilla'));
-  check("a driver's tag and note are set, and they stay in", cam.labelId === 'lbl-holiday' && cam.note === 'Back Thursday' && cam.available === true, JSON.stringify(cam));
+  check("a driver's tag and note are set, and they stay in", (await tagOfDriver('Camilla')) === 'Holiday' && cam.note === 'Back Thursday' && cam.available === true, JSON.stringify(cam));
   check('and no other driver changes', (await others()) === othersWas);
   await dv.click('[data-act="tab"][data-tab="plan"]');
   check('the rail still has her in', await dv.evaluate(() => !document.querySelector('#tab-plan [data-panel="drivers"] .rail-row[data-id="drv-camilla"]').classList.contains('away')));
@@ -4777,8 +4858,9 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
     && (await dvRow('Camilla').locator('[data-field="note"]').inputValue()) === 'Back Thursday');
   await dv.click('[data-act="tab"][data-tab="data"]');
   const [dl] = await Promise.all([dv.waitForEvent('download'), dv.click('[data-act="export"]')]);
-  const exp = JSON.parse(await readFile(await dl.path(), 'utf8')).drivers.find((d) => d.id === 'drv-camilla');
-  check('and both go in Export', exp.labelId === 'lbl-holiday' && exp.note === 'Back Thursday');
+  const expPlan = JSON.parse(await readFile(await dl.path(), 'utf8'));
+  const exp = expPlan.drivers.find((d) => d.id === 'drv-camilla');
+  check('and both go in Export', expPlan.driverTags.find((t) => t.id === exp.tagId)?.name === 'Holiday' && exp.note === 'Back Thursday');
 }
 
 // Share codes carry no driver tags or notes. The receiving browser keeps its
@@ -4786,7 +4868,7 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
 {
   await dvOpen(devPlan);
   const code = await dv.evaluate(async () => {
-    state.drivers.forEach((d, i) => { d.note = `Note ${i}`; d.labelId = state.labels[0].id; });
+    state.drivers.forEach((d, i) => { d.note = `Note ${i}`; d.tagId = state.driverTags[0].id; });
     return Share.encode(state, 'all');
   });
   const rows = await dv.evaluate(async (c) => (await Share.decode(c)).share.dr.map((r) => r.length), code);
@@ -4806,8 +4888,11 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   await readCode(rx, code);
   await rx.check('#shareDlg input[value="all"]');
   await rx.click('[data-act="share-apply"]');
-  const got = await rx.evaluate(() => ({ cam: state.drivers.find((d) => d.name === 'Camilla'), gained: state.drivers.find((d) => d.name !== 'Camilla') }));
-  check('the receiving browser keeps its own tag and note on a driver it had', got.cam.labelId === 'RX' && got.cam.note === 'Kept here', JSON.stringify(got.cam));
+  const got = await rx.evaluate(() => {
+    const cam = state.drivers.find((d) => d.name === 'Camilla');
+    return { cam, camTag: state.driverTags.find((t) => t.id === cam.tagId)?.name, gained: state.drivers.find((d) => d.name !== 'Camilla') };
+  });
+  check('the receiving browser keeps its own tag and note on a driver it had', got.camTag === 'Here only' && got.cam.note === 'Kept here', JSON.stringify(got.cam));
   await rx.click('[data-act="tab"][data-tab="drivers"]');
   const gainedRow = rx.locator('#tab-drivers tbody tr', { has: rx.locator(`[data-field="name"][value="${got.gained.name}"]`) });
   check('and a driver it gains shows an empty note, with OK lit', (await gainedRow.locator('[data-field="note"]').inputValue()) === ''
@@ -4828,6 +4913,12 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   check('the Drivers tab says nothing the old day row said, and no "in today"', !stale.length, stale.join(', '));
   check("its hint says what a usual day does, and that a tag never sets anyone Away",
     words.includes("Tick a driver's usual days to put them in that day's group under Day groups.") && words.includes('A tag or a note never sets anyone Away.'));
+  check('and that its tags are the Driver tags, apart from the car labels, with Special situation\'s details in the note',
+    words.includes('The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.'));
+  await dv.click('[data-act="tab"][data-tab="labels"]');
+  const labelWords = await dv.locator('#tab-labels').innerText();
+  check('the Labels tab no longer says its labels are buttons on drivers',
+    !labelWords.includes('cars, positions and drivers') && labelWords.includes('Drivers have tags of their own, under Driver tags below.'));
 }
 
 // The wider row at the Windows app's smallest windows, on the dev fixture:
@@ -5411,7 +5502,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
 
   await cm.click('[data-act="tab"][data-tab="labels"]');
-  const course = cmTabRow('labels', 'name', 'Course');
+  const course = cm.locator('#labelList tbody tr', { has: cm.locator('[data-field="name"][value="Course"]') });
   await cmRight(course.locator('[data-act="down"]'));
   same('a Labels tab row opens the label\'s menu, the printout tick above its delete', await cmEntries(), ['Show on the printout', 'Delete label']);
   const labelCost = await cm.evaluate(() => {
@@ -5422,8 +5513,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
     const list = words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
     return total ? `${list} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
   });
-  same('its delete counts the tagged drivers with the cars and positions', await cmMenu.locator('[data-act="del"] small').textContent(), labelCost);
-  check('with a driver among them', /driver/.test(labelCost), labelCost);
+  same('its delete counts the cars and positions wearing it', await cmMenu.locator('[data-act="del"] small').textContent(), labelCost);
+  check('and never the drivers, who wear driver tags', !/driver/.test(await cmMenu.locator('[data-act="del"] small').textContent()));
   await cmMenu.locator('[data-act="toggle"]').click();
   check('Show on the printout ticks the label\'s printout box', await cm.evaluate(() => state.labels.find((l) => l.id === 'lbl-course').onSheet === true)
     && await course.locator('[data-field="onSheet"]').isChecked());
@@ -5432,6 +5523,18 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
   await cmRight(course.locator('[data-field="color"]'));
   check('and so does its colour box', (await cmNative()) === true && await cmMenu.isHidden());
+  // A driver tag's row: only its delete, counting the drivers wearing it.
+  const courseTag = cm.locator('#driverTagList tbody tr', { has: cm.locator('[data-field="name"][value="Course"]') });
+  await cmRight(courseTag.locator('[data-act="down"]'));
+  same('a Driver tags row opens the tag\'s menu: its delete only', await cmEntries(), ['Delete driver tag']);
+  const tagCost = await cm.evaluate(() => {
+    const id = state.driverTags.find((t) => t.name === 'Course').id;
+    const k = state.drivers.filter((d) => d.tagId === id).length;
+    return k ? `${k} driver${k === 1 ? '' : 's'} ${k === 1 ? 'has' : 'have'} it` : 'No driver has it';
+  });
+  same('its delete counts the drivers wearing it', await cmMenu.locator('[data-act="del"] small').textContent(), tagCost);
+  check('and there is one', tagCost === '1 driver has it', tagCost);
+  await cm.keyboard.press('Escape');
   await cm.click('[data-act="tab"][data-tab="plan"]');
 }
 

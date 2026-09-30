@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -155,6 +155,15 @@ function newRoute(name, gapBefore = false) {
   return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
 }
 
+/* Drivers wear tags from a list of their own from schema 6 on. A store.js
+   cached from before it can pair with this app.js after a deploy: its drivers
+   still wear the labels, and a driverTags list saved under its older schema
+   would stop the move-over from ever running. So until store.js is fresh too,
+   drivers keep the labels and no driverTags list is made. */
+function ownDriverTags() {
+  return Store.SCHEMA >= 6;
+}
+
 function defaults() {
   const pos = (name) => ({ id: uid(), name, multi: name === 'Garage', labelId: '', note: '' });
   return {
@@ -172,6 +181,7 @@ function defaults() {
     ],
     cars: [],
     drivers: [],
+    ...(ownDriverTags() ? { driverTags: Store.readyTags() } : {}),
     driverGroups: [],
     templates: [],
     routes: [
@@ -244,7 +254,7 @@ function moveDateOnOpen() {
   dateMove = { from, to, plan: state, saved: false, inFile: false };
 }
 
-const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups, template: state.templates })[kind];
+const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driverTag: state.driverTags, driver: state.drivers, driverGroup: state.driverGroups, template: state.templates })[kind];
 
 /* ---------- small html helpers ----------
    Ids reach attributes, and an imported JSON file can carry any string as an
@@ -259,16 +269,23 @@ const moveDel = (kind, id) =>
   actBtn('down', kind, id, '↓', '', 'title="Move down"') +
   actBtn('del', kind, id, armed === `del:${id}` ? 'Sure?' : '✕', armed === `del:${id}` ? 'armed' : '', 'title="Delete"');
 
+/* Where a thing's tag comes from, and the field that holds it: a driver
+   wears a driver tag, a car or a position a label. */
+const tagList = (kind) => (kind === 'driver' && ownDriverTags() ? state.driverTags || [] : state.labels);
+const tagField = (kind) => (kind === 'driver' && ownDriverTags() ? 'tagId' : 'labelId');
+const tagOf = (kind, item) => byId(tagList(kind), item[tagField(kind)]);
+
 function labelChips(kind, item) {
-  const ok = `<button class="chip ok ${item.labelId ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
-  return ok + state.labels.map((l) =>
-    `<button class="chip ${item.labelId === l.id ? 'on' : ''}" style="--c:${esc(colour(l.color))}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
+  const on = item[tagField(kind)];
+  const ok = `<button class="chip ok ${on ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
+  return ok + tagList(kind).map((l) =>
+    `<button class="chip ${on === l.id ? 'on' : ''}" style="--c:${esc(colour(l.color))}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(l.id)}">${esc(l.name)}</button>`
   ).join('');
 }
 
 /* Everything a driver is, minted in one place so the rail, the tab and an
    applied group cannot drift apart on what a new one starts as. */
-const newDriver = (name) => ({ id: uid(), name, available: true, labelId: '', note: '' });
+const newDriver = (name) => ({ id: uid(), name, available: true, [tagField('driver')]: '', note: '' });
 
 /* ---------- the clash rule ----------
    Two routes can share a packing spot as long as they are packed in different
@@ -499,7 +516,8 @@ let tagSettling = false;
 
 const tagOpenFor = (kind, id) => tagFor && tagFor.kind === kind && tagFor.id === id;
 
-/* The tag menu: every label, the way off, and a box to make a new one.
+/* The tag menu: every tag the thing can wear (a driver's from the driver
+   tags, a car's from the labels), the way off, and a box to make a new one.
 
    It used to be drawn inside the row it belongs to, and the rows sit in a
    list that scrolls — and a scrolling box cuts off whatever crosses its edge.
@@ -512,8 +530,8 @@ function tagMenu(kind, item) {
     `<button class="tag-choice ${on ? 'on' : ''}" data-act="set-tag" data-kind="${kind}" data-id="${esc(item.id)}" data-label="${esc(id)}">
       <span class="dot"${color ? ` style="--c:${esc(color)}"` : ''}></span>${esc(name)}</button>`;
   return `<div class="tag-choices">
-      ${choice('', 'No tag', null, !item.labelId)}
-      ${state.labels.map((l) => choice(l.id, labelName(l), colour(l.color), item.labelId === l.id)).join('')}
+      ${choice('', 'No tag', null, !item[tagField(kind)])}
+      ${tagList(kind).map((l) => choice(l.id, labelName(l), colour(l.color), item[tagField(kind)] === l.id)).join('')}
     </div>
     <div class="tag-new">
       <input id="newTagName" type="text" placeholder="New tag…" aria-label="Name for a new tag">
@@ -623,7 +641,8 @@ const CTX_ROWS = [
   ['drivers', '#tab-drivers tbody tr'],
   ['cars', '#tab-cars tbody tr'],
   ['positions', '#tab-positions tbody tr'],
-  ['labels', '#tab-labels tbody tr'],
+  ['labels', '#labelList tbody tr'],
+  ['driverTags', '#driverTagList tbody tr'],
   ['template', '#tab-plan .tpl'],
 ];
 // The inputs a right-click opens the row's menu on. A text box is one of them
@@ -818,17 +837,26 @@ function ctxPosition(p) {
 }
 
 /* A label: its printout tick, offered where the tab offers it, and its delete,
-   which takes it off every car, position and driver wearing it. */
+   which takes it off every car and position wearing it. Drivers wear driver
+   tags, so they are counted only under a store.js from before those. */
 function ctxLabel(l) {
   const l0 = { kind: 'label', id: l.id };
   const counts = [['car', state.cars], ['position', state.positions], ['driver', state.drivers]]
-    .map(([word, list]) => [word, list.filter((x) => x.labelId === l.id).length]).filter(([, n]) => n);
+    .filter(([word]) => tagList(word) === state.labels)
+    .map(([word, list]) => [word, list.filter((x) => x[tagField(word)] === l.id).length]).filter(([, n]) => n);
   const total = counts.reduce((sum, [, n]) => sum + n, 0);
   const cost = total ? `${andList(counts.map(([word, n]) => plural(n, word)))} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
   return [
     Store.SCHEMA >= 5 ? [{ act: 'toggle', data: { ...l0, field: 'onSheet' }, text: l.onSheet === true ? 'Stop showing on the printout' : 'Show on the printout' }] : [],
     [{ act: 'del', data: l0, arm: `del:${l.id}`, text: 'Delete label', cost }],
   ];
+}
+
+/* A driver tag: only its delete, which takes it off every driver wearing it. */
+function ctxDriverTag(t) {
+  const n = state.drivers.filter((d) => d.tagId === t.id).length;
+  return [[{ act: 'del', data: { kind: 'driverTag', id: t.id }, arm: `del:${t.id}`, text: 'Delete driver tag',
+    cost: n ? `${plural(n, 'driver')} ${n === 1 ? 'has' : 'have'} it` : 'No driver has it' }]];
 }
 
 /* A template card, its open contents included. Load only asks, as the name
@@ -856,6 +884,7 @@ const CTX_MENUS = {
   cars: (c, x) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars', x.view) }),
   positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
   labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),
+  driverTags: (t) => ({ name: labelName(t), groups: ctxDriverTag(t) }),
   template: (t) => ({ name: t.name.trim() || '-', groups: ctxTemplate(t) }),
 };
 
@@ -1019,7 +1048,7 @@ function ctxHit(t) {
 /* One row of the rail: grip, status dot, the name as an editable box, where
    it is today, and the two buttons that act on it. */
 function railRow(kind, item, label, where, extra = '', cls = '') {
-  const lab = byId(state.labels, item.labelId);
+  const lab = tagOf(kind, item);
   const field = kind === 'car' ? 'reg' : 'name';
   const title = [item[field], lab && labelName(lab), item.note].filter(Boolean).join(' · ');
   return `<li class="rail-row ${cls} ${armed === `del:${item.id}` ? 'arming' : ''}" draggable="true"
@@ -1493,7 +1522,7 @@ function renderDrivers() {
   // #addDriverBar is the tour's step 3 (tour.js).
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
-    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups. A tag or a note never sets anyone Away.</p>
+    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups.${ownDriverTags() ? ' The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.' : ''} A tag or a note never sets anyone Away.</p>
     <div class="bar" id="addDriverBar">
       <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
       <button class="btn" data-act="add-driver">+ Add driver</button>
@@ -1600,14 +1629,35 @@ function renderLabels() {
     ${ticks ? `<td><label><input type="checkbox" data-kind="label" data-id="${esc(l.id)}" data-field="onSheet" ${l.onSheet === true ? 'checked' : ''}> Show on printout</label></td>` : ''}
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
-    <h2>Status labels</h2>
-    <p class="hint">These become the one-click buttons on cars, positions and drivers. Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
+    <h2>Car and position labels</h2>
+    <p class="hint">${ownDriverTags() ? 'These become the one-click buttons on cars and positions. Drivers have tags of their own, under Driver tags below.' : 'These become the one-click buttons on cars, positions and drivers.'} Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
     <div class="bar">
       <input id="newLabel" type="text" placeholder="Label name, e.g. No fuel card">
       <input id="newLabelColor" type="color" value="#1565c0">
       <button class="btn" data-act="add-label">+ Add label</button>
     </div>
-    <table class="grid"><thead><tr><th>Name</th><th>Colour</th>${ticks ? '<th>Printout</th>' : ''}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="grid" id="labelList"><thead><tr><th>Name</th><th>Colour</th>${ticks ? '<th>Printout</th>' : ''}<th></th></tr></thead><tbody>${rows}</tbody></table>
+    ${ownDriverTags() ? driverTagSection() : ''}`;
+}
+
+/* The driver tags: the Drivers tab's one-click buttons and the Drivers
+   panel's tag menu, and nothing else. They are not printed and never travel
+   in a share code, so there is no Printout column. */
+function driverTagSection() {
+  const rows = state.driverTags.map((t) => `<tr>
+    <td>${field('driverTag', t.id, 'name', t.name)}</td>
+    <td><input type="color" data-kind="driverTag" data-id="${esc(t.id)}" data-field="color" value="${esc(colour(t.color))}"></td>
+    <td class="btns">${moveDel('driverTag', t.id)}</td></tr>`).join('');
+  return `<h2 style="margin-top:22px">Driver tags</h2>
+    <p class="hint">These become the one-click buttons on the Drivers tab and the choices in a driver's tag menu. A tag never sets anyone Away, and it is never on the printout or in a share code.</p>
+    <div class="bar">
+      <input id="newDriverTag" type="text" placeholder="Tag name, e.g. Parental leave">
+      <input id="newDriverTagColor" type="color" value="#1565c0">
+      <button class="btn" data-act="add-driver-tag">+ Add driver tag</button>
+    </div>
+    ${rows
+      ? `<table class="grid" id="driverTagList"><thead><tr><th>Name</th><th>Colour</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="empty">No driver tags. Add one above to mark a driver as off sick, on holiday or on a course.</p>'}`;
 }
 
 /* The Colours switch, in the This browser card. Which button is pressed is
@@ -2673,9 +2723,9 @@ document.addEventListener('click', (e) => {
     case 'up': if (i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]]; break;
     case 'down': if (i >= 0 && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]]; break;
     case 'toggle': list[i][b.dataset.field] = !list[i][b.dataset.field]; break;
-    case 'setLabel': list[i].labelId = b.dataset.label; break;
-    // The rail's quick tag: the same labelId the Cars and Positions tabs set
-    // with their chips, reached without leaving the plan.
+    case 'setLabel': list[i][tagField(kind)] = b.dataset.label; break;
+    // The rail's quick tag: the same tag the Drivers, Cars and Positions tabs
+    // set with their chips, reached without leaving the plan.
     case 'tag':
       tagFor = tagOpenFor(kind, id) ? null : { kind, id };
       render();
@@ -2687,32 +2737,41 @@ document.addEventListener('click', (e) => {
       if (tagFor) ($('#tagMenu .tag-choice.on') || $('#tagMenu .tag-choice'))?.focus();
       return;
     case 'set-tag':
-      list[i].labelId = b.dataset.label;
+      list[i][tagField(kind)] = b.dataset.label;
       tagFor = null;
       if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
       break;
     case 'add-tag': {
       const name = $('#newTagName').value.trim();
       if (!name) { $('#newTagName').focus(); return; }
-      const label = { id: uid(), name, color: $('#newTagColor').value, onSheet: false };
-      state.labels.push(label);
-      list[i].labelId = label.id;
+      // A driver's new tag is a driver tag; a car's is a label, onSheet and all.
+      const driverTag = tagList(kind) !== state.labels;
+      const made = { id: uid(), name, color: $('#newTagColor').value, ...(driverTag ? {} : { onSheet: false }) };
+      tagList(kind).push(made);
+      list[i][tagField(kind)] = made.id;
       tagFor = null;
       if (e.detail === 0) refocus = `#tab-plan [data-act="tag"][data-kind="${kind}"][data-id="${CSS.escape(id)}"]`;
-      note('info', `Tagged ${list[i].reg || list[i].name} ${name}. The tag is on the Labels tab now, for everything else.`);
+      note('info', driverTag
+        ? `Tagged ${list[i].name} ${name}. The tag is under Driver tags on the Labels tab now, for every driver.`
+        : `Tagged ${list[i].reg || list[i].name} ${name}. The label is on the Labels tab now, for every car and position.`);
       break;
     }
     case 'del':
       if (!confirmTwice(`del:${id}`, e.detail === 0)) return;
       // The backup list shows this label as written, so say it the way it
       // reads on screen rather than the way the code spells it.
-      Store.snapshot(state, `Deleting a ${kind === 'driverGroup' ? 'day group' : kind}`);
+      Store.snapshot(state, `Deleting a ${{ driverGroup: 'day group', driverTag: 'driver tag' }[kind] || kind}`);
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
-      // Drivers too: a tag left pointing at nothing lit no chip, then came
-      // back as a repair notice on the next load.
-      if (kind === 'label') [...state.cars, ...state.positions, ...state.drivers].forEach((x) => { if (x.labelId === id) x.labelId = ''; });
+      // Whatever wore it goes back to no tag, and only its own kind: a label
+      // comes off cars and positions, a driver tag off drivers. Left pointing
+      // at nothing, it lit no chip, then came back as a repair notice.
+      if (kind === 'label' || kind === 'driverTag') {
+        for (const [k, items] of [['car', state.cars], ['position', state.positions], ['driver', state.drivers]]) {
+          if (tagList(k) === list) items.forEach((x) => { if (x[tagField(k)] === id) x[tagField(k)] = ''; });
+        }
+      }
       // A deleted driver leaves every group, but the day plan keeps the name
       // typed into it: that text is the plan, not a reference to the roster.
       if (kind === 'driver') state.driverGroups.forEach((g) => { g.driverIds = g.driverIds.filter((x) => x !== id); });
@@ -2821,9 +2880,7 @@ document.addEventListener('click', (e) => {
       // Commas and newlines only: a driver's name has spaces in it, unlike a
       // registration, so splitting on whitespace would make two of everyone.
       if (!addFromInput(b.dataset.from || '#newDriver', (v) => v.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).forEach((name) => {
-        if (!state.drivers.some((d) => fold(d.name) === fold(name))) {
-          state.drivers.push({ id: uid(), name, available: true, labelId: '', note: '' });
-        }
+        if (!state.drivers.some((d) => fold(d.name) === fold(name))) state.drivers.push(newDriver(name));
       }))) return;
       break;
     case 'add-group':
@@ -2986,6 +3043,9 @@ document.addEventListener('click', (e) => {
     case 'add-label':
       if (!addFromInput('#newLabel', (name) => state.labels.push({ id: uid(), name, color: $('#newLabelColor').value, onSheet: false }))) return;
       break;
+    case 'add-driver-tag':
+      if (!addFromInput('#newDriverTag', (name) => state.driverTags.push({ id: uid(), name, color: $('#newDriverTagColor').value }))) return;
+      break;
     default: return;
   }
   if (JSON.stringify(state) !== before) save();
@@ -3145,7 +3205,7 @@ function pickChoices(r, at) {
     .filter((d) => !want || fold(d.name).includes(want))
     .sort((a, b) => collate(a.name, b.name))
     .map((d) => {
-      const lab = byId(state.labels, d.labelId);
+      const lab = tagOf('driver', d);
       const others = elsewhere(by[fold(d.name)], at);
       const on = !!fold(r.driver) && fold(d.name) === fold(r.driver);
       const notes = [!d.available && 'Away', lab && esc(labelName(lab)), others.length && `Route ${routeNames(others)}`].filter(Boolean);
@@ -3559,7 +3619,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag' };
   // The rail's own boxes press their own buttons, not the tabs' — they add to
   // the same lists, but from a different box.
   const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];

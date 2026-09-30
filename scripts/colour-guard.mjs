@@ -8,7 +8,8 @@
 // page the same way in any theme.
 //
 // docs/*.js: the app writes a colour inline only where it is data, a label's
-// colour, and the few defaults a new label starts from. Anything else is
+// or a driver tag's colour, the few defaults a new label starts from, and the
+// ready-made driver tags. Anything else is
 // listed here or fails.
 //
 // The printed sheet: no dark block may name a paper token or the sheet's
@@ -22,7 +23,7 @@ const DOCS = fileURLToPath(new URL('../docs/', import.meta.url));
 // (file, literal) pairs the shipped scripts may hold.
 export const JS_ALLOWED = {
   'app.js': ['#c62828', '#ef6c00', '#6a1b9a', '#1565c0'],
-  'store.js': ['#c62828'],
+  'store.js': ['#c62828', '#1565c0', '#00897b', '#6a1b9a', '#ef6c00'],
   'share.js': ['#c62828'],
 };
 
