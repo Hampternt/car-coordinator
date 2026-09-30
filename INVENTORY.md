@@ -20,6 +20,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - 🚧 **Parking map** — a plain drawing of the yard under the week: Spot 1 to Spot 5 and the Gate, each with its routes by round, red when taken twice in one round; other positions listed under it. `manifests/2026-09-29-parking-map.md`.
 - 🚧 **Day plan layout** — day templates straight under the route list, then the week: a column per weekday listing that day's crew, with Load above each, replacing the Mon–Sun buttons. `manifests/2026-09-29-day-plan-layout.md`.
 - 🚧 **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for. `manifests/2026-09-29-plan-for-tomorrow.md`.
+- 🚧 **Right-click menus** — right-click a route, a rail row, a row of the Drivers, Cars, Positions or Labels tab, or a template card for a short menu of what can be done to that one thing; text boxes keep the browser's own Cut, Copy and Paste. `manifests/2026-09-28-context-menus.md`.
 
 ## Fleet
 - ✅ **Round split out of old spot names** — for lists made when the round was written into the spot's name (`Spot 1/1`). Offered on load, never applied: it states every rename and merge line by line, says how many routes gain a round and how many keep the one already typed, names any setting the merging spots disagree about, and takes a backup before it touches anything. Dismissing changes nothing and it asks again next time.
@@ -89,5 +90,4 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
-- 💭 **Right-click menus** across the page.
 - 💭 **A first-use tour** for a new user.

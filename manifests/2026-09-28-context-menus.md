@@ -1,6 +1,6 @@
 # Pack: Right-click menus: the actions for the thing under the pointer
 
-**Status:** 💭 planned — item list awaiting the owner's approval; nothing built
+**Status:** 🚧 building, since 2026-09-30, as part 8 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and the owner question approved (item 5 stays).
 **Date:** 2026-09-28
 **Branch:** cut when execution starts: `context-menus`, from `dev`, after pack 7 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -397,3 +397,5 @@ The same item gets the same entries, in the same order, on every surface. A surf
   - Android: a long-press on a row opens the menu.
 
 ## Ledger
+
+- **2026-09-30, start (combined pack, part 8).** Built on `review-round`, base e6f7656 (0.9.0), so this part cuts 0.10.0. Every item is gated by `check.sh` alone under the owner's batched rule; the smoke cases are written with each item and run once, at the end of part 9, with the screens and the upgrade check from v0.2.4. **Re-read against what parts 2-7 shipped:** the line anchors above are stale and are not relied on. The rail and Drivers-tab driver entries read "Set away" / "Bring back in" (part 4's rule; the Drivers tab button reads In/Away since part 7), so item 7's done-condition is read with "Set away". Part 7 shows the driver's tag as chips on the Drivers tab, so that menu has no Tag… (as planned). Part 2's print tick is the Labels row's `onSheet` box, offered only when `Store.SCHEMA >= 5` as the row does; its entry goes above Delete label. Templates sit under the route list (`#planTemplates`, part 5); the card is still `#tab-plan .tpl`. The label-delete and Use-for-today issues listed under Found in passing are already fixed (parts 7 and 5). Day group cards, the week and the parking map stay without a menu.
