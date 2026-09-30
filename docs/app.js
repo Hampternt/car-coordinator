@@ -990,9 +990,14 @@ function driverGroups() {
       `<button class="chip member ${g.driverIds.includes(d.id) ? 'on' : ''}" data-act="group-member" data-kind="driverGroup" data-id="${esc(g.id)}" data-driver="${esc(d.id)}">${esc(d.name)}</button>`).join('');
     const day = groupWeekday(g.name);
     const used = day >= 0 && byDay.get(day) === g;
+    // Where the group shows on the day plan: a weekday's first crew is its
+    // column under the route list; a weekend crew, or a second crew for a
+    // day, is a button in the Drivers panel.
+    const short = day >= 0 ? WEEKDAYS[day].slice(0, 3) : '';
     const badge = day < 0 ? ''
-      : used ? `<span class="day-badge" title="This group is the ${WEEKDAYS[day].slice(0, 3)} button beside the day plan">${WEEKDAYS[day].slice(0, 3)} button</span>`
-        : `<span class="day-badge twice" title="Another group is ${WEEKDAYS[day]} already, so this one has a button of its own under the week">${WEEKDAYS[day]} twice</span>`;
+      : used && WORK_WEEK.includes(day) ? `<span class="day-badge" title="This group is the ${WEEKDAYS[day]} column under the route list">${short} column</span>`
+        : used ? `<span class="day-badge" title="${WEEKDAYS[day]} has no column; this group has its own button in the Drivers panel beside the day plan">${short} \u00b7 own button</span>`
+          : `<span class="day-badge twice" title="Another group is ${WEEKDAYS[day]} already, so this one has its own button in the Drivers panel beside the day plan">${WEEKDAYS[day]} twice</span>`;
     return `<div class="group">
       <div class="bar">
         ${field('driverGroup', g.id, 'name', g.name, 'style="width:180px"')}${badge}
@@ -1003,7 +1008,7 @@ function driverGroups() {
     </div>`;
   }).join('');
   return `<h2 style="margin-top:22px">Day groups</h2>
-    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a day of the week and it becomes that day's button beside the day plan. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
+    <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a weekday and it becomes that day's column under the route list; Saturday and Sunday crews get a button in the Drivers panel. "Use for today" makes exactly those drivers the ones in today; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
       <button class="btn" data-act="add-group">+ Add group</button>

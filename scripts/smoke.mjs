@@ -1430,10 +1430,16 @@ check("Wednesday's column saves who is in as Wednesday's crew",
 same('which is its column from then on, lit because it is in force', await cols(), ['Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-']);
 
 await page.click('[data-act="tab"][data-tab="drivers"]');
-check('the Drivers tab says which button each group is',
-  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon button'
+check('the Drivers tab says where each group is on the day plan',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon column'
+  && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').getAttribute('title')) === 'This group is the Monday column under the route list'
   && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Mon"]') }).locator('.day-badge').innerText()) === 'Monday twice');
 same('and offers the days that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri', 'Sat', 'Sun']);
+check("its hint names the column under the route list", (await page.locator('#tab-drivers .hint', { hasText: 'column under the route list' }).count()) === 1);
+await page.evaluate(() => { state.driverGroups.push({ id: 'gs', name: 'Lørdag', driverIds: ['d0'] }); render(); });
+check('a Saturday crew is badged as its own button in the Drivers panel',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Lørdag"]') }).locator('.day-badge').innerText()) === 'Sat · own button');
+await page.evaluate(() => { state.driverGroups = state.driverGroups.filter((g) => g.id !== 'gs'); render(); });
 await page.locator('#tab-drivers .day-add .btn', { hasText: 'Fri' }).click();
 check('one click makes that day its group', await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Friday' && g.driverIds.length === 0)));
 await page.click('[data-act="tab"][data-tab="plan"]');
@@ -1520,7 +1526,7 @@ check('a second template opens at its own top, not where the first was left', (a
 await page.click('[data-act="tab"][data-tab="drivers"]');
 await page.locator('#tab-drivers .group [data-field="name"]').first().fill('Thursday');
 check('renaming a group into a day changes its badge there and then',
-  (await page.locator('#tab-drivers .group').first().locator('.day-badge').innerText()) === 'Thu button');
+  (await page.locator('#tab-drivers .group').first().locator('.day-badge').innerText()) === 'Thu column');
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 // On a stacked screen, a tag menu whose row scrolls up under the top bar goes with it.
