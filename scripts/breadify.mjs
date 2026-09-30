@@ -1325,7 +1325,8 @@ const bySequence = await page.evaluate(() => ({
 same(
   'a customer at one street, placed and unplaced, is two stops with the flag between',
   [bySequence.placedAndNot.stops, bySequence.placedAndNot.body],
-  [['Kafé C:31', 'Kafé C:32'], ['Kafé C', 'flag', 'Kafé C', 'bf-total']],
+  // The page's dead space below the total gets its Notes (the owner, 2026-09-30).
+  [['Kafé C:31', 'Kafé C:32'], ['Kafé C', 'flag', 'Kafé C', 'bf-total', 'bf-notes']],
 );
 same('and at two positions, two stops', bySequence.twoPlaces.stops, ['Kafé D:33', 'Kafé D:34']);
 
@@ -1726,13 +1727,16 @@ const freezer = await page.evaluate(() => {
 });
 
 // docs/freezer-list.md says "The sample freezer day prints as 15 routes over
-// 21 sheets", and it did until a customer's orders at one stop shared a block
-// (the owner, 2026-09-29). Route 13's Customer 012 has eight orders there:
-// as one block with eight department sub-headings it is shorter than eight
-// blocks with eight headings, and the route now fits one sheet instead of two.
+// 21 sheets". Sharing a customer's orders at one stop in one block (the owner,
+// 2026-09-29) took it to 20: route 13's Customer 012, eight orders there, fit
+// one sheet as one block. The Delivered box (the owner, 2026-09-30) takes
+// 8.2 mm from every check line, so more of that block's shared lines wrap
+// their names (9 lines instead of 4); the block grows from 172.9 mm to
+// 187.1 mm, no longer fits beside route 13's other stops, and moves whole to
+// a second sheet. 21 again — the spec's figure, for a different reason.
 check(
-  'the freezer day is 15 routes over 20 sheets',
-  freezer.routes === 15 && freezer.count === 20 && freezer.route13 === 1,
+  'the freezer day is 15 routes over 21 sheets',
+  freezer.routes === 15 && freezer.count === 21 && freezer.route13 === 2,
   `${freezer.routes} routes over ${freezer.count} sheets, route 13 on ${freezer.route13}`,
 );
 // F7: the page note says `check list`, so the two sheets cannot be mistaken
