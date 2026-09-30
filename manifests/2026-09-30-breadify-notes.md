@@ -1,6 +1,6 @@
 # Pack: Breadify — room to write
 
-**Status:** 🚧 building on `breadify-notes`, cut from `dev` at 86efb1a (2026-09-30). Merged into `dev` by the coordinator; no push, merge or PR from here.
+**Status:** 🚧 all three items committed on `breadify-notes` (cut from `dev` at 86efb1a), test:breadify green (2026-09-30). Waiting on the owner's look and the coordinator's merge. Merged into `dev` by the coordinator; no push, merge or PR from here.
 **Date:** 2026-09-30
 
 ## The owner's words
@@ -34,3 +34,5 @@ Web version only, like the Breadify-blocks pack. Each of these departs from the 
   - **The R14 hand-made route's page body** now ends in `bf-notes`, the page's dead space below the total. Expected behaviour; the pin gained it.
   - **Not changed:** README.md says the freezer sample prints on 20 sheets, which is now wrong. It is outside the files this job may touch; flagged for the coordinator.
   - Gate: check.sh OK.
+- 2026-09-30 · **test:breadify green:** `CHROMIUM_PATH=/usr/bin/google-chrome npm run test:breadify` exit 0, `all passed` (360 ok), on system Chrome. Run once at the end (it failed on the two pins above first; they were fixed, and the one run repeated). Bread 28 sheets (pinned); freezer **21** (was 20; re-pinned, reason above). Bread day: 352 dotted fields, 345 with room to show; 19 pages with Notes, 9 without. Freezer: 231 lines all C, D … M; 19 pages with Notes, 2 without.
+- 2026-09-30 · **Look files** in the session scratchpad `breadify-look/`: `bread-dotted-fields-route11-customer017.png`, `freezer-c-d-m-route4-customer017.png`, `page-end-with-notes-route8.png` (cropped from the PDF's route 8 page; the screen preview has the app's action bar over it), `bread-sample-day.pdf` (28 pages), `freezer-sample-day.pdf` (21 pages).
