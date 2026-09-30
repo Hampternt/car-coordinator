@@ -121,3 +121,7 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - The smoke check reads whichever form it gets.
     - A targeted Chrome run passed: at 1400 the flyout opens at the menu's right edge level with its entry, Workshop is set and both close, and the keys go in and out; at 390, hover does nothing and a click gives the in-place list; no errors.
   - **The submenu's arrow at the right edge, and opening sooner, on `dev`** (owner: "arrow closer to the right side … snappier … so a user could accidentally discover it"). The arrow is its own span, pushed to the entry's right edge, and the entry says `aria-haspopup="menu"`; its text still reads "Status: OK ›", so the smoke checks are unchanged. Hover now opens it after 60 ms instead of 150; the close still waits 300 ms. The Chrome run passed at 1400 and 390 as before, and a screenshot shows the arrow at the right edge with the flyout beside it.
+  - **The status submenu on Cars tab rows, on `dev`** (owner: "add the status submenu to cars and drivers on their tabs too").
+    - A Cars tab row's menu now starts with "Status: ⟨current⟩ ›", the same list as the rail car's, without Tag… (the tag menu opens only in the rail). One smoke pin is updated.
+    - A Chrome run passed: EK 20877 set to Out of service from the flyout, and its chip lights; no errors.
+    - **Drivers wait for the driver-tags pack:** their status list must be driver tags, not the shared labels. It is added to the rail and the Drivers tab when that pack is merged into `dev`.

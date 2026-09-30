@@ -788,8 +788,10 @@ function ctxCar(c, surface, view) {
   const rail = surface === 'rail';
   // In the rail, its status in one click (the Cars tab's chips, setLabel),
   // with the one it has ticked; Tag… is still there for a new tag.
-  if (rail && view === 'status') return [[ctxBack], ctxStatusList('car', c)];
-  const status = rail ? [ctxStatusOpen(c), { act: 'tag', data: c0, text: 'Tag\u2026' }] : [];
+  if (view === 'status') return [[ctxBack], ctxStatusList('car', c)];
+  // Its status, in the rail and on the Cars tab alike; Tag… (a new tag) only
+  // where the tag menu opens, in the rail.
+  const status = rail ? [ctxStatusOpen(c), { act: 'tag', data: c0, text: 'Tag\u2026' }] : [ctxStatusOpen(c)];
   return [
     status,
     // Its note can only be changed on the Cars tab.
@@ -851,7 +853,7 @@ const CTX_MENUS = {
     ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail', c.view) }
     : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
   drivers: (d) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers') }),
-  cars: (c) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars') }),
+  cars: (c, x) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars', x.view) }),
   positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
   labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),
   template: (t) => ({ name: t.name.trim() || '-', groups: ctxTemplate(t) }),

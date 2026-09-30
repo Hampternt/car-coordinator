@@ -5379,7 +5379,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.click('[data-act="tab"][data-tab="cars"]');
   const car = cmTabRow('cars', 'reg', reg7);
   await cmRight(car.locator('[data-act="up"]'));
-  same('a Cars tab row opens the car\'s menu, with no Tag… and no jump to its own tab', await cmEntries(), ['Go to route 7', 'Take off route 7', 'Delete car']);
+  same('a Cars tab row opens the car\'s menu, with its status, no Tag… and no jump to its own tab', await cmEntries(), ['Status: OK ›', 'Go to route 7', 'Take off route 7', 'Delete car']);
   await cmMenu.locator('[data-act="take-off"]').click();
   check('its Take off empties route 7\'s car and says so', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').carId)) === ''
     && (await cm.locator('#notices .notice', { hasText: `Took ${reg7} off route 7.` }).count()) === 1);
