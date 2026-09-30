@@ -15,10 +15,10 @@ const Store = (() => {
   const hex = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v : '#c62828');
 
   // The driver tags every plan starts with: a new install's, and the ones the
-  // move-over to schema 6 adds. Fresh ids on every call, so no two plans share
-  // them.
+  // move-over to schema 6 adds. A new install's get fresh ids; see normalise
+  // for the move-over's.
   const READY_TAGS = [['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']];
-  const readyTags = () => READY_TAGS.map(([name, color]) => ({ id: uid(), name, color }));
+  const readyTags = (id = uid) => READY_TAGS.map(([name, color]) => ({ id: id(name), name, color }));
   // Two tag names are the same tag when they differ only in case and spacing.
   const sameName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
 
@@ -72,18 +72,24 @@ const Store = (() => {
     // in the Labels tab's order, then the ready-made tags whose names are not
     // there yet. A plan that has the list is left as it is, so a ready-made
     // tag its owner deleted stays deleted.
+    // The move-over's ids come from what each tag is made from, not uid():
+    // until the first change the plan is moved over again on every load, and
+    // the same saved text must read as the same plan each time (an import
+    // weighed against the screen, a backup against the one before it).
     const moved = !Array.isArray(raw.driverTags);
     const tagFor = new Map();   // label id -> the driver tag the move-over made from it
     let driverTags;
     if (moved) {
       const worn = new Set((Array.isArray(raw.drivers) ? raw.drivers : [])
         .filter((d) => d && typeof d === 'object').map((d) => str(d.labelId)).filter(Boolean));
-      driverTags = labels.filter((l) => worn.has(l.id)).map((l) => {
-        const t = { id: uid(), name: l.name, color: l.color };
+      // Once per label id: two labels sharing one would otherwise make two
+      // tags sharing one.
+      driverTags = labels.filter((l, i) => worn.has(l.id) && labels.findIndex((x) => x.id === l.id) === i).map((l) => {
+        const t = { id: `from-${l.id}`, name: l.name, color: l.color };
         tagFor.set(l.id, t.id);
         return t;
       });
-      for (const t of readyTags()) if (!driverTags.some((x) => sameName(x.name, t.name))) driverTags.push(t);
+      for (const t of readyTags((name) => `ready-${name.toLowerCase().replace(/\s+/g, '-')}`)) if (!driverTags.some((x) => sameName(x.name, t.name))) driverTags.push(t);
     } else {
       driverTags = raw.driverTags
         .filter((t) => t && typeof t === 'object')

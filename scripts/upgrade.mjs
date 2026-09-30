@@ -99,9 +99,9 @@ function asOpened(oldPlan, schema) {
   return p;
 }
 
-// A moved-over driver tag gets a fresh id on every load, so tags are compared
-// by what they read: the list without its ids, and a driver's tagId as the
-// name of the tag it points at.
+// Which id a moved-over driver tag gets is the build's own business, so tags
+// are compared by what they read: the list without its ids, and a driver's
+// tagId as the name of the tag it points at.
 function tagsByName(plan) {
   if (!Array.isArray(plan?.driverTags)) return plan;
   const p = JSON.parse(JSON.stringify(plan));
