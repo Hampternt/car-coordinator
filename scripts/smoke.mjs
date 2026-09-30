@@ -1426,7 +1426,7 @@ check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"
 // A template says what is in it, not only what it is called.
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
-check('a template is closed on the shelf to begin with', (await page.locator('.tpl-body').count()) === 0);
+check('a template\'s contents are not on show to begin with', (await page.locator('.tpl-body').count()) === 0);
 // Laid out as the week under it is (owner, 2026-10-01): Monday to Friday in
 // five columns on one row, in day order, and every other template after.
 const tplCards = () => page.evaluate(() => [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
@@ -1437,15 +1437,38 @@ const cardsBefore = await tplCards();
 same('the shelf puts Monday to Friday first, in day order', cardsBefore.slice(0, 5).map((c) => c.name), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
 check('side by side on one row, as the week\'s columns are', new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[1])).size === 1
   && new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[0])).size === 5, JSON.stringify(cardsBefore));
-await page.locator('[data-act="peek-template"]').first().click();
-check('opening one lists the routes it would put on the plan',
-  (await page.locator('.tpl-body tbody tr').count()) === 15);
-same('and moves no card in its row: its table goes under them', (await tplCards()).slice(0, 5).map((c) => c.at), cardsBefore.slice(0, 5).map((c) => c.at));
+// Resting the mouse on a card shows what it holds beside it, as a submenu
+// opens beside its menu (owner, 2026-10-01); leaving lets it go.
+const peek = page.locator('#tplPeek');
+const filled = page.locator('#planTemplates .tpl-head[data-filled]').first();
+await filled.hover();
+await page.waitForTimeout(600);
+check('resting the mouse on a card shows the routes it would put on the plan, beside it',
+  await peek.isVisible() && (await peek.locator('.tpl-body tbody tr').count()) === 15 && await page.evaluate(() => {
+    const l = document.getElementById('tplPeek').getBoundingClientRect(), c = document.querySelector('#planTemplates .tpl-head.shown').getBoundingClientRect();
+    return l.left >= c.right || l.right <= c.left;
+  }));
+same('and moves no card', (await tplCards()).map((c) => c.at), cardsBefore.map((c) => c.at));
 check('with the driver and car each route was saved with',
-  (await page.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
-  await page.locator('.tpl-body tbody tr').nth(2).innerText());
-await page.locator('[data-act="peek-template"]').first().click();
-check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
+  (await peek.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
+  await peek.locator('.tpl-body tbody tr').nth(2).innerText());
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('moving away lets it go', await peek.isHidden() && (await page.locator('.tpl-body').count()) === 0);
+// The route count pins it, for a click, a finger or the keyboard.
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('a click on its route count keeps it open when the mouse leaves', await peek.isVisible()
+  && (await page.locator('#planTemplates [data-act="peek-template"]').first().getAttribute('aria-expanded')) === 'true');
+await page.keyboard.press('Escape');
+check('and Esc shuts it', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek [data-act="peek-template"]').click();
+check('so does its ✕', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.mouse.click(5, 300);
+check('and a click anywhere else', await peek.isHidden());
 
 // --- the tag menu is never cut off ---
 // It was drawn inside its row, and the rows sit in a list that scrolls, so the
@@ -1683,11 +1706,12 @@ check('a click into a text box with a tag menu open is not lost',
 await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
   routes: Array.from({ length: 30 }, (_, i) => ({ name: String(i + 1), driver: `${name} ${i}`, carId: '', positionId: '', round: '', highlight: false, gapBefore: false })) })) });
 await page.reload({ waitUntil: 'networkidle' });
-await page.locator('[data-act="peek-template"]').first().click();
-await page.locator('.tpl-body').evaluate((b) => { b.scrollTop = 300; });
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek .tpl-body').evaluate((b) => { b.scrollTop = 300; });
 await page.waitForTimeout(50);
-await page.locator('[data-act="peek-template"]').nth(1).click();
-check('a second template opens at its own top, not where the first was left', (await page.locator('.tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.locator('#planTemplates [data-act="peek-template"]').nth(1).click();
+check('a second template opens at its own top, not where the first was left', (await page.locator('#tplPeek .tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.keyboard.press('Escape');
 
 // A group renamed into a day is badged as it is typed.
 await page.click('[data-act="tab"][data-tab="drivers"]');
@@ -5758,10 +5782,11 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmRight(card.locator('.tpl-name'));
   check('its name opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
   await cmMenu.locator('[data-act="peek-template"]').click();
-  check('Show contents opens the table', await card.locator('.tpl-table').isVisible() && await cmMenu.isHidden());
-  await cmRight(card.locator('.tpl-table tbody td').first());
-  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Save the plan into it', 'Delete template']);
-  await cm.keyboard.press('Escape');
+  check('Show contents opens the table beside the card', await cm.locator('#tplPeek .tpl-table').isVisible() && await cmMenu.isHidden());
+  await cmRight(card.locator('.tpl-name'));
+  same('and the card\'s menu now offers to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Save the plan into it', 'Delete template']);
+  await cmMenu.locator('[data-act="peek-template"]').click();
+  check('which it does', await cm.locator('#tplPeek').isHidden());
   // An empty weekday template: nothing to load or show, as on its card.
   const monday = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="resave-template"][data-id="tpl-weekday-1"]') });
   await cmRight(monday.locator('.tpl-name'));

@@ -1412,6 +1412,79 @@ function templateContents(t) {
   </div>`;
 }
 
+/* A template's contents, beside its card, the way a right-click submenu opens
+   beside its menu (owner, 2026-10-01): resting the mouse on a card shows
+   them, moving to another card swaps them, and leaving both the card and the
+   layer lets them go. The card's route count pins them open, for a click, a
+   finger or the keyboard, until Esc, a click elsewhere, its ✕ or the count
+   again. One layer, made on first use outside the redrawn page, so a redraw
+   fills it again rather than losing it; the table keeps its scroll while it
+   shows the same template. */
+let tplHover = null;
+let tplHoverTimer = 0;
+const tplShown = () => tplOpen || tplHover;
+function drawTplPeek() {
+  if (tplOpen && !byId(state.templates, tplOpen)) tplOpen = null;
+  if (tplHover && !byId(state.templates, tplHover)) tplHover = null;
+  const t = byId(state.templates, tplShown() || '');
+  const on = t && t.routes.length && tab === 'plan' ? t : null;
+  document.querySelectorAll('#planTemplates .tpl-head[data-tpl]').forEach((h) => {
+    h.classList.toggle('shown', !!on && h.dataset.tpl === on.id);
+    h.querySelector('[data-act="peek-template"]')?.setAttribute('aria-expanded', String(!!on && tplOpen === h.dataset.tpl));
+  });
+  let layer = document.getElementById('tplPeek');
+  if (!on) {
+    if (layer) { layer.hidden = true; layer.innerHTML = ''; delete layer.dataset.tpl; delete layer.dataset.html; }
+    return;
+  }
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'tplPeek';
+    layer.className = 'tpl-peek-layer';
+    layer.setAttribute('role', 'dialog');
+    document.body.append(layer);
+  }
+  layer.setAttribute('aria-label', `What the ${on.name} template holds`);
+  const html = `<div class="tpl-peek-head"><b>${esc(on.name)}</b><span>${plural(on.routes.length, 'route')}</span>${tplOpen === on.id
+    ? `<button type="button" class="btn" data-act="peek-template" data-kind="template" data-id="${esc(on.id)}" title="Close" aria-label="Close">✕</button>` : ''}</div>${templateContents(on)}`;
+  if (layer.dataset.tpl !== on.id) layer.innerHTML = html;
+  else if (layer.dataset.html !== html) {
+    const was = layer.querySelector('.tpl-body')?.scrollTop || 0;
+    layer.innerHTML = html;
+    const body = layer.querySelector('.tpl-body');
+    if (body) body.scrollTop = was;
+  }
+  layer.dataset.tpl = on.id;
+  layer.dataset.html = html;
+  layer.hidden = false;
+  placeTplPeek();
+}
+/* Beside the card, on its right where there is room and on its left where
+   not, its top level with the card's; on a screen too narrow for either,
+   under or over it, as the picker opens. */
+function placeTplPeek() {
+  const layer = document.getElementById('tplPeek');
+  if (!layer || !layer.dataset.tpl) return;
+  const card = document.querySelector(`#planTemplates .tpl-head[data-tpl="${CSS.escape(layer.dataset.tpl)}"]`);
+  const a = card && card.getBoundingClientRect();
+  if (!a || !a.width) { layer.hidden = true; return; }
+  layer.hidden = false;
+  layer.style.maxHeight = '';
+  const w = layer.offsetWidth, h = layer.offsetHeight;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const ceiling = Math.max(0, $('.topbar').getBoundingClientRect().bottom) + 8;
+  const side = a.right + 6 + w <= vw - 8 ? a.right + 6 : (a.left - 6 - w >= 8 ? a.left - 6 - w : null);
+  let left, top, tall;
+  if (side !== null) {
+    left = side;
+    tall = Math.max(0, Math.min(h, vh - 8 - ceiling));
+    top = Math.min(Math.max(a.top, ceiling), vh - 8 - tall);
+  } else ({ left, top, tall } = besideAnchor(a, w, h));
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
+}
+
 /* The shelf, laid out as the week under it is (owner, 2026-10-01): Monday to
    Friday in five columns, each day's template in its day's column, found by
    its name the way the week finds a crew. A weekday with no template shows an
@@ -1423,26 +1496,26 @@ function templateContents(t) {
    Load and Save. Load asks which parts first (the notice at the top); Save
    puts the plan on screen into it, on a second click, after a backup. */
 function templateCard(t) {
-  const open = tplOpen === t.id;
   const n = t.routes.length;
   const saving = armed === `resave:${t.id}`, deleting = armed === `del:${t.id}`;
-  // An empty template (the weekday ones, until saved into) has nothing to
-  // load, so it has no Load: loading it would only empty the plan.
-  return `<div class="tpl${open ? ' open' : ''}${n ? '' : ' empty'}">
-      <div class="tpl-head">
+  // Two rows: the name, what it holds and its ✕; then Load and Save. An empty
+  // template (the weekday ones, until saved into) has nothing to load, so it
+  // has no Load: loading it would only empty the plan.
+  return `<div class="tpl${n ? '' : ' empty'}">
+      <div class="tpl-head${n && tplShown() === t.id ? ' shown' : ''}" data-tpl="${esc(t.id)}"${n ? ' data-filled="1"' : ''}>
         <div class="tpl-title">
           <span class="tpl-name" title="${esc(t.name)}">${esc(t.name)}</span>
+          ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'}`, 'tpl-peek',
+            `title="What is in ${esc(t.name)}: rest the mouse on the card, or click here to keep it open" aria-haspopup="dialog" aria-expanded="${tplOpen === t.id}"`)
+            : '<span class="tpl-empty">Not saved yet</span>'}
           ${actBtn('del', 'template', t.id, deleting ? 'Sure?' : '✕', `tpl-del${deleting ? ' armed' : ''}`, `title="Delete the ${esc(t.name)} template"`)}
         </div>
-        ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'} ${open ? '▴' : '▾'}`, 'tpl-peek', `title="${open ? 'Hide' : 'Show'} what is in this template"`)
-          : '<span class="tpl-empty">Not saved yet</span>'}
         <div class="tpl-acts">
           ${n ? actBtn('ask-template', 'template', t.id, 'Load', 'primary-ish tpl-load', `title="Put the ${esc(t.name)} template on the plan; it asks which parts to take first"`) : ''}
           ${actBtn('resave-template', 'template', t.id, saving ? 'Sure?' : 'Save', `tpl-save${saving ? ' armed' : ''}`,
             `title="Save the ${state.routes.length} routes on the plan into ${esc(t.name)}${n ? `, in place of its ${n}` : ''}"`)}
         </div>
       </div>
-      ${open ? templateContents(t) : ''}
     </div>`;
 }
 
@@ -2076,6 +2149,7 @@ function render() {
   renderTagMenu();
   renderCtxMenu();
   placeInfoBubble();
+  drawTplPeek();
 }
 
 /* ---------- events ---------- */
@@ -3113,6 +3187,7 @@ document.addEventListener('click', (e) => {
     }
     case 'peek-template':
       tplOpen = tplOpen === id ? null : id;
+      tplHover = null;
       render();
       return;
     // The parts the question has ticked; all of them for a question without
@@ -3735,6 +3810,42 @@ document.addEventListener('scroll', (e) => {
   if (infoOpen && !document.getElementById('infoBubble')?.contains(e.target)) placeInfoBubble();
 }, { capture: true, passive: true });
 window.addEventListener('resize', placeInfoBubble);
+
+// A template's contents on hover: a moment's rest on a card before the first
+// shows, at once from one card to the next, and a moment's grace to cross
+// from the card to the layer before they go. The mouse only; a finger or the
+// keyboard uses the route count, which pins them.
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType && e.pointerType !== 'mouse') return;
+  const t = e.target;
+  if (!t || !t.closest) return;
+  clearTimeout(tplHoverTimer);
+  if (t.closest('#tplPeek')) return;
+  const id = t.closest('#planTemplates .tpl-head[data-filled]')?.dataset.tpl || null;
+  if (id === tplHover) return;
+  tplHoverTimer = setTimeout(() => { tplHover = id; drawTplPeek(); }, id ? (tplHover ? 60 : 350) : 250);
+});
+// A right-click on a card is for its menu: the contents on hover make way.
+document.addEventListener('contextmenu', () => { clearTimeout(tplHoverTimer); if (tplHover) { tplHover = null; drawTplPeek(); } }, true);
+// Pinned, they go with a press anywhere but the layer or a route count (which
+// pins another, or unpins this one), and with Esc, handing the focus back.
+document.addEventListener('pointerdown', (e) => {
+  if (!tplOpen || !e.target.closest) return;
+  if (e.target.closest('#tplPeek') || e.target.closest('[data-act="peek-template"]')) return;
+  tplOpen = null;
+  drawTplPeek();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !tplOpen || ctx || infoOpen) return;
+  const id = tplOpen;
+  tplOpen = null;
+  drawTplPeek();
+  document.querySelector(`#planTemplates .tpl-head[data-tpl="${CSS.escape(id)}"] [data-act="peek-template"]`)?.focus();
+});
+document.addEventListener('scroll', (e) => {
+  if (tplShown() && !document.getElementById('tplPeek')?.contains(e.target)) placeTplPeek();
+}, { capture: true, passive: true });
+window.addEventListener('resize', placeTplPeek);
 
 /* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
    key on a control in one. Everywhere else, in any box that is typed in, with
