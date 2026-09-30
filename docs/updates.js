@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.8.0',
+    must: false,
+    title: 'A parking map under the route list',
+    changed: 'A map shows Spot 1 to Spot 5 and the Gate with their routes by round. A spot the warnings call taken twice is red.',
+    affects: 'The Day plan and the Positions tab: the map finds spots by name and lists the rest. The printed sheet and share codes are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.7.0',
     must: false,
     title: 'Templates and the week under the route list',
