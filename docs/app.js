@@ -640,6 +640,9 @@ function ctxRoute(r) {
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
   ], [
+    { act: 'insert-route', data: { ...d, where: 'above' }, text: 'Insert route above' },
+    { act: 'insert-route', data: { ...d, where: 'below' }, text: 'Insert route below' },
+  ], [
     { act: 'del', data: d, arm: `del:${r.id}`, text: 'Delete route', cost: on.length ? on.join(', ') : 'Nothing on it yet' },
   ]];
 }
@@ -2366,6 +2369,16 @@ document.addEventListener('click', (e) => {
       dropKeep();
       offerPlanDayTemplate({ quiet: true });
       break;
+    // A blank route beside the one clicked. Directly above it, the clicked
+    // row keeps its gap, so deleting the new row later never takes a gap
+    // with it. No name: a route put in mid-list is not "the highest + 1".
+    // The caret goes to its name box, since a name is typed next.
+    case 'insert-route': {
+      const r = newRoute('');
+      state.routes.splice(b.dataset.where === 'below' ? i + 1 : i, 0, r);
+      refocus = `#tab-plan [data-kind="route"][data-id="${CSS.escape(r.id)}"][data-field="name"]`;
+      break;
+    }
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
       state.routes.push(newRoute(String(nums.length ? Math.max(...nums) + 1 : 1)));
@@ -3078,7 +3091,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field

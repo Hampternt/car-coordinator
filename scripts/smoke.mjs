@@ -5065,6 +5065,31 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.setViewportSize({ width: 1366, height: 768 });
 }
 
+// Insert route above and below: a blank route beside the one clicked, every
+// gap left where it was, and the caret in the new name box.
+{
+  await cmOpen();
+  const cmPlan = () => cm.evaluate(() => state.routes.map((r) => ({ id: r.id, name: r.name, gap: r.gapBefore })));
+  const was = await cmPlan();
+  await cmRight(cmRoute('HAU 1').locator('[data-field="highlight"]'));
+  await cmMenu.locator('[data-act="insert-route"][data-where="above"]').click();
+  const above = await cmPlan();
+  const at = was.findIndex((r) => r.name === 'HAU 1');
+  const fresh = above[at];
+  check('Insert route above puts a blank route directly above the clicked row', above.length === was.length + 1 && above[at + 1].name === 'HAU 1' && fresh.name === '' && !was.some((r) => r.id === fresh.id));
+  same('and every gap stays where it was, the clicked row\'s included', above.filter((r) => r.id !== fresh.id), was);
+  check('the new route has no gap of its own', fresh.gap === false);
+  check('the caret is in the new route\'s name box', await cm.evaluate((id) => document.activeElement.dataset.id === id && document.activeElement.dataset.field === 'name', fresh.id));
+  same('the new route has exactly a new route\'s fields', await cm.evaluate((id) => Object.keys(state.routes.find((r) => r.id === id)).sort(), fresh.id), await cm.evaluate(() => Object.keys(newRoute('')).sort()));
+
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  await cmMenu.locator('[data-act="insert-route"][data-where="below"]').click();
+  const below = await cmPlan();
+  const three = above.findIndex((r) => r.name === '3');
+  check('Insert route below puts it directly under the clicked row', below.length === above.length + 1 && below[three].name === '3' && below[three + 1].name === '' && !above.some((r) => r.id === below[three + 1].id));
+  same('with every gap where it was', below.filter((r) => r.id !== below[three + 1].id), above);
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();
