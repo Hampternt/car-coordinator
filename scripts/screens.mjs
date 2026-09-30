@@ -292,6 +292,40 @@ await shot('10-print-preview');
 await page.pdf({ path: `${OUT}/11-printed-sheet.pdf`, format: 'A4', printBackground: true });
 console.log(`  ${OUT}/11-printed-sheet.pdf`);
 
+// --- right-click menus, on the plan built above. The screen as it is, not
+// the whole page: the menu opens where the pointer is.
+console.log('right-click menus');
+const viewShot = async (name) => {
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${OUT}/${name}.png` });
+  console.log(`  ${OUT}/${name}.png`);
+};
+const rightClickMark = async () => {
+  const mark = page.locator('#tab-plan tr[data-route]').first().locator('[data-field="highlight"]');
+  await mark.scrollIntoViewIfNeeded();
+  await mark.click({ button: 'right' });
+  await page.waitForSelector('#ctxMenu:not([hidden])');
+};
+await tab('plan');
+await rightClickMark();
+await viewShot('29-route-menu');
+await page.click('#ctxMenu [data-act="del"]');
+await page.waitForSelector('#ctxMenu [data-act="del"].armed');
+await viewShot('30-armed-delete');
+await page.keyboard.press('Escape');
+await page.waitForSelector('#ctxMenu', { state: 'hidden' });
+const railDriver = page.locator('#tab-plan .rail-row[data-drag="driver"] .assign').first();
+await railDriver.scrollIntoViewIfNeeded();
+await railDriver.click({ button: 'right' });
+await page.waitForSelector('#ctxMenu:not([hidden])');
+await viewShot('31-rail-driver-menu');
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 390, height: 844 });
+await rightClickMark();
+await viewShot('32-phone-menu');
+await page.keyboard.press('Escape');
+await page.setViewportSize({ width: 1360, height: 940 });
+
 // --- the next open after an update: the note, and the Data tab's new cards.
 // The marker is taken away, so this browser opens as one the update has not
 // reached yet: its plan goes into Archives first and the note comes last.
