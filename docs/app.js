@@ -1410,7 +1410,7 @@ function renderDrivers() {
   // #addDriverBar is the tour's step 3 (tour.js).
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
-    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups. A tag or a note never sets anyone Away.</p>
+    <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups.${ownDriverTags() ? ' The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.' : ''} A tag or a note never sets anyone Away.</p>
     <div class="bar" id="addDriverBar">
       <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
       <button class="btn" data-act="add-driver">+ Add driver</button>
@@ -1518,7 +1518,7 @@ function renderLabels() {
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
     <h2>Car and position labels</h2>
-    <p class="hint">These become the one-click buttons on cars, positions and drivers. Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
+    <p class="hint">${ownDriverTags() ? 'These become the one-click buttons on cars and positions. Drivers have tags of their own, under Driver tags below.' : 'These become the one-click buttons on cars, positions and drivers.'} Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
     <div class="bar">
       <input id="newLabel" type="text" placeholder="Label name, e.g. No fuel card">
       <input id="newLabelColor" type="color" value="#1565c0">
