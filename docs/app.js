@@ -284,6 +284,14 @@ const spotKey = (positionId, round) => `${positionId}\u0000${fold(round)}`;
 // " in round 2", or nothing at all: a plan that uses no rounds must read
 // exactly as it did before rounds existed.
 const roundPhrase = (round) => (fold(round) ? ` in round ${String(round).trim()}` : '');
+/* Whether one spot-and-round bucket is taken twice over: two or more routes
+   in a spot that exists and is not shared on purpose (Many cars, the Garage).
+   One rule for the warnings and the parking map, so they never disagree. */
+const doubleBooked = (entries) => {
+  if (!entries || entries.length < 2) return false;
+  const pos = byId(state.positions, entries[0].r.positionId);
+  return !!pos && !pos.multi;
+};
 
 function usage() {
   // Null-prototype, because ids come from imported files: a car id of
@@ -445,9 +453,8 @@ function problems() {
   // "many cars" (the Garage) are shared on purpose and never clash.
   for (const key of Object.keys(use.spots)) {
     const routes = use.spots[key];
-    if (routes.length < 2) continue;
+    if (!doubleBooked(routes)) continue;
     const pos = byId(state.positions, routes[0].r.positionId);
-    if (!pos || pos.multi) continue;
     lines.push(`${pos.name}${roundPhrase(routes[0].r.round)} is taken by ${routes.length} routes (${named(routes)})`);
     flag(routes);
   }
