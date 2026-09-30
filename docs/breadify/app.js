@@ -28,7 +28,6 @@
     settings: {
       kind: Model.BREAD,
       showOrderId: true,
-      marker: 'word-only',
       crates: Model.defaultCrateRules(),
     },
   };
@@ -118,8 +117,8 @@
   function productsById() {
     const products = new Map();
     for (const route of state.routes) {
-      for (const stop of route.stops) {
-        for (const line of stop.lines) products.set(line.product.id, line.product);
+      for (const order of route.orders) {
+        for (const line of order.lines) products.set(line.product.id, line.product);
       }
     }
     return products;
@@ -205,6 +204,7 @@
       ? `Read from the filename — ${state.filename}`
       : `The filename says nothing, so it is read as bread — ${state.filename}`;
 
+    // Stops are blocks: a customer's orders at one stop count once.
     const stops = state.routes.reduce((sum, route) => sum + route.stops.length, 0);
     const lines = state.routes.reduce((sum, route) => sum + Model.lineCount(route), 0);
     const stats = [
@@ -271,13 +271,6 @@
   function renderConfigure() {
     const bread = state.settings.kind === Model.BREAD;
     $('showOrderId').checked = state.settings.showOrderId;
-
-    for (const button of $('markerChoices').querySelectorAll('button')) {
-      button.setAttribute(
-        'aria-pressed',
-        String(button.dataset.marker === state.settings.marker),
-      );
-    }
 
     // Nothing on a freezer sheet reads the crate sizes (F4), so the step does
     // not offer them there.
@@ -373,7 +366,20 @@
       source: Model.sourceLabel(state.filename, dates()),
     };
 
-    built = Sheet.day(chosen, state.settings, context, {});
+    try {
+      built = Sheet.day(chosen, state.settings, context, {});
+    } catch (error) {
+      // The layout throws on a value it cannot print correctly. Nothing
+      // printing is the safe outcome; a sheet with something wrong on it is
+      // not.
+      built = [];
+      $('preview').replaceChildren();
+      const message = error && error.message ? error.message : String(error);
+      $('printSummary').textContent =
+        `The sheets could not be laid out, so nothing will print: ${message}`;
+      $('print').disabled = true;
+      return;
+    }
     $('preview').replaceChildren(...built);
     scalePreview();
 
@@ -463,13 +469,6 @@
     $('showOrderId').onchange = () => {
       state.settings.showOrderId = $('showOrderId').checked;
     };
-
-    for (const button of $('markerChoices').querySelectorAll('button')) {
-      button.onclick = () => {
-        state.settings.marker = button.dataset.marker;
-        renderConfigure();
-      };
-    }
 
     for (const id of ['largeCapacity', 'smallCapacity']) {
       $(id).onchange = () => {

@@ -92,6 +92,34 @@ const Validate = (() => {
 
     const findings = [];
     for (const row of rows) {
+      // The reader turns a missing id into 0, so without this every such row
+      // would quietly fold into one order and print as one. An order id is a
+      // whole number above zero; 0, a fraction or a blank is none.
+      const id = row.orderIdExact;
+      if (!Number.isInteger(id) || id <= 0) {
+        findings.push({
+          severity: BLOCKING,
+          kind: 'blank-required-field',
+          headline: `Order ID is missing or not a valid number on row ${row.excelRow}`,
+          detail:
+            `Row ${row.excelRow} has no Order ID that reads as a whole number above zero. ` +
+            'Every row without one would be printed as part of the same single order.',
+          rows: [row.excelRow],
+        });
+      }
+      // A blank or unrecognised answer reads as false, and false prints bold
+      // on the sheet: an answer the file never gave.
+      if (row.acceptAlternativesExact !== true && row.acceptAlternativesExact !== false) {
+        findings.push({
+          severity: BLOCKING,
+          kind: 'blank-required-field',
+          headline: `Accept alternatives is empty or not true/false on row ${row.excelRow}`,
+          detail:
+            `Row ${row.excelRow} does not say plainly whether substitutes are fine. ` +
+            'It would print as "want substitute: false", which the file never said.',
+          rows: [row.excelRow],
+        });
+      }
       for (const [column, field] of required) {
         if (row[field] !== '') continue;
         findings.push({

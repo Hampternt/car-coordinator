@@ -36,7 +36,7 @@ fi
 bad=0
 
 printf '=== node --check (shipped app)\n'
-for f in docs/*.js; do
+for f in docs/*.js docs/breadify/*.js; do
   [[ -e "$f" ]] || continue
   if node --check "$f" 2>&1; then
     printf 'ok   %s\n' "$f"
