@@ -128,6 +128,10 @@
    inside the rail's scrolling lists and clipped the row being tabbed to.
    Focus that lands under the bar is scrolled clear by the app instead.) */
 #notices > * { scroll-margin-top: var(--bar, 80px); }
+/* The scrollbar is there on every tab, so going between a short tab and a long
+   one does not shift the whole page sideways by its width. (scrollbar-gutter:
+   stable did not keep the room in Chrome 154, measured.) */
+html { overflow-y: scroll; }
 body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
 button, input, select { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
