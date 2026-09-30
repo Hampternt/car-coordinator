@@ -44,6 +44,7 @@
   --shadow-dialog: rgba(0,0,0,.35);
   --dot-edge: rgba(0, 0, 0, .25);
   --edge-on-bright: rgba(0, 0, 0, .25);
+  --lift: 0%;                   /* how far a label's colour moves toward --ink */
   /* the printed sheet: never redefined for dark */
   --paper: #fff;
   --paper-ink: #000;
@@ -82,6 +83,7 @@
     --caution: #f0a040;
     --ok: #66bb6a;
     --dot-edge: rgba(255, 255, 255, .55);
+    --lift: 50%;
     color-scheme: dark;
   }
 }
@@ -108,6 +110,7 @@
     --caution: #f0a040;
     --ok: #66bb6a;
     --dot-edge: rgba(255, 255, 255, .55);
+    --lift: 50%;
     color-scheme: dark;
   }
 }
@@ -188,6 +191,14 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .chip.ok.on { --c: var(--ok-fill); }
 /* a day group's members: the app's own colour, not a label's */
 .chip.member { --c: var(--steel-fill); }
+/* A label's colour is what the leader picked, and is never changed. On a dark
+   screen it is drawn lifted toward the text colour, so a dark label's border
+   and dot still stand out; in light --lift is 0% and it is drawn exactly. An
+   older browser without color-mix() draws the colour as picked. */
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .chip { --c-shown: color-mix(in srgb, var(--c, var(--ink)), var(--ink) var(--lift)); border-color: var(--c-shown); }
+  .dot { --c-shown: color-mix(in srgb, var(--c, var(--ok)), var(--ink) var(--lift)); background: var(--c-shown); }
+}
 
 /* car assignment badges */
 .assign { display: inline-block; padding: 2px 8px; margin: 1px 4px 1px 0; font-weight: 600; white-space: nowrap; }
@@ -410,7 +421,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .pick.flag .pick-note { color: var(--caution); font-weight: 600; }
 /* On the hi-vis of the picked choice, grey and orange were too faint to read. */
 .pick.on .pick-note, .pick.on.flag .pick-note { color: var(--on-bright); }
-.tag-choice.on .dot, .pick.on .dot { --dot-edge: var(--edge-on-bright); }
+/* On hi-vis a dot is drawn as it is in light, whatever the theme. */
+.tag-choice.on .dot, .pick.on .dot { --lift: 0%; --dot-edge: var(--edge-on-bright); }
 .pick.away .pick-name { opacity: .6; }
 .picker-empty { margin: 4px 2px; color: var(--muted); }
 @media (max-width: 560px) { .picker-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

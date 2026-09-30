@@ -3473,6 +3473,102 @@ check('and it looks the same in dark as in light', !brightChanged.length, bright
 check('the dark cases log no console errors', dkErrors.length === 0, dkErrors.join(' | '));
 await darkCtx.close();
 
+// --- label colours on a dark screen: lifted to be seen, never changed ---
+// The fixture's five colours, black and navy. In dark a chip's border and a
+// dot are drawn lifted toward the text colour and reach 3:1 on fields and
+// panels; in light, and on hi-vis, they are exactly the colour picked. The
+// colour saved, exported and shared is the same whatever the screen shows.
+const LABEL_COLOURS = ['#c62828', '#ef6c00', '#6a1b9a', '#1565c0', '#2e7d32', '#000000', '#000080'];
+const lcCtx = await browser.newContext({ colorScheme: 'light' });
+const lc = await lcCtx.newPage();
+const lcErrors = [];
+lc.on('console', (m) => m.type() === 'error' && lcErrors.push(m.text()));
+lc.on('pageerror', (e) => lcErrors.push(String(e)));
+await lc.goto(base, { waitUntil: 'networkidle' });
+await lc.evaluate((colours) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  labels: colours.map((color, i) => ({ id: `L${i}`, name: `Label ${i}`, color, onSheet: false })),
+  cars: colours.map((c, i) => ({ id: `c${i}`, reg: `LC1111${i}`, labelId: `L${i}`, note: '' })),
+  positions: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: '', carId: 'c0', positionId: '', round: '', highlight: false, gapBefore: false }],
+})); }, LABEL_COLOURS);
+await lc.reload({ waitUntil: 'networkidle' });
+const lcAs = async (colorScheme) => { await lc.emulateMedia({ media: 'screen', colorScheme }); };
+// Per label: the off chip's border and the rail dot's fill, as drawn, and
+// the page's field and panel.
+const drawn = () => lc.evaluate((colours) => {
+  const parse = (c) => {
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?/.exec(c);
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
+    m = /color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+))?/.exec(c);
+    return m ? [m[1] * 255, m[2] * 255, m[3] * 255, m[4] === undefined ? 1 : +m[4]] : null;
+  };
+  const hex = (c) => '#' + c.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const token = (n) => {
+    const probe = document.createElement('i'); probe.style.color = `var(${n})`; document.body.append(probe);
+    const c = parse(getComputedStyle(probe).color); probe.remove(); return c;
+  };
+  const field = token('--field'), panel = token('--panel');
+  return {
+    field, panel,
+    labels: colours.map((colour, i) => {
+      const chip = document.querySelector(`#tab-cars .chip[data-label="L${i}"]:not(.on)`);
+      const dot = document.querySelector(`#tab-plan [data-panel="cars"] .rail-row[data-id="c${i}"] .dot`);
+      const edge = dot && parse(getComputedStyle(dot).borderTopColor);
+      return { colour, chip: chip && hex(parse(getComputedStyle(chip).borderTopColor)), dot: dot && hex(parse(getComputedStyle(dot).backgroundColor)), edge };
+    }),
+  };
+}, LABEL_COLOURS);
+const lum3 = (h) => { const c = typeof h === 'string' ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : h; const [r, g, b] = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const ratio3 = (a, b) => { const [x, y] = [lum3(a), lum3(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const blend3 = (fg, bg) => [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3]));
+
+await lcAs('light');
+const lightLabels = await drawn();
+check('in light, every chip and dot is drawn in exactly the colour picked',
+  lightLabels.labels.every((l) => l.chip === l.colour && l.dot === l.colour), JSON.stringify(lightLabels.labels.filter((l) => l.chip !== l.colour || l.dot !== l.colour)));
+await lcAs('dark');
+const darkLabels = await drawn();
+const faint = darkLabels.labels.flatMap((l) => [['chip', l.chip], ['dot', l.dot]]
+  .filter(([, c]) => !c || ratio3(c, darkLabels.field) < 3 || ratio3(c, darkLabels.panel) < 3)
+  .map(([what, c]) => `${l.colour} ${what} ${c}`));
+check('in dark, every chip border and dot reaches 3:1 on fields and panels', !faint.length, faint.join(', '));
+const black = darkLabels.labels.find((l) => l.colour === '#000000');
+check("in dark, a black label's dot has an edge of 3:1 or more",
+  black.edge && ratio3(blend3(black.edge, darkLabels.panel), darkLabels.panel) >= 3, JSON.stringify(black.edge));
+// On hi-vis, dots look as they do in light: the tag menu's lit choice.
+const litDot = async () => {
+  await lc.click('[data-act="tab"][data-tab="plan"]');
+  await lc.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c5"]');
+  await lc.waitForSelector('#tagMenu:not([hidden]) .tag-choice.on .dot');
+  const got = await lc.evaluate(() => { const d = document.querySelector('#tagMenu .tag-choice.on .dot'); const cs = getComputedStyle(d); return `${cs.backgroundColor} | ${cs.borderTopColor}`; });
+  await lc.keyboard.press('Escape');
+  await lc.mouse.click(2, 600);
+  return got;
+};
+await lcAs('light'); const litLight = await litDot();
+await lcAs('dark'); const litDark = await litDot();
+check('on hi-vis, a dot looks the same in dark as in light', litLight === litDark, `${litLight} / ${litDark}`);
+// What is saved, exported and shared does not depend on the screen.
+const keep = async () => {
+  await lc.click('[data-act="tab"][data-tab="data"]');
+  const [dl] = await Promise.all([lc.waitForEvent('download'), lc.click('[data-act="export"]')]);
+  return {
+    saved: await lc.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('carcoord:v1')).labels)),
+    exported: await readFile(await dl.path(), 'utf8'),
+    code: await lc.evaluate(() => Share.encode(state, 'all')),
+  };
+};
+await lc.click('[data-act="tab"][data-tab="cars"]');
+await lc.locator('#tab-cars .chip[data-label="L1"]').first().click();   // one real change, so the plan is saved
+await lcAs('light'); const keptLight = await keep();
+await lcAs('dark'); const keptDark = await keep();
+check('the saved colours, the Export and the share code are the same made in dark as in light',
+  keptLight.saved === keptDark.saved && keptLight.exported === keptDark.exported && keptLight.code === keptDark.code
+  && LABEL_COLOURS.every((c) => keptDark.saved.includes(`"color":"${c}"`)));
+check('the label colour cases log no console errors', lcErrors.length === 0, lcErrors.join(' | '));
+await lcCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
