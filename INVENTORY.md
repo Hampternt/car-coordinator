@@ -22,7 +22,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for.
 - ✅ **Right-click menus** — right-click a route, a rail row, a row of the Drivers, Cars, Positions or Labels tab, or a template card for a short menu of what can be done to that one thing; text boxes keep the browser's own Cut, Copy and Paste.
 
-- 🚧 **Driver tags apart from car labels** — drivers get their own tag list (Sick, Holiday, Vacation, Course, Special situation and your own); cars and positions keep theirs. `manifests/2026-09-30-driver-tags.md`.
+- ✅ **Driver tags apart from car labels** — drivers get their own tag list (Sick, Holiday, Vacation, Course, Special situation and your own), set from the Drivers tab, the Drivers panel or a right-click's Tag submenu; cars and positions keep their labels. Every driver's old tag is carried over (0.12.0).
 
 ## Fleet
 - ✅ **Round split out of old spot names** — for lists made when the round was written into the spot's name (`Spot 1/1`). Offered on load, never applied: it states every rename and merge line by line, says how many routes gain a round and how many keep the one already typed, names any setting the merging spots disagree about, and takes a backup before it touches anything. Dismissing changes nothing and it asks again next time.

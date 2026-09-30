@@ -621,14 +621,23 @@ let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, 
    beside it, so a mouse, the keyboard and a finger all reach it the same
    way. ctx.view names the list; nothing about it is saved. */
 const ctxBack = { act: 'ctx-view', data: { view: '' }, text: '\u2039 Back' };
-// The entry that opens an item's status list, saying the status it has now.
-const ctxStatusOpen = (item) => ({ act: 'ctx-view', data: { view: 'status' },
-  text: `Status: ${item.labelId && byId(state.labels, item.labelId) ? labelName(byId(state.labels, item.labelId)) : 'OK'}` });
-// OK and every label, the current one ticked: the chips' own setLabel.
-const ctxStatusList = (kind, item) => [
-  { act: 'setLabel', data: { kind, id: item.id, label: '' }, text: `${item.labelId ? '' : '\u2713 '}OK` },
-  ...state.labels.map((l) => ({ act: 'setLabel', data: { kind, id: item.id, label: l.id }, text: `${item.labelId === l.id ? '\u2713 ' : ''}${labelName(l)}` })),
-];
+// The entry that opens an item's status list, saying what it has now: a
+// car's or a position's label ("Status"), a driver's own tag ("Tag").
+const ctxStatusWords = (kind) => (kind === 'driver' ? ['Tag', 'No tag'] : ['Status', 'OK']);
+const ctxStatusOpen = (kind, item) => {
+  const [head, none] = ctxStatusWords(kind);
+  const on = byId(tagList(kind), item[tagField(kind)]);
+  return { act: 'ctx-view', data: { view: 'status' }, text: `${head}: ${on ? labelName(on) : none}` };
+};
+// None, then every label or driver tag, the current one ticked: the chips'
+// own setLabel, which writes the field that kind uses.
+const ctxStatusList = (kind, item) => {
+  const f = tagField(kind), none = ctxStatusWords(kind)[1];
+  return [
+    { act: 'setLabel', data: { kind, id: item.id, label: '' }, text: `${item[f] ? '' : '\u2713 '}${none}` },
+    ...tagList(kind).map((l) => ({ act: 'setLabel', data: { kind, id: item.id, label: l.id }, text: `${item[f] === l.id ? '\u2713 ' : ''}${labelName(l)}` })),
+  ];
+};
 // Where a keyboard open's focus goes back to: a selector, never an element,
 // since a redraw replaces them all.
 let ctxReturn = null;
@@ -703,7 +712,7 @@ function ctxRoutePosition(r, view) {
     if (document.querySelector(`#planMap [data-position="${CSS.escape(pos.id)}"]`)) {
       own.push({ act: 'show-map', data: { kind: 'position', id: pos.id }, text: 'Show on the parking map' });
     }
-    own.push(ctxStatusOpen(pos));
+    own.push(ctxStatusOpen('position', pos));
     own.push({ act: 'toggle', data: { kind: 'position', id: pos.id, field: 'multi' }, text: pos.multi ? 'Stop allowing many cars' : 'Allow many cars' });
     own.push({ act: 'take-off', data: { kind: 'route', id: r.id, take: 'positionId', was: pos.id }, text: `Take ${pos.name} off route ${r.name.trim() || '-'}` });
   }
@@ -773,15 +782,18 @@ function ctxPutOn(take, value) {
    the rail it also offers a free route, the driver's usual days (the Drivers
    tab's day buttons, crew-day) and the way to its Drivers tab row, since the
    rail is where the plan is made (owner, 2026-09-30). */
-function ctxDriver(d, surface) {
+function ctxDriver(d, surface, view) {
   const d0 = { kind: 'driver', id: d.id };
+  if (view === 'status') return [[ctxBack], ctxStatusList('driver', d)];
   const on = driverUsage()[fold(d.name)] || [];
   const groups = state.driverGroups.filter((g) => g.driverIds.includes(d.id)).length;
   const rail = surface === 'rail';
   const { byDay } = dayCrews();
   return [[
     { act: 'toggle', data: { ...d0, field: 'available' }, text: d.available ? 'Set away' : 'Bring back in' },
-    // The tag menu opens at the rail row's tag button, so only there.
+    // Its tag, on the Drivers tab and in the rail alike; Tag… (the tag menu,
+    // with its box for a new tag) only where it opens, in the rail.
+    ctxStatusOpen('driver', d),
     rail && { act: 'tag', data: d0, text: 'Tag\u2026' },
   ].filter(Boolean), [
     ...(rail && !on.length ? ctxPutOn('driver', d.name) : ctxRoutes(on, 'driver')),
@@ -810,7 +822,7 @@ function ctxCar(c, surface, view) {
   if (view === 'status') return [[ctxBack], ctxStatusList('car', c)];
   // Its status, in the rail and on the Cars tab alike; Tag… (a new tag) only
   // where the tag menu opens, in the rail.
-  const status = rail ? [ctxStatusOpen(c), { act: 'tag', data: c0, text: 'Tag\u2026' }] : [ctxStatusOpen(c)];
+  const status = rail ? [ctxStatusOpen('car', c), { act: 'tag', data: c0, text: 'Tag\u2026' }] : [ctxStatusOpen('car', c)];
   return [
     status,
     // Its note can only be changed on the Cars tab.
@@ -879,8 +891,8 @@ const CTX_MENUS = {
   route: (r, c) => ({ name: routeTitle(r), groups: ctxRoute(r, c.part, c.view) }),
   rail: (x, c) => (c.kind === 'car'
     ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail', c.view) }
-    : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
-  drivers: (d) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers') }),
+    : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail', c.view) }),
+  drivers: (d, x) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers', x.view) }),
   cars: (c, x) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars', x.view) }),
   positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
   labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),

@@ -5287,7 +5287,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmOpen();
   const cmRail = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"]`);
   await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
-  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag…', 'Go to route 1', 'Go to Anders on the Drivers tab', 'Take off route 1',
+  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag: No tag ›', 'Tag…', 'Go to route 1', 'Go to Anders on the Drivers tab', 'Take off route 1',
     '✓ Works Mondays', '✓ Works Tuesdays', 'Works Wednesdays', 'Works Thursdays', 'Works Fridays', 'Delete driver']);
   same('its delete says what it costs', await cmMenu.locator('[data-act="del"] small').textContent(),
     await cm.evaluate(() => { const n = state.driverGroups.filter((g) => g.driverIds.includes('drv-anders')).length; return `${n ? `Taken out of ${n} day group${n === 1 ? '' : 's'}` : 'In no day group'}. Routes keep the name.`; }));
@@ -5436,7 +5436,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.click('[data-act="tab"][data-tab="drivers"]');
   const cmDrv = (name) => cm.locator('#tab-drivers tbody tr', { has: cm.locator(`[data-field="name"][value="${name}"]`) });
   await cmRight(cmDrv('Guro').locator('.assign'));
-  same('a roster row opens the driver\'s menu, with no Tag…', await cmEntries(), ['Set away', 'Go to route 7', 'Take off route 7', 'Delete driver']);
+  same('a roster row opens the driver\'s menu, with its tag and no Tag…', await cmEntries(), ['Set away', 'Tag: No tag ›', 'Go to route 7', 'Take off route 7', 'Delete driver']);
   await cmMenu.locator('[data-act="toggle"]').click();
   check('Set away works from the Drivers tab', await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').available === false));
   await cmRight(cmDrv('Guro').locator('.assign'));
