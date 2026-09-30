@@ -4661,6 +4661,68 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   check('the fixture: Tirsdagslaget on Tuesday, nobody on Wednesday or Thursday', shown.tueGroup === 'Tirsdagslaget' && shown.tue === 13 && shown.wed === 0 && shown.thu === 0, JSON.stringify(shown));
 }
 
+// Usual days write only day groups. The dev fixture, with one driver's id
+// twice in Monday crew and a second group named "Mon".
+{
+  const fx = JSON.parse(devPlan);
+  const monCrew = fx.driverGroups.find((g) => g.name === 'Monday crew');
+  const twice = monCrew.driverIds.find((id) => id !== 'drv-camilla');
+  monCrew.driverIds.push(twice);
+  fx.driverGroups.push({ id: 'grp-mon2', name: 'Mon', driverIds: fx.drivers.slice(0, 2).map((d) => d.id) });
+  await dvOpen(JSON.stringify(fx));
+  // The plan as this build reads it (the fixture is an older shape, which the
+  // first save writes as this build's).
+  const before = await dv.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const monWas = await dv.evaluate(() => JSON.stringify(state.driverGroups.find((g) => g.id === 'grp-mon2').driverIds));
+  const availWas = await dv.evaluate(() => state.drivers.map((d) => d.available).join());
+  const day = (who, d) => `#tab-drivers [data-act="crew-day"][data-id="${who}"][data-day="${d}"]`;
+  const groups = () => dv.evaluate(() => state.driverGroups.map((g) => ({ name: g.name, ids: g.driverIds })));
+  const tuesdayCol = () => dv.evaluate(() => [...document.querySelectorAll('#planWeek .week-col[data-day="2"] li')].map((l) => l.textContent));
+  await dv.click(day('drv-camilla', 2));
+  let g = await groups();
+  check('ticking Tue puts Camilla in Tirsdagslaget, and makes no Tuesday group', g.find((x) => x.name === 'Tirsdagslaget').ids.includes('drv-camilla') && !g.some((x) => x.name === 'Tuesday'));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check("and the week's Tuesday lists her", (await tuesdayCol()).includes('Camilla'));
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  await dv.click(day('drv-camilla', 2));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check('unticking Tue takes her out of both', !(await groups()).find((x) => x.name === 'Tirsdagslaget').ids.includes('drv-camilla') && !(await tuesdayCol()).includes('Camilla'));
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  const countWas = (await groups()).length;
+  await dv.click(day('drv-camilla', 3));
+  g = await groups();
+  check('ticking Wed adds one group, Wednesday, at the end, with only her', g.length === countWas + 1 && g.at(-1).name === 'Wednesday' && g.at(-1).ids.join() === 'drv-camilla');
+  await dv.click(day('drv-camilla', 3));
+  g = await groups();
+  check('unticking Wed leaves that group in place, empty', g.length === countWas + 1 && g.at(-1).name === 'Wednesday' && g.at(-1).ids.length === 0);
+  await dv.click(day(twice, 1));
+  check('one click on Mon takes out every copy of a duplicated driver', !(await groups()).find((x) => x.name === 'Monday crew').ids.includes(twice));
+  check('the second Monday group is never touched', (await dv.evaluate(() => JSON.stringify(state.driverGroups.find((g) => g.id === 'grp-mon2').driverIds))) === monWas);
+  check('and nobody is set in or away', (await dv.evaluate(() => state.drivers.map((d) => d.available).join())) === availWas);
+  const after = await dv.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')));
+  const rest = (p) => JSON.stringify({ ...p, driverGroups: undefined, date: undefined });
+  check('the saved plan differs only in its day groups', rest(after) === rest(before));
+  check('and every driver still has exactly its own five fields', after.drivers.every((d) => Object.keys(d).sort().join() === 'available,id,labelId,name,note'));
+  await dv.focus(day('drv-camilla', 4));
+  await dv.keyboard.press('Enter');
+  check("a day pressed from the keyboard keeps the focus on the same driver's same day", await dv.evaluate(() =>
+    document.activeElement?.matches('[data-act="crew-day"][data-id="drv-camilla"][data-day="4"]')));
+  // Thursday's group now holds only Camilla. Untick her: the group is empty,
+  // its column under the day plan has no Load, and its Use for today changes
+  // nobody and writes nothing.
+  await dv.focus(day('drv-camilla', 4));
+  await dv.keyboard.press('Enter');
+  const savedNow = await dv.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check("an emptied weekday's column has no Load", (await dv.locator('#planWeek .week-col[data-day="4"] [data-act="apply-group"]').count()) === 0);
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  await dv.locator('#tab-drivers .group', { has: dv.locator('[data-field="name"][value="Thursday"]') }).locator('[data-act="apply-group"]').click();
+  check('and its Use for today changes nobody, says why, and writes nothing',
+    (await dv.evaluate(() => state.drivers.map((d) => d.available).join())) === availWas
+    && (await dv.evaluate(() => localStorage.getItem('carcoord:v1'))) === savedNow
+    && (await dv.locator('#notices .notice', { hasText: 'Thursday has nobody in it yet' }).count()) === 1);
+}
+
 // --- the Drivers tab: done ---
 check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
 await drvCtx.close();

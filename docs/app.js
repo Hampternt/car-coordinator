@@ -2332,6 +2332,22 @@ document.addEventListener('click', (e) => {
       if (e.detail === 0) refocus = `#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`;
       break;
     }
+    // A driver's usual day: in or out of that weekday's group (the first one
+    // named for it, as the week reads it), making the group when the day has
+    // none. It writes only the groups, never the driver, never who is in, and
+    // never deletes a group, even an emptied one.
+    case 'crew-day': {
+      const day = Number(b.dataset.day);
+      if (!WORK_WEEK.includes(day)) return;          // a stale button: nothing changed, nothing saved
+      const d = list[i];
+      const crew = dayCrews().byDay.get(day);
+      // Out removes every copy of the id; in adds it only once.
+      if (crew && crew.driverIds.includes(d.id)) crew.driverIds = crew.driverIds.filter((x) => x !== d.id);
+      else if (crew) crew.driverIds.push(d.id);
+      else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds: [d.id] });
+      if (e.detail === 0) refocus = `#tab-drivers [data-act="crew-day"][data-id="${CSS.escape(id)}"][data-day="${day}"]`;
+      break;
+    }
     case 'add-day-group': {
       const day = Number(b.dataset.day);
       if (!WEEKDAYS[day] || dayCrews().byDay.has(day)) break;
@@ -2806,7 +2822,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
