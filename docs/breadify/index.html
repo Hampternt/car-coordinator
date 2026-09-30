@@ -69,18 +69,45 @@
   <!-- 03 Configure ------------------------------------------------------- -->
   <section class="step" id="step-configure" hidden>
     <div class="panes">
-      <div class="pane">
-        <h2>The page</h2>
-        <label class="row">
-          <input type="checkbox" id="showOrderId" checked>
-          <span>
-            <b>Show the order ID</b>
-            <em>The only field that is yours to show or hide, for a customer
-              with one order at a stop. A customer with several orders at a
-              stop always shows the ID on every line, because it tells the
-              orders apart. Everything else on the page is fixed.</em>
-          </span>
-        </label>
+      <!-- The page and the crates down the left, Pay attention down the right
+           beside both, so a short pane leaves no hole under it. -->
+      <div class="pane-col">
+        <div class="pane">
+          <h2>The page</h2>
+          <label class="row">
+            <input type="checkbox" id="showOrderId" checked>
+            <span>
+              <b>Show the order ID</b>
+              <em>The only field that is yours to show or hide, for a customer
+                with one order at a stop. A customer with several orders at a
+                stop always shows the ID on every line, because it tells the
+                orders apart. Everything else on the page is fixed.</em>
+            </span>
+          </label>
+        </div>
+
+        <div class="pane" id="cratePane">
+          <h2>The crates</h2>
+          <p class="hint">
+            Facts about the warehouse, worked out once at the crates — so these
+            are remembered on this PC and the rest of the settings are not.
+          </p>
+          <div class="capacities">
+            <label>Large crate holds
+              <input type="number" id="largeCapacity" min="1" max="999" value="10"> slots
+            </label>
+            <label>Small crate holds
+              <input type="number" id="smallCapacity" min="1" max="998" value="5"> slots
+            </label>
+          </div>
+
+          <h3>How much room each bread takes</h3>
+          <p class="hint">
+            A roll is half a slot; something bulky takes two. Click a bread to
+            set it. Set once — it is remembered from then on.
+          </p>
+          <div class="sizes" id="sizes"></div>
+        </div>
       </div>
 
       <div class="pane" id="attentionPane">
@@ -93,29 +120,6 @@
         <input type="search" id="attentionFind" class="attention-find" placeholder="Find a bread" aria-label="Find a bread">
         <div class="attentions" id="attentionList"></div>
         <p class="hint" id="attentionCount"></p>
-      </div>
-
-      <div class="pane" id="cratePane">
-        <h2>The crates</h2>
-        <p class="hint">
-          Facts about the warehouse, worked out once at the crates — so these
-          are remembered on this PC and the rest of the settings are not.
-        </p>
-        <div class="capacities">
-          <label>Large crate holds
-            <input type="number" id="largeCapacity" min="1" max="999" value="10"> slots
-          </label>
-          <label>Small crate holds
-            <input type="number" id="smallCapacity" min="1" max="998" value="5"> slots
-          </label>
-        </div>
-
-        <h3>How much room each bread takes</h3>
-        <p class="hint">
-          A roll is half a slot; something bulky takes two. Click a bread to
-          set it. Set once — it is remembered from then on.
-        </p>
-        <div class="sizes" id="sizes"></div>
       </div>
     </div>
   </section>

@@ -577,18 +577,38 @@ input[type='number'] {
 
 /* Pay attention (the owner, 2026-10-01): a tick per bread, the marked ones
  * set in bold with the same triangle the sheet prints. */
+/* Configure: The page and The crates stacked down the left, Pay attention
+ * down the right, as tall as the two together, its list filling the room. */
+.pane-col {
+  display: grid;
+  gap: 24px;
+  align-content: start;
+}
+
+#attentionPane {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
 .attention-find {
+  box-sizing: border-box;
   width: 100%;
   margin: 4px 0 8px;
-  padding: 6px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--void);
+  color: var(--strong);
   font: inherit;
 }
 
 .attentions {
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 420px;
+  min-height: 240px;
   overflow-y: auto;
 }
 
