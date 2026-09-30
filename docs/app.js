@@ -946,6 +946,18 @@ function mapParts(use) {
     return { drawing: '<p class="parking-note">The parking map could not be drawn; the plan above is not affected.</p>', list: '' };
   }
 }
+/* A keystroke refills only the map's two boxes: a route name, a round that
+   flips no warning, a registration typed in the rail. The plan is not redrawn,
+   so the focus and the caret stay where they are, and so does the drawing's
+   sideways scroll. */
+function renderMap() {
+  const drawing = document.getElementById('parkingDrawing');
+  const list = document.getElementById('parkingList');
+  if (!drawing || !list) return;
+  const parts = mapParts(usage());
+  drawing.innerHTML = parts.drawing;
+  list.innerHTML = parts.list;
+}
 function mapSlot(use) {
   const { drawing, list } = mapParts(use);
   return `<section class="parking">
@@ -1445,7 +1457,7 @@ document.addEventListener('input', (e) => {
   else if (el.tagName === 'SELECT') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
-  else { renderSheet(); renderPicker(); if (kind === 'meta' && name === 'date') drawDateLine(); }
+  else { renderSheet(); renderPicker(); renderMap(); if (kind === 'meta' && name === 'date') drawDateLine(); }
 });
 
 /* Redraw the lot without interrupting the typing that caused it: render()

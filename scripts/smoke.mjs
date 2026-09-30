@@ -4465,6 +4465,37 @@ await loadWeek();
   await lp.click('[data-act="tab"][data-tab="plan"]');
   v = await mapView();
   check('a renamed spot is listed, and its box looks for its old name', v.listed.includes('Spot 3b') && v.boxes[2].includes('No position named Spot 3'));
+
+  // Live while typing: the map follows each keystroke, and the focus and the
+  // caret stay in the box being typed into.
+  await openWith(devPlan);
+  const typeInto = async (sel, text) => {
+    const box = lp.locator(sel);
+    await box.click();
+    await box.press('End');
+    await box.type(text);
+    return lp.evaluate((sel) => { const el = document.activeElement; return el?.matches(sel) && el.selectionStart === el.value.length; }, sel);
+  };
+  const route = (name, field) => `#tab-plan tbody tr[data-route="${name}"] [data-field="${field}"]`;
+  const rid = (n) => lp.evaluate((n) => state.routes.find((r) => r.name === n).id, n);
+  let kept = await typeInto(route(await rid('2'), 'name'), 'x');
+  check('typing a route name updates its line on the map, focus and caret kept', kept && (await mapView()).boxes[1].includes('route 2x · EL 41033'));
+  // Route 1 is alone in Spot 1's round 1, and round 3 is empty there.
+  const r1 = await rid('1');
+  await lp.locator(route(r1, 'round')).fill('');
+  kept = await typeInto(route(r1, 'round'), '3');
+  check('a round changed with no clash either side moves the route to its new round', kept && /Round 3 route 1 ·/.test((await mapView()).boxes[0]), (await mapView()).boxes[0]);
+  kept = await typeInto('#tab-plan [data-panel="cars"] .rail-row[data-id="car-02"] .rail-name', 'Z');
+  check('a registration typed in the rail updates the map', kept && (await mapView()).boxes[1].includes('EL 41033Z'));
+  const onPort2 = await lp.evaluate(() => state.routes.find((r) => r.positionId === 'pos-port1')?.id);
+  kept = await typeInto(route(onPort2, 'name'), 'q');
+  check('typing the name of a route on a listed position updates the list', kept && (await lp.locator('#planMap .parking-item', { hasText: 'route 7q' }).count()) === 1);
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.evaluate(() => { const b = document.getElementById('parkingDrawing'); b.scrollLeft = 90; b.dispatchEvent(new Event('scroll')); });
+  const at = await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft);
+  await typeInto(route(await rid('2x'), 'name'), 'y');
+  check("on a phone, the map's sideways scroll survives a keystroke", at > 0 && (await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft)) === at);
+  await lp.setViewportSize({ width: 1680, height: 940 });
 }
 // An index.html cached from before the map: no map.js, and the plan still draws.
 for (const [what, setup, says] of [
@@ -4488,6 +4519,14 @@ for (const [what, setup, says] of [
   const routes = await pg.evaluate(() => [document.querySelectorAll('#tab-plan tbody tr').length, state.routes.length]);
   check(`${what}: every route is drawn, and the map says so in words`, routes[0] === routes[1] && routes[0] > 0
     && (await pg.locator('#planMap', { hasText: says }).count()) === 1, JSON.stringify(routes));
+  // Typing still reaches the plan, with the map missing or broken.
+  const first = pg.locator('#tab-plan tbody tr').first();
+  await first.locator('[data-field="name"]').type('k');
+  await first.locator('[data-field="round"]').fill('3');
+  check(`${what}: typing a route name and a round still saves`, await pg.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('carcoord:v1')).routes[0];
+    return saved.name.endsWith('k') && saved.round === '3';
+  }));
   check(`${what}: no console errors`, !errs.length, errs.join(' | '));
   await ctx.close();
 }
