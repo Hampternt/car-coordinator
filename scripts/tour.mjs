@@ -112,6 +112,63 @@ for (const [what, plan] of [['a fresh browser', null], ['the dev fixture', devPl
   await ctx.close();
 }
 
+// (f) Placement: at every width, for a target in the top bar, one far down
+// the page, one in the rail (stacked above the table at 1180 and below) and
+// a missing one, the card stays in the window and under the bar, the target
+// stays uncovered, and the tour adds no sideways scroll. Steps of its own,
+// on this page only.
+const PLACES = [
+  { tab: 'preview', target: '.topbar [data-act="print"]', title: 'In the top bar', text: 'x' },
+  { tab: 'plan', target: '#planMap', title: 'Far down the page', text: 'x' },
+  { tab: 'plan', target: '#tab-plan .rail-panel[data-panel="cars"] .rail-add', title: 'In the rail', text: 'x' },
+  { tab: 'plan', target: '#noSuchThing', title: 'Missing', text: 'x' },
+  { tab: 'cars', target: '#newCar', title: 'A box to type in', text: 'x' },
+];
+const measure = (pg) => pg.evaluate(() => {
+  const c = document.querySelector('#tour').getBoundingClientRect();
+  const bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+  const el = document.querySelector(Tour.STEPS[Number(document.querySelector('#tour .tour-count').textContent.split(' ')[0]) - 1].target);
+  const a = el && el.getBoundingClientRect();
+  const cx = a && a.left + a.width / 2, cy = a && a.top + a.height / 2;
+  const inView = !!a && a.width > 0 && cy >= bar && cy <= innerHeight && cx >= 0 && cx <= document.documentElement.clientWidth;
+  const hit = inView ? document.elementFromPoint(cx, cy) : null;
+  return {
+    inWindow: c.left >= -0.5 && c.right <= document.documentElement.clientWidth + 0.5 && c.bottom <= innerHeight + 0.5,
+    underBar: c.top >= bar - 0.5,
+    uncovered: !inView || (!!hit && el.contains(hit)),
+    inView,
+    sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    ring: !document.querySelector('#tourRing').hidden,
+  };
+});
+for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600], [390, 844]]) {
+  const { ctx, pg } = await openPage({ plan: devPlan, width, height });
+  const baseline = await pg.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  await pg.evaluate((steps) => { Tour.STEPS.splice(0, Tour.STEPS.length, ...steps); }, PLACES);
+  await startTour(pg);
+  for (let i = 0; i < PLACES.length; i++) {
+    if (i) await pg.evaluate((n) => Tour.go(n), i);
+    const m = await measure(pg);
+    const name = `at ${width}, "${PLACES[i].title}"`;
+    check(`${name}: the card is inside the window and under the top bar`, m.inWindow && m.underBar, JSON.stringify(m));
+    if (PLACES[i].target === '#noSuchThing') check(`${name}: no ring`, !m.ring);
+    else check(`${name}: the target is in view and not covered`, m.inView && m.uncovered, JSON.stringify(m));
+    check(`${name}: no sideways scroll beyond the page's own (${baseline}px)`, m.sideways <= baseline, `${m.sideways}px`);
+  }
+  // Typing while the tour points at a box lands in the box.
+  await pg.click('#newCar');
+  await pg.keyboard.type('ZZ99999');
+  check(`at ${width}, typing into the box the tour points at lands`, (await pg.inputValue('#newCar')) === 'ZZ99999' && await tourOpen(pg));
+  // The page scrolled with the tour open: the card follows, still in the
+  // window and under the bar.
+  await pg.evaluate(() => Tour.go(1));
+  await pg.mouse.wheel(0, 250);
+  await pg.waitForTimeout(100);
+  const m = await measure(pg);
+  check(`at ${width}, with the page scrolled under it, the card stays in the window and under the bar`, m.inWindow && m.underBar && m.uncovered, JSON.stringify(m));
+  await ctx.close();
+}
+
 // --- tour: done ---
 check('the tour cases log no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();

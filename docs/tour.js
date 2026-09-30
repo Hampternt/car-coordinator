@@ -71,28 +71,49 @@ const Tour = (() => {
     card().querySelector('[data-tour="next"]').focus({ preventScroll: true });
   }
 
+  /* The card beside its target, lined up with the target's right edge for a
+     step that says so or a target on the right half of the window; the ring
+     round the target, cut to the window and to below the top bar (unless the
+     target is in the bar). No target, or one with no size (its tab is not
+     showing), gives no ring and a card under the bar at the right. */
   function place() {
     if (!hooks || at < 0) return;
     const c = card(), r = ring();
-    const el = find(STEPS[at]);
+    const step = STEPS[at];
+    const el = find(step);
     const a = el && el.getBoundingClientRect();
+    const seen = !!a && a.width > 0 && a.height > 0;
+    const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    const bar = barBottom();
     c.hidden = false;
     c.style.maxHeight = '';
-    if (!a || !a.width || !a.height) {
-      r.hidden = true;
-      c.style.left = `${window.scrollX + document.documentElement.clientWidth - c.offsetWidth - 8}px`;
-      c.style.top = `${window.scrollY + barBottom() + 8}px`;
-      return;
+    const w = c.offsetWidth, h = c.offsetHeight;
+    let left, top, tall;
+    if (seen) {
+      const right = step.align === 'right' || a.left + a.width / 2 > vw / 2;
+      ({ left, top, tall } = hooks.besideAnchor(a, w, h, right));
+      // besideAnchor keeps a card opened upwards clear of the bar, but not
+      // one opened downwards: a target scrolled up under the bar, or in it,
+      // would carry the card over the tabs.
+      if (top < bar + 8) { top = bar + 8; tall = Math.min(h, vh - 8 - top); }
+    } else {
+      left = Math.max(8, vw - w - 8);
+      top = bar + 8;
+      tall = Math.min(h, vh - 8 - top);
     }
-    const { left, top, tall } = hooks.besideAnchor(a, c.offsetWidth, c.offsetHeight);
-    c.style.maxHeight = `${tall}px`;
+    c.style.maxHeight = `${Math.max(0, tall)}px`;
     c.style.left = `${left + window.scrollX}px`;
     c.style.top = `${top + window.scrollY}px`;
+    if (!seen) { r.hidden = true; return; }
+    const ceiling = el.closest('.topbar') ? 0 : bar;
+    const x1 = Math.max(0, a.left - 4), y1 = Math.max(ceiling, a.top - 4);
+    const x2 = Math.min(vw, a.right + 4), y2 = Math.min(vh, a.bottom + 4);
+    if (x2 - x1 < 1 || y2 - y1 < 1) { r.hidden = true; return; }
     r.hidden = false;
-    r.style.left = `${a.left - 4 + window.scrollX}px`;
-    r.style.top = `${a.top - 4 + window.scrollY}px`;
-    r.style.width = `${a.width + 8}px`;
-    r.style.height = `${a.height + 8}px`;
+    r.style.left = `${x1 + window.scrollX}px`;
+    r.style.top = `${y1 + window.scrollY}px`;
+    r.style.width = `${x2 - x1}px`;
+    r.style.height = `${y2 - y1}px`;
   }
 
   function start(opener) {
