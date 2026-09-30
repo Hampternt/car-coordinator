@@ -414,7 +414,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tour-acts [data-tour="end"] { margin-left: auto; }
 #tourRing { position: absolute; z-index: 6; pointer-events: none; border: 3px solid var(--hivis); box-shadow: 0 0 0 2px var(--ink); }
 
-/* The row a Go to landed on, lit for a moment. */
+/* The row a Go to landed on, lit for a moment, and a spot shown on the map. */
+.parking-box.ctx-found { outline: 3px solid var(--hivis); outline-offset: 2px; }
 .grid tr.ctx-found td, .rail-row.ctx-found { background: var(--drop); }
 
 .rail-add { display: flex; gap: 4px; margin-bottom: 8px; }

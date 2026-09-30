@@ -5179,6 +5179,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.locator('[data-act="tab"][data-tab="plan"]').click();
   await cmRight(cmRoute('7').locator('select[data-field="positionId"]'));
   same('a route\'s position lists Go to that position first', (await cmEntries())[0], 'Go to Port 1 on the Positions tab');
+  check('then its own entries, and the free spots to move to', (await cmEntries()).includes('Take Port 1 off route 7')
+    && (await cmEntries()).includes('Allow many cars') && (await cmMenu.locator('[data-act="move-pos"]').count()) > 0);
   await cmMenu.locator('[data-act="go"]').click();
   check('and it lands in that position\'s name box', await cm.evaluate(() => tab === 'positions' && document.activeElement.dataset.id === 'pos-port1' && document.activeElement.dataset.field === 'name'));
   await cm.locator('[data-act="tab"][data-tab="plan"]').click();

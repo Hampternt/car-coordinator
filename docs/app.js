@@ -651,6 +651,32 @@ function ctxEntry(s) {
    either shows "Sure?" on both) and takes the ✕'s backup; Clear is the
    day's clear on this one row, with a key and a backup of its own. */
 const routeIsBlank = (r) => !r.driver && !r.carId && !r.positionId && !r.round && !r.highlight;
+
+/* A right-click on a route's Position box: the position's own entries, then
+   the spots this route could move to (owner, 2026-09-30). Free means free in
+   this route's round, with no status on it; Many-cars spots always are. Five
+   at most, and past that a count. */
+function ctxRoutePosition(r) {
+  const pos = byId(state.positions, r.positionId);
+  const own = [];
+  if (pos) {
+    own.push(ctxGo(`Go to ${pos.name} on the Positions tab`, 'positions', 'position', pos.id, 'name'));
+    if (document.querySelector(`#planMap [data-position="${CSS.escape(pos.id)}"]`)) {
+      own.push({ act: 'show-map', data: { kind: 'position', id: pos.id }, text: 'Show on the parking map' });
+    }
+    own.push({ act: 'toggle', data: { kind: 'position', id: pos.id, field: 'multi' }, text: pos.multi ? 'Stop allowing many cars' : 'Allow many cars' });
+    own.push({ act: 'take-off', data: { kind: 'route', id: r.id, take: 'positionId', was: pos.id }, text: `Take ${pos.name} off route ${r.name.trim() || '-'}` });
+  }
+  const { spots } = usage();
+  const free = state.positions.filter((p) => p.id !== r.positionId && !p.labelId
+    && (p.multi || !(spots[spotKey(p.id, r.round)] || []).length));
+  const round = String(r.round || '').trim();
+  const moves = free.slice(0, 5).map((p) => ({ act: 'move-pos', data: { kind: 'route', id: r.id, value: p.id, was: r.positionId || '' },
+    text: `${pos ? 'Move to' : 'Put on'} ${p.name}`, cost: p.multi ? 'Many cars' : round ? `Free in round ${round}` : 'Free' }));
+  if (free.length > 5) moves.push({ off: true, text: `${free.length - 5} more free` });
+  return [own, moves];
+}
+
 function ctxRoute(r, part) {
   const d = { kind: 'route', id: r.id };
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
@@ -658,11 +684,10 @@ function ctxRoute(r, part) {
     cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
   // Right-clicked on its car or its position: the way to that one first.
   const car = part === 'carId' && byId(state.cars, r.carId);
-  const pos = part === 'positionId' && byId(state.positions, r.positionId);
+  const [posOwn, posMoves] = part === 'positionId' ? ctxRoutePosition(r) : [[], []];
   return [[
     car && ctxGo(`Go to ${car.reg} on the Cars tab`, 'cars', 'car', car.id, 'reg'),
-    pos && ctxGo(`Go to ${pos.name} on the Positions tab`, 'positions', 'position', pos.id, 'name'),
-  ].filter(Boolean), [
+  ].filter(Boolean), posOwn, posMoves, [
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
   ], [
@@ -2648,6 +2673,25 @@ document.addEventListener('click', (e) => {
       r[f] = v;
       break;
     }
+    // A Position box's Move to: only while the route still has the position
+    // the entry was drawn for. The same field the select sets.
+    case 'move-pos': {
+      const r = list[i];
+      const v = b.dataset.value || '', was = b.dataset.was || '';
+      if (r.positionId !== was || !byId(state.positions, v)) { render(); return; }
+      r.positionId = v;
+      break;
+    }
+    // Down to the position's box on the parking map, lit for a moment. It
+    // moves the page, and saves nothing.
+    case 'show-map': {
+      const box = document.querySelector(`#planMap [data-position="${CSS.escape(id || '')}"]`);
+      if (!box) return;
+      box.scrollIntoView({ block: 'center' });
+      box.classList.add('ctx-found');
+      setTimeout(() => box.classList.remove('ctx-found'), 1500);
+      return;
+    }
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
       state.routes.push(newRoute(String(nums.length ? Math.max(...nums) + 1 : 1)));
@@ -3379,7 +3423,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'resave-template']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field

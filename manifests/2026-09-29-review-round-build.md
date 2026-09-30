@@ -102,3 +102,9 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - **Go to ⟨driver⟩ on the Drivers tab.**
 
     The Drivers and Cars tab menus are unchanged. Two smoke menus are re-pinned and a block of eight checks added. A targeted Chrome run with the example data passed: Petter onto route 14, ZH 90458 onto route 14 and then Workshop, Anders into Wednesday (the rail then reads "Mon–Wed"), and Go to landing on his name box; no errors. The full suite runs before `dev` → `main`.
+  - **Position entries on a route's Position box, on `dev`** (owner): "on day plan right clicking position should let me get some position related menu options".
+    - Kept: Go to ⟨position⟩ on the Positions tab.
+    - New: Show on the parking map (only for a spot the map draws), Allow/Stop allowing many cars, and Take ⟨position⟩ off route N.
+    - New: Move to ⟨spot⟩ (or Put on, for a route with none), for spots free in this route's round with no status; Many-cars spots always count. Five at most, then a count. It changes nothing if the route's position moved meanwhile.
+
+    A smoke check is added beside the Go to one. A targeted Chrome run with the example data passed: route 8 (round 2) is offered only the Garage, correctly; route 14 is put on Spot 1; Show on the map lights Spot 1 in view; no errors.
