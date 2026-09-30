@@ -596,7 +596,21 @@ function placeTagMenu(scrolled = false) {
    writes anything on its own. Kept off `state` like the tag menu, and drawn
    in a layer of its own (#ctxMenu) for the same reason: opening or closing
    one saves nothing. */
-let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, room } }
+let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, room }, view }
+
+/* A menu can open a list of its own in place ("Status: OK ›"): the same
+   layer, drawn as that list with ‹ Back on top, rather than a second menu
+   beside it, so a mouse, the keyboard and a finger all reach it the same
+   way. ctx.view names the list; nothing about it is saved. */
+const ctxBack = { act: 'ctx-view', data: { view: '' }, text: '\u2039 Back' };
+// The entry that opens an item's status list, saying the status it has now.
+const ctxStatusOpen = (item) => ({ act: 'ctx-view', data: { view: 'status' },
+  text: `Status: ${item.labelId && byId(state.labels, item.labelId) ? labelName(byId(state.labels, item.labelId)) : 'OK'} \u203a` });
+// OK and every label, the current one ticked: the chips' own setLabel.
+const ctxStatusList = (kind, item) => [
+  { act: 'setLabel', data: { kind, id: item.id, label: '' }, text: `${item.labelId ? '' : '\u2713 '}OK` },
+  ...state.labels.map((l) => ({ act: 'setLabel', data: { kind, id: item.id, label: l.id }, text: `${item.labelId === l.id ? '\u2713 ' : ''}${labelName(l)}` })),
+];
 // Where a keyboard open's focus goes back to: a selector, never an element,
 // since a redraw replaces them all.
 let ctxReturn = null;
@@ -656,14 +670,16 @@ const routeIsBlank = (r) => !r.driver && !r.carId && !r.positionId && !r.round &
    the spots this route could move to (owner, 2026-09-30). Free means free in
    this route's round, with no status on it; Many-cars spots always are. Five
    at most, and past that a count. */
-function ctxRoutePosition(r) {
+function ctxRoutePosition(r, view) {
   const pos = byId(state.positions, r.positionId);
+  if (pos && view === 'status') return [[ctxBack], ctxStatusList('position', pos)];
   const own = [];
   if (pos) {
     own.push(ctxGo(`Go to ${pos.name} on the Positions tab`, 'positions', 'position', pos.id, 'name'));
     if (document.querySelector(`#planMap [data-position="${CSS.escape(pos.id)}"]`)) {
       own.push({ act: 'show-map', data: { kind: 'position', id: pos.id }, text: 'Show on the parking map' });
     }
+    own.push(ctxStatusOpen(pos));
     own.push({ act: 'toggle', data: { kind: 'position', id: pos.id, field: 'multi' }, text: pos.multi ? 'Stop allowing many cars' : 'Allow many cars' });
     own.push({ act: 'take-off', data: { kind: 'route', id: r.id, take: 'positionId', was: pos.id }, text: `Take ${pos.name} off route ${r.name.trim() || '-'}` });
   }
@@ -677,13 +693,14 @@ function ctxRoutePosition(r) {
   return [own, moves];
 }
 
-function ctxRoute(r, part) {
+function ctxRoute(r, part, view) {
   const d = { kind: 'route', id: r.id };
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
   const clear = { act: 'clear-route', data: d, arm: `clear:${r.id}`, text: 'Clear driver, car, position and round',
     cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
   // Right-clicked on its car or its position: the way to that one first.
   const car = part === 'carId' && byId(state.cars, r.carId);
+  if (part === 'positionId' && view === 'status' && byId(state.positions, r.positionId)) return ctxRoutePosition(r, view);
   const [posOwn, posMoves] = part === 'positionId' ? ctxRoutePosition(r) : [[], []];
   return [[
     car && ctxGo(`Go to ${car.reg} on the Cars tab`, 'cars', 'car', car.id, 'reg'),
@@ -757,7 +774,7 @@ function ctxDriver(d, surface) {
 
 /* A car, in the rail or on the Cars tab. Deleting one takes it off every
    route and template, which is what the cost line counts. */
-function ctxCar(c, surface) {
+function ctxCar(c, surface, view) {
   const c0 = { kind: 'car', id: c.id };
   const on = usage().cars[c.id] || [];
   const tpl = state.templates.filter((t) => t.routes.some((r) => r.carId === c.id)).length;
@@ -766,11 +783,8 @@ function ctxCar(c, surface) {
   const rail = surface === 'rail';
   // In the rail, its status in one click (the Cars tab's chips, setLabel),
   // with the one it has ticked; Tag… is still there for a new tag.
-  const status = rail ? [
-    { act: 'setLabel', data: { ...c0, label: '' }, text: `${c.labelId ? '' : '\u2713 '}OK` },
-    ...state.labels.map((l) => ({ act: 'setLabel', data: { ...c0, label: l.id }, text: `${c.labelId === l.id ? '\u2713 ' : ''}${labelName(l)}` })),
-    { act: 'tag', data: c0, text: 'Tag\u2026' },
-  ] : [];
+  if (rail && view === 'status') return [[ctxBack], ctxStatusList('car', c)];
+  const status = rail ? [ctxStatusOpen(c), { act: 'tag', data: c0, text: 'Tag\u2026' }] : [];
   return [
     status,
     // Its note can only be changed on the Cars tab.
@@ -827,9 +841,9 @@ function ctxTemplate(t) {
 // Each surface's menu: the header's name, and the entries in groups that a
 // separator divides.
 const CTX_MENUS = {
-  route: (r, c) => ({ name: routeTitle(r), groups: ctxRoute(r, c.part) }),
+  route: (r, c) => ({ name: routeTitle(r), groups: ctxRoute(r, c.part, c.view) }),
   rail: (x, c) => (c.kind === 'car'
-    ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail') }
+    ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail', c.view) }
     : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
   drivers: (d) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers') }),
   cars: (c) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars') }),
@@ -3318,6 +3332,12 @@ $('#ctxMenu')?.addEventListener('click', (e) => {
   ctxClosed = null;
   const b = e.target.closest('[data-act]');
   if (!b || !ctx) return;
+  if (b.dataset.act === 'ctx-view') {
+    ctx.view = b.dataset.view || null;
+    renderCtxMenu();
+    $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+    return;
+  }
   if (b.dataset.arm && b.dataset.arm !== armed) return;
   ctxClosed = { keyboard: e.detail === 0, back: ctx.keyboard ? ctxReturn : null };
   ctx = null;
@@ -3359,6 +3379,13 @@ document.addEventListener('keydown', (e) => {
   const t = e.target;
   if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); return; }
   if (t !== document.body && !layer.contains(t)) return;
+  if (e.key === 'Escape' && ctx.view) {
+    e.preventDefault();
+    ctx.view = null;
+    renderCtxMenu();
+    $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+    return;
+  }
   if (e.key === 'Escape' || e.key === 'Tab') {
     e.preventDefault();
     const back = ctx.keyboard ? ctxReturn : null;

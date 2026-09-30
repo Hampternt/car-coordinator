@@ -108,3 +108,9 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - New: Move to ⟨spot⟩ (or Put on, for a route with none), for spots free in this route's round with no status; Many-cars spots always count. Five at most, then a count. It changes nothing if the route's position moved meanwhile.
 
     A smoke check is added beside the Go to one. A targeted Chrome run with the example data passed: route 8 (round 2) is offered only the Garage, correctly; route 14 is put on Spot 1; Show on the map lights Spot 1 in view; no errors.
+  - **A status list inside the menu, on `dev`** (owner): "positions can be tagged so … make it so i can tag them … eg tags > [tag1, tag2, tag3]".
+    - The menu can switch in place to a list of its own. `ctx.view` holds it; the list starts with ‹ Back, and Escape goes back before it closes. Nothing about it is saved.
+    - A route's Position box gets "Status: ⟨current⟩ ›" (OK and every label, ticked; setLabel).
+    - The rail car's flat status list from earlier today becomes the same "Status: ⟨current⟩ ›".
+    - The smoke rail-car checks are re-pinned, with Back and Escape added.
+    - A targeted Chrome run passed: Spot 1 → Workshop raises its warning; the menu stays in place; Escape goes back, then out; no errors.

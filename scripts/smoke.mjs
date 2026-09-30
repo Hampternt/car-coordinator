@@ -5180,6 +5180,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmRight(cmRoute('7').locator('select[data-field="positionId"]'));
   same('a route\'s position lists Go to that position first', (await cmEntries())[0], 'Go to Port 1 on the Positions tab');
   check('then its own entries, and the free spots to move to', (await cmEntries()).includes('Take Port 1 off route 7')
+    && (await cmEntries()).includes('Status: OK ›')
     && (await cmEntries()).includes('Allow many cars') && (await cmMenu.locator('[data-act="move-pos"]').count()) > 0);
   await cmMenu.locator('[data-act="go"]').click();
   check('and it lands in that position\'s name box', await cm.evaluate(() => tab === 'positions' && document.activeElement.dataset.id === 'pos-port1' && document.activeElement.dataset.field === 'name'));
@@ -5240,7 +5241,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   });
   await cmRight(cmRail('car', 'car-07').locator('.assign'));
   const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
-  same('a rail car\'s menu', await cmEntries(), [...await cm.evaluate(() => ['✓ OK', ...state.labels.map((l) => l.name)]), 'Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Take off route 7', 'Delete car']);
+  same('a rail car\'s menu', await cmEntries(), ['Status: OK ›', 'Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Take off route 7', 'Delete car']);
   same('and its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), cost);
   await cm.keyboard.press('Escape');
 
@@ -5308,10 +5309,16 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmMenu.locator('[data-act="put-on"]').first().click();
   check('Put on route puts the car there, as a drop would', (await cm.evaluate((n) => state.routes.find((r) => r.name === n).carId, first)) === 'car-16' && await cmMenu.isHidden());
   await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  same('Status: OK › opens the status list in place, with Back', await cmEntries(), await cm.evaluate(() => ['‹ Back', '✓ OK', ...state.labels.map((l) => l.name)]));
+  check('and the menu stays open while it does', await cmMenu.isVisible());
   await cmMenu.locator('[data-act="setLabel"]', { hasText: 'Workshop' }).click();
   check('a status entry sets the car\'s label', await cm.evaluate(() => byId(state.labels, state.cars.find((c) => c.id === 'car-16').labelId)?.name === 'Workshop'));
   await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
-  check('and the menu ticks it the next time', (await cmEntries()).includes('✓ Workshop') && !(await cmEntries()).includes('✓ OK'));
+  check('and the menu then says it', (await cmEntries())[0] === 'Status: Workshop ›');
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  await cm.keyboard.press('Escape');
+  check('Escape in the status list goes back to the menu, not out of it', await cmMenu.isVisible() && (await cmEntries())[0] === 'Status: Workshop ›');
   await cm.keyboard.press('Escape');
   await cmRight(cmRailRow('driver', 'drv-anders').locator('.grip'));
   await cmMenu.locator('[data-act="crew-day"]', { hasText: 'Works Wednesdays' }).click();
