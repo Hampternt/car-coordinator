@@ -288,6 +288,17 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-panel h3 { font: 600 15px var(--head); margin: 0 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rail-count { font: 400 12px var(--body); color: var(--muted); }
 .rail-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
+/* Beside a plan longer than the window (templates and the week sit under
+   the routes), the rail still fits the window under the top bar: its two
+   lists give way, down to about three rows each, so the last car can still be
+   dragged. The rail does not scroll as a whole, because the tag menu closes
+   when its row leaves its own list's edges. Stacked at 1180px and below, the
+   rail keeps its old shape. */
+@media (min-width: 1181px) {
+  .rail { display: flex; flex-direction: column; max-height: calc(100vh - 90px); }
+  .rail-panel { display: flex; flex-direction: column; min-height: 0; }
+  .rail-list { flex: 0 1 auto; min-height: 5em; }
+}
 .rail-list li { display: flex; align-items: center; gap: 4px; padding: 2px 0; border-bottom: 1px solid var(--line); font-size: 13px; position: relative; }
 .rail-list li:last-child { border-bottom: 0; }
 .rail-list b { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

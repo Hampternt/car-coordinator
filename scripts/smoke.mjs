@@ -4228,6 +4228,32 @@ await loadWeek();
   check("a Load takes the rail's driver list back to its top", await lp.evaluate(() => document.querySelector('#tab-plan [data-keep-scroll="drivers"]').scrollTop === 0));
 }
 
+// The rail beside the longer plan: at 1280x850 and 1600x940, on a dev-sized
+// plan, with the week in view, the rail still ends inside the window, and the
+// last car in its list can be reached.
+{
+  await layPlan({
+    routes: Array.from({ length: 15 }, (_, i) => ({ id: `r${i}`, name: String(i + 1), driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
+    driverGroups: [{ id: 'gm', name: 'Monday', driverIds: Array.from({ length: 16 }, (_, i) => `d${i}`) }],
+  });
+  for (const [width, height] of [[1280, 850], [1600, 940]]) {
+    await lp.setViewportSize({ width, height });
+    await lp.reload({ waitUntil: 'networkidle' });
+    await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+    const fits = await lp.evaluate(() => document.querySelector('#tab-plan .rail').getBoundingClientRect().bottom <= innerHeight + 1);
+    check(`at ${width}x${height}, with the week in view, the rail ends inside the window`, fits);
+    const last = await lp.evaluate(() => {
+      const list = document.querySelector('#tab-plan [data-panel="cars"] .rail-list');
+      list.scrollTop = list.scrollHeight;
+      const row = list.lastElementChild.getBoundingClientRect();
+      const hit = document.elementFromPoint(row.left + row.width / 2, row.top + row.height / 2);
+      return !!hit && list.lastElementChild.contains(hit);
+    });
+    check(`at ${width}x${height}, the last car in the list can be reached`, last);
+  }
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
 // --- under the route list: done ---
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();
