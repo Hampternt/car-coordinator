@@ -3385,6 +3385,10 @@ const pairs = [
   ['a day with a crew', '#tab-plan .day:not(.none):not(.on)', 'color', TEXT],
   ['the recovery page link', '#tab-data a[href="recover.html"]', 'color', TEXT],
   ['the pressed Colours button', '#tab-data .colour-choice.lit', 'color', TEXT],
+  ['a name in the week', '#planWeek .week-col li', 'color', TEXT],
+  ["the week's count", '#planWeek .week-count', 'color', TEXT],
+  ['a lit Load', '#planWeek .week-load.lit', 'color', TEXT],
+  ['a quiet day in the week', '#planWeek .week-col.quiet .week-none', 'color', TEXT],
   ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
   ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
   ['a grip', '.grip', 'color', MARK],
@@ -4148,6 +4152,80 @@ await lp.reload({ waitUntil: 'networkidle' });
   const [r2, t2, s2] = [await boxOf('#tab-plan .rail'), await boxOf('#tab-plan .plan-table'), await boxOf('#planTemplates')];
   check('at 1100 the page reads rail, route list, templates', r2.top < t2.top && t2.bottom <= s2.top, JSON.stringify({ r2, t2, s2 }));
   await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
+// The week fixture: five drivers, all in, and crews for Monday, Tuesday
+// (stored out of roster order, Bo in Monday too), a weekend crew, a second
+// Monday, Saturday, and an empty Sunday.
+const weekDrivers = ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' }));
+const weekGroups = [
+  { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
+  { id: 'g2', name: 'Tuesdays', driverIds: ['d3', 'd1', 'd2'] },
+  { id: 'g3', name: 'Weekend crew', driverIds: ['d3'] },
+  { id: 'g4', name: 'Mon', driverIds: ['d4'] },
+  { id: 'g5', name: 'Lørdag gjeng', driverIds: ['d2', 'd3'] },
+  { id: 'g6', name: 'Sunday', driverIds: [] },
+];
+const loadWeek = async (extra = {}) => {
+  await layPlan({ drivers: weekDrivers, driverGroups: weekGroups, ...extra });
+  await lp.reload({ waitUntil: 'networkidle' });
+};
+const weekView = () => lp.evaluate(() => [...document.querySelectorAll('#planWeek .week-col')].map((c) => ({
+  day: c.querySelector('.week-day').textContent,
+  quiet: c.classList.contains('quiet'),
+  load: !!c.querySelector('[data-act="apply-group"]'),
+  lit: !!c.querySelector('.week-load.lit'),
+  marked: c.getAttribute('aria-current') === 'date',
+  names: [...c.querySelectorAll('li')].map((li) => li.textContent + (li.classList.contains('away') ? ' (away)' : '')),
+  count: c.querySelector('.week-count')?.textContent || '',
+})));
+const inNow = () => lp.evaluate(() => state.drivers.filter((d) => d.available).map((d) => d.name).join(','));
+const v1Minus = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(p); });
+await loadWeek();
+{
+  let w = await weekView();
+  same('the week: Monday to Friday, Wednesday to Friday quiet with no Load',
+    w.map((c) => `${c.day}${c.quiet ? '-' : ''}${c.load ? '' : ' (no Load)'}`), ['Monday', 'Tuesday', 'Wednesday- (no Load)', 'Thursday- (no Load)', 'Friday- (no Load)']);
+  same('Tuesday lists its crew in roster order', w[1].names, ['Bo', 'Cai', 'Dee']);
+  const planDay = await lp.evaluate(() => planWeekday());
+  same("the plan's day is the marked column", w.filter((c) => c.marked).map((c) => c.day),
+    planDay >= 1 && planDay <= 5 ? [['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][planDay]] : []);
+  await lp.evaluate(() => { const d = parseDay(state.date); d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7)); state.date = dayString(d); render(); });
+  check('a Saturday plan marks no column', (await weekView()).every((c) => !c.marked));
+  await lp.reload({ waitUntil: 'networkidle' });
+  // Bo away, from the rail: greyed and counted in Monday and in Tuesday.
+  await lp.click('#tab-plan [data-panel="drivers"] .rail-row[data-id="d1"] [data-act="toggle"][data-field="available"]');
+  w = await weekView();
+  check('a driver set away is greyed and counted in every column they are in',
+    w[0].names.includes('Bo (away)') && w[1].names.includes('Bo (away)') && w[0].count.endsWith('· 1 away') && w[1].count.endsWith('· 1 away'), JSON.stringify(w.slice(0, 2)));
+  // Load: that crew in, everyone else away, and nothing else changed.
+  const notesBefore = await lp.locator('#notices .notice').count();
+  const restBefore = await v1Minus();
+  await lp.focus('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  await lp.keyboard.press('Enter');
+  w = await weekView();
+  check("Load on Monday makes exactly Monday's crew the ones in, and lights it", (await inNow()) === 'Ana,Bo' && w[0].lit && !w[1].lit);
+  check('and keeps the keyboard on Load', await lp.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="1"] [data-act="apply-group"]')));
+  await lp.click('#planWeek .week-col[data-day="2"] [data-act="apply-group"]');
+  check("Tuesday's Load then makes exactly Tuesday's crew the ones in", (await inNow()) === 'Bo,Cai,Dee');
+  check('each Load adds no notice, and saves only who is in', (await lp.locator('#notices .notice').count()) === notesBefore && (await v1Minus()) === restBefore);
+  // With the rail's question open at 1600, the next Load stays under the pointer.
+  await lp.setViewportSize({ width: 1600, height: 940 });
+  // (The day row's question until item 6 removes the row; then Sunday's chip.)
+  await lp.locator('#tab-plan .day-bar [data-act="day-missing"]').first().click();
+  const next = () => lp.evaluate(() => { const r = document.querySelector('#planWeek .week-col[data-day="2"] [data-act="apply-group"]').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)].join(); });
+  const at = await next();
+  await lp.click('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  check("a Load leaves the next column's Load under the pointer", (await next()) === at, `${at} -> ${await next()}`);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+// A long roster scrolled down: Load takes the rail's list back to its top.
+{
+  await layPlan({ driverGroups: [{ id: 'gm', name: 'Monday', driverIds: Array.from({ length: 16 }, (_, i) => `d${i}`) }] });
+  await lp.reload({ waitUntil: 'networkidle' });
+  await lp.evaluate(() => { const l = document.querySelector('#tab-plan [data-keep-scroll="drivers"]'); l.scrollTop = l.scrollHeight; l.dispatchEvent(new Event('scroll')); });
+  await lp.click('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  check("a Load takes the rail's driver list back to its top", await lp.evaluate(() => document.querySelector('#tab-plan [data-keep-scroll="drivers"]').scrollTop === 0));
 }
 
 // --- under the route list: done ---

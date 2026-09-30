@@ -838,6 +838,7 @@ function renderPlan() {
           <tbody>${rows}</tbody>
         </table></div>
         ${renderTemplates()}
+        ${renderWeek()}
       </div>
       <aside class="rail">${railDrivers()}${railCars(use)}
         <p class="rail-saved">Every change here is saved as you make it.</p>
@@ -917,6 +918,50 @@ function renderTemplates() {
     </div>
     ${shelf ? `<div class="shelf">${shelf}</div>
       <p class="hint" style="margin:8px 0 0">A template can offer itself when the plan is for its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+  </section>`;
+}
+
+/* ---------- the week, under the templates ----------
+   Monday to Friday, a column each, listing that day's crew in roster order:
+   the order the leader chose, so a Load never reshuffles a column. Load at
+   the top of a column is apply-group, the same act as the Drivers tab's
+   button: that crew in, everyone else away. A driver who is away is greyed in
+   every column they are in, as the rail shows them. A day with no crew, or an
+   empty one, is quiet and has no Load. The head's three lines never wrap, so
+   a Load changing the counts moves nothing under the pointer. */
+const WORK_WEEK = [1, 2, 3, 4, 5];
+
+function renderWeek() {
+  if (!state.drivers.length) return '';
+  const { byDay } = dayCrews();
+  const planDay = planWeekday();
+  const cols = WORK_WEEK.map((day) => {
+    const g = byDay.get(day);
+    const ids = g ? crewIds(g) : new Set();
+    const name = WEEKDAYS[day];
+    const marked = day === planDay;
+    const attrs = `data-day="${day}"${marked ? ` aria-current="date" title="The plan's date is this day (${esc(dayLabel(state.date))})"` : ''}`;
+    const head = `<div class="week-day">${name}</div>`;
+    if (!ids.size) {
+      return `<div class="week-col quiet${marked ? ' plan-day' : ''}" ${attrs}>${head}
+        <p class="week-none">${g ? 'Nobody in this crew yet' : 'No crew yet'}</p>
+      </div>`;
+    }
+    const crew = state.drivers.filter((d) => ids.has(d.id));
+    const away = crew.filter((d) => !d.available).length;
+    const on = crewInForce(ids);
+    const count = `${crew.length} driver${crew.length === 1 ? '' : 's'}${away ? ` \u00b7 ${away} away` : ''}`;
+    return `<div class="week-col${marked ? ' plan-day' : ''}" ${attrs}>${head}
+      <button class="btn week-load${on ? ' lit' : ''}" data-act="apply-group" data-kind="driverGroup" data-id="${esc(g.id)}" aria-pressed="${on}"
+        title="Make ${name}'s ${crew.length} the ones in; everyone else goes to away">Load</button>
+      <div class="week-count" title="${count}">${count}</div>
+      <ul>${crew.map((d) => `<li${d.available ? '' : ' class="away" title="Away"'}>${esc(d.name)}</li>`).join('')}</ul>
+    </div>`;
+  }).join('');
+  return `<section id="planWeek" class="week">
+    <h3>The week</h3>
+    <p class="hint">Each weekday's crew, from the day groups on the Drivers tab. Load makes that crew the ones in and sets everyone else to away. Greyed names are away.</p>
+    <div class="week-cols" data-keep-scroll="week">${cols}</div>
   </section>`;
 }
 
@@ -2215,7 +2260,6 @@ document.addEventListener('click', (e) => {
     // pointer that was about to press it.
     case 'all-in':
       state.drivers.forEach((d) => { d.available = true; });
-      dayAsk = null;
       delete planScroll.drivers;
       if (e.detail === 0) refocus = '#tab-plan .day-bar [data-act="all-in"]';
       break;
@@ -2280,12 +2324,17 @@ document.addEventListener('click', (e) => {
       // to take yesterday's leftovers out, or "who is in today" is a lie by
       // the end of the week.
       state.drivers.forEach((d) => { d.available = g.driverIds.includes(d.id); });
-      dayAsk = null;
+      // The rail's question stays up: at stacked widths the rail sits above
+      // the week, and closing it moved the columns under the pointer.
       // The crew just brought in sorts to the top of the list: show it there,
       // rather than keep the list scrolled down among the ones now away.
       delete planScroll.drivers;
       if (b.closest('#tab-plan')) {
-        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-act="apply-group"][data-id="${CSS.escape(id)}"], #tab-plan .rail-groups [data-act="apply-group"][data-id="${CSS.escape(id)}"]`;
+        // From the keyboard, back to the button pressed: the week's Load, the
+        // chip, or the day row's button. One selector would find the week's
+        // copy first, because the week comes first in the page.
+        const where = b.closest('#planWeek') ? '#planWeek' : b.closest('.rail-groups') ? '#tab-plan .rail-groups' : '#tab-plan .day-bar';
+        if (e.detail === 0) refocus = `${where} [data-act="apply-group"][data-id="${CSS.escape(id)}"]`;
         break;
       }
       const inToday = state.drivers.filter((d) => d.available).length;
