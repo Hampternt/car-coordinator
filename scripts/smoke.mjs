@@ -5090,6 +5090,36 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   same('with every gap where it was', below.filter((r) => r.id !== below[three + 1].id), above);
 }
 
+// Clear one route: two clicks blank its driver, car, position, round and mark
+// after a backup; its name, its gap, the other routes and the date stay.
+{
+  await cmOpen();
+  const cmState = () => cm.evaluate(() => JSON.parse(JSON.stringify({ date: state.date, routes: state.routes })));
+  const was = await cmState();
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  const clear = cmMenu.locator('[data-act="clear-route"]');
+  same('Clear says what it costs', await clear.locator('small').textContent(), 'Route 3 only. The pink mark goes too.');
+  await clear.click();
+  same('one click alone changes nothing', await cmState(), was);
+  check('and leaves the menu open on Sure?', await cmMenu.isVisible() && (await clear.locator('span').textContent()) === 'Sure? Click again');
+  await clear.click();
+  const now = await cmState();
+  const r3 = now.routes.find((r) => r.id === 'rt-03');
+  const w3 = was.routes.find((r) => r.id === 'rt-03');
+  same('the second click empties route 3\'s driver, car, position, round and mark', [r3.driver, r3.carId, r3.positionId, r3.round, r3.highlight], ['', '', '', '', false]);
+  check('and keeps its name and its gap', r3.name === w3.name && r3.gapBefore === w3.gapBefore);
+  same('the other routes are untouched', now.routes.filter((r) => r.id !== 'rt-03'), was.routes.filter((r) => r.id !== 'rt-03'));
+  check('and so is the date', now.date === was.date);
+  check('after a "Clearing route 3" backup that still holds what was on it', await cm.evaluate(() => Store.backups().some((b) => b.label === 'Clearing route 3'
+    && JSON.parse(b.json).routes.some((r) => r.id === 'rt-03' && r.driver === 'Camilla' && r.highlight === true))));
+
+  // Nothing on it: the entry is there, but disabled, and does nothing.
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  const off = cmMenu.locator('[role="menuitem"][aria-disabled]', { hasText: 'Clear driver, car, position and round' });
+  check('on a route with nothing on it, Clear is disabled and carries no act', (await off.count()) === 1 && (await off.getAttribute('data-act')) === null);
+  await cm.keyboard.press('Escape');
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();

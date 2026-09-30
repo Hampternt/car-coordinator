@@ -630,12 +630,17 @@ function ctxEntry(s) {
     + `<span>${on ? 'Sure? Click again' : esc(s.text)}</span>${cost}</button>`;
 }
 
-/* A route's own entries: the same two toggles as its Mark and Gap, and last,
-   after a separator, its delete, which is the ✕'s own act and confirm key
-   (so arming either shows "Sure?" on both) and takes the ✕'s backup. */
+/* A route's own entries: the same two toggles as its Mark and Gap, a blank
+   route above or below, and last, after a separator, the two that throw
+   something away. Delete is the ✕'s own act and confirm key (so arming
+   either shows "Sure?" on both) and takes the ✕'s backup; Clear is the
+   day's clear on this one row, with a key and a backup of its own. */
+const routeIsBlank = (r) => !r.driver && !r.carId && !r.positionId && !r.round && !r.highlight;
 function ctxRoute(r) {
   const d = { kind: 'route', id: r.id };
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
+  const clear = { act: 'clear-route', data: d, arm: `clear:${r.id}`, text: 'Clear driver, car, position and round',
+    cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
   return [[
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
@@ -643,6 +648,7 @@ function ctxRoute(r) {
     { act: 'insert-route', data: { ...d, where: 'above' }, text: 'Insert route above' },
     { act: 'insert-route', data: { ...d, where: 'below' }, text: 'Insert route below' },
   ], [
+    routeIsBlank(r) ? { ...clear, off: true, cost: 'Nothing on it to clear' } : clear,
     { act: 'del', data: d, arm: `del:${r.id}`, text: 'Delete route', cost: on.length ? on.join(', ') : 'Nothing on it yet' },
   ]];
 }
@@ -2379,6 +2385,16 @@ document.addEventListener('click', (e) => {
       refocus = `#tab-plan [data-kind="route"][data-id="${CSS.escape(r.id)}"][data-field="name"]`;
       break;
     }
+    // One route blanked, as Clear blanks the day: never its name, its gap or
+    // the date. Its own confirm key, which cannot meet the day's 'clear'.
+    case 'clear-route': {
+      const r = list[i];
+      if (routeIsBlank(r)) { render(); return; }   // blanked meanwhile: no backup for nothing
+      if (!confirmTwice(`clear:${id}`, e.detail === 0)) return;
+      Store.snapshot(state, `Clearing route ${r.name.trim() || '-'}`);
+      r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false;
+      break;
+    }
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
       state.routes.push(newRoute(String(nums.length ? Math.max(...nums) + 1 : 1)));
@@ -3091,7 +3107,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field
