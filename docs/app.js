@@ -1013,14 +1013,29 @@ function assignCell(entries) {
   }).join('');
 }
 
+/* A driver's usual days, Monday to Friday: pressed where that weekday's
+   group (the first one named for it, as the week under the day plan reads
+   it) holds them. A press edits the group, never the driver (crew-day). */
+function usualDays(d, byDay) {
+  return `<span class="day-ticks">${WORK_WEEK.map((day) => {
+    const crew = byDay.get(day);
+    const on = !!crew && crew.driverIds.includes(d.id);
+    const title = !crew ? `No ${WEEKDAYS[day]} group yet \u2014 click to start one with ${d.name}`
+      : on ? `In ${crew.name} \u2014 click to take ${d.name} out` : `Click to put ${d.name} in ${crew.name}`;
+    return `<button class="day-tick${on ? ' on' : ''}" data-act="crew-day" data-kind="driver" data-id="${esc(d.id)}" data-day="${day}" aria-pressed="${on}" title="${esc(title)}">${WEEKDAYS[day].slice(0, 3)}</button>`;
+  }).join('')}</span>`;
+}
+
 function renderDrivers() {
   const assigned = driverUsage();
+  const { byDay } = dayCrews();
   const rows = state.drivers.map((d) => {
     const on = assigned[fold(d.name)];
     return `<tr class="${d.available ? '' : 'away'}">
       <td>${field('driver', d.id, 'name', d.name, 'style="width:200px"')}</td>
       <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
       <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In today' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
+      <td>${usualDays(d, byDay)}</td>
       <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
   }).join('');
   $('#tab-drivers').innerHTML = `
@@ -1031,7 +1046,7 @@ function renderDrivers() {
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
     ${state.drivers.length
-      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th>Usual days</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
     ${driverGroups()}`;
 }

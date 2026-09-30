@@ -4640,6 +4640,27 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   check('and no repair notice comes after a reload', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
 }
 
+// Usual days on each row: pressed exactly where that weekday's first group
+// holds the driver.
+{
+  await dvOpen(devPlan);
+  const shown = await dv.evaluate(() => {
+    const { byDay } = dayCrews();
+    const wrong = [];
+    for (const d of state.drivers) {
+      for (const day of [1, 2, 3, 4, 5]) {
+        const b = document.querySelector(`#tab-drivers [data-act="crew-day"][data-id="${CSS.escape(d.id)}"][data-day="${day}"]`);
+        const want = !!byDay.get(day)?.driverIds.includes(d.id);
+        if (!b || (b.getAttribute('aria-pressed') === 'true') !== want) wrong.push(`${d.name} ${day}`);
+      }
+    }
+    const count = (day) => document.querySelectorAll(`#tab-drivers [data-act="crew-day"][data-day="${day}"][aria-pressed="true"]`).length;
+    return { wrong, tue: count(2), wed: count(3), thu: count(4), tueGroup: byDay.get(2)?.name };
+  });
+  check("each driver's usual days are pressed where that day's group holds them", !shown.wrong.length, shown.wrong.join(', '));
+  check('the fixture: Tirsdagslaget on Tuesday, nobody on Wednesday or Thursday', shown.tueGroup === 'Tirsdagslaget' && shown.tue === 13 && shown.wed === 0 && shown.thu === 0, JSON.stringify(shown));
+}
+
 // --- the Drivers tab: done ---
 check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
 await drvCtx.close();
