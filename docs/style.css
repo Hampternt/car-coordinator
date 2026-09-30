@@ -276,6 +276,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* The route table scrolls sideways in a box of its own when the screen is
    narrower than it, so the rail beside or above it keeps the screen's width. */
 .plan-table { min-width: 0; overflow-x: auto; }
+/* The left column: the route list, then what sits under it (templates, the
+   week, the map), however long the rail beside it is. */
+.plan-main { min-width: 0; }
 /* `minmax(0, 1fr)`, not the implicit `auto`: an auto column is sized from its
    content's minimum, and a row of grip, name box, badge and three buttons has
    a minimum wider than the rail. The column grew to 387 inside a 320 aside and
@@ -372,7 +375,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .day-ask .btn { padding: 2px 8px; font-size: 13px; }
 .day-ask.done { border-left-color: var(--ok); }
 
-/* ---------- day templates, at the foot of the plan ----------
+/* ---------- day templates, straight under the route list ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf
    itself is quiet: the question gets asked in a notice at the top of the page,
    where there is room to say what it costs. */

@@ -832,15 +832,17 @@ function renderPlan() {
     </div>
     ${dateLineHtml()}
     <div class="plan">
-      <div class="plan-table" data-keep-scroll="table"><table class="grid">
-        <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
+      <div class="plan-main">
+        <div class="plan-table" data-keep-scroll="table"><table class="grid">
+          <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+        ${renderTemplates()}
+      </div>
       <aside class="rail">${railDrivers()}${railCars(use)}
         <p class="rail-saved">Every change here is saved as you make it.</p>
       </aside>
-    </div>
-    ${renderTemplates()}`;
+    </div>`;
   // The rail's lists scroll, and this redraw replaces them: without putting
   // the scroll back, every click in a long roster — tag, in or away, remove —
   // threw the list to the top and the row just clicked out of sight.
@@ -906,7 +908,7 @@ function renderTemplates() {
       </div>
       ${tplOpen === t.id ? templateContents(t) : ''}
     </div>`).join('');
-  return `<section class="templates">
+  return `<section id="planTemplates" class="templates">
     <h3>Day templates</h3>
     <p class="hint">A saved copy of the routes as they stand — drivers, cars, positions, rounds and marks, but never the date. Save the way Monday usually runs once, and put it back next Monday.</p>
     <div class="bar">

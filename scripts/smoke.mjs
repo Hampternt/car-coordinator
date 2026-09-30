@@ -4113,6 +4113,47 @@ for (const [what, act] of [
 check('the no-op cases log no console errors', npErrors.length === 0, npErrors.join(' | '));
 await noCtx.close();
 
+// --- under the route list: templates, the week, the map's slot ---
+// A context of its own. The route table comes first, and what sits under it
+// sits right under it, however long the Drivers and Cars panels beside it.
+const layCtx = await browser.newContext({ viewport: { width: 1680, height: 940 } });
+const lp = await layCtx.newPage();
+const lpErrors = [];
+lp.on('console', (m) => m.type() === 'error' && lpErrors.push(m.text()));
+lp.on('pageerror', (e) => lpErrors.push(String(e)));
+await lp.goto(base, { waitUntil: 'networkidle' });
+const layPlan = (extra = {}) => lp.evaluate((extra) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
+  localStorage.setItem('carcoord:v1', JSON.stringify({
+    schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false, labels: [], positions: [],
+    cars: Array.from({ length: 17 }, (_, i) => ({ id: `c${i}`, reg: `LY${10000 + i}`, labelId: '', note: '' })),
+    drivers: Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, name: `Driver ${i + 1}`, available: true, labelId: '', note: '' })),
+    driverGroups: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [] }],
+    routes: ['1', '2', '3'].map((name) => ({ id: `r${name}`, name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
+    ...extra,
+  }));
+}, extra);
+const boxOf = (sel) => lp.evaluate((sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r && { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left }; }, sel);
+await layPlan();
+await lp.reload({ waitUntil: 'networkidle' });
+{
+  const table = await boxOf('#tab-plan .plan-table');
+  const shelf = await boxOf('#planTemplates');
+  const rail = await boxOf('#tab-plan .rail');
+  check('with a rail longer than the plan, the templates sit right under the route list',
+    rail.bottom > table.bottom + 100 && shelf.top >= table.bottom && shelf.top - table.bottom <= 30 && Math.abs(shelf.left - table.left) <= 1,
+    JSON.stringify({ table, shelf, rail }));
+  await lp.setViewportSize({ width: 1100, height: 900 });
+  const [r2, t2, s2] = [await boxOf('#tab-plan .rail'), await boxOf('#tab-plan .plan-table'), await boxOf('#planTemplates')];
+  check('at 1100 the page reads rail, route list, templates', r2.top < t2.top && t2.bottom <= s2.top, JSON.stringify({ r2, t2, s2 }));
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
+// --- under the route list: done ---
+check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
+await layCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
