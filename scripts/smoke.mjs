@@ -4902,9 +4902,20 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmMenu.locator('[role="menuitem"]').nth(1).click();
   check('Add a blank line above puts the gap in', (await cmFlags('7'))?.gapBefore === true && await cmMenu.isHidden());
 
-  // The browser's own menu stays in boxes that are typed in, and with Shift.
+  // A text box in a row opens the row's menu (owner, 2026-09-30); the
+  // browser's own stays with text selected in it, with Shift, and in other
+  // kinds of box.
   await cmRight(cmRoute('7').locator('[data-field="name"]'));
-  check('a right-click in a route\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('a right-click in a route\'s name box opens the route\'s menu', (await cmNative()) === false && await cmMenu.isVisible()
+    && (await cmMenu.locator('.ctx-head').textContent()) === 'Route 7');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('and so does its driver box', (await cmNative()) === false && await cmMenu.isVisible()
+    && (await cmMenu.locator('.ctx-head').textContent()) === 'Route 7');
+  await cm.keyboard.press('Escape');
+  await cmRoute('7').locator('[data-field="name"]').evaluate((i) => { i.focus(); i.setSelectionRange(0, i.value.length); });
+  await cmRoute('7').locator('[data-field="name"]').dispatchEvent('contextmenu', { button: 2 });
+  check('with text selected in it, the browser\'s menu stays, for copying', (await cmNative()) === true && await cmMenu.isHidden());
   await cmRight(mark, ['Shift']);
   check('so does Shift+right-click on Mark', (await cmNative()) === true && await cmMenu.isHidden());
   await cmRight(cm.locator('#date'));
@@ -5187,7 +5198,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
     await cm.evaluate(() => { const n = state.driverGroups.filter((g) => g.driverIds.includes('drv-anders')).length; return `${n ? `Taken out of ${n} day group${n === 1 ? '' : 's'}` : 'In no day group'}. Routes keep the name.`; }));
   await cm.keyboard.press('Escape');
   await cmRight(cmRail('driver', 'drv-anders').locator('.rail-name'));
-  check('the rail\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('the rail\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
   check('and the rail\'s ✕ reads Delete, not Remove', (await cmRail('driver', 'drv-anders').locator('[data-act="del"]').getAttribute('title')) === 'Delete Anders');
 
   await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
@@ -5305,9 +5317,11 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('Delete driver deletes with two clicks, after the usual backup', !(await cm.evaluate(() => state.drivers.some((d) => d.id === 'drv-guro')))
     && (await cm.evaluate(() => Store.backups()[0].label)) === 'Deleting a driver');
   await cmRight(cmDrv('Anders').locator('[data-field="name"]'));
-  check('a roster name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('a roster name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
   await cmRight(cmDrv('Anders').locator('[data-field="note"]'));
-  check('and so does its note box', (await cmNative()) === true && await cmMenu.isHidden());
+  check('and so does its note box', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
 }
 
 // The Cars, Positions and Labels tabs' rows, opened from the row's buttons.
@@ -5324,9 +5338,11 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('its Take off empties route 7\'s car and says so', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').carId)) === ''
     && (await cm.locator('#notices .notice', { hasText: `Took ${reg7} off route 7.` }).count()) === 1);
   await cmRight(car.locator('[data-field="reg"]'));
-  check('the reg box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('the reg box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
   await cmRight(car.locator('[data-field="note"]'));
-  check('and so does the car\'s note box', (await cmNative()) === true && await cmMenu.isHidden());
+  check('and so does the car\'s note box', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
 
   await cm.click('[data-act="tab"][data-tab="positions"]');
   const port = cmTabRow('positions', 'name', 'Port 1');
@@ -5345,7 +5361,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   same('a right-click on the Many cars tick opens the menu too, now offering to stop', (await cmEntries())[0], 'Stop allowing many cars');
   await cm.keyboard.press('Escape');
   await cmRight(port.locator('[data-field="name"]'));
-  check('the position\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('the position\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
 
   await cm.click('[data-act="tab"][data-tab="labels"]');
   const course = cmTabRow('labels', 'name', 'Course');
@@ -5365,7 +5382,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('Show on the printout ticks the label\'s printout box', await cm.evaluate(() => state.labels.find((l) => l.id === 'lbl-course').onSheet === true)
     && await course.locator('[data-field="onSheet"]').isChecked());
   await cmRight(course.locator('[data-field="name"]'));
-  check('the label\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('the label\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
   await cmRight(course.locator('[data-field="color"]'));
   check('and so does its colour box', (await cmNative()) === true && await cmMenu.isHidden());
   await cm.click('[data-act="tab"][data-tab="plan"]');

@@ -612,9 +612,13 @@ const CTX_ROWS = [
   ['labels', '#tab-labels tbody tr'],
   ['template', '#tab-plan .tpl'],
 ];
-// The only inputs a right-click opens the page's menu on. Any other box is
-// typed in, and keeps the browser's own Cut, Copy and Paste.
+// The inputs a right-click opens the row's menu on. A text box is one of them
+// (owner, 2026-09-30: the route's name and driver are where a route's menu is
+// reached for); the browser's Cut, Copy and Paste stay one step away, with
+// Shift held or text selected in the box. Any other kind of box (a date, a
+// colour) keeps the browser's menu.
 const CTX_INPUTS = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range']);
+const CTX_TEXT = new Set(['text', 'search']);
 
 // Every data-* attribute, as a selector: the entries of one menu differ only
 // in some of them (Mark and Gap in data-field).
@@ -3181,7 +3185,10 @@ document.addEventListener('contextmenu', (e) => {
   if (!layer) return;
   if (layer.contains(t)) { e.preventDefault(); return; }
   if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
-  if (t.closest('textarea, a') || (t.tagName === 'INPUT' && !CTX_INPUTS.has(t.type))) return;
+  if (t.closest('textarea, a')) return;
+  if (t.tagName === 'INPUT') {
+    if (CTX_TEXT.has(t.type) ? t.selectionStart !== t.selectionEnd : !CTX_INPUTS.has(t.type)) return;
+  }
   const hit = ctxHit(t);
   if (!hit) return;
   const sel = window.getSelection();
