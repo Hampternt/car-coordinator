@@ -392,6 +392,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* A submenu, beside its entry: above the menu it opens from. */
 .ctx-sub { z-index: 9; }
 .ctx-item.open { background: var(--concrete); }
+.ctx-row { display: flex; align-self: stretch; align-items: baseline; }
+.ctx-arrow { margin-left: auto; padding-left: 12px; font-size: 16px; line-height: 1; color: var(--muted); }
 .ctx-menu:focus { outline: none; }
 .ctx-head { margin: 0; padding: 4px 8px 6px; font: 600 12px var(--head); color: var(--muted); overflow-wrap: anywhere; }
 .ctx-sep { height: 1px; margin: 4px 0; background: var(--line); }

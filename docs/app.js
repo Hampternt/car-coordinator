@@ -605,7 +605,7 @@ let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, 
 const ctxBack = { act: 'ctx-view', data: { view: '' }, text: '\u2039 Back' };
 // The entry that opens an item's status list, saying the status it has now.
 const ctxStatusOpen = (item) => ({ act: 'ctx-view', data: { view: 'status' },
-  text: `Status: ${item.labelId && byId(state.labels, item.labelId) ? labelName(byId(state.labels, item.labelId)) : 'OK'} \u203a` });
+  text: `Status: ${item.labelId && byId(state.labels, item.labelId) ? labelName(byId(state.labels, item.labelId)) : 'OK'}` });
 // OK and every label, the current one ticked: the chips' own setLabel.
 const ctxStatusList = (kind, item) => [
   { act: 'setLabel', data: { kind, id: item.id, label: '' }, text: `${item.labelId ? '' : '\u2713 '}OK` },
@@ -655,8 +655,13 @@ function ctxEntry(s) {
   if (s.off) return `<button type="button" class="ctx-item" role="menuitem" tabindex="-1" aria-disabled="true"><span>${esc(s.text)}</span>${cost}</button>`;
   const on = !!s.arm && armed === s.arm;
   const data = Object.entries(s.data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
-  return `<button type="button" class="ctx-item${on ? ' armed' : ''}" role="menuitem" tabindex="-1" data-act="${s.act}"${data}${s.arm ? ` data-arm="${esc(s.arm)}"` : ''}>`
-    + `<span>${on ? 'Sure? Click again' : esc(s.text)}</span>${cost}</button>`;
+  // An entry that opens a submenu carries its arrow at the right-hand edge,
+  // as a desktop menu shows one.
+  const opens = s.act === 'ctx-view' && s.data && s.data.view;
+  const label = opens ? `<span class="ctx-row">${esc(s.text)} <span class="ctx-arrow" aria-hidden="true">\u203a</span></span>`
+    : `<span>${on ? 'Sure? Click again' : esc(s.text)}</span>`;
+  return `<button type="button" class="ctx-item${on ? ' armed' : ''}" role="menuitem" tabindex="-1" data-act="${s.act}"${data}${s.arm ? ` data-arm="${esc(s.arm)}"` : ''}${opens ? ' aria-haspopup="menu"' : ''}>`
+    + `${label}${cost}</button>`;
 }
 
 /* A route's own entries: the same two toggles as its Mark and Gap, a blank
@@ -3475,7 +3480,7 @@ $('#ctxMenu')?.addEventListener('mousemove', (e) => {
     clearTimeout(ctxHoverTimer);
     // Only where it fits beside the menu: a hover never swaps the menu for
     // the in-place list; a click or a key does.
-    if (ctx.sub !== view && ctxSubFits()) ctxHoverTimer = setTimeout(() => ctxOpenSub(view, false), 150);
+    if (ctx.sub !== view && ctxSubFits()) ctxHoverTimer = setTimeout(() => ctxOpenSub(view, false), 60);
   } else if (ctx.sub) {
     clearTimeout(ctxHoverTimer);
     ctxHoverTimer = setTimeout(() => ctxCloseSub(false), 300);
