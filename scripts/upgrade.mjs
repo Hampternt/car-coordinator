@@ -73,13 +73,22 @@ const passed = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && date < CLOC
 const READY_TAGS = [['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']];
 const sameTagName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
 
+// The weekday templates this build adds: Monday to Friday, empty, with their
+// fixed ids, each unless a template's name already reads as that day. Only
+// plain day names are read here (the plans this check uses have no others);
+// the smoke test holds the build's own reading to the week's.
+const WEEKDAY_WORDS = [['MONDAY', 'MON', 'MANDAG', 'MAN'], ['TUESDAY', 'TUE', 'TUES', 'TIRSDAG', 'TIR'], ['WEDNESDAY', 'WED', 'WEDS', 'ONSDAG', 'ONS'],
+  ['THURSDAY', 'THU', 'THUR', 'THURS', 'TORSDAG'], ['FRIDAY', 'FRI', 'FREDAG', 'FRE']];
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
 // The plan as this build reads the old build's saved text, in memory, with
 // only the changes the packs name: schema 5's Show on printout tick, unticked
 // unless it was ticked, the QR fixed off, a passed date moved to the next
 // working day (0.6.0), which is not written until the next change, and
 // schema 6's move-over: each label a driver wears becomes a driver tag of the
 // same name and colour, in the labels' order, then the ready-made tags not
-// already there, and a driver's labelId becomes its tagId.
+// already there, and a driver's labelId becomes its tagId; and 0.13.0's
+// weekday templates, after the plan's own, with the mark that they were added.
 function asOpened(oldPlan, schema) {
   const p = JSON.parse(JSON.stringify(oldPlan));
   delete p.extra;   // makeOdd's field, which no build keeps
@@ -95,6 +104,15 @@ function asOpened(oldPlan, schema) {
       d.tagId = p.driverTags.some((t) => t.id === `moved:${d.labelId}`) ? `moved:${d.labelId}` : '';
       delete d.labelId;
     }
+  }
+  if (p.weekdayTemplates !== true) {
+    p.templates = p.templates || [];
+    WEEKDAY_WORDS.forEach((words, i) => {
+      if (!p.templates.some((t) => t.id === `tpl-weekday-${i + 1}` || words.includes(String(t.name).trim().toUpperCase()))) {
+        p.templates.push({ id: `tpl-weekday-${i + 1}`, name: WEEKDAY_NAMES[i], weekday: '', routes: [] });
+      }
+    });
+    p.weekdayTemplates = true;
   }
   return p;
 }
@@ -378,6 +396,11 @@ const scenarios = {
         check('mixed files: an old store.js means no Driver tags section, and no driver tags in memory', section === 0
           && await now.page.evaluate(() => state.driverTags === undefined && state.drivers.every((d) => !('tagId' in d))), `${section} section parts`);
       }
+      // An old store.js adds no weekday templates, and the shelf shows the
+      // plan's own.
+      check('mixed files: an old store.js means the plan\'s own templates only', await now.page.evaluate(() => state.weekdayTemplates === undefined
+        && !state.templates.some((t) => /^tpl-weekday-\d$/.test(t.id))
+        && document.querySelectorAll('#planTemplates .tpl').length === state.templates.length));
       check('mixed files: no console errors', !now.errors.length, now.errors.join(' | '));
       await now.context.close();
 
@@ -428,6 +451,9 @@ const scenarios = {
       const tagged = mine.drivers.filter((d) => d.tagId).map((d) => `${d.name}=${mine.driverTags.find((t) => t.id === d.tagId)?.name}`);
       check(`${v} in an older build: this build moved the drivers' tags over on import`, tagged.join() === 'Petter=Holiday,Randi=Course'
         && mine.driverTags.map((t) => t.name).join() === 'Holiday,Course,Sick,Vacation,Special situation', `${tagged.join()} | ${mine.driverTags.map((t) => t.name).join()}`);
+      check(`${v} in an older build: this build added Monday to Friday after the plan's own templates, on import`,
+        mine.weekdayTemplates === true && mine.templates.map((t) => t.name).join() === 'Standard weekday,Saturday,Monday,Tuesday,Wednesday,Thursday,Friday',
+        mine.templates.map((t) => t.name).join());
       check(`${v} in an older build: this build logged no console errors`, !now.errors.length, now.errors.join(' | '));
       await now.context.close();
 
@@ -448,8 +474,10 @@ const scenarios = {
       // An older build knows no driver tags: the list goes, and its drivers
       // come back with no tag, as the update note says.
       delete want.driverTags;
+      // It keeps every template, the weekday ones included, and drops the mark.
+      delete want.weekdayTemplates;
       for (const d of want.drivers) { delete d.tagId; d.labelId = ''; }
-      check(`${v} in an older build: one change later, only the change, the schema, the ticks and the driver tags differ`, sameData(oldSaved, want) && oldSaved.qrOnSheet === false, differing(oldSaved, want).join(', '));
+      check(`${v} in an older build: one change later, only the change, the schema, the ticks, the driver tags and the weekday-templates mark differ`, sameData(oldSaved, want) && oldSaved.qrOnSheet === false, differing(oldSaved, want).join(', '));
       check(`${v} in an older build: the old build logged no console errors`, !old.errors.length, old.errors.join(' | '));
       await old.context.close();
 

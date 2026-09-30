@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -49,6 +49,8 @@ const DAY_NAMES = [
   ['FRIDAY', 'FRI', 'FREDAG', 'FRE'],
   ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG', 'LØR'],
 ];
+// store.js has a copy of DAY_NAMES and this, as Store.weekdayOf, for the
+// weekday templates it adds; the two must be kept in step.
 function groupWeekday(name) {
   let n = fold(name)
     .replace(/[.!]+$/, '')                                            // "Mondays."
@@ -183,7 +185,10 @@ function defaults() {
     drivers: [],
     ...(ownDriverTags() ? { driverTags: Store.readyTags() } : {}),
     driverGroups: [],
-    templates: [],
+    // Monday to Friday, empty, and the mark that they were given. Only from a
+    // store.js that has them: a cached older one pairs with this app.js after
+    // a deploy, and defaults() runs before anything else is drawn.
+    ...(typeof Store.weekdayTemplates === 'function' ? { templates: Store.weekdayTemplates(), weekdayTemplates: true } : { templates: [] }),
     routes: [
       ...['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14'].map((n) => newRoute(n)),
       newRoute('HAU 1', true),
@@ -872,15 +877,17 @@ function ctxDriverTag(t) {
 }
 
 /* A template card, its open contents included. Load only asks, as the name
-   button does: the question's own Load is the only thing that writes. */
+   button does: the question's own Load is the only thing that writes. An
+   empty template has nothing to load or show, as on its card. */
 function ctxTemplate(t) {
   const t0 = { kind: 'template', id: t.id };
-  return [[
-    { act: 'ask-template', data: t0, text: 'Load over the plan\u2026' },
+  return [t.routes.length ? [
+    { act: 'ask-template', data: t0, text: 'Load\u2026' },
     { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
-  ], [
-    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Replace with the plan as it is now',
-      cost: `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}` },
+  ] : [], [
+    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Update from plan',
+      cost: t.routes.length ? `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}`
+        : `It holds nothing yet; it becomes the plan's ${plural(state.routes.length, 'route')}` },
     { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
   ]];
 }
@@ -1337,10 +1344,16 @@ function templateContents(t) {
 }
 
 function renderTemplates() {
+  // An empty template (the weekday ones, until Update from plan) has nothing
+  // to load, so it has no Load: loading it would only empty the plan.
   const shelf = state.templates.map((t) => `<div class="tpl ${tplOpen === t.id ? 'open' : ''}">
       <div class="tpl-head">
-      ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
-      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}
+      ${t.routes.length
+        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
+      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}`
+        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet \u2014 Update from plan fills it</span>`}
+      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', armed === `resave:${t.id}` ? 'armed' : '',
+        `title="Make this template the ${state.routes.length} routes on the plan now; its name and day stay"`)}
       <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
         <option value="">Never offer it</option>
         ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
@@ -1351,7 +1364,7 @@ function renderTemplates() {
     </div>`).join('');
   return `<section id="planTemplates" class="templates">
     <h3>Day templates</h3>
-    <p class="hint">A saved copy of the routes as they stand — drivers, cars, positions, rounds and marks, but never the date. Save the way Monday usually runs once, and put it back next Monday.</p>
+    <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
     <div class="bar">
       <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
       <button class="btn" data-act="save-template">Save as template</button>
@@ -1872,11 +1885,23 @@ function renderNotices() {
   // own, { head, text }, which is set in bold: the update note's "What it
   // affects:" and "Your data:" are read as labels, not as part of a sentence.
   const line = (l) => (l && typeof l === 'object' ? `<b>${esc(l.head)}</b> ${esc(l.text)}` : esc(l));
-  $('#notices').innerHTML = notices.map((n, i) =>
-    `<div class="notice ${n.kind}"><div class="say">${esc(n.text)}${n.lines?.length
-      ? `<ul>${n.lines.map((l) => `<li>${line(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${n.offer
-      ? actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish')
-      : ''}${n.link ? `<a class="btn" href="${esc(n.link.href)}">${esc(n.link.text)}</a>` : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`).join('');
+  // A template's load question draws its ticks, and the sentence and button
+  // they make, from the plan as it is at this draw: never a stale count.
+  const loading = (n, i) => {
+    const t = n.parts && n.offer && byId(state.templates, n.offer.id);
+    if (!t) return null;
+    const q = templateQuestion(t, n.parts);
+    const ticks = TEMPLATE_PARTS.map(([k, name]) =>
+      `<label><input type="checkbox" data-act="tpl-part" data-index="${i}" data-part="${k}"${n.parts[k] ? ' checked' : ''}> ${name}</label>`).join('');
+    return { say: `${esc(n.text)}<div class="tpl-parts" role="group" aria-label="What to take from ${esc(t.name)}">${ticks}</div><p class="tpl-says">${esc(q.text)}</p>`, button: q.button };
+  };
+  $('#notices').innerHTML = notices.map((n, i) => {
+    const q = loading(n, i);
+    const offer = q ? (q.button && actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(q.button), 'primary-ish'))
+      : n.offer && actBtn(n.offer.act, n.offer.kind, n.offer.id, esc(n.offer.text), 'primary-ish');
+    return `<div class="notice ${n.kind}"><div class="say">${q ? q.say : esc(n.text)}${n.lines?.length
+      ? `<ul>${n.lines.map((l) => `<li>${line(l)}</li>`).join('')}</ul>` : ''}</div><div class="acts">${offer || ''}${n.link ? `<a class="btn" href="${esc(n.link.href)}">${esc(n.link.text)}</a>` : ''}<button class="btn" data-act="dismiss" data-index="${i}" title="Dismiss">\u2715</button></div></div>`;
+  }).join('');
 
   // The question just asked, not the first one on screen: with an older
   // question still up, scrolling to the first left the new one out of sight.
@@ -2327,6 +2352,7 @@ const note = (kind, text, offer = null, lines = [], link = null) => {
   // view: at start-up that is the one about the data, which comes first on
   // purpose; any question asked later is raised on its own and wins.
   if (offer && !offerRaised) offerRaised = n;
+  return n;
 };
 
 /* One live offer at a time: asking about Tuesday takes Monday's question away
@@ -2625,7 +2651,8 @@ function offerPlanDayTemplate({ quiet = false } = {}) {
   notices = notices.filter((n) => !(n.offer && n.offer.day));
   const day = planWeekday();
   if (day < 0) return;
-  const set = state.templates.filter((t) => t.weekday === String(day));
+  // An empty template is never offered: there is nothing in it to use.
+  const set = state.templates.filter((t) => t.weekday === String(day) && t.routes.length);
   if (!set.length) return;                             // the default, and the point of it
   const t = set[0];
   // More than one set for the same day is allowed: the offer names the first
@@ -2637,11 +2664,100 @@ function offerPlanDayTemplate({ quiet = false } = {}) {
   if (quiet) offerRaised = raised;
 }
 
+/* Loading a template in parts. Each tick takes one thing from the template:
+   Routes is the route list itself (names, order, marks and gaps); Drivers;
+   Cars; Positions and rounds, together, since a round is a round at a spot.
+   An unticked part keeps what the plan has now. Routes are matched by name,
+   folded; a blank name matches nothing, and of two routes sharing a name the
+   first is the one matched.
+   The question's sentence, its button and the load itself all read this one
+   answer, so the question says exactly what the load does. */
+const TEMPLATE_PARTS = [['routes', 'Routes'], ['drivers', 'Drivers'], ['cars', 'Cars'], ['positions', 'Positions and rounds']];
+const allParts = () => ({ routes: true, drivers: true, cars: true, positions: true });
+function templateLoad(t, parts, routes) {
+  const byName = (list) => {
+    const m = new Map();
+    for (const r of list) if (fold(r.name) && !m.has(fold(r.name))) m.set(fold(r.name), r);
+    return m;
+  };
+  // The ticked parts of `from`, put on `to`.
+  const take = (to, from) => ({
+    ...to,
+    ...(parts.drivers ? { driver: from.driver } : {}),
+    ...(parts.cars ? { carId: from.carId } : {}),
+    ...(parts.positions ? { positionId: from.positionId, round: from.round } : {}),
+  });
+  if (parts.routes) {
+    // The template's routes, each starting from the plan's route of the same
+    // name for the parts left unticked, or blank where there is none. Ids are
+    // minted here rather than stored, so loading the same template twice
+    // cannot leave two rows sharing one id; the spread goes first, so a stored
+    // id cannot put itself back over the new one.
+    const mine = byName(routes);
+    let matched = 0;
+    const next = t.routes.map((r) => {
+      const was = mine.get(fold(r.name));
+      if (was) matched++;
+      return take({ ...r, id: uid(), driver: was?.driver || '', carId: was?.carId || '', positionId: was?.positionId || '', round: was?.round || '' }, r);
+    });
+    return { routes: next, matched, unmatched: next.length - matched };
+  }
+  const theirs = byName(t.routes);
+  let matched = 0;
+  const next = routes.map((r) => {
+    const from = theirs.get(fold(r.name));
+    if (!from) return r;
+    matched++;
+    return take(r, from);
+  });
+  return { routes: next, matched, unmatched: next.length - matched };
+}
+
+// The words for what the ticks take: "positions and rounds" is two things to
+// a sentence, and "positions" alone on a button.
+const partWords = (parts, ticked) => [
+  parts.drivers === ticked && 'drivers', parts.cars === ticked && 'cars',
+  ...(parts.positions === ticked ? ['positions', 'rounds'] : []),
+].filter(Boolean);
+
+function templateQuestion(t, parts) {
+  const now = state.routes.length;
+  const n = t.routes.length;
+  const { matched, unmatched } = templateLoad(t, parts, state.routes);
+  const taken = partWords(parts, true);
+  const kept = partWords(parts, false);
+  const short = taken.filter((w) => w !== 'rounds');
+  let text, button = null;
+  if (parts.routes) {
+    text = `Replaces your ${plural(now, 'route')} with ${t.name}'s ${n}${taken.length ? `, with their ${andList(taken)}` : ''}.`;
+    if (kept.length) {
+      text += ` Their ${andList(kept)} come from your route of the same name, where there is one: ${
+        !matched ? 'none of them has one, so they start blank'
+          : !unmatched ? `all ${n} have one`
+            : `${matched} of ${n} have one, and the other ${unmatched} start blank`}.`;
+    }
+    button = `Load ${t.name}: ${['routes', ...short].join(', ')}`;
+  } else if (taken.length) {
+    text = `Keeps your ${plural(now, 'route')} and puts in ${t.name}'s ${andList(taken)}, by route name${
+      !unmatched ? '.'
+        : !matched ? `; none of your routes is in ${t.name}, so nothing changes.`
+          : `; ${unmatched} of your routes ${unmatched === 1 ? 'is' : 'are'} not in ${t.name} and keep${unmatched === 1 ? 's its' : ' theirs'}.`}`;
+    if (matched) button = `Put in ${t.name}'s ${andList(short)}`;
+  } else {
+    text = `Tick what to take from ${t.name}.`;
+  }
+  if (button) text += ' A backup is taken first, so Backups can undo it.';
+  return { text, button };
+}
+
+/* The load question. Its ticks are kept on the question itself, never on the
+   plan: they are how this one load is to be done, not part of the plan. */
 function askTemplate(t) {
   dropOffers();
-  const now = state.routes.length;
-  note('warn', `Load the ${t.name} template over the plan on screen? That replaces the ${now} route${now === 1 ? '' : 's'} there now with the template's ${t.routes.length}. A backup is taken first, so Backups can undo it.`,
+  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Update from plan fills it.`); return; }
+  const n = note('warn', `Load the ${t.name} template over the plan on screen? Untick what the plan should keep.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
+  n.parts = allParts();
 }
 
 function applyImport(text, source) {
@@ -2668,6 +2784,13 @@ document.addEventListener('click', (e) => {
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
   // The tour only points: it goes nowhere near the save below.
   if (act === 'tour') { if (typeof Tour !== 'undefined') Tour.start(b); return; }
+  // A tick in a template's load question changes the question, never the plan.
+  if (act === 'tpl-part') {
+    const n = notices[Number(b.dataset.index)];
+    if (n && n.parts) n.parts[b.dataset.part] = b.checked;
+    renderKeepingFocus();
+    return;
+  }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
   // Every act below that reads list[i] needs there to be an i. There should
@@ -2907,32 +3030,38 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
-    // A menu's Replace: this template, found by its id rather than by its
-    // name, so the one clicked is the one replaced even when two share a
-    // name. It keeps its id, name and weekday, after a backup.
+    // Update from plan, on the card and in its menu: this template, found by
+    // its id rather than by its name, so the one clicked is the one updated
+    // even when two share a name. It keeps its id, name and weekday, after a
+    // backup.
     case 'resave-template': {
       if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
       const t = list[i];
-      Store.snapshot(state, `Replacing the ${t.name} template`);
+      Store.snapshot(state, `Updating the ${t.name} template from the plan`);
       const routes = templateRoutes();
       list[i] = { ...t, routes };
-      note('info', `Replaced the ${t.name} template with the ${routes.length} routes on the plan now.`);
+      note('info', `Updated the ${t.name} template from the plan: it holds the ${routes.length} routes on the plan now. What it held before is in Backups.`);
+      if (e.detail === 0 && b.closest('#planTemplates')) refocus = `#planTemplates [data-act="resave-template"][data-id="${CSS.escape(id)}"]`;
       break;
     }
     case 'peek-template':
       tplOpen = tplOpen === id ? null : id;
       render();
       return;
+    // The parts the question has ticked; all of them for a question without
+    // ticks. Nothing ticked has no button, and does nothing.
     case 'load-template': {
       const t = list[i];
+      const parts = notices.find((n) => n.parts && n.offer?.id === id)?.parts || allParts();
+      const taken = partWords(parts, true);
+      if (!parts.routes && !taken.length) return;
+      const done = templateLoad(t, parts, state.routes);
       Store.snapshot(state, `Loading the ${t.name} template`);
-      // Ids are minted here rather than stored, so loading the same template
-      // twice cannot leave two rows sharing one id and editing as one. The
-      // spread goes first, so a stored id (from an imported file, say) cannot
-      // put itself back over the new one and undo exactly that.
-      state.routes = t.routes.map((r) => ({ ...r, id: uid() }));
+      state.routes = done.routes;
       dropOffers();
-      note('info', `Loaded the ${t.name} template: ${state.routes.length} routes. The plan as it was is in Backups.`);
+      note('info', parts.routes
+        ? `Loaded the ${t.name} template: ${plural(state.routes.length, 'route')}${taken.length ? `, with their ${andList(taken)}` : ''}. The plan as it was is in Backups.`
+        : `Put in the ${t.name} template's ${andList(taken)} on ${plural(done.matched, 'route')}. The plan as it was is in Backups.`);
       break;
     }
     case 'group-member': {

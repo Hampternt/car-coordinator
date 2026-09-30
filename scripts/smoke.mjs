@@ -87,6 +87,11 @@ same('and the ready-made driver tags under Driver tags',
 same('with the car labels as before', await page.locator('#labelList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
   ['Out of service', 'Unavailable', 'Workshop']);
 
+// A first run's shelf: Monday to Friday, empty, never offered on a day.
+same("a first run's shelf holds Monday to Friday, empty and offered on no day",
+  await page.evaluate(() => state.weekdayTemplates === true && state.templates.map((t) => `${t.id}:${t.name}:${t.weekday}:${t.routes.length}`)),
+  ['tpl-weekday-1:Monday::0', 'tpl-weekday-2:Tuesday::0', 'tpl-weekday-3:Wednesday::0', 'tpl-weekday-4:Thursday::0', 'tpl-weekday-5:Friday::0']);
+
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');
 await page.fill('#newCar', 'AA11111 BB22222 CC33333');
@@ -333,8 +338,8 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-check('v2 data loads with an empty template list and no repair notice',
-  (await page.evaluate(() => Array.isArray(state.templates) && state.templates.length === 0))
+check('v2 data loads with only the empty Monday to Friday templates, and no repair notice',
+  (await page.evaluate(() => state.templates.map((t) => `${t.name}:${t.routes.length}`).join() === 'Monday:0,Tuesday:0,Wednesday:0,Thursday:0,Friday:0'))
   && (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 // A template is stored state like any other, so it goes through the same
@@ -976,8 +981,10 @@ check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 // --- day templates: saving the plan that gets made again ---
 // A template is the route list as it stands minus the date. Saving is not
 // destructive; saving over a name already used is, so that one is snapshotted.
+// Marked as having had its weekday templates, so the shelf holds only what
+// these cases put on it.
 const templatePlan = {
-  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [],
+  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [], weekdayTemplates: true,
   cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
   positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Spot 2' }],
   routes: [
@@ -1067,7 +1074,7 @@ const before = await backupCount();
 
 await page.click('#tab-plan .tpl [data-act="ask-template"]');
 check('clicking a template asks before it does anything',
-  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  (await page.locator('#notices .notice.warn').innerText()).includes("Replaces your 1 route with Monday's 3, with their drivers, cars, positions and rounds."),
   await page.locator('#notices .notice.warn').innerText());
 check('and the plan is untouched while the question stands',
   JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
@@ -1145,7 +1152,7 @@ check('and has loaded nothing while it waits to be asked',
 
 await page.click('#notices [data-act="ask-template"]');
 check('taking the offer asks the same question the shelf asks',
-  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  (await page.locator('#notices .notice.warn').innerText()).includes("Replaces your 1 route with Monday's 3, with their drivers, cars, positions and rounds."),
   await page.locator('#notices .notice.warn').innerText());
 await page.click('#notices [data-act="load-template"]');
 check('and only then is anything replaced, with the same backup taken first',
@@ -1181,6 +1188,123 @@ check('dismissing the question takes the question, not the notice beside it',
   && (await page.locator('#notices .notice').innerText()).includes('Repaired saved data')
   && JSON.stringify(await planDrivers()) === '["Typed This Morning"]',
   await page.locator('#notices').innerText());
+
+// --- the weekday templates: on every shelf once, empty until filled ---
+// A plan from before them, with a template already named for Monday the way
+// the week reads crews: only Tuesday to Friday are added, after it.
+{
+  const mandagText = JSON.stringify({ ...templatePlan, weekdayTemplates: undefined, templates: [{ id: 'tm', name: 'Mandag', weekday: '', routes: mondayRoutes }] });
+  await page.evaluate((t) => localStorage.setItem('carcoord:v1', t), mandagText);
+  await page.reload({ waitUntil: 'networkidle' });
+  same('a plan with a Mandag template gains Tuesday to Friday only, after it',
+    await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+  check('with no repair notice, and nothing written until a change',
+    (await page.locator('#notices .notice').count()) === 0 && (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === mandagText);
+  const names = ['Monday', 'mon', 'Mondays', 'Monday crew', "Monday's crew", 'Mandag', ' tirsdag ', 'Weds', 'Onsdagsgjengen', 'THURSDAYS', 'Torsdag',
+    'Fredagsvakta', 'fri.', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri', 'Standard weekday'];
+  same("store.js reads a template's day exactly as the week reads a crew's",
+    await page.evaluate((ns) => ns.filter((n) => Store.weekdayOf(n) !== groupWeekday(n)), names), []);
+
+  // An empty card: its name and what fills it, and nothing to load.
+  const tue = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-2"]') });
+  check('an empty template reads "Not saved yet — Update from plan fills it"', (await tue.innerText()).includes('Not saved yet — Update from plan fills it'));
+  check('and has no Load and no contents to show',
+    (await tue.locator('[data-act="ask-template"]').count()) === 0 && (await tue.locator('[data-act="peek-template"]').count()) === 0);
+  await page.evaluate(() => { askTemplate(state.templates[1]); render(); });
+  check('asked to load anyway, it says it is not saved yet, and offers no Load',
+    (await page.locator('#notices [data-act="load-template"]').count()) === 0
+    && (await page.locator('#notices').innerText()).includes('The Tuesday template is not saved yet'));
+  await page.evaluate(() => { notices = []; state.templates[1].weekday = String(planWeekday()); offerPlanDayTemplate(); render(); });
+  check('and set for the plan\'s day, it is not offered', (await page.locator('#notices [data-act="ask-template"]').count()) === 0);
+  await page.evaluate(() => { state.templates[1].weekday = ''; save(); render(); });
+
+  // Update from plan fills it: two clicks, a backup, the name and day kept.
+  const update = tue.locator('[data-act="resave-template"]');
+  await update.click();
+  check('one click on Update from plan only arms it', (await update.innerText()) === 'Sure?'
+    && (await page.evaluate(() => state.templates[1].routes.length)) === 0);
+  await update.click();
+  same('two clicks fill it with the plan\'s routes, keeping its id, name and day',
+    await page.evaluate(() => { const t = state.templates[1]; return [t.id, t.name, t.weekday, t.routes.map((r) => r.driver).join()]; }),
+    ['tpl-weekday-2', 'Tuesday', '', 'Weekday One,Weekday Two,']);
+  check('after an "Updating the Tuesday template from the plan" backup', (await page.evaluate(() => Store.backups()[0].label)) === 'Updating the Tuesday template from the plan');
+  check('and now it can be loaded', (await tue.locator('[data-act="ask-template"]').innerText()) === 'Tuesday');
+
+  // A weekday template deleted stays deleted.
+  const wed = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-3"]') }).locator('[data-act="del"]');
+  await wed.click();
+  await wed.click();
+  await page.reload({ waitUntil: 'networkidle' });
+  same('a deleted Wednesday template does not come back', await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Thursday', 'Friday']);
+}
+
+// --- loading a template in parts ---
+// The plan has routes 1 and 9; Monday has 1, 2 and 3. Every combination does
+// what its sentence says, and a tick writes nothing.
+{
+  const partsPlan = { ...templatePlan, routes: [
+    { id: 'm1', name: '1', driver: 'Mine One', carId: 'c2', positionId: 'p2', round: '9' },
+    { id: 'm9', name: '9', driver: 'Mine Nine', carId: 'c1', positionId: 'p1', round: '4' },
+  ], templates: [{ id: 't1', name: 'Monday', weekday: '', routes: mondayRoutes }] };
+  const question = page.locator('#notices .notice.warn');
+  const says = () => question.locator('.tpl-says').innerText();
+  const button = question.locator('[data-act="load-template"]');
+  const tick = (part) => question.locator(`[data-act="tpl-part"][data-part="${part}"]`);
+  const routesNow = () => page.evaluate(() => state.routes.map((r) => [r.name, r.driver, r.carId, r.positionId, r.round].join('|')));
+  const ask = async (untick = []) => {
+    await loadPlan(partsPlan);
+    await page.click('#tab-plan .tpl [data-act="ask-template"]');
+    for (const part of untick) await tick(part).click();
+  };
+
+  await ask();
+  check('the load question has four ticks, all on', (await question.locator('[data-act="tpl-part"]:checked').count()) === 4
+    && (await question.locator('.tpl-parts').innerText()).replace(/\s+/g, ' ').trim() === 'Routes Drivers Cars Positions and rounds');
+  same('all on: it says it replaces the routes, with everything on them', await says(),
+    "Replaces your 2 routes with Monday's 3, with their drivers, cars, positions and rounds. A backup is taken first, so Backups can undo it.");
+  same('and the button says the same in short', await button.innerText(), 'Load Monday: routes, drivers, cars, positions');
+  const stored = await page.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await tick('drivers').click();
+  check('a tick changes the question, never the plan', (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === stored
+    && JSON.stringify(await routesNow()) === JSON.stringify(['1|Mine One|c2|p2|9', '9|Mine Nine|c1|p1|4']));
+  same('Routes on, Drivers off: the drivers come from the plan\'s route of the same name', await says(),
+    "Replaces your 2 routes with Monday's 3, with their cars, positions and rounds. Their drivers come from your route of the same name, where there is one: 1 of 3 have one, and the other 2 start blank. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), 'Load Monday: routes, cars, positions');
+  await button.click();
+  same('and it does that', await routesNow(), ['1|Mine One|c1|p1|1', '2||c2|p2|2', '3||||']);
+  check('marks and gaps come with the routes', await page.evaluate(() => state.routes[0].highlight === true && state.routes[1].gapBefore === true));
+  check('after a backup of the plan as it was', await page.evaluate(() => Store.backups()[0].label === 'Loading the Monday template'
+    && JSON.parse(Store.backups()[0].json).routes.map((r) => r.driver).join() === 'Mine One,Mine Nine'));
+
+  await ask(['routes']);
+  same('Routes off: it keeps the routes and puts in the ticked parts by name', await says(),
+    "Keeps your 2 routes and puts in Monday's drivers, cars, positions and rounds, by route name; 1 of your routes is not in Monday and keeps its. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), "Put in Monday's drivers, cars and positions");
+  await tick('cars').click();
+  await tick('positions').click();
+  same('Drivers only', await says(),
+    "Keeps your 2 routes and puts in Monday's drivers, by route name; 1 of your routes is not in Monday and keeps its. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), "Put in Monday's drivers");
+  await button.click();
+  same('and it does that: route 1 gets Monday\'s driver, route 9 keeps its own', await routesNow(), ['1|Weekday One|c2|p2|9', '9|Mine Nine|c1|p1|4']);
+  same('the routes are the same routes', await page.evaluate(() => state.routes.map((r) => r.id)), ['m1', 'm9']);
+  check('and it says what it did', (await page.locator('#notices .notice.info').last().innerText()).includes("Put in the Monday template's drivers on 1 route."));
+
+  await ask(['routes', 'drivers', 'cars']);
+  same('Positions and rounds only: its button', await button.innerText(), "Put in Monday's positions");
+  await button.click();
+  same('position and round go together', await routesNow(), ['1|Mine One|c2|p1|1', '9|Mine Nine|c1|p1|4']);
+
+  await ask(['routes', 'drivers', 'cars', 'positions']);
+  same('nothing ticked: it asks for a tick', await says(), 'Tick what to take from Monday.');
+  check('and there is no button', (await button.count()) === 0);
+
+  // Space on a tick from the keyboard: the focus stays on that tick.
+  await tick('drivers').focus();
+  await page.keyboard.press('Space');
+  check('a tick pressed with Space keeps the focus on it', await page.evaluate(() => document.activeElement?.dataset.part === 'drivers' && document.activeElement.checked));
+  await page.click('#notices .notice.warn [data-act="dismiss"]');
+}
 
 // --- templates are private to this PC, and travel in the JSON file ---
 // The decisions table's call, asserted in both directions: a share code
@@ -3049,8 +3173,10 @@ check('What\'s new names the running version and the newest entry\'s four parts'
 const archRows = dt.locator('#tab-data .arch-row');
 const updRow = archRows.filter({ hasText: `Before ${V}` });
 const rescueRow = archRows.filter({ hasText: 'Could not be read' });
+// Its plan reads as a Restore would load it: from before the weekday
+// templates, so with the five empty ones.
 check('an update row says what it holds before anything is replaced',
-  (await updRow.innerText()).includes(`Before ${V} (from 0.2.4 or earlier)`) && (await updRow.innerText()).includes('1 route, 1 car, 0 drivers, 0 templates, dated 29/09/2026'),
+  (await updRow.innerText()).includes(`Before ${V} (from 0.2.4 or earlier)`) && (await updRow.innerText()).includes('1 route, 1 car, 0 drivers, 5 templates, dated 29/09/2026'),
   await updRow.innerText());
 check('a rescue row offers Download only',
   (await rescueRow.locator('[data-act="archive-download"]').count()) === 1 && (await rescueRow.locator('[data-act="archive-restore"]').count()) === 0);
@@ -3222,6 +3348,9 @@ want5.driverTags = [['No fuel card', '#1565c0'], ['Sick', '#c62828'], ['Holiday'
   .map(([name, color]) => ({ name, color }));
 want5.drivers[0].tagId = 'No fuel card';
 delete want5.drivers[0].labelId;
+// And 0.13.0's empty Monday to Friday, with the mark that they were added.
+want5.templates = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((name, i) => ({ id: `tpl-weekday-${i + 1}`, name, weekday: '', routes: [] }));
+want5.weekdayTemplates = true;
 // Driver tags by name: their ids are the build's own business.
 const tagsByName = (plan) => {
   const p = JSON.parse(JSON.stringify(plan));
@@ -4017,8 +4146,9 @@ for (const [at, date, what] of [
   await pg.close();
 }
 {
+  const tpl = (id, name, weekday) => ({ id, name, weekday, routes: [{ name: '1', driver: name, carId: '', positionId: '', round: '', highlight: false, gapBefore: false }] });
   const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-13-45', {
-    templates: ['0', '1', '2', '3', '4', '5', '6'].map((d) => ({ id: `t${d}`, name: `Day ${d}`, weekday: d, routes: [] })),
+    templates: ['0', '1', '2', '3', '4', '5', '6'].map((d) => tpl(`t${d}`, `Day ${d}`, d)),
   }) });
   check('a date that is not a real day offers no template', (await pg.locator('#notices [data-act="ask-template"]').count()) === 0);
   await pg.close();
@@ -4254,7 +4384,7 @@ const layPlan = (extra = {}) => lp.evaluate((extra) => {
   localStorage.clear();
   localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
   localStorage.setItem('carcoord:v1', JSON.stringify({
-    schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false, labels: [], driverTags: [], positions: [],
+    schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false, labels: [], driverTags: [], positions: [], weekdayTemplates: true,
     cars: Array.from({ length: 17 }, (_, i) => ({ id: `c${i}`, reg: `LY${10000 + i}`, labelId: '', note: '' })),
     drivers: Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, name: `Driver ${i + 1}`, available: true, tagId: '', note: '' })),
     driverGroups: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [] }],
@@ -5311,13 +5441,16 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('Tag… opens the tag menu at that row\'s tag button, and shuts this one', await cm.locator('#tagMenu').isVisible()
     && (await cm.locator('#tagMenu').getAttribute('data-for')) === 'driver:drv-guro' && await cmMenu.isHidden());
   await cm.keyboard.press('Escape');
-  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId);
+  // Down to Tag… by its words: the Tag submenu (0.12.0) sits between it and
+  // Set away, and a fixed count of presses would land on whatever is there.
+  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId);
   await cmRail('driver', 'drv-guro').locator('[data-act="tag"]').focus();
   await cm.keyboard.press('Shift+F10');
-  await cm.keyboard.press('ArrowDown');
+  const onEntry = () => cm.evaluate(() => document.activeElement?.querySelector('span')?.textContent);
+  for (let k = 0; k < 6 && (await onEntry()) !== 'Tag\u2026'; k++) await cm.keyboard.press('ArrowDown');
   await cm.keyboard.press('Enter');
   check('Enter on Tag… opens the tag menu without choosing a tag', await cm.locator('#tagMenu').isVisible() && await cmMenu.isHidden()
-    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId)) === tagWas);
+    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId)) === tagWas);
   await cm.keyboard.press('Escape');
 
   // Go to route 7: the focus in that route's driver box.
@@ -5538,52 +5671,59 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.click('[data-act="tab"][data-tab="plan"]');
 }
 
-// A template card: Load over the plan… only asks; Show contents opens it;
+// A template card: Load… only asks; Show contents opens it;
 // the open table opens the same menu.
 {
   await cmOpen();
   const before = await cmStored();
   const card = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="ask-template"][data-id="tpl-weekday"]') });
   await cmRight(card.locator('[data-act="peek-template"]'));
-  same('a template card opens the template\'s menu', await cmEntries(), ['Load over the plan…', 'Show contents', 'Replace with the plan as it is now', 'Delete template']);
+  same('a template card opens the template\'s menu', await cmEntries(), ['Load…', 'Show contents', 'Update from plan', 'Delete template']);
   check('and never offers to load it outright', (await cmMenu.locator('[data-act="load-template"]').count()) === 0);
   await cmMenu.locator('[data-act="ask-template"]').click();
-  check('Load over the plan… raises the same question as the name button', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
+  check('Load… raises the same question as the name button', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
   check('and saves nothing', (await cmStored()) === before);
   await cmRight(card.locator('select[data-field="weekday"]'));
   check('the weekday box opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
   await cmMenu.locator('[data-act="peek-template"]').click();
   check('Show contents opens the table', await card.locator('.tpl-table').isVisible() && await cmMenu.isHidden());
   await cmRight(card.locator('.tpl-table tbody td').first());
-  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load over the plan…', 'Hide contents', 'Replace with the plan as it is now', 'Delete template']);
+  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Update from plan', 'Delete template']);
+  await cm.keyboard.press('Escape');
+  // An empty weekday template: nothing to load or show, as on its card.
+  const monday = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="resave-template"][data-id="tpl-weekday-1"]') });
+  await cmRight(monday.locator('select[data-field="weekday"]'));
+  same("an empty template's menu offers Update from plan and Delete only", await cmEntries(), ['Update from plan', 'Delete template']);
+  same('and its Update says what it becomes', await cmMenu.locator('[data-act="resave-template"] small').textContent(),
+    `It holds nothing yet; it becomes the plan's ${await cm.evaluate(() => state.routes.length)} routes`);
   await cm.keyboard.press('Escape');
 }
 
-// Replace a template with the plan: two clicks, by id, after a backup; its id,
+// Update a template from the plan: two clicks, by id, after a backup; its id,
 // name and weekday stay.
 {
   await cmOpen();
   const cmTpl = (id) => cm.evaluate((x) => JSON.parse(JSON.stringify(state.templates.find((t) => t.id === x) || null)), id);
-  const cmCard = (id) => cm.locator('#tab-plan .tpl', { has: cm.locator(`[data-act="ask-template"][data-id="${id}"]`) });
+  const cmCard = (id) => cm.locator('#tab-plan .tpl', { has: cm.locator(`[data-act="resave-template"][data-id="${id}"]`) });
   const plan = await cm.evaluate(() => state.routes.map((r) => ({ name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId, round: r.round, highlight: r.highlight, gapBefore: r.gapBefore })));
   const sat = await cmTpl('tpl-saturday');
-  await cmRight(cmCard('tpl-saturday').locator('[data-act="peek-template"]'));
+  await cmRight(cmCard('tpl-saturday').locator('select[data-field="weekday"]'));
   const replace = cmMenu.locator('[data-act="resave-template"]');
-  same('Replace says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
+  same('Update from plan says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
   await replace.click();
   same('one click alone changes nothing', await cmTpl('tpl-saturday'), sat);
   await replace.click();
   const now = await cmTpl('tpl-saturday');
   same('two clicks put the plan\'s routes in the template', now.routes, plan);
   check('and keep its id, name and weekday', now.id === sat.id && now.name === sat.name && now.weekday === sat.weekday);
-  check('after a "Replacing the Saturday template" backup holding what it was', await cm.evaluate((n) => Store.backups().some((b) => b.label === 'Replacing the Saturday template'
+  check('after an "Updating the Saturday template from the plan" backup holding what it was', await cm.evaluate((n) => Store.backups().some((b) => b.label === 'Updating the Saturday template from the plan'
     && JSON.parse(b.json).templates.find((t) => t.id === 'tpl-saturday').routes.length === n), sat.routes.length));
 
   // Two templates with the same folded name: the one clicked is replaced.
   await cmOpen();
   await cm.evaluate(() => { state.templates.push({ id: 'tpl-sat2', name: 'SATURDAY', weekday: '', routes: [] }); save(); render(); });
   const first = await cmTpl('tpl-saturday');
-  await cmRight(cmCard('tpl-sat2').locator('[data-act="peek-template"]'));
+  await cmRight(cmCard('tpl-sat2').locator('select[data-field="weekday"]'));
   await replace.click();
   await replace.click();
   check('with two templates of the same name, the one clicked is the one replaced', (await cmTpl('tpl-sat2')).routes.length === plan.length

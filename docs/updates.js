@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.13.0',
+    must: true,
+    title: 'Weekday templates, and loading in parts',
+    changed: 'Monday to Friday templates wait on the shelf, empty until Update from plan fills them. A load asks which parts to take, and says what will happen.',
+    affects: 'The Day templates shelf and its right-click menu. Share codes and the printed sheet are unchanged. After an older copy saves, a deleted weekday template can return: update it.',
+    data: 'Empty Monday to Friday templates are added once, skipping any day a template already has. Your own templates are unchanged. An older copy keeps them.',
+  },
+  {
     version: '0.12.0',
     must: true,
     title: 'Driver tags, apart from car labels',
