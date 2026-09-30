@@ -5457,6 +5457,37 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
 }
 
+// A route's car and driver: their status and tag, the same list their own
+// tabs' menus open (owner, 2026-10-01).
+{
+  await cmOpen();
+  const reg = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  same('a right-click on a route\'s car offers its status, after Go to', (await cmEntries()).slice(0, 2), [`Go to ${reg} on the Cars tab`, 'Status: OK ›']);
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  same('a right-click on a route\'s driver offers the driver\'s tag first', (await cmEntries())[0], 'Tag: No tag ›');
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  const subOpen = await cm.locator('#ctxSub').isVisible().catch(() => false);
+  const layer = subOpen ? cm.locator('#ctxSub') : cmMenu;
+  same('which lists No tag and every driver tag, No tag ticked', await layer.locator('[data-act="setLabel"] span').allTextContents(),
+    await cm.evaluate(() => ['✓ No tag', ...state.driverTags.map((t) => t.name)]));
+  await layer.locator('[data-act="setLabel"]', { hasText: 'Sick' }).click();
+  check('choosing Sick tags that driver, and saves it', await cm.evaluate(() => {
+    const d = state.drivers.find((x) => x.name === 'Guro');
+    const saved = JSON.parse(localStorage.getItem('carcoord:v1')).drivers.find((x) => x.name === 'Guro');
+    return byId(state.driverTags, d.tagId)?.name === 'Sick' && saved.tagId === d.tagId;
+  }));
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('and the menu then says it', (await cmEntries())[0] === 'Tag: Sick ›');
+  await cm.keyboard.press('Escape');
+  await cmRoute('7').locator('[data-field="driver"]').fill('Nobody Listed');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('a name on no roster has no tag to offer', !(await cmEntries()).some((x) => x.startsWith('Tag:')));
+  await cm.keyboard.press('Escape');
+}
+
 // The rail's rows: a driver's and a car's menus, opened from anywhere on the
 // row but its name box.
 {

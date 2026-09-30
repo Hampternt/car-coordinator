@@ -766,12 +766,20 @@ function ctxRoute(r, part, view) {
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
   const clear = { act: 'clear-route', data: d, arm: `clear:${r.id}`, text: 'Clear driver, car, position and round',
     cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
-  // Right-clicked on its car or its position: the way to that one first.
+  // Right-clicked on its car or its position: the way to that one first. On
+  // its car or its driver, that one's status or tag too: the list its own
+  // tab's menu opens (owner, 2026-10-01). A driver is the roster entry of
+  // that name; a name typed that is on no roster has no tag to set.
   const car = part === 'carId' && byId(state.cars, r.carId);
+  const driver = part === 'driver' && fold(r.driver) && state.drivers.find((x) => fold(x.name) === fold(r.driver));
   if (part === 'positionId' && view === 'status' && byId(state.positions, r.positionId)) return ctxRoutePosition(r, view);
+  if (view === 'status' && car) return [[ctxBack], ctxStatusList('car', car)];
+  if (view === 'status' && driver) return [[ctxBack], ctxStatusList('driver', driver)];
   const [posOwn, posMoves] = part === 'positionId' ? ctxRoutePosition(r) : [[], []];
   return [[
     car && ctxGo(`Go to ${car.reg} on the Cars tab`, 'cars', 'car', car.id, 'reg'),
+    car && ctxStatusOpen('car', car),
+    driver && ctxStatusOpen('driver', driver),
   ].filter(Boolean), posOwn, posMoves, [
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
@@ -1088,7 +1096,7 @@ function ctxHit(t) {
     if (!row) continue;
     const del = row.querySelector('[data-act="del"][data-kind][data-id]');
     if (!del) return null;
-    const part = surface === 'route' ? t.closest('select[data-field="carId"], select[data-field="positionId"]')?.dataset.field || '' : '';
+    const part = surface === 'route' ? t.closest('select[data-field="carId"], select[data-field="positionId"], input[data-field="driver"]')?.dataset.field || '' : '';
     return { row, surface, kind: del.dataset.kind, id: del.dataset.id, part };
   }
   return null;
