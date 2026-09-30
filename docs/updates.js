@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.5.0',
+    must: true,
+    title: 'Dark mode',
+    changed: 'On screen the app now follows the computer\'s light or dark setting. Under Colours on the Data tab, pick Follow the computer, Light or Dark for this browser.',
+    affects: 'Every tab on screen; Print preview still shows the sheet on white paper. The printed sheet and share codes are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.4.0',
     must: true,
     title: 'A printed sheet without warnings or a QR code',
