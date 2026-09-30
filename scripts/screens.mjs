@@ -195,13 +195,16 @@ if ((await page.locator('#tab-plan tbody tr.warn').count()) !== 4) {
 
 // --- the plan you make again: save it as a template, set it for Mondays
 console.log('day templates');
+// The shelf starts with Monday to Friday, empty (0.13.0), so saving "Monday"
+// fills that one; it is the only one with routes to load.
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
-await page.locator('#tab-plan .tpl select[data-field="weekday"]').selectOption('1');
-if ((await page.locator('#tab-plan .tpl').count()) !== 1) {
-  console.log('\nthe template shelf under the plan is empty after saving one');
+const saved = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="ask-template"]') });
+if ((await saved.count()) !== 1) {
+  console.log(`\nexpected one template with routes on the shelf after saving Monday, got ${await saved.count()}`);
   process.exit(1);
 }
+await saved.locator('select[data-field="weekday"]').selectOption('1');
 await shot('03-day-plan-with-warnings');
 
 // An ⓘ's bubble, open beside it on the day plan.
