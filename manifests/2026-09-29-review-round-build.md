@@ -70,3 +70,6 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **Part 5 start.** Base eaccb92 (0.6.0). `update-note` and `origin/dev` had not moved.
 - **Part 5 done** (day plan layout, 0.7.0): start b3a443f; items 1-12 at f28d86d, 9b1de92, 9f64d58, 0ee12df, 283384c, **fbc5fe8 ⚠️**, 9185da6, 83a1c0a, 37e519f, 443f23f, fa81461, 5791df1. `check.sh` per item.
 - **Part 6 start.** Base ab6a206 (0.7.0). `update-note` and `origin/dev` had not moved.
+- **Part 6 done** (parking map, 0.8.0): start 1fcd19c; items 1-9 at b264d69, 36c34f4, ae02da0, **df37b50 ⚠️**, 5ccd33d, c25022e, 8e596a4, 2c0afe4, 1d135d8. `check.sh` per item.
+- **Merged `update-note` before part 7** (4e3f164: 898d819, "Skip the linked-file cases where the test browser crashes on them"): clean, smoke only. Gate: `check.sh` OK.
+- **Part 7 start.** Base 4e3f164 (0.8.0).
