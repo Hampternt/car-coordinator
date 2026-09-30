@@ -116,6 +116,14 @@ const Tour = (() => {
       // one opened downwards: a target scrolled up under the bar, or in it,
       // would carry the card over the tabs.
       if (top < bar + 8) { top = bar + 8; tall = Math.min(h, vh - 8 - top); }
+      // No room beside it at all (a target taller than the space left, or
+      // scrolled to fill the window): the card goes to the top or the bottom
+      // of the window, whichever is further from the target's middle, and
+      // covers the least of it.
+      if (tall < Math.min(h, 120) || top + tall > vh - 8) {
+        tall = Math.min(h, vh - 16 - bar);
+        top = a.top + a.height / 2 > (bar + vh) / 2 ? bar + 8 : vh - 8 - tall;
+      }
     } else {
       left = Math.max(8, vw - w - 8);
       top = bar + 8;
