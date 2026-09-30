@@ -86,7 +86,8 @@ check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts
 // A first run's Labels tab: the car and position labels, then the five
 // ready-made driver tags in a section of their own.
 await page.click('[data-act="tab"][data-tab="labels"]');
-same("a first run's Labels tab has two sections", await page.locator('#tab-labels h2').allInnerTexts(), ['Car and position labels', 'Driver tags']);
+// A heading's ⓘ is part of its text; the words are what count here.
+same("a first run's Labels tab has two sections", (await page.locator('#tab-labels h2').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')), ['Car and position labels', 'Driver tags']);
 same('and the ready-made driver tags under Driver tags',
   await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
   ['Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
@@ -1372,8 +1373,13 @@ same('and nothing in it is pushed off the edge', await page.evaluate(() => {
 }), []);
 
 // Carrying a name onto the route it drives.
+// A hand moves a few pixels before it travels, and that is where Chrome starts
+// the drag. One jump straight across missed the start whenever the page above
+// was laid out a little differently (a one-line notice instead of the tour's).
 const carry = async (from, to) => {
   await from.hover(); await page.mouse.down();
+  const b = await from.boundingBox();
+  await page.mouse.move(b.x + b.width / 2 + 6, b.y + b.height / 2, { steps: 3 });
   await to.hover(); await to.hover(); await page.mouse.up();
 };
 const planRow = (n) => page.locator('#tab-plan tbody tr').nth(n);
@@ -3167,7 +3173,7 @@ await leaveAs(dt, { 'carcoord:v1': sincePlan, 'carcoord:archives': archivesAB(V)
 await dt.reload({ waitUntil: 'networkidle' });
 await dt.click('[data-act="tab"][data-tab="data"]');
 same('What\'s new and Archives sit above Backups, which is still the last card',
-  await dt.locator('#tab-data .card h3').allInnerTexts(),
+  (await dt.locator('#tab-data .card h3').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')),
   ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
 check('This browser links to the recovery page', (await dt.locator('#tab-data .card', { hasText: 'This browser' }).locator('a[href="recover.html"]').count()) === 1);
 check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
@@ -5776,8 +5782,11 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
       for (const key of byTab[t]) {
         const btn = ib.locator(`.info-btn[data-info="${key}"]`);
         await btn.evaluate((b) => b.scrollIntoView({ block: 'center', inline: 'center' }));
+        // The page may already be wider than a phone (the print preview's
+        // sheet is); the bubble must not make it any wider.
+        const pageWidth = await ib.evaluate(() => Math.max(document.documentElement.scrollWidth, window.innerWidth));
         await btn.click();
-        const got = await ib.evaluate((key) => {
+        const got = await ib.evaluate(([key, pageWidth]) => {
           const layer = document.getElementById('infoBubble');
           const a = document.querySelector(`.info-btn[data-info="${key}"]`).getBoundingClientRect();
           const m = layer.getBoundingClientRect();
@@ -5786,9 +5795,9 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
             open: !layer.hidden && document.getElementById('infoTitle').textContent === HELP[key].title && layer.querySelector('p').textContent === HELP[key].text,
             inside: m.left >= -0.5 && m.right <= vw + 0.5 && m.top >= -0.5 && m.bottom <= vh + 0.5,
             beside: Math.abs(m.top - a.bottom) <= 4 || Math.abs(m.bottom - a.top) <= 4,
-            wide: document.documentElement.scrollWidth <= window.innerWidth + 1,
+            wide: document.documentElement.scrollWidth <= pageWidth + 1,
           };
-        }, key);
+        }, [key, pageWidth]);
         const bad = Object.entries(got).filter(([, v]) => !v).map(([k]) => k);
         if (bad.length) wrong.push(`${key}: ${bad.join('/')}`);
         await ib.keyboard.press('Escape');

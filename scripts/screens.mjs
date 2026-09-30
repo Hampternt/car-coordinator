@@ -107,7 +107,7 @@ const usual = (name, day) => driverRow(name).locator(`[data-act="crew-day"][data
 await usual('Ana Ruiz', 2);                 // makes a Tuesday group
 await usual('Bo Lind', 2);
 await usual('Cai Mensah', 3);               // and a Wednesday one
-await driverRow('Hana Sol').locator('.chip', { hasText: 'Unavailable' }).click();
+await driverRow('Hana Sol').locator('.chip', { hasText: 'Sick' }).click();
 await driverRow('Bo Lind').locator('[data-field="note"]').fill('Back from leave Monday');
 if ((await page.locator('#tab-drivers tbody tr.away').count()) !== 1
   || (await page.evaluate(() => state.driverGroups.map((g) => `${g.name}:${g.driverIds.length}`).join()))  !== 'Monday:8,Tuesday:2,Wednesday:1') {
