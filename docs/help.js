@@ -11,7 +11,7 @@
 const HELP = {
   // ---------- Day plan ----------
   'plan-date': { title: 'The date',
-    text: 'The date printed at the top of the sheet, normally the next working day. The line under it says when it is not and offers Set to tomorrow; a passed date moved forward when the app opened can be put back with Keep.' },
+    text: 'The date printed at the top of the sheet, normally the next working day. Type it as dd/mm/yyyy, or pick it with the calendar button. The line under it says when it is not the next working day and offers Set to tomorrow; a passed date moved forward when the app opened can be put back with Keep.' },
   'plan-warnings': { title: 'Routes to look at',
     text: 'A car on two routes, a spot taken twice in one round, or a car or spot with a status label on a route. Nothing is ever blocked, since sometimes it is meant, and none of this goes on the printed sheet.' },
   'plan-routes': { title: 'The routes',

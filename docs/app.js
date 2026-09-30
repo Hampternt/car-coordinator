@@ -122,6 +122,24 @@ function dayLabel(s) {
   return `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}${year}`;
 }
 
+/* The Date box shows dd/mm/yyyy whatever language the browser is in; a date
+   field of the browser's own would show mm/dd/yyyy in an American one. The
+   plan still keeps YYYY-MM-DD, so nothing saved changes. */
+function dmyOf(s) {
+  const d = parseDay(s);
+  return d ? `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}` : '';
+}
+/* What was typed in the Date box, as YYYY-MM-DD, or '' while it is not a real
+   day. dd/mm/yyyy with / . or - between, a one-digit day or month allowed; a
+   YYYY-MM-DD pasted in is taken as it is. The year is always four digits, so
+   a date half typed ("01/10/20") never reads as a real day in 2020. */
+function typedDay(text) {
+  const t = String(text || '').trim();
+  const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  const s = m ? `${m[3]}-${pad2(m[2])}-${pad2(m[1])}` : t;
+  return parseDay(s) ? s : '';
+}
+
 // The weekday of the plan's own date, 0 for Sunday, or -1 when it is not a day.
 const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
 
@@ -1283,7 +1301,11 @@ function renderPlan() {
     </div>` : ''}
     <div class="bar" id="planBar">
       <label for="date">Date</label>${infoBtn('plan-date')}
-      <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
+      <span class="date-box">
+        <input id="date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" data-kind="meta" data-field="date" value="${esc(dmyOf(state.date))}">
+        <button type="button" class="btn date-cal" data-act="pick-date" title="Pick the date from a calendar" aria-label="Pick the date from a calendar">\u{1F4C5}</button>
+        <input id="datePick" type="date" tabindex="-1" aria-hidden="true" value="${esc(parseDay(state.date) ? state.date : '')}">
+      </span>
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
@@ -2018,7 +2040,7 @@ document.addEventListener('input', (e) => {
   const weekSig = () => state.driverGroups.map((g) => groupWeekday(g.name)).join();
   const regroup = kind === 'driverGroup' && name === 'name';
   const weekWas = regroup ? weekSig() : null;
-  if (kind === 'meta') state[name] = value;
+  if (kind === 'meta') state[name] = name === 'date' ? typedDay(value) : value;
   else {
     const item = byId(listFor(kind) || [], id);
     if (!item) return;
@@ -2922,6 +2944,13 @@ document.addEventListener('click', (e) => {
         state.templates.forEach((t) => t.routes.forEach((r) => { if (r[ref] === id) r[ref] = ''; }));
       }
       break;
+    // The calendar is the browser's own, on a date field kept out of sight
+    // under the Date box; what is picked in it is typed into the box (below).
+    case 'pick-date': {
+      const p = $('#datePick');
+      try { p.showPicker(); } catch (err) { p.focus(); }
+      return;
+    }
     case 'set-tomorrow':
       state.date = nextWorkingDay();
       dropKeep();
@@ -3850,6 +3879,19 @@ document.addEventListener('dragstart', closeCtxMenu, true);
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
+  // Leaving the Date box tidies what was typed ("1.10.2026") into dd/mm/yyyy;
+  // a date that is not a real day stays as typed, to be put right.
+  if (e.target.id === 'date') { if (parseDay(state.date)) e.target.value = dmyOf(state.date); return; }
+  // A day picked from the calendar goes in as if typed, so it takes exactly
+  // the path a typed date does.
+  if (e.target.id === 'datePick') {
+    const box = $('#date');
+    if (!box || !parseDay(e.target.value)) return;
+    box.value = dmyOf(e.target.value);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.focus();
+    return;
+  }
   if (e.target.id !== 'importFile') return;
   const f = e.target.files && e.target.files[0];
   e.target.value = '';

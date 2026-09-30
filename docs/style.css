@@ -187,6 +187,13 @@ h2 { font: 700 20px var(--head); margin: 0 0 12px; }
 
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .bar label { font-weight: 600; }
+/* The Date box, typed as dd/mm/yyyy, and its calendar button. The browser's
+   own date field sits out of sight at the box's foot, only for its calendar,
+   which then opens under the box. */
+.date-box { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+#date { width: 8.5em; padding: 5px 6px; border: 1px solid var(--line); background: var(--field); font-variant-numeric: tabular-nums; }
+.date-cal { padding: 3px 7px; line-height: 1.2; }
+#datePick { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 /* What day the plan is for, under the Date. Quiet when it is the next working
    day; a warning with Set to tomorrow when not. Never .warn, which is for
    the route rows. */

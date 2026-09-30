@@ -4096,10 +4096,11 @@ for (const [seededAt, wantNew, what] of [
   const pg = await calOpen('2026-09-29T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30') });
   const quiet = await line(pg);
   check('the date line is quiet for the next working day', quiet.text === 'Wednesday 30/09, the next working day.' && !quiet.off && !quiet.button, JSON.stringify(quiet));
+  check('the Date box shows the plan\'s day as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
   const cases = [
-    ['2026-09-29', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
-    ['2026-09-28', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
-    ['2026-10-01', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
+    ['29/09/2026', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
+    ['28/09/2026', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
+    ['01/10/2026', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
     ['', 'The date is not a real day. The next working day is Wednesday 30/09.'],
   ];
   for (const [typed, want] of cases) {
@@ -4111,6 +4112,32 @@ for (const [seededAt, wantNew, what] of [
   check('typing a date leaves the warnings and stripes as they were', (await pg.locator('#tab-plan tbody tr.warn').count()) === 0);
   await pg.click('[data-act="set-tomorrow"]');
   check('Set to tomorrow sets the date and saves it', (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-09-30,2026-09-30');
+  check('and the Date box shows it as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
+  // The Date box reads dd/mm/yyyy in any browser language, and a few other
+  // ways of writing it; the plan keeps YYYY-MM-DD, as it always has.
+  const typedAs = async (typed) => { await pg.fill('#date', typed); return pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join()); };
+  for (const [typed, want] of [['02/10/2026', '2026-10-02'], ['2.10.2026', '2026-10-02'], ['2-10-2026', '2026-10-02'], ['2026-10-02', '2026-10-02'],
+    ['02/10/20', ''], ['02/10/202', ''], ['31/09/2026', ''], ['10/13/2026', '']]) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} in the Date box keeps ${want || 'no day'}`, got === `${want},${want}`, got);
+  }
+  await pg.fill('#date', '2.10.2026');
+  await pg.locator('#date').blur();
+  check('leaving the Date box writes what was typed as dd/mm/yyyy', (await pg.inputValue('#date')) === '02/10/2026', await pg.inputValue('#date'));
+  await pg.fill('#date', '31/09/2026');
+  await pg.locator('#date').blur();
+  check('and leaves a day that is not real as typed, to be put right', (await pg.inputValue('#date')) === '31/09/2026');
+  // The calendar button opens the browser's own picker, on a date field kept
+  // out of sight; a day picked there goes into the box as if typed.
+  check('the calendar button sits beside the Date box, and its field is out of sight',
+    await pg.locator('.date-box [data-act="pick-date"]').isVisible() && (await pg.locator('#datePick').evaluate((i) => getComputedStyle(i).opacity)) === '0');
+  await pg.click('[data-act="pick-date"]');
+  await pg.keyboard.press('Escape');
+  await pg.locator('#datePick').evaluate((i) => { i.value = '2026-10-05'; i.dispatchEvent(new Event('change', { bubbles: true })); });
+  check('a day picked from the calendar is written in the box as dd/mm/yyyy, set and saved',
+    (await pg.inputValue('#date')) === '05/10/2026' && (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-10-05,2026-10-05');
+  check('and the focus is back in the Date box', await pg.evaluate(() => document.activeElement?.id === 'date'));
+  await pg.click('[data-act="set-tomorrow"]');
   await pg.fill('#date', '2026-10-01');
   await pg.focus('[data-act="set-tomorrow"]');
   await pg.keyboard.press('Enter');
