@@ -4376,6 +4376,29 @@ await loadWeek();
   }
 }
 
+// "Use for today" on an empty group, on the Drivers tab: nobody changes, it
+// says why, and nothing is written — not even on a save from a newer version.
+{
+  const empty = { drivers: weekDrivers, driverGroups: [{ id: 'ge', name: 'Nights', driverIds: [] }] };
+  for (const newer of [false, true]) {
+    await layPlan(newer ? { ...empty, schemaVersion: 99 } : empty);
+    await lp.reload({ waitUntil: 'networkidle' });
+    const savedWas = await lp.evaluate(() => localStorage.getItem('carcoord:v1'));
+    await lp.evaluate(() => {
+      window.__w = 0;
+      const save = Store.save; Store.save = (...a) => { window.__w++; return save(...a); };
+      const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:v1') window.__w++; return set.call(this, k, v); };
+    });
+    await lp.click('[data-act="tab"][data-tab="drivers"]');
+    await lp.click('#tab-drivers [data-act="apply-group"][data-id="ge"]');
+    const after = await lp.evaluate(() => ({ inAll: state.drivers.every((d) => d.available), writes: window.__w, saved: localStorage.getItem('carcoord:v1') }));
+    const what = newer ? 'on a save from a newer version' : 'on a plan of this version';
+    check(`Use for today on an empty group changes nobody and writes nothing, ${what}`, after.inAll && after.writes === 0 && after.saved === savedWas, JSON.stringify({ ...after, saved: undefined }));
+    check(`and says why, ${what}`, (await lp.locator('#notices .notice', { hasText: 'Nights has nobody in it yet. Tick names into it first; nobody was changed.' }).count()) === 1);
+    await lp.click('[data-act="tab"][data-tab="plan"]');
+  }
+}
+
 // --- under the route list: done ---
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();

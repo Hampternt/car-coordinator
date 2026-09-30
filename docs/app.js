@@ -2266,6 +2266,13 @@ document.addEventListener('click', (e) => {
     }
     case 'apply-group': {
       const g = list[i];
+      // A group with nobody on the roster in it changes nobody: sending
+      // everyone away is never what "use this crew" meant. Nothing is saved.
+      if (!crewIds(g).size) {
+        if (!b.closest('#tab-plan')) note('info', `${g.name.trim() || 'That group'} has nobody in it yet. Tick names into it first; nobody was changed.`);
+        render();
+        return;
+      }
       // A write across the whole roster, not an addition: picking Monday has
       // to take yesterday's leftovers out, or "who is in today" is a lie by
       // the end of the week.
