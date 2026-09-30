@@ -1474,6 +1474,14 @@ check('so does its ✕', await peek.isHidden());
 await page.locator('#planTemplates [data-act="peek-template"]').first().click();
 await page.mouse.click(5, 300);
 check('and a click anywhere else', await peek.isHidden());
+// From the keyboard the focus goes into it, and back to the count when it shuts.
+await page.locator('#planTemplates [data-act="peek-template"]').first().focus();
+await page.keyboard.press('Enter');
+check('Enter on the route count pins it and puts the focus on its ✕', await peek.isVisible()
+  && await page.evaluate(() => !!document.activeElement?.closest('#tplPeek')));
+await page.keyboard.press('Enter');
+check('and Enter there shuts it, handing the focus back to the count', await peek.isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'peek-template' && !!document.activeElement.closest('#planTemplates')));
 
 // --- the tag menu is never cut off ---
 // It was drawn inside its row, and the rows sit in a list that scrolls, so the
@@ -4273,6 +4281,21 @@ for (const [at, date, what] of [
   await pg.click('[data-act="set-tomorrow"]');
   same('Set to tomorrow loads its day\'s crew too', await inNow(), await crewOf('Friday'));
   check('with the week\'s Friday Load lit', (await pg.locator('#planWeek .week-col[data-day="5"] .week-load.lit').count()) === 1);
+  // Only a real change to a whole date loads a crew (review, 2026-10-01).
+  await pg.evaluate(() => { state.drivers.find((d) => d.name === 'Camilla').available = false; save(); render(); });
+  await pg.fill('#date', '02/10/2026');
+  check('retyping the day the plan has loads nothing: a driver set away by hand stays away',
+    await pg.evaluate(() => !state.drivers.find((d) => d.name === 'Camilla').available));
+  // Editing the day in place, key by key: "05" over "02" passes through
+  // "0/10/2026", and the crew loads once, for the day finally written, with
+  // the focus kept in the box all along.
+  await pg.locator('#date').focus();
+  await pg.keyboard.press('Home');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.type('05');
+  same('editing the day in place loads the crew of the day written', await inNow(), await crewOf('Monday crew'));
+  check('and keeps the focus in the Date box, reading 05/10/2026', await pg.evaluate(() => document.activeElement?.id === 'date' && document.activeElement.value === '05/10/2026'));
   await pg.close();
 }
 

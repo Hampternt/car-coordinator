@@ -1524,6 +1524,10 @@ function drawTplPeek() {
   }
   layer.dataset.tpl = on.id;
   layer.dataset.html = html;
+  // Shown on hover it is a glance: the pointer passes through it to the cards
+  // under it, so the next card still swaps it and its Load and Save still
+  // click (review, 2026-10-01). Pinned, it takes the pointer, to scroll it.
+  layer.classList.toggle('pinned', tplOpen === on.id);
   layer.hidden = false;
   placeTplPeek();
 }
@@ -1565,18 +1569,19 @@ function placeTplPeek() {
 function templateCard(t) {
   const n = t.routes.length;
   const saving = armed === `resave:${t.id}`, deleting = armed === `del:${t.id}`;
-  // Two rows: the name, what it holds and its ✕; then Load and Save. An empty
-  // template (the weekday ones, until saved into) has nothing to load, so it
-  // has no Load: loading it would only empty the plan.
+  // The name on its own row with its ✕, wrapping rather than cut short, so
+  // two templates can always be told apart; then what it holds; then Load and
+  // Save. An empty template (the weekday ones, until saved into) has nothing
+  // to load, so it has no Load: loading it would only empty the plan.
   return `<div class="tpl${n ? '' : ' tpl-blank'}">
       <div class="tpl-head${n && tplShown() === t.id ? ' shown' : ''}" data-tpl="${esc(t.id)}"${n ? ' data-filled="1"' : ''}>
         <div class="tpl-title">
           <span class="tpl-name" title="${esc(t.name)}">${esc(t.name)}</span>
-          ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'}`, 'tpl-peek',
-            `title="What is in ${esc(t.name)}: rest the mouse on the card, or click here to keep it open" aria-haspopup="dialog" aria-expanded="${tplOpen === t.id}"`)
-            : '<span class="tpl-empty">Not saved yet</span>'}
           ${actBtn('del', 'template', t.id, deleting ? 'Sure?' : '✕', `tpl-del${deleting ? ' armed' : ''}`, `title="Delete the ${esc(t.name)} template"`)}
         </div>
+        ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'}`, 'tpl-peek',
+          `title="What is in ${esc(t.name)}: rest the mouse on the card, or click here to keep it open" aria-haspopup="dialog" aria-expanded="${tplOpen === t.id}"`)
+          : '<span class="tpl-empty">Not saved yet</span>'}
         <div class="tpl-acts">
           ${n ? actBtn('ask-template', 'template', t.id, 'Load', 'primary-ish tpl-load', `title="Put the ${esc(t.name)} template on the plan; it asks which parts to take first"`) : ''}
           ${actBtn('resave-template', 'template', t.id, saving ? 'Sure?' : 'Save', `tpl-save${saving ? ' armed' : ''}`,
@@ -2247,13 +2252,20 @@ document.addEventListener('input', (e) => {
   // A date half typed is not a day yet: nothing changes and nothing is saved;
   // only the day and the line under the box say so, until it reads one.
   if (kind === 'meta' && name === 'date' && dateTyping() !== null) { drawDateLine(); return; }
+  const dayWas = state.date;
   if (kind === 'meta') state[name] = name === 'date' ? typedDay(value) : value;
   else {
     const item = byId(listFor(kind) || [], id);
     if (!item) return;
     item[name] = value;
   }
-  const crewMoved = kind === 'meta' && name === 'date' && !!parseDay(state.date) && loadDayCrew();
+  // The day's crew loads only when the date really changes, and only to a
+  // date written out whole: editing "05/10/2026" in place passes through
+  // "2/10/2026", which is a real day, and loading its crew on the way would
+  // overwrite who is in (review, 2026-10-01). A date retyped as it was loads
+  // nothing, so availability set by hand stays.
+  const crewMoved = kind === 'meta' && name === 'date' && state.date !== dayWas && !!parseDay(state.date)
+    && /^\d{2}\/\d{2}\/\d{4}$/.test(String(value).trim()) && loadDayCrew();
   save();
   // A tick is often pressed with Space, and the next Tab has to go on from it.
   if (el.type === 'checkbox') renderKeepingFocus();
@@ -2276,7 +2288,10 @@ function redrawKeepingCaret(el) {
   const { kind, id, field: name } = el.dataset;
   const sel = [el.selectionStart, el.selectionEnd, el.selectionDirection];
   render();
-  const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
+  // By its id where it has one: the Date box has no data-id, and looking for
+  // data-id="undefined" lost it, and the focus with it (review, 2026-10-01).
+  const again = el.id ? document.getElementById(el.id)
+    : document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
   if (!again) return;
   again.focus();
   again.setSelectionRange(...sel);
@@ -3138,12 +3153,14 @@ document.addEventListener('click', (e) => {
     case 'date-step':
       putDate(stepDate(state.date, b.dataset.unit, Number(b.dataset.by)));
       return;
-    case 'set-tomorrow':
+    case 'set-tomorrow': {
+      const was = state.date;
       state.date = nextWorkingDay();
-      loadDayCrew();
+      if (state.date !== was) loadDayCrew();
       dropKeep();
       if (e.detail === 0) refocus = '#date';
       break;
+    }
     case 'clear-day':
       if (!confirmTwice('clear', e.detail === 0)) return;
       Store.snapshot(state, 'Clearing the day');
@@ -3263,11 +3280,19 @@ document.addEventListener('click', (e) => {
       if (e.detail === 0 && b.closest('#planTemplates')) refocus = `#planTemplates [data-act="resave-template"][data-id="${CSS.escape(id)}"]`;
       break;
     }
-    case 'peek-template':
-      tplOpen = tplOpen === id ? null : id;
+    case 'peek-template': {
+      const pinning = tplOpen !== id;
+      tplOpen = pinning ? id : null;
       tplHover = null;
       render();
+      // From the keyboard the focus follows: into the layer to read and shut
+      // it, and back to the card's route count when it shuts.
+      if (e.detail === 0) {
+        (pinning ? $('#tplPeek [data-act="peek-template"]')
+          : $(`#planTemplates .tpl-head[data-tpl="${CSS.escape(id)}"] [data-act="peek-template"]`))?.focus();
+      }
       return;
+    }
     // The parts the question has ticked; all of them for a question without
     // ticks. Nothing ticked has no button, and does nothing.
     case 'load-template': {
@@ -4119,7 +4144,8 @@ document.addEventListener('change', async (e) => {
     if (!box || !parseDay(e.target.value)) return;
     box.value = dmyOf(e.target.value);
     box.dispatchEvent(new Event('input', { bubbles: true }));
-    box.focus();
+    // A crew loaded redraws the plan: the box to focus is the new one.
+    $('#date')?.focus();
     return;
   }
   if (e.target.id !== 'importFile') return;
@@ -4217,7 +4243,9 @@ async function start() {
   // Read before Share.readHash() clears it: an open by share link keeps the
   // update note for the next ordinary open.
   const link = /^#d=/.test(location.hash || '');
-  state = await Store.init(defaults, render, APP_VERSION);
+  // A write to the save file redraws after it lands; keeping the focus where
+  // it is, so typing (a date half typed, a name) goes on (review, 2026-10-01).
+  state = await Store.init(defaults, () => renderKeepingFocus(), APP_VERSION);
   // The untouched copy, before anything below can change what is saved. In a
   // try of its own, and so is the note: whatever goes wrong in either, the
   // save-file check between them still runs, exactly as in 0.2.5.

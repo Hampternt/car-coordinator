@@ -585,20 +585,21 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tpl-head.shown { box-shadow: inset 0 -3px var(--steel); }
 .tpl .btn { padding: 2px 7px; color: var(--muted); }
 .tpl .btn.primary-ish { color: var(--muted-on-bright); }
-/* Two rows: the name, what it holds and its ✕; then Load and Save, side by
-   side, the same width. */
-.tpl-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tpl-name { flex: 1; min-width: 0; font: 700 14px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name with its ✕, wrapping rather than cut short; what it holds; then
+   Load and Save, side by side, the same width. */
+.tpl-title { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.tpl-name { flex: 1; min-width: 0; font: 700 14px/1.25 var(--head); overflow-wrap: anywhere; }
 .tpl-none .tpl-name { flex: none; color: var(--quiet); }
 .tpl .btn.tpl-del { flex: none; padding: 0 6px; }
-.tpl .btn.tpl-peek { flex: none; padding: 0 6px; font-size: 12px; white-space: nowrap; }
-.tpl-empty { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tpl .btn.tpl-peek { align-self: flex-start; padding: 0 6px; font-size: 12px; white-space: nowrap; }
+.tpl-empty { font-size: 12px; color: var(--muted); }
 .tpl-acts { display: flex; gap: 6px; }
 .tpl-acts .btn { flex: 1; min-width: 0; padding: 3px 6px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A template's contents, beside its card (drawTplPeek): the header, then the
    table, which scrolls inside the layer when the screen is short. */
 .tpl-peek-layer { position: absolute; z-index: 8; display: flex; flex-direction: column; width: min(560px, calc(100vw - 16px)); background: var(--field); color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 8px 10px 10px; }
 .tpl-peek-layer[hidden] { display: none; }
+.tpl-peek-layer:not(.pinned) { pointer-events: none; }
 .tpl-peek-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .tpl-peek-head b { font: 700 15px var(--head); }
 .tpl-peek-head span { font-size: 12px; color: var(--muted); flex: 1; }
