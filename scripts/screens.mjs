@@ -305,6 +305,40 @@ await shot('20-dark-print-preview');
 await page.pdf({ path: `${OUT}/21-printed-sheet-while-dark.pdf`, format: 'A4', printBackground: true });
 console.log(`  ${OUT}/21-printed-sheet-while-dark.pdf`);
 
+// --- a plan whose date has passed, opened: Keep, then the date line both ways.
+// On a page of its own, in light, with the update note already seen.
+console.log('a passed date');
+const dp = await browser.newPage({ viewport: { width: 1360, height: 700 }, deviceScaleFactor: 2 });
+dp.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+dp.on('pageerror', (e) => errors.push(String(e)));
+const dpShot = async (name) => {
+  await dp.waitForTimeout(150);
+  await dp.screenshot({ path: `${OUT}/${name}.png` });
+  console.log(`  ${OUT}/${name}.png`);
+};
+await dp.goto(server.base, { waitUntil: 'networkidle' });
+await dp.evaluate(() => {
+  const d = new Date(); d.setDate(d.getDate() - 3);
+  const past = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  localStorage.clear();
+  localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
+  localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 5, date: past, labels: [], cars: [], positions: [], drivers: [], driverGroups: [], templates: [],
+    routes: ['1', '2', '3'].map((name) => ({ id: `r${name}`, name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })) }));
+});
+await dp.reload({ waitUntil: 'networkidle' });
+if (!(await dp.locator('#notices [data-act="keep-date"]').count())) {
+  console.log('\na plan dated three days ago was not moved on open');
+  process.exit(1);
+}
+await dpShot('22-date-moved-with-keep');
+await dp.click('#notices [data-act="keep-date"]');
+await dp.waitForSelector('#dateLine.off [data-act="set-tomorrow"]');
+await dpShot('23-date-line-warning');
+await dp.click('#dateLine [data-act="set-tomorrow"]');
+await dp.waitForSelector('#dateLine:not(.off)');
+await dpShot('24-date-line-quiet');
+await dp.close();
+
 await browser.close();
 server.close();
 
