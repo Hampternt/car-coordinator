@@ -1377,9 +1377,14 @@ await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]'
 same('the driver grid fits a short screen rather than running off it', await cutOff('#picker'), []);
 await page.keyboard.press('Escape');
 
-// --- the week, as a row of days beside the plan ---
-// All, then Monday to Sunday. A group named for a day is that day's button,
-// however it was written; a group that is not a day keeps a button of its own.
+// --- the week under the route list, and the Drivers panel's chip line ---
+// A group named for a weekday is that day's column under the route list,
+// however it was written; every other group — Saturday's and Sunday's, a day
+// named twice, a group that is no day — is a chip in the Drivers panel, after
+// All. (The row of Mon–Sun buttons beside the plan went in 0.7.0. Its checks
+// were re-proved against the columns and the chip line: here, and in the
+// layout cases near the end. The two that were retired say why where they
+// stood.)
 same('a group is matched to its day the way people write them',
   await page.evaluate(() => ['Monday', 'mon', 'Mondays', 'Monday crew', 'Mandag', ' tirsdag ', 'Weds', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri']
     .map((n) => groupWeekday(n))),
@@ -1397,32 +1402,32 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   templates: [],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-const week = () => page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.map((b) =>
-  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('none') ? '-' : '')));
-const dayBtn = (text) => page.locator('#tab-plan .day-bar .day', { hasText: text });
-same('the drivers panel shows the week: All, then Monday to Sunday, the days with no crew quiet',
-  await week(), ['All*', 'Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-check("the plan's day is marked", await page.evaluate(() =>
-  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][planWeekday()]));
-same('a group that is not a day, or is a day twice over, keeps a button of its own',
-  await page.locator('#tab-plan .rail-groups .btn').allInnerTexts(), ['Weekend crew', 'Mon']);
+const chips = () => page.locator('#tab-plan .rail-groups .btn').evaluateAll((bs) => bs.map((b) =>
+  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('quiet') ? '-' : '')));
+const cols = () => page.locator('#planWeek .week-col').evaluateAll((cs) => cs.map((c) =>
+  c.querySelector('.week-day').textContent.slice(0, 3) + (c.querySelector('.week-load.lit') ? '*' : '') + (c.classList.contains('quiet') ? '-' : '')));
+const loadDay = (day) => page.click(`#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`);
+same('the week: Monday to Friday, the days with no crew quiet', await cols(), ['Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-']);
+same('the chip line: All, then every group with no column', await chips(), ['All*', 'Weekend crew', 'Mon']);
+check("the plan's day is marked in the week", await page.evaluate(() => {
+  const c = document.querySelector('#planWeek .week-col[aria-current="date"]');
+  const d = planWeekday();
+  return d >= 1 && d <= 5 ? Number(c?.dataset.day) === d : !c;
+}));
 
-await dayBtn('Mon').click();
-same('Mon makes exactly the Monday crew the ones in', await inToday(), ['Ana', 'Bo']);
-same('and is lit, with All no longer lit', await week(), ['All', 'Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-await dayBtn('Tue').click();
-same('Tue then replaces them rather than adding to them', await inToday(), ['Cai']);
-await dayBtn('All').click();
+await loadDay(1);
+same("Monday's Load makes exactly the Monday crew the ones in", await inToday(), ['Ana', 'Bo']);
+same('and lights Monday, with All no longer lit', [...await cols(), ...await chips()], ['Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'All', 'Weekend crew', 'Mon']);
+await loadDay(2);
+same("Tuesday's then replaces them rather than adding to them", await inToday(), ['Cai']);
+await page.click('#tab-plan .rail-groups [data-act="all-in"]');
 same('All puts everyone in', await inToday(), ['Ana', 'Bo', 'Cai', 'Dee', 'Efe']);
 
-await dayBtn('Mon').click();
-await dayBtn('Wed').click();
-check('a day with no crew yet only asks', (await page.evaluate(() => state.driverGroups.length)) === 4
-  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').innerText()) === 'Save as Wednesday');
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('and saving makes a Wednesday group of who is in',
+await loadDay(1);
+await page.click('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]');
+check("Wednesday's column saves who is in as Wednesday's crew",
   await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Wednesday' && g.driverIds.join() === 'd0,d1')));
-same('which is the Wed button from then on, lit because it is in force', await week(), ['All', 'Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+same('which is its column from then on, lit because it is in force', await cols(), ['Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-']);
 
 await page.click('[data-act="tab"][data-tab="drivers"]');
 check('the Drivers tab says which button each group is',
@@ -1449,28 +1454,27 @@ const railList = (panel) => page.locator(`#tab-plan [data-panel="${panel}"] .rai
 await page.setViewportSize({ width: 1600, height: 940 });
 await weekFixture({ driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] }, { id: 'g2', name: 'Thursday', driverIds: [] }] });
 await page.reload({ waitUntil: 'networkidle' });
-same('an empty crew is as quiet as a missing one, and not lit', await week(), ['All*', 'Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-await dayBtn('Thu').click();
-check('pressing it asks rather than sending everyone away',
-  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+same('an empty crew is as quiet as a missing one, with no Load', await cols(), ['Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-']);
+check('it offers to save who is in, and sends nobody away',
+  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]').count()) === 1);
 await page.evaluate(() => { state.drivers[5].available = false; render(); });
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('the offer counts who is in when it is pressed, and fills the empty crew rather than making a second',
+await page.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+check('the Save counts who is in when it is pressed, and fills the empty crew rather than making a second',
   await page.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1
     && state.driverGroups.find((g) => g.id === 'g2').driverIds.length === 29));
 
-await page.evaluate(() => { note('warn', 'A question about the data', { act: 'split-rounds', kind: '', id: '', text: 'Answer it' }); render(); });
-await dayBtn('Sat').click();
-check('a question about a day leaves every other question up',
-  (await page.locator('#notices [data-act="split-rounds"]').count()) === 1 && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+// Retired: "a question about a day leaves every other question up". There is
+// no day question any more: a weekday's column saves in place, and a Saturday
+// or Sunday crew is now made on the Drivers tab (Add a crew for Sat, then
+// tick names).
 await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
 
-const rowWas = await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top);
-await dayBtn('Mon').click();
-check('pressing a day adds no notice, so the row stays under the pointer',
+const weekTopWas = await page.locator('#planWeek').evaluate((b) => b.getBoundingClientRect().top);
+await loadDay(1);
+check('a Load adds no notice, so the week stays under the pointer',
   (await page.locator('#notices .notice').count()) === 0
-  && Math.abs((await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top)) - rowWas) < 1);
-await dayBtn('All').click();
+  && Math.abs((await page.locator('#planWeek').evaluate((b) => b.getBoundingClientRect().top)) - weekTopWas) < 1);
+await page.click('#tab-plan .rail-groups [data-act="all-in"]');
 
 await railList('drivers').evaluate((l) => { l.scrollTop = 400; });
 await page.waitForTimeout(50);
@@ -1478,29 +1482,22 @@ await page.click('[data-act="tab"][data-tab="drivers"]');
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('a trip to another tab leaves the rail lists where they were', (await railList('drivers').evaluate((l) => l.scrollTop)) === 400,
   String(await railList('drivers').evaluate((l) => l.scrollTop)));
-await dayBtn('Mon').click();
-check('but pressing a day shows the crew it brought in, at the top', (await railList('drivers').evaluate((l) => l.scrollTop)) === 0);
+await loadDay(1);
+check('but a Load shows the crew it brought in, at the top', (await railList('drivers').evaluate((l) => l.scrollTop)) === 0);
 
-await dayBtn('Tue').focus();
+await page.focus('#planWeek .week-col[data-day="2"] [data-act="save-day-crew"]');
 await page.keyboard.press('Enter');
-await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').waitFor();
-check('a day with no crew pressed from the keyboard takes the focus to its question',
-  await page.evaluate(() => document.activeElement?.dataset.act === 'save-day-crew'));
-await dayBtn('Mon').focus();
+check("an empty day's Save pressed from the keyboard takes the focus to its new Load",
+  await page.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="2"] [data-act="apply-group"]')));
+await page.focus('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
 await page.keyboard.press('Enter');
-check('and a day pressed from the keyboard keeps the focus on itself',
-  await page.evaluate(() => document.activeElement?.closest('.day-bar') && document.activeElement.textContent.trim() === 'Mon'));
+check('and a Load pressed from the keyboard keeps the focus on itself',
+  await page.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="1"] [data-act="apply-group"]')));
 await page.evaluate(() => { notices = []; render(); });
 
-// The offer is in view, not under the top bar, even from the bottom of a long plan.
-await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-await dayBtn('Fri').click();
-check('the question a day raises is in view, clear of the top bar',
-  await page.evaluate(() => {
-    const b = document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]').getBoundingClientRect();
-    return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.dataset.act === 'save-day-crew';
-  }));
-await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
+// Retired: "the question a day raises is in view, clear of the top bar". A
+// column's Save sits where it was pressed and asks nothing anywhere else.
+await page.evaluate(() => { window.scrollTo(0, 0); });
 
 // A click into a box while a tag menu is open lands in the box.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
@@ -1534,18 +1531,15 @@ await page.evaluate(() => window.scrollTo(0, 600));
 await page.waitForTimeout(100);
 check('a tag menu whose row scrolls up under the top bar shuts', await page.locator('#tagMenu').isHidden());
 
-// A phone: the whole week on screen, and a question that can be read.
+// A phone: the group question can be read. (Every weekday on screen is now
+// the week box's own check at 390, in the layout cases.)
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => window.scrollTo(0, 0));
-check('on a phone every day of the week is on screen',
-  await page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.length === 8 && bs.every((b) => {
-    const r = b.getBoundingClientRect();
-    return r.left >= 0 && r.right <= document.documentElement.clientWidth;
-  })));
-await dayBtn('Sat').click();
-check("and a day's question reads as a sentence, not a word per line",
+await page.evaluate(() => { state.driverGroups.push({ id: 'gq', name: 'Reserves', driverIds: [] }); render(); });
+await page.click('#tab-plan .rail-groups [data-act="group-empty"]');
+check("an empty group's question reads as a sentence, not a word per line",
   (await page.locator('#tab-plan .day-ask span').first().evaluate((s) => s.getBoundingClientRect().width)) > 200);
-await page.evaluate(() => { notices = []; render(); });
+await page.evaluate(() => { dayAsk = null; state.driverGroups = state.driverGroups.filter((g) => g.id !== 'gq'); notices = []; render(); });
 
 // --- what a second check of those fixes found ---
 same('Norwegian writes the crew into the day, and has its own short forms',
@@ -1566,22 +1560,20 @@ check('Enter in the new-tag box adds the tag and the menu stays shut, with the f
   && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].labelId === state.labels.find((l) => l.name === 'Nights')?.id));
 
 await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
-check('an empty group under the week sends nobody away, and says why',
+check('an empty group in the chip line sends nobody away, and says why',
   await page.evaluate(() => state.drivers.every((d) => d.available))
   && (await page.locator('#tab-plan .day-ask').innerText()).includes('Weekend has nobody in it yet'));
 
 // (The tag just made raised a notice of its own; clear it, so what follows
 // counts only what setting up the week adds.)
 await page.evaluate(() => { notices = []; render(); });
-await dayBtn('Tue').click();
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-await dayBtn('Wed').click();
+await page.click('#planWeek .week-col[data-day="2"] [data-act="save-day-crew"]');
 await page.evaluate(() => { state.drivers.slice(10).forEach((d) => { d.available = false; }); render(); });
-check('the question counts who is in as it stands', (await page.locator('#tab-plan .day-ask').innerText()).includes('Save the 10 in now'));
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('setting up the week from the row piles nothing up above the plan: one line, the latest answer',
-  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#tab-plan .day-ask').count()) === 1
-  && (await page.locator('#tab-plan .day-ask').innerText()).startsWith("Saved: Wednesday's crew is the 10"));
+check("an empty day's Save counts who is in as it stands",
+  (await page.locator('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]').innerText()).includes('Save the 10 in'));
+await page.click('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]');
+check('setting up the week from its columns piles nothing up above the plan',
+  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#planWeek .week-col[data-day="3"] .week-load.lit').count()) === 1);
 await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
 
 // A list emptied and filled again starts at its top, not at a place the old
@@ -1604,11 +1596,14 @@ await page.evaluate(() => { notices = []; render(); });
 // Phone.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => window.scrollTo(0, 0));
-const tueAt = await dayBtn('Tue').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-await dayBtn('Thu').click();
-check('on a phone a quiet day asks under the week, and nothing moves under the next tap',
-  await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.textContent.trim() === 'Tue', tueAt));
-await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+// On a phone, across two Loads, the chip line keeps its height and each chip
+// its width, so nothing under the next tap moves.
+const chipLine = () => page.locator('#tab-plan .rail-groups').evaluate((p) =>
+  [Math.round(p.getBoundingClientRect().height), ...[...p.children].map((b) => Math.round(b.getBoundingClientRect().width))].join());
+const chipsWas = await chipLine();
+await loadDay(2);
+await loadDay(3);
+check('on a phone, across two Loads, the chip line keeps its height and every chip its width', (await chipLine()) === chipsWas, `${chipsWas} -> ${await chipLine()}`);
 
 const tableBox = page.locator('#tab-plan .plan-table');
 await tableBox.evaluate((b) => { b.scrollLeft = 300; });
@@ -1642,11 +1637,8 @@ check('a delete confirmed from the keyboard deletes', (await page.evaluate(() =>
 // --- and what a third check found ---
 await weekFixture({ driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
 await page.reload({ waitUntil: 'networkidle' });
-await dayBtn('Wed').click();
-await page.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d3', 'd4'] }); render(); });
-check('a question overtaken on the Drivers tab turns into the answer, with no Save left in it',
-  (await page.locator('#tab-plan .day-ask').innerText()).includes('Wednesday has a crew now')
-  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 0);
+// "A question overtaken on the Drivers tab turns into the answer" is now a
+// column: a crew added meanwhile shows with Load and no Save (layout cases).
 await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
 await page.evaluate(() => { state.driverGroups.find((g) => g.id === 'g1').driverIds.push('d5'); render(); });
 check('and a line about an empty crew goes once names are ticked into it', (await page.locator('#tab-plan .day-ask').count()) === 0);
@@ -3317,9 +3309,9 @@ await dk.evaluate((crew) => { localStorage.clear(); localStorage.setItem('carcoo
 await themeAs('light');
 await dk.reload({ waitUntil: 'networkidle' });
 await dk.evaluate(() => { note('info', 'An information line.'); note('warn', 'A warning line.'); render(); });
-await dk.click('#tab-plan .day.today');   // the plan's day's crew, lit
-check('the dark cases have their states: the update note, today lit, a clash',
-  (await dk.locator('#notices .notice.update').count()) === 1 && (await dk.locator('#tab-plan .day.today.on').count()) === 1
+await dk.click('#planWeek .week-col[aria-current="date"] [data-act="apply-group"]');   // the plan's day's crew, lit
+check("the dark cases have their states: the update note, the plan's day lit, a clash",
+  (await dk.locator('#notices .notice.update').count()) === 1 && (await dk.locator('#planWeek .week-col[aria-current="date"] .week-load.lit').count()) === 1
   && (await dk.locator('#tab-plan tbody tr.warn').count()) >= 2);
 
 // Colours on screen, as a reader sees them: a colour with transparency is
@@ -3381,8 +3373,7 @@ const pairs = [
   ['a template button', '.tpl .btn:not(.primary-ish)', 'color', TEXT],
   ['a Data tab button', '#tab-data .card .btn', 'color', TEXT],
   ['the share code box', '#shareIn', 'color', TEXT],
-  ['a day with no crew', '#tab-plan .day.none', 'color', TEXT],
-  ['a day with a crew', '#tab-plan .day:not(.none):not(.on)', 'color', TEXT],
+  ['a chip in the Drivers panel', '#tab-plan .rail-groups .btn:not(.on)', 'color', TEXT],
   ['the recovery page link', '#tab-data a[href="recover.html"]', 'color', TEXT],
   ['the pressed Colours button', '#tab-data .colour-choice.lit', 'color', TEXT],
   ['a name in the week', '#planWeek .week-col li', 'color', TEXT],
@@ -3392,7 +3383,7 @@ const pairs = [
   ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
   ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
   ['a grip', '.grip', 'color', MARK],
-  ["today's line, lit", '#tab-plan .day.today.on', 'box-shadow', MARK],
+  ["the plan's day in the week", '#planWeek .week-col.plan-day .week-day', 'box-shadow', MARK],
   ['an information edge', '#notices .notice:not(.warn):not(.update)', 'border-left-color', MARK],
   ['a warning edge', '#notices .notice.warn', 'border-left-color', MARK],
   ["the warning box's edge", '#tab-plan .problems', 'border-left-color', MARK],
@@ -3887,7 +3878,7 @@ for (const [at, date, what] of [
     drivers: [{ id: 'd1', name: 'Ana', available: true }], driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   }) });
   same("on a Friday, a Monday plan offers the Monday template and not Friday's", await offers(pg), ['Use Mondays']);
-  check("the week row marks the plan's day", (await pg.locator('#tab-plan .day-bar .day.today').innerText()).trim() === 'Mon');
+  check("the week marks the plan's day", (await pg.locator('#planWeek .week-col[aria-current="date"]').getAttribute('data-day')) === '1');
   check('no word in the rail says today', !/today/i.test(await pg.locator('#tab-plan [data-panel="drivers"]').evaluate((el) => el.outerHTML)));
   const before = await pg.locator('#notices').innerHTML();
   await pg.fill('#date', '2026-10-07');
@@ -4079,7 +4070,7 @@ const noop = async (what, act) => {
 await noop('Up on the first row', () => np.locator('#tab-plan tbody tr').first().locator('[data-act="up"]').click());
 await noop('Down on the last row', () => np.locator('#tab-plan tbody tr').last().locator('[data-act="down"]').click());
 await noop('All when everyone is in', () => np.click('#tab-plan [data-act="all-in"]'));
-await noop('the lit day', () => np.click('#tab-plan .day-bar .day.on[data-act="apply-group"]'));
+await noop('the lit Load', () => np.click('#planWeek .week-load.lit'));
 await noop('a tag to the tag it has', async () => {
   await np.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c1"]');
   await np.click('#tagMenu .tag-choice.on');
@@ -4211,8 +4202,7 @@ await loadWeek();
   check('each Load adds no notice, and saves only who is in', (await lp.locator('#notices .notice').count()) === notesBefore && (await v1Minus()) === restBefore);
   // With the rail's question open at 1600, the next Load stays under the pointer.
   await lp.setViewportSize({ width: 1600, height: 940 });
-  // (The day row's question until item 6 removes the row; then Sunday's chip.)
-  await lp.locator('#tab-plan .day-bar [data-act="day-missing"]').first().click();
+  await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');   // Sunday's chip asks
   const next = () => lp.evaluate(() => { const r = document.querySelector('#planWeek .week-col[data-day="2"] [data-act="apply-group"]').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)].join(); });
   const at = await next();
   await lp.click('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
@@ -4284,7 +4274,7 @@ await loadWeek();
     if (width === 1100) {
       // The rail sits above the week here: with its question open, a Load
       // still leaves the next column's Load under the pointer.
-      await lp.locator('#tab-plan .day-bar [data-act="day-missing"], #tab-plan .rail-groups [data-act="group-empty"]').first().click();
+      await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');
       await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
       const at = await lp.evaluate(() => { const r = document.querySelectorAll('#planWeek [data-act="apply-group"]')[1].getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; });
       await lp.locator('#planWeek [data-act="apply-group"]').first().click();
@@ -4357,6 +4347,27 @@ await loadWeek();
     (await lp.evaluate(() => window.__w)) === 0 && (await lp.locator(`${wed} [data-act="apply-group"]`).count()) === 1
     && (await lp.locator(`${wed} [data-act="save-day-crew"]`).count()) === 0);
   await lp.reload({ waitUntil: 'networkidle' });
+}
+
+// The chip line: All, then every crew with no column, in the Drivers tab's
+// order. Saturday's and Sunday's crews, and a Monday named twice, keep a
+// button there, so nothing the old row did is lost.
+{
+  await loadWeek();
+  const chipTexts = () => lp.locator('#tab-plan .rail-groups .btn').evaluateAll((bs) => bs.map((b) => b.textContent.trim() + (b.classList.contains('on') ? '*' : '')));
+  same('on the week fixture, the chip line reads All, then every crew with no column', await chipTexts(), ['All*', 'Weekend crew', 'Mon', 'Lørdag gjeng', 'Sunday']);
+  await lp.click('#tab-plan .rail-groups [data-act="apply-group"][data-id="g5"]');
+  check("Lørdag gjeng makes exactly Cai and Dee the ones in, and is lit", (await inNow()) === 'Cai,Dee' && (await chipTexts()).includes('Lørdag gjeng*'));
+  await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');
+  check('Sunday, empty, is quiet, sends nobody away and asks', (await inNow()) === 'Cai,Dee'
+    && (await lp.locator('#tab-plan .day-ask', { hasText: 'Sunday has nobody in it yet' }).count()) === 1);
+  await lp.click('#tab-plan .rail-groups [data-act="all-in"]');
+  check('All puts everyone in', (await inNow()) === 'Ana,Bo,Cai,Dee,Efe');
+  for (const [what, groups] of [['only Monday-to-Friday crews', weekGroups.filter((g) => ['g1', 'g2'].includes(g.id))], ['drivers but no groups', []]]) {
+    await layPlan({ drivers: weekDrivers, driverGroups: groups });
+    await lp.reload({ waitUntil: 'networkidle' });
+    same(`with ${what}, the chip line still shows All`, await chipTexts(), ['All*']);
+  }
 }
 
 // --- under the route list: done ---

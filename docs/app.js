@@ -33,8 +33,9 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 // The week the way the warehouse reads it: Monday first.
 const WEEK = [1, 2, 3, 4, 5, 6, 0];
 
-/* A day group named for a day of the week is that day's crew, and is the
-   button for that day beside the plan. Named the way people name them: in
+/* A day group named for a day of the week is that day's crew: Monday to
+   Friday's are the week's columns under the route list, and Saturday's and
+   Sunday's are buttons in the Drivers panel. Named the way people name them: in
    English or Norwegian, whole or short, with a plural or a "crew" after it —
    "Monday", "Mon", "Mondays", "Monday crew", "Mandag", "Mandagsgjeng", "Man".
    Thursday's Norwegian short form is left out on purpose: "Tor" is a name
@@ -661,10 +662,14 @@ function railDrivers() {
     return railRow('driver', d, 'Driver name', where, inOut, d.available ? '' : 'away');
   }).join('');
   const away = state.drivers.length - inToday.length;
-  const { others } = dayCrews();
-  // Groups that are not a day of the week — a weekend crew, a Monday named
-  // twice — keep their own buttons under the week.
-  const groups = others.map((g) => {
+  const { byDay } = dayCrews();
+  // The chip line: All, then every crew with no column under the route list —
+  // Saturday's and Sunday's, a second crew for a day, groups that are no day —
+  // in the Drivers tab's order. Monday to Friday's crews are the week's.
+  const everyone = inToday.length === state.drivers.length;
+  const all = actBtn('all-in', '', '', 'All', everyone ? 'on' : '', `aria-pressed="${everyone}" title="Put everyone on the roster in"`);
+  const noColumn = state.driverGroups.filter((g) => { const day = groupWeekday(g.name); return !(WORK_WEEK.includes(day) && byDay.get(day) === g); });
+  const groups = noColumn.map((g) => {
     const ids = crewIds(g);
     if (!ids.size) {
       return actBtn('group-empty', 'driverGroup', g.id, esc(g.name), 'quiet', 'title="Nobody in this group yet"');
@@ -675,8 +680,7 @@ function railDrivers() {
   }).join('');
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
-    ${state.drivers.length ? dayBar(inToday) : ''}
-    ${groups ? `<p class="rail-groups">${groups}</p>` : ''}
+    ${state.drivers.length ? `<p class="rail-groups" role="group" aria-label="Who is in">${all}${groups}</p>` : ''}
     ${dayQuestion()}
     <div class="rail-add">
       <input id="railDriver" type="text" placeholder="Name(s), comma separated" aria-label="Add a driver">
@@ -688,77 +692,18 @@ function railDrivers() {
   </section>`;
 }
 
-/* The question a quiet day asks, and what it says once answered. Asked in
-   the Drivers panel, under the week, rather than as a notice above the page:
-   a notice pushed the week down under the finger that had just pressed it, so
-   on a phone the next tap landed on "Save" instead of the next day, and a
-   week set up day by day piled a notice up for every one. Here nothing above
-   the row moves, the count is who is in right now, and each answer replaces
-   the last. Kept off `state`: it is a conversation, not data. */
-let dayAsk = null;   // { day } | { day, saved: [driver ids] } | { groupId }
+/* The question an empty crew's chip asks, in the Drivers panel rather than
+   as a notice above the page, so nothing above the week moves. Kept off
+   `state`: it is a conversation, not data. It goes by itself once the group
+   has names, or is gone. */
+let dayAsk = null;   // { groupId }
 
-/* Drawn from what is true now, every time: the Drivers tab can fill, rename
-   or delete a crew while the question is up, and a line that went on saying
-   "Wednesday's crew is empty" beside a Wed that had since got a crew was
-   worse than no line. A question overtaken like that turns into the answer,
-   or goes. */
 function dayQuestion() {
-  if (!dayAsk || !state.drivers.length) return '';
+  if (!dayAsk || !dayAsk.groupId || !state.drivers.length) return '';
+  const g = byId(state.driverGroups, dayAsk.groupId);
+  if (!g || crewIds(g).size) return '';
   const close = '<button class="btn" data-act="day-ask-close" aria-label="Close" title="Close">✕</button>';
-  const line = (text, acts = '', cls = '') => `<div class="day-ask ${cls}" role="status"><span>${text}</span><span class="acts">${acts}${close}</span></div>`;
-  if (dayAsk.groupId) {
-    const g = byId(state.driverGroups, dayAsk.groupId);
-    if (!g || crewIds(g).size) return '';
-    return line(`${esc(g.name.trim() || 'That group')} has nobody in it yet. Tick names into it on the Drivers tab.`);
-  }
-  const name = WEEKDAYS[dayAsk.day];
-  const crew = dayCrews().byDay.get(dayAsk.day);
-  const has = crew ? crewIds(crew).size : 0;
-  if (dayAsk.saved) {
-    // Only while the crew is still the one saved: edited on the Drivers tab
-    // since, "Saved: the 6" would be claiming someone else's work.
-    const ids = crew ? crewIds(crew) : new Set();
-    const same = ids.size === dayAsk.saved.length && dayAsk.saved.every((x) => ids.has(x));
-    return same ? line(`Saved: ${name}'s crew is the ${ids.size} who were in. Press ${name.slice(0, 3)} to bring them back any ${name}.`, '', 'done') : '';
-  }
-  if (has) return line(`${name} has a crew now. Press ${name.slice(0, 3)} to use it.`);
-  const what = crew ? `${name}'s crew is empty.` : `No ${name} crew yet.`;
-  const n = state.drivers.filter((d) => d.available).length;
-  if (!n) return line(`${what} Nobody is in to save as one — set who is in first, or tick names into it on the Drivers tab.`);
-  const all = n === state.drivers.length && n > 1 ? ' That is everyone: set anyone who is off to away first, if the crew is smaller.' : '';
-  return line(`${what} Save the ${n} in now as ${name}'s?${all}`,
-    `<button class="btn primary-ish" data-act="save-day-crew" data-day="${dayAsk.day}">Save as ${name}</button>`);
-}
-
-/* Monday morning is one click, and the week is where it is found: All, then
-   Monday to Sunday, as one row. The one in force is lit — the crew in today
-   is exactly that day's, or everyone — and today has a line under it. A day
-   with no crew yet is there but quiet, and clicking it offers to save who is
-   in now as that day's. */
-function dayBar(inToday) {
-  const { byDay } = dayCrews();
-  const inIds = new Set(inToday.map((d) => d.id));
-  const today = planWeekday();   // the plan's day, which is usually tomorrow
-  // A crew left empty — made with no names ticked, or whose names all left —
-  // is not a crew to send everyone away with, so it looks and acts like a day
-  // that has none, and never lights up.
-  const everyone = inIds.size === state.drivers.length;
-  const days = WEEK.map((day) => {
-    const g = byDay.get(day);
-    const ids = g ? crewIds(g) : new Set();
-    const on = crewInForce(ids);
-    const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && !dayAsk.saved && 'asking'].filter(Boolean).join(' ');
-    const when = `${WEEKDAYS[day]}${day === today ? " (this plan's day)" : ''}`;
-    if (!ids.size) {
-      return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
-        title="${when}: ${g ? 'the crew is empty' : 'no crew yet'} — click to save who is in now as ${WEEKDAYS[day]}'s">${WEEKDAYS[day].slice(0, 3)}</button>`;
-    }
-    return `<button class="${cls}" data-act="apply-group" data-kind="driverGroup" data-id="${esc(g.id)}" data-day="${day}" aria-pressed="${on}"
-      title="${esc(when)}: ${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in">${WEEKDAYS[day].slice(0, 3)}</button>`;
-  }).join('');
-  return `<div class="day-bar" role="group" aria-label="Who is in">
-    <button class="day all${everyone ? ' on' : ''}" data-act="all-in" aria-pressed="${everyone}" title="Everyone on the roster is in">All</button>${days}
-  </div>`;
+  return `<div class="day-ask" role="status"><span>${esc(g.name.trim() || 'That group')} has nobody in it yet. Tick names into it on the Drivers tab.</span><span class="acts">${close}</span></div>`;
 }
 
 /* Where each of the plan's scrolling lists was left. Taken from the lists'
@@ -2268,36 +2213,20 @@ document.addEventListener('click', (e) => {
       if (at >= 0) g.driverIds.splice(at, 1); else g.driverIds.push(b.dataset.driver);
       break;
     }
-    // No notice from the week beside the plan: the lit day and the count in
-    // the heading already say what happened, and a notice arriving above the
-    // plan pushed the row down, so the next day was no longer under the
-    // pointer that was about to press it.
+    // No notice from the chip line: the lit chip and the count in the heading
+    // already say what happened, and a notice arriving above the plan would
+    // push the week down under the pointer about to press the next Load.
     case 'all-in':
       state.drivers.forEach((d) => { d.available = true; });
       delete planScroll.drivers;
-      if (e.detail === 0) refocus = '#tab-plan .day-bar [data-act="all-in"]';
+      if (e.detail === 0) refocus = '#tab-plan .rail-groups [data-act="all-in"]';
       break;
-    // A day with no crew, or an empty one. It only ever asks — under the week,
-    // with the count as it stands — and the button in the question is what
-    // saves, the same two steps as loading a template.
-    case 'day-missing':
-      dayAsk = { day: Number(b.dataset.day) };
-      render();
-      if (e.detail === 0) {
-        (document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]')
-          || document.querySelector(`#tab-plan .day-bar [data-day="${Number(b.dataset.day)}"]`))?.focus();
-      }
-      return;
     case 'day-ask-close': {
       const was = dayAsk;
       dayAsk = null;
       render();
-      // From the keyboard, back to what asked: the day, or the crew.
-      if (e.detail === 0 && was) {
-        document.querySelector(was.groupId
-          ? `#tab-plan .rail-groups [data-id="${CSS.escape(was.groupId)}"]`
-          : `#tab-plan .day-bar [data-day="${was.day}"]`)?.focus();
-      }
+      // From the keyboard, back to the chip that asked.
+      if (e.detail === 0 && was && was.groupId) document.querySelector(`#tab-plan .rail-groups [data-id="${CSS.escape(was.groupId)}"]`)?.focus();
       return;
     }
     case 'group-empty':
@@ -2306,31 +2235,22 @@ document.addEventListener('click', (e) => {
       if (e.detail === 0) document.querySelector(`#tab-plan .rail-groups [data-id="${CSS.escape(id)}"]`)?.focus();
       return;
     // Counted when pressed, not when asked: who is in may have changed since.
+    // From an empty weekday's column. No question and no notice: the column
+    // filling and lighting up is the answer.
     case 'save-day-crew': {
       const day = Number(b.dataset.day);
-      // From the week's column: no question is set or read, and no notice is
-      // raised; the column filling and lighting up is the answer.
-      const fromWeek = !!b.closest('#planWeek');
       const driverIds = state.drivers.filter((d) => d.available).map((d) => d.id);
       const crew = WEEKDAYS[day] ? dayCrews().byDay.get(day) : null;
       // Nothing to do: not a day, nobody in, or a crew made on the Drivers tab
       // meanwhile. The page redraws to say so, and nothing is saved.
       if (!WEEKDAYS[day] || (crew && crewIds(crew).size) || !driverIds.length) {
-        if (!fromWeek && WEEKDAYS[day]) dayAsk = { day };
         render();
-        if (e.detail === 0) {
-          document.querySelector(fromWeek ? `#planWeek .week-col[data-day="${day}"] button` : `#tab-plan .day-bar [data-day="${day}"]`)?.focus();
-        }
+        if (e.detail === 0) document.querySelector(`#planWeek .week-col[data-day="${day}"] button`)?.focus();
         return;
       }
       if (crew) crew.driverIds = driverIds;
       else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
-      if (fromWeek) {
-        if (e.detail === 0) refocus = `#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`;
-      } else {
-        dayAsk = { day, saved: driverIds };
-        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
-      }
+      if (e.detail === 0) refocus = `#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`;
       break;
     }
     case 'add-day-group': {
@@ -2351,10 +2271,9 @@ document.addEventListener('click', (e) => {
       // rather than keep the list scrolled down among the ones now away.
       delete planScroll.drivers;
       if (b.closest('#tab-plan')) {
-        // From the keyboard, back to the button pressed: the week's Load, the
-        // chip, or the day row's button. One selector would find the week's
-        // copy first, because the week comes first in the page.
-        const where = b.closest('#planWeek') ? '#planWeek' : b.closest('.rail-groups') ? '#tab-plan .rail-groups' : '#tab-plan .day-bar';
+        // From the keyboard, back to the button pressed: the week's Load or the
+        // chip.
+        const where = b.closest('#planWeek') ? '#planWeek' : '#tab-plan .rail-groups';
         if (e.detail === 0) refocus = `${where} [data-act="apply-group"][data-id="${CSS.escape(id)}"]`;
         break;
       }
