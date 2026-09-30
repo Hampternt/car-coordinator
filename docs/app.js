@@ -280,6 +280,18 @@ const tagList = (kind) => (kind === 'driver' && ownDriverTags() ? state.driverTa
 const tagField = (kind) => (kind === 'driver' && ownDriverTags() ? 'tagId' : 'labelId');
 const tagOf = (kind, item) => byId(tagList(kind), item[tagField(kind)]);
 
+/* ---------- the ⓘ and its bubble ----------
+   A small ⓘ beside a part of the app opens a bubble beside it saying what
+   the part is and how to use it; the words are in help.js. It only tells:
+   the ⓘ carries data-info, never data-act, and has click handling of its
+   own, so no press on it or in its bubble reaches save(). One bubble at a
+   time, placed the way the menus are; Esc, a press outside it, the focus
+   moving elsewhere or another ⓘ shuts it. A cached index.html without
+   help.js draws no ⓘ at all. */
+let infoOpen = null;   // { key }: the open bubble, kept off `state`
+const infoBtn = (key) => (typeof HELP === 'undefined' || !HELP[key] ? ''
+  : `<button type="button" class="info-btn" data-info="${esc(key)}" aria-label="About ${esc(HELP[key].title)}" aria-expanded="${!!infoOpen && infoOpen.key === key}" title="What is this?">\u24d8</button>`);
+
 function labelChips(kind, item) {
   const on = item[tagField(kind)];
   const ok = `<button class="chip ok ${on ? '' : 'on'}" data-act="setLabel" data-kind="${kind}" data-id="${esc(item.id)}" data-label="">OK</button>`;
@@ -1978,6 +1990,7 @@ function render() {
   renderPicker();
   renderTagMenu();
   renderCtxMenu();
+  placeInfoBubble();
   // The tour follows its target through every redraw. It must never stop
   // one: whatever it throws is logged and the page is drawn regardless.
   if (typeof Tour !== 'undefined') { try { Tour.place(); } catch (e) { console.error(e); } }
@@ -3571,6 +3584,98 @@ window.addEventListener('resize', () => {
     requestAnimationFrame(() => requestAnimationFrame(() => { tagSettling = false; placeTagMenu(); }));
   }
 });
+
+/* The ⓘ's bubble: a layer made on first use, out of the page's sections, so
+   a redraw never replaces it. Its words are drawn when it opens; a redraw
+   only moves it beside its ⓘ (which the redraw has replaced), or shuts it
+   when its ⓘ is gone or hidden, on another tab. */
+const infoAnchor = () => infoOpen && document.querySelector(`.info-btn[data-info="${CSS.escape(infoOpen.key)}"]`);
+const inInfo = (t) => !!t && !!t.closest && (!!t.closest('#infoBubble') || !!t.closest('.info-btn'));
+function infoLayer() {
+  let layer = document.getElementById('infoBubble');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'infoBubble';
+    layer.className = 'info-bubble';
+    layer.setAttribute('role', 'dialog');
+    layer.setAttribute('aria-labelledby', 'infoTitle');
+    layer.tabIndex = -1;
+    layer.hidden = true;
+    document.body.appendChild(layer);
+  }
+  return layer;
+}
+function placeInfoBubble() {
+  const layer = document.getElementById('infoBubble');
+  if (!layer) return;
+  const a = infoAnchor();
+  const box = a && a.getBoundingClientRect();
+  if (!box || !box.width) {
+    infoOpen = null;
+    layer.hidden = true;
+    return;
+  }
+  layer.hidden = false;
+  layer.style.maxHeight = '';
+  const vw = document.documentElement.clientWidth;
+  const { left, top, tall } = besideAnchor(box, layer.offsetWidth, layer.offsetHeight, box.left + box.width / 2 > vw / 2);
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
+}
+function markInfoButtons() {
+  document.querySelectorAll('.info-btn').forEach((b) => b.setAttribute('aria-expanded', String(!!infoOpen && infoOpen.key === b.dataset.info)));
+}
+// From the keyboard the focus goes into the bubble; from the mouse it stays.
+function openInfo(key, keyboard) {
+  if (typeof HELP === 'undefined' || !HELP[key]) return;
+  closePicker();
+  closeTagMenu();
+  closeCtxMenu();
+  infoOpen = { key };
+  const layer = infoLayer();
+  layer.innerHTML = `<div class="info-head"><h3 id="infoTitle">${esc(HELP[key].title)}</h3>
+    <button type="button" class="info-close" data-info-close aria-label="Close">\u2715</button></div>
+    <p>${esc(HELP[key].text)}</p>`;
+  markInfoButtons();
+  placeInfoBubble();
+  if (keyboard) layer.focus({ preventScroll: true });
+}
+// `back`: hand the focus to the ⓘ, looked up again, since a redraw may have
+// replaced the one that opened it.
+function closeInfo(back = false) {
+  if (!infoOpen) return;
+  const a = back ? infoAnchor() : null;
+  infoOpen = null;
+  const layer = document.getElementById('infoBubble');
+  if (layer) layer.hidden = true;
+  markInfoButtons();
+  if (a) a.focus({ preventScroll: true });
+}
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t.closest) return;
+  const i = t.closest('.info-btn');
+  if (i) {
+    e.preventDefault();
+    if (infoOpen && infoOpen.key === i.dataset.info) closeInfo(e.detail === 0);
+    else openInfo(i.dataset.info, e.detail === 0);
+    return;
+  }
+  if (t.closest('[data-info-close]')) closeInfo(true);
+});
+document.addEventListener('pointerdown', (e) => { if (infoOpen && !inInfo(e.target)) closeInfo(); }, true);
+// The focus going anywhere else shuts it too: a menu opened from the keyboard,
+// the route picker opened by typing, a Tab away.
+document.addEventListener('focusin', (e) => { if (infoOpen && !inInfo(e.target)) closeInfo(); });
+document.addEventListener('keydown', (e) => {
+  if (!infoOpen) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeInfo(inInfo(document.activeElement)); return; }
+  // Tab from inside the bubble goes on from its ⓘ, not from the end of the page.
+  if (e.key === 'Tab' && document.getElementById('infoBubble')?.contains(e.target)) closeInfo(true);
+});
+window.addEventListener('scroll', placeInfoBubble, { passive: true });
+window.addEventListener('resize', placeInfoBubble);
 
 /* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
    key on a control in one. Everywhere else, in any box that is typed in, with

@@ -392,6 +392,18 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    fixed width, so a redraw never changes where an entry is. */
 .ctx-menu { position: absolute; z-index: 8; width: min(280px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 4px; }
 .ctx-menu[hidden] { display: none; }
+/* The ⓘ beside a part of the app, quiet until it is wanted, and its bubble,
+   set like the menus. */
+.info-btn { background: none; border: 0; padding: 0 3px; margin: 0 2px; color: var(--muted); font: 400 15px/1 var(--body); cursor: pointer; vertical-align: baseline; }
+.info-btn:hover, .info-btn:focus-visible, .info-btn[aria-expanded="true"] { color: var(--ink); }
+.info-bubble { position: absolute; z-index: 8; width: min(320px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 8px 12px 10px; font-weight: 400; text-align: left; }
+.info-bubble[hidden] { display: none; }
+.info-bubble:focus { outline: none; }
+.info-bubble .info-head { display: flex; align-items: baseline; gap: 8px; }
+.info-bubble h3 { margin: 0 0 4px; font: 700 15px var(--head); }
+.info-bubble p { margin: 0; font-size: 14px; line-height: 1.4; }
+.info-bubble .info-close { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 14px; }
+.info-bubble .info-close:hover, .info-bubble .info-close:focus-visible { color: var(--ink); }
 /* A submenu, beside its entry: above the menu it opens from. */
 .ctx-sub { z-index: 9; }
 .ctx-item.open { background: var(--concrete); }
@@ -667,7 +679,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #tour, #tourRing, .app-footer { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #tour, #tourRing, #infoBubble, .app-footer { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 

@@ -1,6 +1,6 @@
 # Pack: Info bubbles instead of the tour
 
-**Status:** APPROVED. The owner's go came 2026-09-30; it starts when `weekday-templates` is merged into `dev`.
+**Status:** IN PROGRESS. Building on branch `info-bubbles`, cut from `dev` at 27cd03b after the weekday-templates merge.
 **Branch:** its own, `info-bubbles`, cut from `dev` **after `weekday-templates` is merged**, since both rewrite parts of `app.js`. Merged back into `dev` when green. Ships as 0.14.0.
 
 Observable: a small ⓘ sits beside each part of the app. Clicking one opens a short bubble right next to it, saying what that part does and how to use it. The Tour button and the "Show me around" offer are gone.
@@ -36,7 +36,7 @@ Each is one or two short sentences: what it is, then how to use it.
 
 ## Items
 
-- [ ] **1. The bubble.** A `help.js` holds every text by key (one top-level name, as `map.js` and `tour.js` do), and an `infoBtn(key)` in app.js draws the ⓘ. A layer app.js makes on first use opens beside its ⓘ, placed the way the menus are, and one at a time. It closes on Esc, an outside click or another ⓘ, is keyboard reachable, is never printed, and saves nothing. A cached index.html without help.js simply draws no ⓘ. Done: every key opens its own text beside its button, and nothing is written.
+- [x] **1. The bubble.** A `help.js` holds every text by key (one top-level name, as `map.js` and `tour.js` do), and an `infoBtn(key)` in app.js draws the ⓘ. A layer app.js makes on first use opens beside its ⓘ, placed the way the menus are, and one at a time. It closes on Esc, an outside click or another ⓘ, is keyboard reachable, is never printed, and saves nothing. A cached index.html without help.js simply draws no ⓘ. Done: every key opens its own text beside its button, and nothing is written.
 - [ ] **2. The ⓘ in place** at every spot in the table above. Done: every key in help.js has exactly one visible ⓘ on its tab, and every ⓘ has a text.
 - [ ] **3. Remove the tour:** `tour.js`, `#tour` and `#tourRing`, the Tour button, `offerTour`, `scripts/tour.mjs`, its npm script, and its screenshot. The top bar's 1300px wrap rule stays if it is still needed without the Tour button; re-measure it. Done: no reference to Tour is left; the suite and screens pass.
 - [ ] **4. The first-open hint**, where the tour offer was raised (a first run, no share link, no warning, no save file linked), with the `infoHint` pref. Done: it shows once and never again after ✕.
@@ -62,3 +62,5 @@ Each is one or two short sentences: what it is, then how to use it.
 
 - 2026-09-30: planned with the owner's three answers. It waits for `weekday-templates` to merge.
 - 2026-09-30: the owner's go: "go, start it after the templates merge".
+- 2026-09-30: build started on `info-bubbles`.
+- 2026-09-30: item 1 done. `docs/help.js` declares `HELP` (25 keys: the table's, with the Data tab's What's new and Archives as two keys, and Positions split into the map, Many cars and status), loaded before app.js with ?v=. `infoBtn(key)` draws the ⓘ (`data-info`, never `data-act`, `aria-expanded` from `infoOpen`), or nothing without HELP or the key. `#infoBubble` is made on first use, placed with `besideAnchor` (right-aligned for an ⓘ on the window's right half, max height from its room), re-placed after every render, scroll and resize, and shut when its ⓘ is gone. Its own click, pointerdown, focusin and keydown handlers: another ⓘ swaps it, the same one toggles it, Esc / an outside press / the focus leaving shut it, Tab from inside goes on from the ⓘ, a keyboard open focuses it and a keyboard close hands focus back. Opening shuts the picker, tag menu and right-click menu. Hidden in print. No ⓘ is placed yet (item 2). check.sh: CHECK OK; colour guard OK.
