@@ -4746,6 +4746,41 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   check('and both go in Export', exp.labelId === 'lbl-holiday' && exp.note === 'Back Thursday');
 }
 
+// Share codes carry no driver tags or notes. The receiving browser keeps its
+// own on the drivers it has, and a driver it gains arrives with neither.
+{
+  await dvOpen(devPlan);
+  const code = await dv.evaluate(async () => {
+    state.drivers.forEach((d, i) => { d.note = `Note ${i}`; d.labelId = state.labels[0].id; });
+    return Share.encode(state, 'all');
+  });
+  const rows = await dv.evaluate(async (c) => (await Share.decode(c)).share.dr.map((r) => r.length), code);
+  check('an everything code sends each driver as a name and in or away, and nothing more', rows.length > 0 && rows.every((n) => n === 2), JSON.stringify(rows));
+  const rxCtx = await browser.newContext();
+  const rx = await rxCtx.newPage();
+  const rxErrors = [];
+  rx.on('console', (m) => m.type() === 'error' && rxErrors.push(m.text()));
+  await rx.goto(base, { waitUntil: 'networkidle' });
+  await rx.evaluate(() => {
+    localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
+    localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 5, date: nextWorkingDay(), labels: [{ id: 'RX', name: 'Here only', color: '#1565c0', onSheet: false }], cars: [], positions: [], routes: [], driverGroups: [], templates: [],
+      drivers: [{ id: 'rx-cam', name: 'Camilla', available: true, labelId: 'RX', note: 'Kept here' }] }));
+  });
+  await rx.reload({ waitUntil: 'networkidle' });
+  await rx.click('[data-act="tab"][data-tab="data"]');
+  await readCode(rx, code);
+  await rx.check('#shareDlg input[value="all"]');
+  await rx.click('[data-act="share-apply"]');
+  const got = await rx.evaluate(() => ({ cam: state.drivers.find((d) => d.name === 'Camilla'), gained: state.drivers.find((d) => d.name !== 'Camilla') }));
+  check('the receiving browser keeps its own tag and note on a driver it had', got.cam.labelId === 'RX' && got.cam.note === 'Kept here', JSON.stringify(got.cam));
+  await rx.click('[data-act="tab"][data-tab="drivers"]');
+  const gainedRow = rx.locator('#tab-drivers tbody tr', { has: rx.locator(`[data-field="name"][value="${got.gained.name}"]`) });
+  check('and a driver it gains shows an empty note, with OK lit', (await gainedRow.locator('[data-field="note"]').inputValue()) === ''
+    && (await gainedRow.locator('.chip.on').innerText()) === 'OK');
+  check('the receiving browser logs no console errors', !rxErrors.length, rxErrors.join(' | '));
+  await rxCtx.close();
+}
+
 // --- the Drivers tab: done ---
 check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
 await drvCtx.close();
