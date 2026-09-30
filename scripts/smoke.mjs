@@ -4600,6 +4600,9 @@ for (const [what, setup, says] of [
     && (await pg.locator('#planMap', { hasText: says }).count()) === 1, JSON.stringify(routes));
   // Typing still reaches the plan, with the map missing or broken.
   const first = pg.locator('#tab-plan tbody tr').first();
+  // To the end of the name first: a box focused without a click has its
+  // caret at the start.
+  await first.locator('[data-field="name"]').press('End');
   await first.locator('[data-field="name"]').type('k');
   await first.locator('[data-field="round"]').fill('3');
   check(`${what}: typing a route name and a round still saves`, await pg.evaluate(() => {
