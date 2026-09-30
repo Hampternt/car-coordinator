@@ -326,7 +326,7 @@ Record the row height at 900 in the ledger.
 
 ## Items
 
-- [ ] **1. Deleting a label clears it from drivers too.** Add `state.drivers` to the label sweep (Design D). The "Deleting a label" backup is unchanged.
+- [x] **1. Deleting a label clears it from drivers too.** Add `state.drivers` to the label sweep (Design D). The "Deleting a label" backup is unchanged.
       *Done when:* smoke tags a driver and deletes that label with two clicks. The driver's `labelId` is then empty, "Deleting a label" is at the top of Backups, and no repair notice shows after a reload.
 - [ ] ~~**2. Use for today on an empty group changes nothing.** The guard in Design C. If pack 5's Load doesn't reach `apply-group`, move the check into one helper that both call.~~ **Dropped 2026-09-29: pack 5 item 8 does this (owner).**
       *Done when:* smoke presses Use for today on two empty groups: a new Fri group made with Add a crew for, and a group whose only driver was deleted. It also presses pack 5's Load on the empty Fri column, whatever pack 5 shows there. Each time, everyone's in/away, `carcoord:v1` and the Backups stay byte-identical and the notice shows. A group with members still applies as before.
@@ -442,3 +442,4 @@ Record the row height at 900 in the ledger.
 ## Ledger
 
 - **2026-09-30, start (combined pack, part 7).** Built on `review-round`, base 980c016 (0.8.0). **At go:** `APP_VERSION` is 0.8.0, so this part cuts 0.9.0. Part 5's Load is `apply-group`, and its item 8 already guards an empty group ("⟨name⟩ has nobody in it yet. Tick names into it first; nobody was changed."), so item 2 stays dropped. `scripts/upgrade.mjs` reads the note's versions from `docs/updates.js`, so item 11 has nothing to change there; under the owner's batched rule it runs once, from v0.2.4, at the end. Part 5 added `WORK_WEEK` and already reworded the group badges and the Day groups hint; part 2 already made the Labels hint name drivers. INVENTORY's two 💭 lines are one 🚧 pointer under Day plan; Working hours stays under Considered.
+- Item 1 done, 9a3173f. Design D: the label sweep now includes `state.drivers`. Smoke: a Drivers tab context (`drvCtx`, the dev fixture) deletes Course, which Randi wears, with two clicks: her `labelId` is empty, "Deleting a label" tops Backups, and no repair notice follows a reload. Later items add their cases before its "the Drivers tab: done" line. Gate: `check.sh` OK.
