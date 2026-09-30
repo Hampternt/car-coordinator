@@ -1,6 +1,6 @@
 # Pack: Driver tags, apart from car labels
 
-**Status:** PROPOSED. Owner's answers taken 2026-09-30; waiting for the go.
+**Status:** IN PROGRESS. Owner said go 2026-09-30; building on branch `driver-tags` (cut from `dev` at 69d1e47), merged into `dev` by the main session.
 **Branch:** `dev`, where the combined update is being tested. It ships with it, as 0.12.0.
 
 Observable: a driver's tag menu and the Drivers tab offer only driver tags (Sick, Holiday, Vacation, Course, Special situation and your own), never Workshop or Out of service. Cars and positions offer only their labels. Every driver keeps the tag they had.
@@ -43,7 +43,7 @@ It is applied, not offered, because it is lossless: every driver keeps exactly t
 
 ## Items
 
-- [ ] **1. ⚠ Store: schema 6 and the move-over.** `driverTags` and `tagId` in `normalise`, the move-over above, a repair for a `tagId` pointing at nothing, and `readable()` (the save-file comparison) naming driver tags too. Done: a v5 plan with Petter on Holiday and Randi on Course loads as v6 with driver tags Holiday, Course, Sick, Vacation, Special situation; Petter and Randi keep theirs; `labels` is byte-identical; and loading the result again changes nothing.
+- [x] **1. ⚠ Store: schema 6 and the move-over.** `driverTags` and `tagId` in `normalise`, the move-over above, a repair for a `tagId` pointing at nothing, and `readable()` (the save-file comparison) naming driver tags too. Done: a v5 plan with Petter on Holiday and Randi on Course loads as v6 with driver tags Holiday, Course, Sick, Vacation, Special situation; Petter and Randi keep theirs; `labels` is byte-identical; and loading the result again changes nothing.
 - [ ] **2. New installs.** `defaults()` gets the five ready-made driver tags. Done: a first run's Labels tab lists them under Driver tags.
 - [ ] **3. Drivers use driver tags everywhere.** The Drivers tab chips, the rail's tag menu (and its Add, which makes a driver tag), the rail dot, and the driver picker's dot and note. Done: a driver's tag menu lists only driver tags, and a car's only labels.
 - [ ] **4. The Labels tab in two sections.** "Car and position labels" as now, then "Driver tags": name, colour, reorder, delete and add. Deleting a label no longer touches drivers; deleting a driver tag clears it from the drivers who have it, after the usual backup. Done: both sections work, and each delete sweeps only its own kind.
@@ -61,3 +61,5 @@ It is applied, not offered, because it is lossless: every driver keeps exactly t
 ## Ledger
 
 - 2026-09-30: planned, with the owner's three answers. Waiting for the go.
+- 2026-09-30: go from the owner; build started on `driver-tags`.
+- 2026-09-30: item 1 done. `SCHEMA` 6; move-over in `normalise` when `raw.driverTags` is not a list (fresh `uid()` ids, so the upgrade check compares tags by name); ready-made list lives in store.js as `Store.readyTags()`; colour-guard allowlist for store.js gains the four new tag colours. Scratch harness: dev fixture gives Holiday #1565c0, Course #2e7d32, Sick, Vacation, Special situation, Petter=Holiday, Randi=Course, labels unchanged, reload changes nothing, no repair notices; v5 with a dangling labelId repairs it once; deleted ready-made stays deleted. check.sh: CHECK OK. Awaiting the main session's review.
