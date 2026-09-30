@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.14.0',
+    must: false,
+    title: 'Info buttons instead of the tour',
+    changed: 'A small ⓘ beside each part of the app opens a short note on what it does. Esc or a click elsewhere closes it. The Tour button is gone.',
+    affects: 'Every tab, and the top bar. The ⓘ never prints. Share codes and the printed sheet are unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.13.0',
     must: true,
     title: 'Weekday templates, and loading in parts',

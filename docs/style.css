@@ -128,6 +128,10 @@
    inside the rail's scrolling lists and clipped the row being tabbed to.
    Focus that lands under the bar is scrolled clear by the app instead.) */
 #notices > * { scroll-margin-top: var(--bar, 80px); }
+/* The scrollbar is there on every tab, so going between a short tab and a long
+   one does not shift the whole page sideways by its width. (scrollbar-gutter:
+   stable did not keep the room in Chrome 154, measured.) */
+html { overflow-y: scroll; }
 body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.4 var(--body); }
 button, input, select { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--steel); outline-offset: 1px; }
@@ -157,20 +161,15 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .sibling::after { content: ' \2192'; color: var(--hivis); }
 .sibling:hover, .sibling:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
 .sibling:hover::after, .sibling:focus-visible::after { color: var(--on-bright); }
-/* The Tour button, right of Print: set like the Breadify link, a way in
-   rather than an action on the plan. */
-.tour-btn {
-  padding: 7px 13px; background: none; border: 1px solid var(--bar-edge); border-left: 4px solid var(--hivis);
-  color: var(--on-bar); font: 700 14px var(--head); white-space: nowrap; flex: none; cursor: pointer;
-}
-.tour-btn:hover, .tour-btn:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
-/* Below 1300px the bar has no room for the tabs beside everything else: a
-   tab name went onto two lines, and at 900 (the Windows app's smallest
-   window) the page scrolled sideways. The tabs take a row of their own
-   instead, scrolling inside it on a phone, and Print and Tour stay right.
-   1300 rather than the 1245 measured in headless Chrome, to leave room for
-   fonts that draw wider than the test browser's. */
-@media (max-width: 1300px) {
+/* Below 1205px the bar has no room for the tabs beside everything else: the
+   name and Print break onto two lines first, and at 900 (the Windows app's
+   smallest window) the page would scroll sideways. The tabs take a row of
+   their own instead, scrolling inside it on a phone, and Print stays right.
+   Measured in headless Chrome on every item in the bar, not only the tabs:
+   all of it stays on one line down to 1150px since the Tour button went;
+   1205 keeps the 55px of room the first measurement left for fonts that draw
+   wider than the test browser's (the scrollbar's kept room comes out of it). */
+@media (max-width: 1205px) {
   .topbar { flex-wrap: wrap; gap: 10px 16px; }
   .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
   .topbar .primary { margin-left: auto; }
@@ -329,6 +328,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-panel { background: var(--panel); padding: 10px 12px; }
 .rail-panel h3 { font: 600 15px var(--head); margin: 0 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rail-count { font: 400 12px var(--body); color: var(--muted); }
+/* The heading's ⓘ stays beside its word; the count keeps the right edge. */
+.rail-panel h3 .info-btn { margin-right: auto; margin-left: -4px; }
 .rail-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 /* Beside a plan longer than the window (templates and the week sit under
    the routes), the rail still fits the window under the top bar: its two
@@ -392,6 +393,18 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    fixed width, so a redraw never changes where an entry is. */
 .ctx-menu { position: absolute; z-index: 8; width: min(280px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 4px; }
 .ctx-menu[hidden] { display: none; }
+/* The ⓘ beside a part of the app, quiet until it is wanted, and its bubble,
+   set like the menus. */
+.info-btn { background: none; border: 0; padding: 0 3px; margin: 0 2px; color: var(--muted); font: 400 15px/1 var(--body); cursor: pointer; vertical-align: baseline; }
+.info-btn:hover, .info-btn:focus-visible, .info-btn[aria-expanded="true"] { color: var(--ink); }
+.info-bubble { position: absolute; z-index: 8; width: min(320px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); color: var(--ink); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 8px 12px 10px; font-weight: 400; text-align: left; }
+.info-bubble[hidden] { display: none; }
+.info-bubble:focus { outline: none; }
+.info-bubble .info-head { display: flex; align-items: baseline; gap: 8px; }
+.info-bubble h3 { margin: 0 0 4px; font: 700 15px var(--head); }
+.info-bubble p { margin: 0; font-size: 14px; line-height: 1.4; }
+.info-bubble .info-close { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 14px; }
+.info-bubble .info-close:hover, .info-bubble .info-close:focus-visible { color: var(--ink); }
 /* A submenu, beside its entry: above the menu it opens from. */
 .ctx-sub { z-index: 9; }
 .ctx-item.open { background: var(--concrete); }
@@ -408,19 +421,6 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .ctx-cost { font-size: 12px; color: var(--quiet); }
 .ctx-item.armed .ctx-cost { color: var(--on-fill); }
 @media (pointer: coarse) { .ctx-item { min-height: 40px; } }
-/* The first-use tour: a card beside what it points at, and a ring round
-   that, which never takes a click. Above the top bar (5), under the car grid,
-   the tag menu (7) and the right-click menu (8). No dimming: the page stays
-   usable while it is open. */
-.tour { position: absolute; z-index: 6; width: min(340px, calc(100vw - 16px)); overflow-y: auto; background: var(--field); color: var(--ink); border: 1px solid var(--ink); border-top: 4px solid var(--hivis); box-shadow: 0 8px 24px var(--shadow-picker); padding: 10px 14px 12px; }
-.tour[hidden], #tourRing[hidden] { display: none; }
-.tour h3 { margin: 0 0 6px; font: 700 17px var(--head); }
-.tour p { margin: 0 0 8px; font-size: 14px; }
-.tour .tour-count { margin-bottom: 2px; font: 600 12px var(--head); color: var(--muted); }
-.tour .tour-extra { font-size: 13px; color: var(--muted); }
-.tour-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-.tour-acts [data-tour="end"] { margin-left: auto; }
-#tourRing { position: absolute; z-index: 6; pointer-events: none; border: 3px solid var(--hivis); box-shadow: 0 0 0 2px var(--ink); }
 
 /* The row a Go to landed on, lit for a moment, and a spot shown on the map. */
 .parking-box.ctx-found { outline: 3px solid var(--hivis); outline-offset: 2px; }
@@ -667,7 +667,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #tour, #tourRing, .app-footer { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #infoBubble, .app-footer { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 

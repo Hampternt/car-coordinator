@@ -33,25 +33,12 @@ await page.evaluate(() => { localStorage.clear(); });
 await page.reload({ waitUntil: 'networkidle' });
 
 console.log('first run');
-// The one notice a first-ever open shows is the offer of the tour.
-if ((await page.locator('#notices .notice [data-act="tour"]').count()) !== 1) {
-  console.log('\na first-ever open did not offer the tour');
+// The one notice a first-ever open shows is the hint about the ⓘ buttons.
+if ((await page.locator('#notices .notice').count()) !== 1 || !(await page.locator('#notices .notice').innerText()).includes('New here? Click any \u24d8')) {
+  console.log('\na first-ever open did not show the ⓘ hint alone');
   process.exit(1);
 }
 await shot('01-first-run');
-
-// --- the tour's first step, then Skip tour. Starting it took the offer
-// away, so no later picture carries it.
-console.log('the tour');
-await page.click('#notices [data-act="tour"]');
-await page.waitForSelector('#tour:not([hidden])');
-await shot('33-tour-step-1');
-await page.click('#tour [data-tour="end"]');
-await page.waitForSelector('#tour', { state: 'hidden' });
-if (await page.locator('#notices .notice [data-act="tour"]').count()) {
-  console.log('\nthe offer of the tour was still up after the tour');
-  process.exit(1);
-}
 
 // --- build a fleet, the way you would on day one: paste the lot in at once
 console.log('cars');
@@ -120,7 +107,7 @@ const usual = (name, day) => driverRow(name).locator(`[data-act="crew-day"][data
 await usual('Ana Ruiz', 2);                 // makes a Tuesday group
 await usual('Bo Lind', 2);
 await usual('Cai Mensah', 3);               // and a Wednesday one
-await driverRow('Hana Sol').locator('.chip', { hasText: 'Unavailable' }).click();
+await driverRow('Hana Sol').locator('.chip', { hasText: 'Sick' }).click();
 await driverRow('Bo Lind').locator('[data-field="note"]').fill('Back from leave Monday');
 if ((await page.locator('#tab-drivers tbody tr.away').count()) !== 1
   || (await page.evaluate(() => state.driverGroups.map((g) => `${g.name}:${g.driverIds.length}`).join()))  !== 'Monday:8,Tuesday:2,Wednesday:1') {
@@ -208,14 +195,27 @@ if ((await page.locator('#tab-plan tbody tr.warn').count()) !== 4) {
 
 // --- the plan you make again: save it as a template, set it for Mondays
 console.log('day templates');
+// The shelf starts with Monday to Friday, empty (0.13.0), so saving "Monday"
+// fills that one; it is the only one with routes to load.
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
-await page.locator('#tab-plan .tpl select[data-field="weekday"]').selectOption('1');
-if ((await page.locator('#tab-plan .tpl').count()) !== 1) {
-  console.log('\nthe template shelf under the plan is empty after saving one');
+const saved = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="ask-template"]') });
+if ((await saved.count()) !== 1) {
+  console.log(`\nexpected one template with routes on the shelf after saving Monday, got ${await saved.count()}`);
   process.exit(1);
 }
+await saved.locator('select[data-field="weekday"]').selectOption('1');
 await shot('03-day-plan-with-warnings');
+
+// An ⓘ's bubble, open beside it on the day plan.
+console.log('an info bubble');
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.click('#tab-plan .info-btn[data-info="plan-drivers"]');
+await page.waitForSelector('#infoBubble:not([hidden])');
+await page.waitForTimeout(150);
+await page.screenshot({ path: `${OUT}/33-info-bubble.png` });
+console.log(`  ${OUT}/33-info-bubble.png`);
+await page.keyboard.press('Escape');
 
 // The week under the route list, Monday's crew lit: at the exe's default
 // width, and on a phone, where it scrolls sideways in its own box.

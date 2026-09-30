@@ -52,13 +52,19 @@ const PLAN_DMY = PLAN_DAY.split('-').reverse().join('/');
 // --- first run ---
 // The tab's own empty message, not the template shelf's further down it.
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
-// One notice, and it is the tour's offer: no warning, and no update note.
-check('a first run shows one notice, the offer of the tour, and no warnings', (await page.locator('#notices .notice').count()) === 1
-  && (await page.locator('#notices .notice.info [data-act="tour"]').count()) === 1 && (await page.locator('#notices .notice.warn').count()) === 0,
+// One notice, and it is the line about the ⓘ buttons: no warning, and no
+// update note.
+check('a first run shows one notice, the line about the \u24d8 buttons, and no warnings', (await page.locator('#notices .notice').count()) === 1
+  && (await page.locator('#notices .notice.info').innerText()).includes('New here? Click any \u24d8 to see what that part does.')
+  && (await page.locator('#notices .notice.warn').count()) === 0,
   await page.locator('#notices').innerText());
+check('and it has no button but its \u2715', (await page.locator('#notices .notice button').count()) === 1);
 // Put away, as a leader who does not want it would: the rest of this page's
 // cases count notices from none.
 await page.locator('#notices .notice [data-act="dismiss"]').click();
+check('its \u2715 puts it away in this browser for good', await page.evaluate(() => localStorage.getItem('carcoord:pref:infoHint') === 'done'));
+await page.reload({ waitUntil: 'networkidle' });
+check('so it is not there after a reload', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 check('after a normal start, the static line pointing at the recovery page is gone', (await page.locator('#notices .boot-line').count()) === 0);
 check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
 check('the release notes load, newest first at the running version', await page.evaluate(() =>
@@ -80,7 +86,8 @@ check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts
 // A first run's Labels tab: the car and position labels, then the five
 // ready-made driver tags in a section of their own.
 await page.click('[data-act="tab"][data-tab="labels"]');
-same("a first run's Labels tab has two sections", await page.locator('#tab-labels h2').allInnerTexts(), ['Car and position labels', 'Driver tags']);
+// A heading's ⓘ is part of its text; the words are what count here.
+same("a first run's Labels tab has two sections", (await page.locator('#tab-labels h2').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')), ['Car and position labels', 'Driver tags']);
 same('and the ready-made driver tags under Driver tags',
   await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
   ['Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
@@ -1366,8 +1373,13 @@ same('and nothing in it is pushed off the edge', await page.evaluate(() => {
 }), []);
 
 // Carrying a name onto the route it drives.
+// A hand moves a few pixels before it travels, and that is where Chrome starts
+// the drag. One jump straight across missed the start whenever the page above
+// was laid out a little differently (a one-line notice instead of the tour's).
 const carry = async (from, to) => {
   await from.hover(); await page.mouse.down();
+  const b = await from.boundingBox();
+  await page.mouse.move(b.x + b.width / 2 + 6, b.y + b.height / 2, { steps: 3 });
   await to.hover(); await to.hover(); await page.mouse.up();
 };
 const planRow = (n) => page.locator('#tab-plan tbody tr').nth(n);
@@ -3161,7 +3173,7 @@ await leaveAs(dt, { 'carcoord:v1': sincePlan, 'carcoord:archives': archivesAB(V)
 await dt.reload({ waitUntil: 'networkidle' });
 await dt.click('[data-act="tab"][data-tab="data"]');
 same('What\'s new and Archives sit above Backups, which is still the last card',
-  await dt.locator('#tab-data .card h3').allInnerTexts(),
+  (await dt.locator('#tab-data .card h3').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')),
   ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
 check('This browser links to the recovery page', (await dt.locator('#tab-data .card', { hasText: 'This browser' }).locator('a[href="recover.html"]').count()) === 1);
 check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
@@ -4353,6 +4365,13 @@ await noop('picking the car already chosen', async () => {
   await np.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').click();
   await np.click('#picker .pick.on');
 });
+await noop('opening an \u24d8, another, and shutting them', async () => {
+  await np.click('#tab-plan .info-btn[data-info="plan-routes"]');
+  await np.click('#tab-plan .info-btn[data-info="plan-drivers"]');
+  await np.click('#infoBubble [data-info-close]');
+  await np.click('#tab-plan .info-btn[data-info="plan-date"]');
+  await np.keyboard.press('Escape');
+});
 await noop('asking to load a template', () => np.click('#tab-plan .tpl [data-act="ask-template"]'));
 check('and the question is still asked', (await np.locator('#notices .notice.warn [data-act="load-template"]').count()) === 1);
 check('nothing was written in all of that', (await npSaved()).writes === npStart.writes && (await npSaved()).v1 === npStart.v1);
@@ -4668,8 +4687,8 @@ await loadWeek();
     boxes: [...document.querySelectorAll('#planMap .parking-box')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()),
     listed: [...document.querySelectorAll('#planMap .parking-item > .parking-title')].map((t) => t.textContent),
     banner: document.querySelector('#tab-plan .problems')?.innerText || '',
-    // The tour's offer is a first open's one notice; any other counts.
-    notes: [...document.querySelectorAll('#notices .notice')].filter((n) => !n.querySelector('[data-act="tour"]')).length,
+    // The line about the ⓘ buttons is a first open's one notice; any other counts.
+    notes: [...document.querySelectorAll('#notices .notice')].filter((n) => !n.innerText.includes('New here? Click any \u24d8')).length,
   }));
   const openWith = async (text) => {
     await lp.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
@@ -4710,12 +4729,12 @@ await loadWeek();
   v = await mapView();
   check('a Many cars spot with two routes in one round is not red, and lists both', !v.banner && !v.red.length
     && ['route 1', 'route 2', 'Many cars'].every((t) => v.boxes[1].includes(t)), v.boxes[1]);
-  // A first run: no notices but the tour's offer, five Free spots, and the
+  // A first run: no notices but the line about the ⓘ buttons, five Free spots, and the
   // gate looking for its name.
   await lp.evaluate(() => localStorage.clear());
   await lp.reload({ waitUntil: 'networkidle' });
   v = await mapView();
-  check(`a first run: no notices but the tour's offer, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
+  check(`a first run: no notices but the line about the \u24d8 buttons, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
     v.notes === 0 && v.boxes.slice(0, 5).every((t) => t.endsWith('Free')) && v.boxes[5].includes(`No position named ${GATE_NAME}`), JSON.stringify(v));
   // A spot renamed on the Positions tab moves to the list, as its hint says.
   await lp.click('[data-act="tab"][data-tab="positions"]');
@@ -5728,6 +5747,135 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await replace.click();
   check('with two templates of the same name, the one clicked is the one replaced', (await cmTpl('tpl-sat2')).routes.length === plan.length
     && JSON.stringify(await cmTpl('tpl-saturday')) === JSON.stringify(first));
+}
+
+// --- the ⓘ buttons and their bubbles ---
+// On the dev fixture, so the parts that show only with data are there: the
+// warnings box, the week, the driver and car tables.
+{
+  const ibCtx = await browser.newContext();
+  const ib = await ibCtx.newPage();
+  const ibErrors = [];
+  ib.on('console', (m) => m.type() === 'error' && ibErrors.push(m.text()));
+  ib.on('pageerror', (e) => ibErrors.push(String(e)));
+  await ib.goto(base, { waitUntil: 'networkidle' });
+  await ib.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  await ib.reload({ waitUntil: 'networkidle' });
+  const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview'];
+  const shown = async () => ib.evaluate(() => [...document.querySelectorAll('.info-btn')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => b.dataset.info));
+  const byTab = {};
+  for (const t of TABS) { await ib.click(`[data-act="tab"][data-tab="${t}"]`); byTab[t] = await shown(); }
+  console.log(`       the ⓘ keys by tab: ${JSON.stringify(byTab)}`);
+  const all = Object.values(byTab).flat();
+  const keys = await ib.evaluate(() => Object.keys(HELP));
+  same('every text in help.js has exactly one visible ⓘ, on its tab', [...all].sort(), [...keys].sort());
+  check('and every one has a title and words', await ib.evaluate(() => Object.values(HELP).every((h) => h.title.trim() && h.text.trim())));
+  check('no ⓘ is inside anything that acts, so none can reach a save', await ib.evaluate(() => [...document.querySelectorAll('.info-btn')].every((b) => !b.closest('[data-act]'))));
+  const savedWas = await ib.evaluate(() => [localStorage.getItem('carcoord:v1'), localStorage.getItem('carcoord:backups')].join('\n'));
+
+  // Every ⓘ opens its own words beside itself, inside the window, at every width.
+  for (const width of [1680, 1280, 900, 390]) {
+    await ib.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const wrong = [];
+    for (const t of TABS) {
+      await ib.click(`[data-act="tab"][data-tab="${t}"]`);
+      for (const key of byTab[t]) {
+        const btn = ib.locator(`.info-btn[data-info="${key}"]`);
+        await btn.evaluate((b) => b.scrollIntoView({ block: 'center', inline: 'center' }));
+        // The page may already be wider than a phone (the print preview's
+        // sheet is); the bubble must not make it any wider.
+        const pageWidth = await ib.evaluate(() => Math.max(document.documentElement.scrollWidth, window.innerWidth));
+        await btn.click();
+        const got = await ib.evaluate(([key, pageWidth]) => {
+          const layer = document.getElementById('infoBubble');
+          const a = document.querySelector(`.info-btn[data-info="${key}"]`).getBoundingClientRect();
+          const m = layer.getBoundingClientRect();
+          const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+          return {
+            open: !layer.hidden && document.getElementById('infoTitle').textContent === HELP[key].title && layer.querySelector('p').textContent === HELP[key].text,
+            inside: m.left >= -0.5 && m.right <= vw + 0.5 && m.top >= -0.5 && m.bottom <= vh + 0.5,
+            beside: Math.abs(m.top - a.bottom) <= 4 || Math.abs(m.bottom - a.top) <= 4,
+            wide: document.documentElement.scrollWidth <= pageWidth + 1,
+          };
+        }, [key, pageWidth]);
+        const bad = Object.entries(got).filter(([, v]) => !v).map(([k]) => k);
+        if (bad.length) wrong.push(`${key}: ${bad.join('/')}`);
+        await ib.keyboard.press('Escape');
+      }
+    }
+    same(`at ${width}, every ⓘ opens its own words beside itself, inside the window`, wrong, []);
+  }
+  await ib.setViewportSize({ width: 1280, height: 900 });
+  await ib.click('[data-act="tab"][data-tab="plan"]');
+  await ib.evaluate(() => window.scrollTo(0, 0));
+
+  // One at a time; the same ⓘ again shuts it; a press outside shuts it.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.click('.info-btn[data-info="plan-drivers"]');
+  check('another ⓘ swaps the bubble: one at a time', (await ib.locator('#infoBubble').count()) === 1
+    && (await ib.locator('#infoTitle').textContent()) === 'The Drivers panel'
+    && await ib.evaluate(() => [...document.querySelectorAll('.info-btn[aria-expanded="true"]')].map((b) => b.dataset.info).join() === 'plan-drivers'));
+  await ib.click('.info-btn[data-info="plan-drivers"]');
+  check('the same ⓘ again shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('#tab-plan .plan-table thead');
+  check('a press outside it shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('#infoBubble p');
+  check('a press inside it does not', await ib.locator('#infoBubble').isVisible());
+  await ib.click('#infoBubble [data-info-close]');
+  check('and its ✕ does', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('[data-act="tab"][data-tab="cars"]');
+  check('another tab shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('[data-act="tab"][data-tab="plan"]');
+
+  // The keyboard: Enter opens it with the focus in it, Escape hands the focus
+  // back, and Tab from inside goes on from the ⓘ.
+  await ib.locator('.info-btn[data-info="plan-date"]').focus();
+  await ib.keyboard.press('Enter');
+  check('Enter on an ⓘ opens its bubble with the focus in it', await ib.evaluate(() => document.activeElement?.id === 'infoBubble'));
+  await ib.keyboard.press('Escape');
+  check('Escape shuts it and hands the focus back to its ⓘ', await ib.locator('#infoBubble').isHidden()
+    && await ib.evaluate(() => document.activeElement?.dataset.info === 'plan-date'));
+  await ib.keyboard.press('Enter');
+  await ib.keyboard.press('Tab');
+  check('Tab through it goes on past its ⓘ and shuts it', await ib.locator('#infoBubble').isHidden()
+    && await ib.evaluate(() => document.activeElement?.id === 'date'));
+  await ib.locator('.info-btn[data-info="plan-date"]').focus();
+  await ib.keyboard.press('Enter');
+  await ib.locator('#tab-plan tbody tr').first().locator('[data-field="name"]').focus();
+  check('the focus going anywhere else shuts it', await ib.locator('#infoBubble').isHidden());
+
+  // Right-click menus and the bubble never stand together.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.locator('#tab-plan tbody tr').first().locator('[data-act="toggle"][data-field="highlight"]').click({ button: 'right' });
+  check('a right-click menu shuts the bubble', await ib.locator('#infoBubble').isHidden() && await ib.locator('#ctxMenu').isVisible());
+  await ib.keyboard.press('Escape');
+
+  // Never printed.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.emulateMedia({ media: 'print' });
+  check('an open bubble is not printed', await ib.evaluate(() => getComputedStyle(document.getElementById('infoBubble')).display === 'none'
+    && [...document.querySelectorAll('.info-btn')].every((b) => b.getBoundingClientRect().width === 0)));
+  await ib.emulateMedia({ media: null });
+  await ib.keyboard.press('Escape');
+
+  check('none of it wrote the plan or the backups', (await ib.evaluate(() => [localStorage.getItem('carcoord:v1'), localStorage.getItem('carcoord:backups')].join('\n'))) === savedWas);
+  check('the ⓘ cases log no console errors', ibErrors.length === 0, ibErrors.join(' | '));
+  await ibCtx.close();
+
+  // An index.html from before help.js: no ⓘ and no line about them, and the
+  // app runs.
+  const oldCtx = await browser.newContext();
+  await oldCtx.route('**/help.js*', (r) => r.fulfill({ status: 404, body: '' }));
+  const op = await oldCtx.newPage();
+  const opErrors = [];
+  op.on('pageerror', (e) => opErrors.push(String(e)));
+  await op.goto(base, { waitUntil: 'networkidle' });
+  check('without help.js: no ⓘ, no line about them, and the plan is drawn', (await op.locator('.info-btn').count()) === 0
+    && !(await op.locator('#notices').innerText()).includes('ⓘ') && (await op.locator('#tab-plan tbody tr').count()) > 0 && !opErrors.length, opErrors.join(' | '));
+  await oldCtx.close();
 }
 
 // --- right-click menus: done ---

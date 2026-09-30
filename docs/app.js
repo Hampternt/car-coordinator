@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.14.0';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -279,6 +279,18 @@ const moveDel = (kind, id) =>
 const tagList = (kind) => (kind === 'driver' && ownDriverTags() ? state.driverTags || [] : state.labels);
 const tagField = (kind) => (kind === 'driver' && ownDriverTags() ? 'tagId' : 'labelId');
 const tagOf = (kind, item) => byId(tagList(kind), item[tagField(kind)]);
+
+/* ---------- the ⓘ and its bubble ----------
+   A small ⓘ beside a part of the app opens a bubble beside it saying what
+   the part is and how to use it; the words are in help.js. It only tells:
+   the ⓘ carries data-info, never data-act, and has click handling of its
+   own, so no press on it or in its bubble reaches save(). One bubble at a
+   time, placed the way the menus are; Esc, a press outside it, the focus
+   moving elsewhere or another ⓘ shuts it. A cached index.html without
+   help.js draws no ⓘ at all. */
+let infoOpen = null;   // { key }: the open bubble, kept off `state`
+const infoBtn = (key) => (typeof HELP === 'undefined' || !HELP[key] ? ''
+  : `<button type="button" class="info-btn" data-info="${esc(key)}" aria-label="About ${esc(HELP[key].title)}" aria-expanded="${!!infoOpen && infoOpen.key === key}" title="What is this?">\u24d8</button>`);
 
 function labelChips(kind, item) {
   const on = item[tagField(kind)];
@@ -1098,7 +1110,7 @@ function railCars(use) {
   const out = state.cars.filter((c) => use.cars[c.id]).length;
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
   return `<section class="rail-panel" data-panel="cars">
-    <h3>Cars <span class="rail-count">${out} out · ${free} free</span></h3>
+    <h3>Cars${infoBtn('plan-cars')} <span class="rail-count">${out} out · ${free} free</span></h3>
     <div class="rail-add">
       <input id="railCar" type="text" placeholder="Registration(s)" aria-label="Add a registration">
       <button class="btn" data-act="add-car" data-from="#railCar" title="Add to the fleet">+</button>
@@ -1179,7 +1191,7 @@ function railDrivers() {
       `aria-pressed="${on}" title="${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in"`);
   }).join('');
   return `<section class="rail-panel" data-panel="drivers">
-    <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    <h3>Drivers${infoBtn('plan-drivers')} <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
     ${state.drivers.length ? `<p class="rail-groups" role="group" aria-label="Who is in">${all}${groups}</p>` : ''}
     ${dayQuestion()}
     <div class="rail-add">
@@ -1263,15 +1275,14 @@ function renderPlan() {
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
 
-  // #planBar is the tour's step 5 (tour.js).
   $('#tab-plan').innerHTML = `
     ${noCars}
     ${found.length ? `<div class="problems">
-      <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
+      <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b>${infoBtn('plan-warnings')} \u2014 nothing is blocked, check they are on purpose.
       <ul>${found.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
     </div>` : ''}
     <div class="bar" id="planBar">
-      <label for="date">Date</label>
+      <label for="date">Date</label>${infoBtn('plan-date')}
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
@@ -1280,7 +1291,7 @@ function renderPlan() {
     <div class="plan">
       <div class="plan-main">
         <div class="plan-table" data-keep-scroll="table"><table class="grid">
-          <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
+          <thead><tr><th>Route${infoBtn('plan-routes')}</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
         ${renderTemplates()}
@@ -1363,7 +1374,7 @@ function renderTemplates() {
       ${tplOpen === t.id ? templateContents(t) : ''}
     </div>`).join('');
   return `<section id="planTemplates" class="templates">
-    <h3>Day templates</h3>
+    <h3>Day templates${infoBtn('plan-templates')}</h3>
     <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
     <div class="bar">
       <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
@@ -1413,7 +1424,7 @@ function renderWeek() {
     </div>`;
   }).join('');
   return `<section id="planWeek" class="week">
-    <h3>The week</h3>
+    <h3>The week${infoBtn('plan-week')}</h3>
     <p class="hint">Each weekday's crew, from the day groups on the Drivers tab. Load makes that crew the ones in and sets everyone else to away. Greyed names are away.</p>
     <div class="week-cols" data-keep-scroll="week">${cols}</div>
   </section>`;
@@ -1461,7 +1472,7 @@ function renderMap() {
 function mapSlot(use) {
   const { drawing, list } = mapParts(use);
   return `<section class="parking">
-    <h3>Parking map</h3>
+    <h3>Parking map${infoBtn('plan-map')}</h3>
     <p class="hint">Spots are found by name, so a renamed spot moves to the list under the map. The Garage is left off.</p>
     <div id="parkingDrawing" class="parking-scroll" data-keep-scroll="parking">${drawing}</div>
     <div id="parkingList" class="parking-under">${list}</div>
@@ -1544,7 +1555,6 @@ function renderDrivers() {
       <td>${field('driver', d.id, 'note', d.note, 'placeholder="Note (e.g. back Monday)"')}</td>
       <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
   }).join('');
-  // #addDriverBar is the tour's step 3 (tour.js).
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
     <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups.${ownDriverTags() ? ' The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.' : ''} A tag or a note never sets anyone Away.</p>
@@ -1553,7 +1563,7 @@ function renderDrivers() {
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
     ${state.drivers.length
-      ? `<table class="grid"><thead><tr><th>Name</th><th>Route</th><th>In or away</th><th>Usual days</th><th>Tag</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Route</th><th>In or away</th><th>Usual days${infoBtn('drivers-days')}</th><th>Tag${infoBtn('drivers-tags')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
     ${driverGroups()}`;
 }
@@ -1588,7 +1598,7 @@ function driverGroups() {
       ${state.drivers.length ? `<div class="chips">${members}</div>` : '<p class="hint" style="margin:0">Add drivers above, then tick them into this group.</p>'}
     </div>`;
   }).join('');
-  return `<h2 style="margin-top:22px">Day groups</h2>
+  return `<h2 style="margin-top:22px">Day groups${infoBtn('drivers-groups')}</h2>
     <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a weekday and it becomes that day's column under the route list; Saturday and Sunday crews get a button in the Drivers panel. "Use for today" makes exactly those drivers the ones in; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
@@ -1612,7 +1622,6 @@ function renderCars() {
     <td>${labelChips('car', c)}</td>
     <td>${field('car', c.id, 'note', c.note, 'placeholder="Note (e.g. back Friday)"')}</td>
     <td class="btns">${moveDel('car', c.id)}</td></tr>`).join('');
-  // #addCarBar is the tour's step 1 (tour.js).
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
     <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning. A parked car is listed on the printout when its label has Show on printout ticked, on the Labels tab.</p>
@@ -1622,7 +1631,7 @@ function renderCars() {
       <button class="btn" data-act="add-car">+ Add car</button>
     </div>
     ${state.cars.length
-      ? `<table class="grid"><thead><tr><th>Reg.</th><th>Assigned to</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Reg.</th><th>Assigned to${infoBtn('cars-assigned')}</th><th>Status${infoBtn('cars-status')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : `<p class="empty">No cars yet. Paste the whole fleet into the box above at once \u2014 separate registrations with spaces, commas or semicolons.</p>`}`;
 }
 
@@ -1634,13 +1643,13 @@ function renderPositions() {
     <td>${field('position', p.id, 'note', p.note, 'placeholder="Note"')}</td>
     <td class="btns">${moveDel('position', p.id)}</td></tr>`).join('');
   $('#tab-positions').innerHTML = `
-    <h2>Positions</h2>
+    <h2>Positions${infoBtn('positions-map')}</h2>
     <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning. The parking map on the Day plan finds Spot 1 to Spot 5 and the gate by name; a renamed spot moves to the list under it.</p>
     <div class="bar">
       <input id="newPos" type="text" placeholder="Name, e.g. Spot 6 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>
     </div>
-    <table class="grid"><thead><tr><th>Name</th><th>Sharing</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="grid"><thead><tr><th>Name</th><th>Sharing${infoBtn('positions-many')}</th><th>Status${infoBtn('positions-status')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderLabels() {
@@ -1654,7 +1663,7 @@ function renderLabels() {
     ${ticks ? `<td><label><input type="checkbox" data-kind="label" data-id="${esc(l.id)}" data-field="onSheet" ${l.onSheet === true ? 'checked' : ''}> Show on printout</label></td>` : ''}
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
-    <h2>Car and position labels</h2>
+    <h2>Car and position labels${infoBtn('labels-labels')}</h2>
     <p class="hint">${ownDriverTags() ? 'These become the one-click buttons on cars and positions. Drivers have tags of their own, under Driver tags below.' : 'These become the one-click buttons on cars, positions and drivers.'} Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
     <div class="bar">
       <input id="newLabel" type="text" placeholder="Label name, e.g. No fuel card">
@@ -1673,7 +1682,7 @@ function driverTagSection() {
     <td>${field('driverTag', t.id, 'name', t.name)}</td>
     <td><input type="color" data-kind="driverTag" data-id="${esc(t.id)}" data-field="color" value="${esc(colour(t.color))}"></td>
     <td class="btns">${moveDel('driverTag', t.id)}</td></tr>`).join('');
-  return `<h2 style="margin-top:22px">Driver tags</h2>
+  return `<h2 style="margin-top:22px">Driver tags${infoBtn('labels-driver-tags')}</h2>
     <p class="hint">These become the one-click buttons on the Drivers tab and the choices in a driver's tag menu. A tag never sets anyone Away, and it is never on the printout or in a share code.</p>
     <div class="bar">
       <input id="newDriverTag" type="text" placeholder="Tag name, e.g. Parental leave">
@@ -1690,7 +1699,7 @@ function driverTagSection() {
 function coloursRow() {
   const now = document.documentElement.dataset.theme || 'follow';
   const choice = (v, name) => `<button class="btn colour-choice${now === v ? ' lit' : ''}" data-act="theme" data-colours="${v}" aria-pressed="${now === v}">${name}</button>`;
-  return `<p class="colours" role="group" aria-label="Colours">Colours: ${choice('follow', 'Follow the computer')}${choice('light', 'Light')}${choice('dark', 'Dark')}</p>
+  return `<p class="colours" role="group" aria-label="Colours">Colours: ${choice('follow', 'Follow the computer')}${choice('light', 'Light')}${choice('dark', 'Dark')}${infoBtn('data-colours')}</p>
       <p class="hint">Light or Dark is kept in this browser only. The printed sheet looks the same whichever you pick.</p>
       ${themeKept ? '' : `<p class="status warn-status">This browser couldn't keep the choice, so it lasts only until this page is closed or reloaded.</p>`}`;
 }
@@ -1764,7 +1773,7 @@ function fileStatus() {
 function whatsNewCard() {
   const releases = typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) ? UPDATES.filter(Boolean) : null;
   const running = `<p class="hint">You are running version ${esc(APP_VERSION)}.</p>`;
-  if (!releases) return `<div class="card"><h3>What's new</h3>${running}</div>`;
+  if (!releases) return `<div class="card"><h3>What's new${infoBtn('data-news')}</h3>${running}</div>`;
   const full = releases.slice(0, 3).map((r) => `<div class="release">
       <h4>${esc(r.version)} \u00b7 ${esc(r.title)}</h4>
       <p>${esc(r.changed)}</p>
@@ -1773,7 +1782,7 @@ function whatsNewCard() {
     </div>`).join('');
   const older = releases.slice(3).map((r) => `<p class="older">${esc(r.version)} \u00b7 ${esc(r.title)}. Your data: ${esc(r.data)}${r.must
     ? `<br>What it affects: ${esc(r.affects)}` : ''}</p>`).join('');
-  return `<div class="card whatsnew"><h3>What's new</h3>${running}${full}${older}</div>`;
+  return `<div class="card whatsnew"><h3>What's new${infoBtn('data-news')}</h3>${running}${full}${older}</div>`;
 }
 
 /* parseImport, for drawing a row rather than importing: it also warns about
@@ -1792,7 +1801,7 @@ function parseQuietly(text) {
    only table. What an update copy holds is read before it is offered, so
    Restore is only ever offered for a plan. */
 function archivesCard() {
-  if (typeof Store.archives !== 'function') return '<div class="card"><h3>Archives</h3><p class="empty">Reload the page to see Archives.</p></div>';
+  if (typeof Store.archives !== 'function') return `<div class="card"><h3>Archives${infoBtn('data-archives')}</h3><p class="empty">Reload the page to see Archives.</p></div>`;
   const rows = Store.archives().map((a) => {
     const at = esc(when(a.t));
     const down = actBtn('archive-download', esc(a.kind), a.t, 'Download');
@@ -1805,7 +1814,7 @@ function archivesCard() {
       armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}</span></div>`;
   }).join('');
   return `<div class="card">
-      <h3>Archives</h3>
+      <h3>Archives${infoBtn('data-archives')}</h3>
       <p class="hint">A copy of everything as it was just before each update, kept in this browser like Backups but never pushed out by them. Restore puts that whole plan and setup back, replacing everything changed since; what is on screen goes into Backups first. Download keeps the copy as a file you can Import later or send on.</p>
       ${rows || '<p class="empty">No archives yet.</p>'}
     </div>`;
@@ -1837,13 +1846,12 @@ function renderData() {
     </tr>`;
   }).join('');
 
-  // #fileCard and #backupsCard are the tour's steps 10 and 11 (tour.js).
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
     <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
 
     <div class="card" id="fileCard">
-      <h3>Auto-save to a file</h3>
+      <h3>Auto-save to a file${infoBtn('data-file')}</h3>
       ${fileStatus()}
     </div>
 
@@ -1857,7 +1865,7 @@ function renderData() {
     <div class="card" id="shareCard"></div>
 
     <div class="card">
-      <h3>Your own copy</h3>
+      <h3>Your own copy${infoBtn('data-copy')}</h3>
       <p class="hint">A plain JSON file you can email to yourself or drop on a stick.</p>
       <button class="btn" data-act="export">Export a copy\u2026</button>
       <button class="btn" data-act="import">Import a copy\u2026</button>
@@ -1869,7 +1877,7 @@ function renderData() {
     ${archivesCard()}
 
     <div class="card" id="backupsCard">
-      <h3>Backups</h3>
+      <h3>Backups${infoBtn('data-backups')}</h3>
       <p class="hint">Automatic snapshots taken before anything is cleared or deleted, and once at the start of each day. Restoring replaces everything on screen \u2014 the current state is snapshotted first, so you can undo it.</p>
       ${list.length
         ? `<table class="grid"><thead><tr><th>When</th><th>Taken before</th><th>Contents</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
@@ -1974,13 +1982,15 @@ function render() {
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
   renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  // The preview's hint is static markup; its ⓘ goes in a slot there. A cached
+  // index.html without the slot gets none.
+  const previewInfo = document.getElementById('previewInfo');
+  if (previewInfo) previewInfo.innerHTML = infoBtn('preview');
   renderNotices();
   renderPicker();
   renderTagMenu();
   renderCtxMenu();
-  // The tour follows its target through every redraw. It must never stop
-  // one: whatever it throws is logged and the page is drawn regardless.
-  if (typeof Tour !== 'undefined') { try { Tour.place(); } catch (e) { console.error(e); } }
+  placeInfoBubble();
 }
 
 /* ---------- events ---------- */
@@ -2123,7 +2133,7 @@ function renderShare() {
   const el = $('#shareCard');
   if (!el) return;
   el.innerHTML = `
-    <h3>Send this list to another PC</h3>
+    <h3>Send this list to another PC${infoBtn('data-share')}</h3>
     <p class="hint">Makes a code holding the finished list. Paste it into a chat or an email; the other PC pastes it back in below. Nothing is uploaded \u2014 the code <em>is</em> the list.</p>
     <button class="btn primary-ish" data-act="share-make" data-mode="day">Copy the day plan</button>
     <button class="btn" data-act="share-make" data-mode="all">Copy everything (cars, positions, labels)</button>
@@ -2325,7 +2335,11 @@ async function dataAction(act, b, fromKeyboard = false) {
       downloadText(entry.kind === 'rescue' ? `car-coordinator-unreadable-${String(entry.t).slice(0, 10)}.json` : `car-coordinator-before-${entry.to}.json`, entry.text);
       return;
     }
-    case 'dismiss': notices.splice(Number(b.dataset.index), 1); break;
+    case 'dismiss': {
+      const [gone] = notices.splice(Number(b.dataset.index), 1);
+      if (gone && gone === infoHint) { Store.setPref('infoHint', 'done'); infoHint = null; }
+      break;
+    }
     default: return;
   }
   render();
@@ -2432,8 +2446,8 @@ function archiveNeeded({ version, from, usableText, archives, seen }) {
 }
 
 /* Whether this open is a first run: nothing saved in this browser and
-   nothing recovered from the save file. Set once, at start-up, for the tour
-   (pack 9) to read as well. */
+   nothing recovered from the save file. Set once, at start-up, for the
+   first-open hint to read as well. */
 let firstRun = false;
 
 /* The first write at boot: the saved text, byte for byte, into Archives
@@ -2513,30 +2527,22 @@ function raiseUpdateNote({ link, recovered, copy }) {
   if (show) note('update', updateNoteText(copy, recovered), null, updateNoteLines(show));
 }
 
-/* The tour, offered once there is reason to think this is someone's first
-   look: a first-ever open (nothing saved, nothing read from a save file), not
-   by a share link, with no warning up (an unreadable save is one), no save
-   file linked (a linked file means this browser was used before, even with
-   its plan gone), and the tour not seen here. It only offers: the tour opens
-   when Show me around is pressed. Kept, so starting the tour takes this
-   notice away and no other: the update note never carries this button, but
-   removing by act would be one change away from taking the note too. */
-let tourOffer = null;
-function offerTour(link) {
-  if (!firstRun || link || typeof Tour === 'undefined' || typeof Store.pref !== 'function') return;
+
+/* The first-open hint: one line, raised when there is reason to think this
+   is someone's first look (a first-ever open with nothing saved and nothing
+   read from a save file, not by a share link, no warning up, no save file
+   linked), and only while this browser has never put it away. Its ✕ puts it
+   away for good, in a per-browser pref, never on the plan. Kept, so that ✕
+   and no other notice's is the one that does. */
+let infoHint = null;
+function offerInfoHint(link) {
+  if (!firstRun || link || typeof HELP === 'undefined' || typeof Store.pref !== 'function') return;
   if (notices.some((n) => n.kind === 'warn') || (Store.file && Store.file.handle)) return;
-  // null is "never seen"; undefined is storage that could not be read, which
-  // is no reason to offer.
-  if (Store.pref('tour') !== null) return;
-  note('info', 'New here? A two-minute tour shows where everything is. The tour only points at things; anything you type on the page is saved as usual. Used Car Coordinator before? Open your save file or an exported copy from the Data tab first.',
-    { act: 'tour', kind: '', id: '', text: 'Show me around' });
-  tourOffer = notices[notices.length - 1];
+  // null is "never put away"; undefined is storage that could not be read,
+  // which is no reason to show it.
+  if (Store.pref('infoHint') !== null) return;
+  infoHint = note('info', 'New here? Click any \u24d8 to see what that part does.');
 }
-const dropTourOffer = () => {
-  if (!tourOffer) return;
-  notices = notices.filter((n) => n !== tourOffer);
-  tourOffer = null;
-};
 
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
@@ -2782,8 +2788,6 @@ document.addEventListener('click', (e) => {
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
-  // The tour only points: it goes nowhere near the save below.
-  if (act === 'tour') { if (typeof Tour !== 'undefined') Tour.start(b); return; }
   // A tick in a template's load question changes the question, never the plan.
   if (act === 'tpl-part') {
     const n = notices[Number(b.dataset.index)];
@@ -3572,6 +3576,103 @@ window.addEventListener('resize', () => {
   }
 });
 
+/* The ⓘ's bubble: a layer made on first use, out of the page's sections, so
+   a redraw never replaces it. Its words are drawn when it opens; a redraw
+   only moves it beside its ⓘ (which the redraw has replaced), or shuts it
+   when its ⓘ is gone or hidden, on another tab. */
+const infoAnchor = () => infoOpen && document.querySelector(`.info-btn[data-info="${CSS.escape(infoOpen.key)}"]`);
+const inInfo = (t) => !!t && !!t.closest && (!!t.closest('#infoBubble') || !!t.closest('.info-btn'));
+function infoLayer() {
+  let layer = document.getElementById('infoBubble');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'infoBubble';
+    layer.className = 'info-bubble';
+    layer.setAttribute('role', 'dialog');
+    layer.setAttribute('aria-labelledby', 'infoTitle');
+    layer.tabIndex = -1;
+    layer.hidden = true;
+    document.body.appendChild(layer);
+  }
+  return layer;
+}
+function placeInfoBubble() {
+  const layer = document.getElementById('infoBubble');
+  if (!layer) return;
+  const a = infoAnchor();
+  const box = a && a.getBoundingClientRect();
+  if (!box || !box.width) {
+    infoOpen = null;
+    layer.hidden = true;
+    return;
+  }
+  layer.hidden = false;
+  layer.style.maxHeight = '';
+  const vw = document.documentElement.clientWidth;
+  const { left, top, tall } = besideAnchor(box, layer.offsetWidth, layer.offsetHeight, box.left + box.width / 2 > vw / 2);
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
+}
+function markInfoButtons() {
+  document.querySelectorAll('.info-btn').forEach((b) => b.setAttribute('aria-expanded', String(!!infoOpen && infoOpen.key === b.dataset.info)));
+}
+// From the keyboard the focus goes into the bubble; from the mouse it stays.
+function openInfo(key, keyboard) {
+  if (typeof HELP === 'undefined' || !HELP[key]) return;
+  closePicker();
+  closeTagMenu();
+  closeCtxMenu();
+  infoOpen = { key };
+  const layer = infoLayer();
+  layer.innerHTML = `<div class="info-head"><h3 id="infoTitle">${esc(HELP[key].title)}</h3>
+    <button type="button" class="info-close" data-info-close aria-label="Close">\u2715</button></div>
+    <p>${esc(HELP[key].text)}</p>`;
+  markInfoButtons();
+  placeInfoBubble();
+  if (keyboard) layer.focus({ preventScroll: true });
+}
+// `back`: hand the focus to the ⓘ, looked up again, since a redraw may have
+// replaced the one that opened it.
+function closeInfo(back = false) {
+  if (!infoOpen) return;
+  const a = back ? infoAnchor() : null;
+  infoOpen = null;
+  const layer = document.getElementById('infoBubble');
+  if (layer) layer.hidden = true;
+  markInfoButtons();
+  if (a) a.focus({ preventScroll: true });
+}
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t.closest) return;
+  const i = t.closest('.info-btn');
+  if (i) {
+    e.preventDefault();
+    if (infoOpen && infoOpen.key === i.dataset.info) closeInfo(e.detail === 0);
+    else openInfo(i.dataset.info, e.detail === 0);
+    return;
+  }
+  if (t.closest('[data-info-close]')) closeInfo(true);
+});
+document.addEventListener('pointerdown', (e) => { if (infoOpen && !inInfo(e.target)) closeInfo(); }, true);
+// The focus going anywhere else shuts it too: a menu opened from the keyboard,
+// the route picker opened by typing, a Tab away.
+document.addEventListener('focusin', (e) => { if (infoOpen && !inInfo(e.target)) closeInfo(); });
+document.addEventListener('keydown', (e) => {
+  if (!infoOpen) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeInfo(inInfo(document.activeElement)); return; }
+  // Tab from inside the bubble goes on from its ⓘ, not from the end of the page.
+  if (e.key === 'Tab' && document.getElementById('infoBubble')?.contains(e.target)) closeInfo(true);
+});
+// Any scroll can move the ⓘ: the page's, or a table scrolling sideways inside
+// it, which never reaches the window. So the bubble follows them all, its own
+// scrolling excepted.
+document.addEventListener('scroll', (e) => {
+  if (infoOpen && !document.getElementById('infoBubble')?.contains(e.target)) placeInfoBubble();
+}, { capture: true, passive: true });
+window.addEventListener('resize', placeInfoBubble);
+
 /* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
    key on a control in one. Everywhere else, in any box that is typed in, with
    Shift held, over selected text or while the share dialog is open, the
@@ -3839,17 +3940,6 @@ function drawFooter() {
 }
 
 async function start() {
-  // First, before anything can draw: Store.init draws the page before it
-  // returns, and every draw asks the tour where its card goes.
-  if (typeof Tour !== 'undefined') {
-    Tour.init({
-      showTab: (t) => { tab = t; render(); },
-      tab: () => tab,
-      closeLayers: () => { closePicker(); closeTagMenu(); closeCtxMenu(); dropTourOffer(); },
-      besideAnchor,
-      setPref: (name, value) => Store.setPref(name, value),
-    });
-  }
   clearTheBar();
   drawFooter();
   // Read before Share.readHash() clears it: an open by share link keeps the
@@ -3889,7 +3979,7 @@ async function start() {
   drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
   // After the note, which is what works out whether this is a first run.
-  try { offerTour(link); } catch (e) { console.warn('tour offer skipped', e); }
+  try { offerInfoHint(link); } catch (e) { console.warn('first-open hint skipped', e); }
   render();
 
   const fromLink = Share.readHash();
