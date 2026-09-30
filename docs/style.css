@@ -397,6 +397,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .week-none { margin: 0; font-size: 13px; }
 .week-save { width: 100%; text-align: left; color: var(--ink); }
 
+/* The parking map's slot: no space at all until the map fills it. */
+.plan-map:empty { display: none; }
+
 /* ---------- day templates, straight under the route list ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf
    itself is quiet: the question gets asked in a notice at the top of the page,

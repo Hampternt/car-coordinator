@@ -784,6 +784,7 @@ function renderPlan() {
         </table></div>
         ${renderTemplates()}
         ${renderWeek()}
+        <div id="planMap" class="plan-map">${mapSlot(use)}</div>
       </div>
       <aside class="rail">${railDrivers()}${railCars(use)}
         <p class="rail-saved">Every change here is saved as you make it.</p>
@@ -909,6 +910,16 @@ function renderWeek() {
     <p class="hint">Each weekday's crew, from the day groups on the Drivers tab. Load makes that crew the ones in and sets everyone else to away. Greyed names are away.</p>
     <div class="week-cols" data-keep-scroll="week">${cols}</div>
   </section>`;
+}
+
+/* The parking map's slot, under the week; pack 6's docs/map.js fills it. The
+   map's renderer is pure — it returns a string and writes nothing — because
+   this runs on every draw, even the ones before the saved plan is read and
+   before the update archive is taken. A map that fails leaves the slot empty
+   and the plan drawn. */
+function mapSlot(use) {
+  if (typeof ParkingMap === 'undefined' || typeof ParkingMap.render !== 'function') return '';
+  try { return String(ParkingMap.render(state, use) ?? ''); } catch (e) { console.warn('parking map skipped', e); return ''; }
 }
 
 /* An empty weekday's one button: who is in now, saved as that day's crew. It

@@ -4399,6 +4399,49 @@ await loadWeek();
   }
 }
 
+// The map's slot: after the week, taking no space until a map fills it. A
+// stand-in renderer shows there, survives a redraw, never writes, and one
+// that throws leaves the plan drawn.
+{
+  await loadWeek();
+  const slot = await lp.evaluate(() => {
+    const m = document.getElementById('planMap');
+    return { after: !!m && m.previousElementSibling?.id === 'planWeek', height: m?.getBoundingClientRect().height, shown: m && getComputedStyle(m).display };
+  });
+  check('the map slot comes after the week and takes no space while empty', slot.after && slot.height === 0 && slot.shown === 'none', JSON.stringify(slot));
+  const warns = [];
+  const onWarn = (m) => { if (m.type() === 'warning') warns.push(m.text()); };
+  lp.on('console', onWarn);
+  // No new Function(): the page's policy forbids building code from text.
+  const stub = (mode) => lp.evaluate((mode) => {
+    const render = mode === 'throw' ? () => { throw new Error('map broken on purpose'); } : () => '<p id="stubMap">x</p>';
+    if (typeof ParkingMap !== 'undefined') { if (!window.__mapWas) window.__mapWas = ParkingMap.render; ParkingMap.render = render; }
+    else if (window.__mapMade) window.ParkingMap.render = render;
+    else { window.__mapMade = true; window.ParkingMap = { render }; }
+  }, mode);
+  const unstub = () => lp.evaluate(() => {
+    if (window.__mapMade) { delete window.ParkingMap; delete window.__mapMade; }
+    else if (window.__mapWas) { ParkingMap.render = window.__mapWas; delete window.__mapWas; }
+    render();
+  });
+  await stub('map');
+  const keys = () => lp.evaluate(() => JSON.stringify([JSON.stringify(state), ...Object.keys(localStorage).filter((k) => k.startsWith('carcoord:')).sort().map((k) => [k, localStorage.getItem(k)])]));
+  await lp.evaluate(() => { window.__sets = 0; const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { window.__sets++; return set.call(this, k, v); }; });
+  const was = await keys();
+  await lp.evaluate(() => render());
+  check('a map in the slot is drawn there', (await lp.locator('#planMap #stubMap').count()) === 1);
+  await lp.click('[data-act="tab"][data-tab="cars"]');
+  await lp.click('[data-act="tab"][data-tab="plan"]');
+  check('and survives a redraw from a tab click', (await lp.locator('#planMap #stubMap').count()) === 1);
+  check('and drawing it writes nothing', (await keys()) === was && (await lp.evaluate(() => window.__sets)) === 0);
+  await stub('throw');
+  await lp.evaluate(() => render());
+  check('a map that throws leaves the plan drawn, with a warning', (await lp.locator('#tab-plan tbody tr').count()) > 0
+    && (await lp.locator('#planMap').innerHTML()) === '' && warns.some((w) => w.includes('parking map skipped')));
+  await unstub();
+  lp.off('console', onWarn);
+}
+
 // --- under the route list: done ---
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();
