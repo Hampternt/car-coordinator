@@ -581,7 +581,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tpl { display: flex; flex-direction: column; min-width: 0; }
 .tpl-head { flex: 1; }
 .tpl-head, .tpl-none { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); }
-.tpl.empty .tpl-head, .tpl-none { background: none; border-style: dashed; border-color: var(--dash); }
+.tpl-blank .tpl-head, .tpl-none { background: none; border-style: dashed; border-color: var(--dash); }
 .tpl-head.shown { box-shadow: inset 0 -3px var(--steel); }
 .tpl .btn { padding: 2px 7px; color: var(--muted); }
 .tpl .btn.primary-ish { color: var(--muted-on-bright); }

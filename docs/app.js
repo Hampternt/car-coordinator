@@ -209,8 +209,8 @@ function dateLine() {
   if (d < now) return { off: true, text: `${dayLabel(d)} has passed. The next working day is ${dayLabel(nwd)}.` };
   return { off: true, text: `${dayLabel(d)} is not the next working day, ${dayLabel(nwd)}.` };
 }
-const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off
-  ? ` <button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>` : ''}`;
+const setTomorrowBtn = () => `<button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>`;
+const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off ? ` ${setTomorrowBtn()}` : ''}`;
 const dateLineHtml = () => { const l = dateLine(); return `<p id="dateLine" class="date-line${l.off ? ' off' : ''}">${dateLineInner(l)}</p>`; };
 
 /* Above the line: the plan's day, large, and how far it is from today, so the
@@ -242,12 +242,21 @@ const dateHeadHtml = () => `<div id="dateHead" class="date-head">${dateHeadInner
    would take the focus out of it mid-typing. */
 function drawDateLine() {
   const head = document.getElementById('dateHead');
-  if (head) head.innerHTML = dateHeadInner();
+  const big = dateHeadInner();
+  if (head && head.dataset.drawn !== big) { head.innerHTML = big; head.dataset.drawn = big; }
   const el = document.getElementById('dateLine');
   if (!el) return;
   const l = dateLine();
   el.className = `date-line${l.off ? ' off' : ''}`;
-  el.innerHTML = dateLineInner(l);
+  // In place, never redrawn whole: pressing Set to tomorrow takes the focus out
+  // of the Date box, and a line redrawn between the press and the release
+  // would take the button away from under the pointer, and the click with it.
+  const words = el.querySelector('span');
+  if (words) words.textContent = l.text; else el.innerHTML = dateLineInner(l);
+  const btn = el.querySelector('[data-act="set-tomorrow"]');
+  if (l.off && !btn) el.insertAdjacentHTML('beforeend', ` ${setTomorrowBtn()}`);
+  else if (!l.off && btn) btn.remove();
+  else if (btn) btn.title = `Set the date to ${dayLabel(nextWorkingDay())}`;
 }
 // A window left open overnight does not vouch for yesterday's "tomorrow".
 window.addEventListener('focus', drawDateLine);
@@ -1559,7 +1568,7 @@ function templateCard(t) {
   // Two rows: the name, what it holds and its ✕; then Load and Save. An empty
   // template (the weekday ones, until saved into) has nothing to load, so it
   // has no Load: loading it would only empty the plan.
-  return `<div class="tpl${n ? '' : ' empty'}">
+  return `<div class="tpl${n ? '' : ' tpl-blank'}">
       <div class="tpl-head${n && tplShown() === t.id ? ' shown' : ''}" data-tpl="${esc(t.id)}"${n ? ' data-filled="1"' : ''}>
         <div class="tpl-title">
           <span class="tpl-name" title="${esc(t.name)}">${esc(t.name)}</span>
@@ -3906,7 +3915,7 @@ document.addEventListener('contextmenu', () => { clearTimeout(tplHoverTimer); if
 // Pinned, they go with a press anywhere but the layer or a route count (which
 // pins another, or unpins this one), and with Esc, handing the focus back.
 document.addEventListener('pointerdown', (e) => {
-  if (!tplOpen || !e.target.closest) return;
+  if (!tplOpen || e.button !== 0 || !e.target.closest) return;
   if (e.target.closest('#tplPeek') || e.target.closest('[data-act="peek-template"]')) return;
   tplOpen = null;
   drawTplPeek();

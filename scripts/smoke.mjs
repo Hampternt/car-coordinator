@@ -1429,10 +1429,15 @@ await page.click('[data-act="save-template"]');
 check('a template\'s contents are not on show to begin with', (await page.locator('.tpl-body').count()) === 0);
 // Laid out as the week under it is (owner, 2026-10-01): Monday to Friday in
 // five columns on one row, in day order, and every other template after.
-const tplCards = () => page.evaluate(() => [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
-  const r = c.getBoundingClientRect();
-  return { name: c.querySelector('.tpl-load, .tpl-name').textContent.trim(), at: `${Math.round(r.left)},${Math.round(r.top)}` };
-}));
+// Where each card sits in the shelf, measured from the shelf, so a scroll
+// between two looks does not read as a card moving.
+const tplCards = () => page.evaluate(() => {
+  const shelf = document.querySelector('#planTemplates .shelf').getBoundingClientRect();
+  return [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
+    const r = c.getBoundingClientRect();
+    return { name: c.querySelector('.tpl-name').textContent.trim(), at: `${Math.round(r.left - shelf.left)},${Math.round(r.top - shelf.top)}` };
+  });
+});
 const cardsBefore = await tplCards();
 same('the shelf puts Monday to Friday first, in day order', cardsBefore.slice(0, 5).map((c) => c.name), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
 check('side by side on one row, as the week\'s columns are', new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[1])).size === 1
@@ -5978,7 +5983,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await ib.keyboard.press('Enter');
   await ib.keyboard.press('Tab');
   check('Tab through it goes on past its ⓘ and shuts it', await ib.locator('#infoBubble').isHidden()
-    && await ib.evaluate(() => document.activeElement?.id === 'date'));
+    && await ib.evaluate(() => document.activeElement?.dataset.act === 'date-step'));
   await ib.locator('.info-btn[data-info="plan-date"]').focus();
   await ib.keyboard.press('Enter');
   await ib.locator('#tab-plan tbody tr').first().locator('[data-field="name"]').focus();
