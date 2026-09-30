@@ -919,14 +919,41 @@ function renderWeek() {
   </section>`;
 }
 
-/* The parking map's slot, under the week; pack 6's docs/map.js fills it. The
-   map's renderer is pure — it returns a string and writes nothing — because
-   this runs on every draw, even the ones before the saved plan is read and
-   before the update archive is taken. A map that fails leaves the slot empty
-   and the plan drawn. */
+/* ---------- the parking map, under the week ----------
+   The card and its two boxes are drawn here, always, so a redraw while
+   typing has somewhere to write even when docs/map.js is missing or fails;
+   map.js fills them. It is handed plain copies of what it reads, never
+   `state`, and the double-booking verdict the warnings use, so the red boxes
+   are exactly the spots the warnings name. It runs on every draw, even the
+   ones before the saved plan is read, so it is pure: a string, and no
+   writes. */
+function mapParts(use) {
+  // An index.html cached from before the map pairs this app.js with no map.js.
+  if (typeof ParkingMap === 'undefined') return { drawing: '<p class="parking-note">Reload the page to see the parking map.</p>', list: '' };
+  try {
+    const m = ParkingMap.model({
+      positions: state.positions.map(({ id, name, multi, labelId, note }) => ({ id, name, multi: multi === true, labelId, note })),
+      labels: state.labels.map(({ id, name, color }) => ({ id, name, color })),
+      cars: state.cars.map(({ id, reg }) => ({ id, reg })),
+      rounds: Object.values(use.spots).map((e) => ({
+        routes: e.map(({ r }) => ({ name: r.name, round: r.round, positionId: r.positionId, carId: r.carId })),
+        clash: doubleBooked(e),
+      })),
+    });
+    return { drawing: ParkingMap.drawing(m), list: ParkingMap.others(m) };
+  } catch (e) {
+    console.warn('parking map not drawn', e);
+    return { drawing: '<p class="parking-note">The parking map could not be drawn; the plan above is not affected.</p>', list: '' };
+  }
+}
 function mapSlot(use) {
-  if (typeof ParkingMap === 'undefined' || typeof ParkingMap.render !== 'function') return '';
-  try { return String(ParkingMap.render(state, use) ?? ''); } catch (e) { console.warn('parking map skipped', e); return ''; }
+  const { drawing, list } = mapParts(use);
+  return `<section class="parking">
+    <h3>Parking map</h3>
+    <p class="hint">Spots are found by name, so a renamed spot moves to the list under the map. The Garage is left off.</p>
+    <div id="parkingDrawing" class="parking-scroll" data-keep-scroll="parking">${drawing}</div>
+    <div id="parkingList" class="parking-under">${list}</div>
+  </section>`;
 }
 
 /* An empty weekday's one button: who is in now, saved as that day's crew. It

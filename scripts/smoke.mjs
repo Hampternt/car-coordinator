@@ -4399,47 +4399,94 @@ await loadWeek();
   }
 }
 
-// The map's slot: after the week, taking no space until a map fills it. A
-// stand-in renderer shows there, survives a redraw, never writes, and one
-// that throws leaves the plan drawn.
+// The parking map in the slot under the week (part 6). Red exactly where the
+// warnings name a spot, the Garage left off, other positions listed, and
+// nothing saved by drawing it — even when map.js is missing or throws.
 {
-  await loadWeek();
-  const slot = await lp.evaluate(() => {
-    const m = document.getElementById('planMap');
-    return { after: !!m && m.previousElementSibling?.id === 'planWeek', height: m?.getBoundingClientRect().height, shown: m && getComputedStyle(m).display };
-  });
-  check('the map slot comes after the week and takes no space while empty', slot.after && slot.height === 0 && slot.shown === 'none', JSON.stringify(slot));
-  const warns = [];
-  const onWarn = (m) => { if (m.type() === 'warning') warns.push(m.text()); };
-  lp.on('console', onWarn);
-  // No new Function(): the page's policy forbids building code from text.
-  const stub = (mode) => lp.evaluate((mode) => {
-    const render = mode === 'throw' ? () => { throw new Error('map broken on purpose'); } : () => '<p id="stubMap">x</p>';
-    if (typeof ParkingMap !== 'undefined') { if (!window.__mapWas) window.__mapWas = ParkingMap.render; ParkingMap.render = render; }
-    else if (window.__mapMade) window.ParkingMap.render = render;
-    else { window.__mapMade = true; window.ParkingMap = { render }; }
-  }, mode);
-  const unstub = () => lp.evaluate(() => {
-    if (window.__mapMade) { delete window.ParkingMap; delete window.__mapMade; }
-    else if (window.__mapWas) { ParkingMap.render = window.__mapWas; delete window.__mapWas; }
-    render();
-  });
-  await stub('map');
-  const keys = () => lp.evaluate(() => JSON.stringify([JSON.stringify(state), ...Object.keys(localStorage).filter((k) => k.startsWith('carcoord:')).sort().map((k) => [k, localStorage.getItem(k)])]));
-  await lp.evaluate(() => { window.__sets = 0; const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { window.__sets++; return set.call(this, k, v); }; });
-  const was = await keys();
+  const GATE_NAME = await lp.evaluate(() => ParkingMap.GATE_NAMES[0]);
+  const mapView = () => lp.evaluate(() => ({
+    red: [...document.querySelectorAll('#planMap .parking-box.parking-red > .parking-title')].map((t) => t.textContent),
+    boxes: [...document.querySelectorAll('#planMap .parking-box')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()),
+    listed: [...document.querySelectorAll('#planMap .parking-item > .parking-title')].map((t) => t.textContent),
+    banner: document.querySelector('#tab-plan .problems')?.innerText || '',
+    notes: document.querySelectorAll('#notices .notice').length,
+  }));
+  const openWith = async (text) => {
+    await lp.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+    await lp.reload({ waitUntil: 'networkidle' });
+  };
+  await openWith(devPlan);
+  check('the parking map sits in the slot after the week', await lp.evaluate(() =>
+    document.getElementById('planMap').previousElementSibling?.id === 'planWeek' && !!document.querySelector('#planMap .parking-yard')));
+  let v = await mapView();
+  check('on the dev fixture, Spot 2 is red, with its round-2 routes and its tag', v.red.join() === 'Spot 2'
+    && ['Taken by 2 routes in round 2', 'route 9 · EV 73112', 'route 10 · EV 73140'].every((t) => v.boxes[1].includes(t)), JSON.stringify(v.boxes[1]));
+  check(`the positions that are not spots or ${GATE_NAME} are listed, and the Garage is nowhere`,
+    ['Port 1', 'Port 2'].every((n) => v.listed.includes(n)) && ![...v.boxes, ...v.listed].some((t) => /Garage/.test(t)), JSON.stringify(v.listed));
+  const keptState = await lp.evaluate(() => [JSON.stringify(state), localStorage.getItem('carcoord:v1')].join('\n'));
   await lp.evaluate(() => render());
-  check('a map in the slot is drawn there', (await lp.locator('#planMap #stubMap').count()) === 1);
-  await lp.click('[data-act="tab"][data-tab="cars"]');
+  check('drawing the map saves nothing', (await lp.evaluate(() => [JSON.stringify(state), localStorage.getItem('carcoord:v1')].join('\n'))) === keptState);
+
+  // Parity with the warnings, round by round.
+  const spotAt = (rounds, extra = {}) => layPlan({
+    positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'p2', name: 'Garage', multi: true, labelId: '', note: '' }],
+    routes: rounds.map(([name, round], i) => ({ id: `r${i}`, name, driver: '', carId: '', positionId: 'p1', round, highlight: false, gapBefore: false })),
+    ...extra,
+  });
+  for (const rounds of [[['1', '2'], ['2', '2']], [['1', ''], ['2', '']], [['1', ' a '], ['2', 'A']], [['1', '1'], ['2', '2']]]) {
+    await spotAt(rounds);
+    await lp.reload({ waitUntil: 'networkidle' });
+    v = await mapView();
+    const named = /Spot 1\b.* is taken by/.test(v.banner);
+    check(`the map is red exactly where the warnings name the spot: rounds ${rounds.map((r) => JSON.stringify(r[1])).join(' and ')}`,
+      named ? v.red.join() === 'Spot 1' : v.red.length === 0, `${v.banner} / ${v.red}`);
+  }
+  // Many cars: shared on purpose, never red.
+  await layPlan({
+    positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'p2', name: 'Spot 2', multi: true, labelId: '', note: '' }],
+    routes: [['1', 'p2'], ['2', 'p2']].map(([name, positionId], i) => ({ id: `r${i}`, name, driver: '', carId: '', positionId, round: '2', highlight: false, gapBefore: false })),
+  });
+  await lp.reload({ waitUntil: 'networkidle' });
+  v = await mapView();
+  check('a Many cars spot with two routes in one round is not red, and lists both', !v.banner && !v.red.length
+    && ['route 1', 'route 2', 'Many cars'].every((t) => v.boxes[1].includes(t)), v.boxes[1]);
+  // A first run: no notices, five Free spots, and the gate looking for its name.
+  await lp.evaluate(() => localStorage.clear());
+  await lp.reload({ waitUntil: 'networkidle' });
+  v = await mapView();
+  check(`a first run: no notices, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
+    v.notes === 0 && v.boxes.slice(0, 5).every((t) => t.endsWith('Free')) && v.boxes[5].includes(`No position named ${GATE_NAME}`), JSON.stringify(v));
+  // A spot renamed on the Positions tab moves to the list.
+  await lp.click('[data-act="tab"][data-tab="positions"]');
+  await lp.locator('#tab-positions [data-field="name"][value="Spot 3"]').fill('Spot 3b');
   await lp.click('[data-act="tab"][data-tab="plan"]');
-  check('and survives a redraw from a tab click', (await lp.locator('#planMap #stubMap').count()) === 1);
-  check('and drawing it writes nothing', (await keys()) === was && (await lp.evaluate(() => window.__sets)) === 0);
-  await stub('throw');
-  await lp.evaluate(() => render());
-  check('a map that throws leaves the plan drawn, with a warning', (await lp.locator('#tab-plan tbody tr').count()) > 0
-    && (await lp.locator('#planMap').innerHTML()) === '' && warns.some((w) => w.includes('parking map skipped')));
-  await unstub();
-  lp.off('console', onWarn);
+  v = await mapView();
+  check('a renamed spot is listed, and its box looks for its old name', v.listed.includes('Spot 3b') && v.boxes[2].includes('No position named Spot 3'));
+}
+// An index.html cached from before the map: no map.js, and the plan still draws.
+for (const [what, setup, says] of [
+  ['without the map tag', (ctx) => ctx.route(/\/(index\.html)?(\?.*)?$/, async (route) => {
+    const res = await route.fetch();
+    route.fulfill({ response: res, body: (await res.text()).replace(/\s*<script src="map\.js[^"]*"><\/script>/, '') });
+  }), 'Reload the page to see the parking map.'],
+  ['with a map that throws', (ctx) => ctx.route('**/map.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript',
+    body: "const ParkingMap = { GATE_NAMES: ['Gate'], model() { throw new Error('map broken on purpose'); }, drawing() { return ''; }, others() { return ''; } };" })),
+  'The parking map could not be drawn; the plan above is not affected.'],
+]) {
+  const ctx = await browser.newContext();
+  await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  await pg.evaluate((t) => { localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  await pg.reload({ waitUntil: 'networkidle' });
+  const routes = await pg.evaluate(() => [document.querySelectorAll('#tab-plan tbody tr').length, state.routes.length]);
+  check(`${what}: every route is drawn, and the map says so in words`, routes[0] === routes[1] && routes[0] > 0
+    && (await pg.locator('#planMap', { hasText: says }).count()) === 1, JSON.stringify(routes));
+  check(`${what}: no console errors`, !errs.length, errs.join(' | '));
+  await ctx.close();
 }
 
 // --- under the route list: done ---
