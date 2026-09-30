@@ -1,6 +1,6 @@
 # Pack: Day plan layout
 
-**Status:** 💭 planned — item list awaiting the owner's approval; nothing built.
+**Status:** 🚧 building, since 2026-09-30, as part 5 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (grey means Away in every column; item 8 is in).
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `day-plan-layout`, from `dev` after pack 4 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -641,3 +641,5 @@ Kept and re-run as they are:
   - Update the container's Status line.
 
 ## Ledger
+
+- **2026-09-30, start (combined pack, part 5).** Built on `review-round`, base 06b9477 (0.6.0). Design A done: INVENTORY's two Considered lines are one 🚧 pointer under Day plan; the container's row 5 reads "None: Load only sets who is in", its "Use for today" finding is marked as this pack's item 8, and Design G's contract is written into its pack 6 section. **Pack 4 as built:** its helpers are `planWeekday()` and `nextWorkingDay()`, with no working-week list, so this pack adds `WORK_WEEK = [1, 2, 3, 4, 5]`; its template offer is `offerPlanDayTemplate`; the rail's day row already underlines `planWeekday()`. **Batched rule:** `check.sh` per item; smoke cases, screens and the one upgrade check (from v0.2.4) at the end of part 9.

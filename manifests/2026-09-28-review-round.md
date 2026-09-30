@@ -53,7 +53,7 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 | 2 | Printed sheet cleanup | `manifests/2026-09-29-sheet-cleanup.md` (7 items) | **Schema v5**: a print tick on each label |
 | 3 | Dark mode | `manifests/2026-09-29-dark-mode.md` (10 items) | New per-PC key |
 | 4 | Plan for tomorrow | `manifests/2026-09-29-plan-for-tomorrow.md` (10 items) | The date moves forward on open (not saved until you change something) |
-| 5 | Day plan layout | `manifests/2026-09-29-day-plan-layout.md` (12 items) | None; a Load that includes a template takes the existing backup |
+| 5 | Day plan layout | `manifests/2026-09-29-day-plan-layout.md` (12 items) | None: Load only sets who is in |
 | 6 | Parking map | `manifests/2026-09-29-parking-map.md` (9 items) | None, if spots match positions by name |
 | 7 | Drivers tab | `manifests/2026-09-29-drivers-tab.md` (11 items) | None: uses existing fields and crews |
 | 8 | Right-click menus | `manifests/2026-09-28-context-menus.md` | None |
@@ -216,6 +216,8 @@ Decided by the owner in the review threads:
 - The map is drawn as plain boxes with no labels that identify the site, because the repo is public.
 
 **Decided:** the gate is one port; the hatched areas are building or dock where nobody parks, and spots 1–3 are ordinary spots beside it; each spot lists its routes by round; nothing for the garage.
+
+**The slot's contract** (pack 5, Design G): `docs/map.js` declares `const ParkingMap = (() => …)()`, never frozen and never named `Map`, loaded by its own `<script src="map.js?v=⟨APP_VERSION⟩">` before `app.js`. `ParkingMap.render(state, use)` is pure: it returns a string, never calls `Store`, `localStorage` or IndexedDB, and never changes `state` or `use` (`use` is `problems().use`). Its markup escapes its own text, has no `data-act` element and no `data-kind`/`data-field` control, no `table`/`tr`/`[data-route]`, no `data-drag`/`data-drop`, and scrolls, if at all, with `data-keep-scroll="map"`. `mapSlot(use)` in `renderPlan` draws it into `#planMap` after `#planWeek`, and a throw leaves the slot empty with a `console.warn`.
 </details>
 
 <details>
@@ -266,7 +268,7 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items).
   - Dragging a name onto a route probably fails in the Windows app. `dragDropEnabled` is left at its default in `src-tauri/tauri.conf.json`, and Tauri says it must be off for HTML drag and drop on Windows. Unverified on Windows; the fix is one line.
   - Restore picks its backup by list position (`docs/app.js:1390`). A backup taken between the two clicks would restore the neighbouring entry.
   - Deleting a label clears it from cars and positions but not from drivers, so the next load shows a repair notice.
-  - "Use for today" on an empty day group sends everyone away.
+  - "Use for today" on an empty day group sends everyone away. *(Fixed in pack 5, item 8, owner 2026-09-29.)*
   - Saving a template under an existing name overwrites the first match, and imported templates can share a name.
 
 - **Found while building pack 2:**
