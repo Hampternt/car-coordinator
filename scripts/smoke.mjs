@@ -5310,9 +5310,16 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('Put on route puts the car there, as a drop would', (await cm.evaluate((n) => state.routes.find((r) => r.name === n).carId, first)) === 'car-16' && await cmMenu.isHidden());
   await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
   await cmMenu.locator('[data-act="ctx-view"]').click();
-  same('Status: OK › opens the status list in place, with Back', await cmEntries(), await cm.evaluate(() => ['‹ Back', '✓ OK', ...state.labels.map((l) => l.name)]));
+  // Beside the menu where there is room, in its place where there is not.
+  const subOpen = await cm.locator('#ctxSub').isVisible().catch(() => false);
+  const listed = subOpen ? await cm.locator('#ctxSub [role="menuitem"] span').allTextContents() : (await cmEntries()).filter((x) => x !== '‹ Back');
+  same('Status: OK › lists OK and every label, OK ticked', listed, await cm.evaluate(() => ['✓ OK', ...state.labels.map((l) => l.name)]));
   check('and the menu stays open while it does', await cmMenu.isVisible());
-  await cmMenu.locator('[data-act="setLabel"]', { hasText: 'Workshop' }).click();
+  if (subOpen) {
+    const [m, s] = [await cmMenu.boundingBox(), await cm.locator('#ctxSub').boundingBox()];
+    check('the submenu opens beside the menu, not over it', s.x >= m.x + m.width - 4 || s.x + s.width <= m.x + 4);
+  }
+  await (subOpen ? cm.locator('#ctxSub') : cmMenu).locator('[data-act="setLabel"]', { hasText: 'Workshop' }).click();
   check('a status entry sets the car\'s label', await cm.evaluate(() => byId(state.labels, state.cars.find((c) => c.id === 'car-16').labelId)?.name === 'Workshop'));
   await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
   check('and the menu then says it', (await cmEntries())[0] === 'Status: Workshop ›');

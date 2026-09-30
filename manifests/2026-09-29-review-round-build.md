@@ -114,3 +114,9 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - The rail car's flat status list from earlier today becomes the same "Status: ⟨current⟩ ›".
     - The smoke rail-car checks are re-pinned, with Back and Escape added.
     - A targeted Chrome run passed: Spot 1 → Workshop raises its warning; the menu stays in place; Escape goes back, then out; no errors.
+  - **Submenus open beside the menu, on `dev`** (owner): "when hovering over a menu that has a sub menu make the menu appear to the right of the context menu like that type of menu usually works".
+    - "Status: … ›" opens a second menu (`#ctxSub`, made by app.js on first use, so an older cached index.html is fine) to the right of the menu, level with its entry, or to the left when the right has no room. Hover opens it after 150 ms, and hovering another entry shuts it after 300 ms. Click toggles it; ArrowRight goes in; ArrowLeft or Escape come back.
+    - Choosing an entry closes both. An outside press, the wheel, right-click and focus bookkeeping treat the submenu as part of the menu.
+    - Where neither side fits (a phone), a click or key uses the in-place list from before; a hover never does.
+    - The smoke check reads whichever form it gets.
+    - A targeted Chrome run passed: at 1400 the flyout opens at the menu's right edge level with its entry, Workshop is set and both close, and the keys go in and out; at 390, hover does nothing and a click gives the in-place list; no errors.

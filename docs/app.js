@@ -866,6 +866,7 @@ function renderCtxMenu() {
     ctx = null;
     layer.hidden = true;
     layer.innerHTML = '';
+    renderCtxSub(null);
     return;
   }
   // Put back on the entry it was on, found by what it is.
@@ -882,6 +883,96 @@ function renderCtxMenu() {
     layer.style.maxHeight = `${ctx.at.room}px`;
   }
   if (kept) layer.querySelector(kept)?.focus({ preventScroll: true });
+  renderCtxSub(item);
+}
+
+/* A submenu, the way a desktop menu opens one: a second menu to the right
+   of its entry (to the left when the window has no room there), opened by
+   hovering the entry, clicking it, or ArrowRight. Its entries are the same
+   list the in-place view draws, without ‹ Back. Where neither side has room
+   (a phone), it is the in-place view instead (owner, 2026-09-30). Drawn in
+   a layer of its own, made the first time it is needed, so an index.html
+   from before it still works. */
+function ctxSubLayer() {
+  let sub = document.getElementById('ctxSub');
+  if (sub) return sub;
+  sub = document.createElement('div');
+  sub.id = 'ctxSub';
+  sub.className = 'ctx-menu ctx-sub';
+  sub.setAttribute('role', 'menu');
+  sub.tabIndex = -1;
+  sub.hidden = true;
+  document.body.appendChild(sub);
+  sub.addEventListener('click', ctxChoose);
+  sub.addEventListener('mouseenter', () => clearTimeout(ctxHoverTimer));
+  sub.addEventListener('mousemove', ctxHoverFocus);
+  return sub;
+}
+const inCtx = (t) => !!t && ($('#ctxMenu')?.contains(t) || document.getElementById('ctxSub')?.contains(t));
+
+function renderCtxSub(item) {
+  const sub = document.getElementById('ctxSub');
+  const opener = ctx && ctx.sub && $(`#ctxMenu [data-act="ctx-view"][data-view="${CSS.escape(ctx.sub)}"]`);
+  if (!item || !opener) {
+    if (ctx) ctx.sub = null;
+    if (sub) { sub.hidden = true; sub.innerHTML = ''; }
+    return;
+  }
+  const layer = ctxSubLayer();
+  const f = document.activeElement;
+  const kept = f && layer.contains(f) ? dataSelector(f) : null;
+  const { groups } = CTX_MENUS[ctx.surface](item, { ...ctx, view: ctx.sub });
+  const list = groups.filter((g) => g.length && !g.some((s) => s.act === 'ctx-view'));
+  layer.innerHTML = list.map((g) => g.map(ctxEntry).join('')).join('<div class="ctx-sep" role="separator"></div>');
+  layer.setAttribute('aria-label', opener.textContent.replace(/\s*\u203a\s*$/, ''));
+  layer.style.maxHeight = '';
+  layer.hidden = false;
+  opener.classList.add('open');
+  opener.setAttribute('aria-expanded', 'true');
+  const m = $('#ctxMenu').getBoundingClientRect(), a = opener.getBoundingClientRect();
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const w = layer.offsetWidth, h = layer.offsetHeight;
+  let left = m.right - 2;
+  if (left + w > vw - 8) left = m.left - w + 2;
+  if (left < 8) {
+    // No room on either side: the list takes the menu's place instead.
+    layer.hidden = true;
+    layer.innerHTML = '';
+    ctx.view = ctx.sub;
+    ctx.sub = null;
+    renderCtxMenu();
+    $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+    return;
+  }
+  const top = Math.max(8, Math.min(a.top - 5, vh - h - 8));
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
+  layer.style.maxHeight = `${vh - 16}px`;
+  if (kept) layer.querySelector(kept)?.focus({ preventScroll: true });
+}
+
+let ctxHoverTimer = null;
+// Whether a submenu fits beside the menu, on either side.
+function ctxSubFits() {
+  const m = $('#ctxMenu').getBoundingClientRect();
+  const vw = document.documentElement.clientWidth, w = Math.min(280, vw - 16);
+  return m.right - 2 + w <= vw - 8 || m.left - w + 2 >= 8;
+}
+function ctxOpenSub(view, focusFirst) {
+  clearTimeout(ctxHoverTimer);
+  if (!ctx) return;
+  ctx.view = null;
+  ctx.sub = view;
+  renderCtxMenu();
+  if (focusFirst) document.querySelector('#ctxSub [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+}
+function ctxCloseSub(focusOpener) {
+  clearTimeout(ctxHoverTimer);
+  if (!ctx || !ctx.sub) return;
+  const view = ctx.sub;
+  ctx.sub = null;
+  renderCtxMenu();
+  if (focusOpener) $(`#ctxMenu [data-act="ctx-view"][data-view="${CSS.escape(view)}"]`)?.focus({ preventScroll: true });
 }
 
 /* Placed once, when it opens, against `a` (screen coordinates): the pointer,
@@ -1879,11 +1970,11 @@ function confirmTwice(key, fromKeyboard = false) {
    the Drivers tab both have a ✕ for driver d3, and only one is showing. */
 function renderKeepingFocus() {
   const el = document.activeElement;
-  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, #ctxMenu, dialog');
+  const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, #ctxMenu, #ctxSub, dialog');
   // The tag menu, the route picker and the right-click menu put their own
   // focus back, by the very choice it was on; a second guess here could only
   // be worse.
-  const own = area && (area.id === 'tagMenu' || area.id === 'picker' || area.id === 'ctxMenu');
+  const own = area && (area.id === 'tagMenu' || area.id === 'picker' || area.id === 'ctxMenu' || area.id === 'ctxSub');
   // Every data-* attribute, not a chosen few: the rail's Mark and Gap share
   // an act, kind and id and differ only in data-field, the tag choices only in
   // data-label, the day buttons in data-day — and a near match puts the focus
@@ -3281,7 +3372,7 @@ document.addEventListener('contextmenu', (e) => {
   const t = e.target;
   const layer = $('#ctxMenu');
   if (!layer) return;
-  if (layer.contains(t)) { e.preventDefault(); return; }
+  if (inCtx(t)) { e.preventDefault(); return; }
   if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
   if (t.closest('textarea, a')) return;
   if (t.tagName === 'INPUT') {
@@ -3328,20 +3419,25 @@ function ctxFocusBack(sel) {
    the first click on a destructive entry, which arms it and leaves the menu
    open on "Sure?". The redraw the act makes then hides the layer. */
 let ctxClosed = null;   // { keyboard, back }, for the listener after the dispatcher
-$('#ctxMenu')?.addEventListener('click', (e) => {
+function ctxChoose(e) {
   ctxClosed = null;
   const b = e.target.closest('[data-act]');
   if (!b || !ctx) return;
   if (b.dataset.act === 'ctx-view') {
-    ctx.view = b.dataset.view || null;
-    renderCtxMenu();
-    $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+    // ‹ Back, in the in-place view; any other opens its submenu.
+    if (!b.dataset.view) {
+      ctx.view = null;
+      renderCtxMenu();
+      $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
+    } else if (ctx.sub === b.dataset.view) ctxCloseSub(false);
+    else ctxOpenSub(b.dataset.view, e.detail === 0);
     return;
   }
   if (b.dataset.arm && b.dataset.arm !== armed) return;
   ctxClosed = { keyboard: e.detail === 0, back: ctx.keyboard ? ctxReturn : null };
   ctx = null;
-});
+}
+$('#ctxMenu')?.addEventListener('click', ctxChoose);
 /* After the dispatcher: an act that drew nothing still hides the menu. And a
    choice made from the keyboard, in a menu the keyboard opened, hands the
    focus back to where it came from, unless the act put it somewhere itself
@@ -3361,11 +3457,29 @@ document.addEventListener('click', (e) => {
 // destructive one: a key pressed next must not be able to arm it. Only a
 // pointer that moved: the browser also reports one when a menu is drawn under
 // a pointer resting where it was, and that took a keyboard user's place.
-$('#ctxMenu')?.addEventListener('mousemove', (e) => {
+function ctxHoverFocus(e) {
   if (!e.movementX && !e.movementY) return;
   const entry = e.target.closest('[role="menuitem"]');
   if (!entry || entry.dataset.arm || entry.hasAttribute('aria-disabled') || entry === document.activeElement) return;
   entry.focus({ preventScroll: true });
+}
+$('#ctxMenu')?.addEventListener('mousemove', (e) => {
+  ctxHoverFocus(e);
+  if (!e.movementX && !e.movementY) return;
+  // Resting on an entry with a submenu opens it; moving to another entry
+  // shuts it, after a moment, so a pointer crossing towards it gets there.
+  const entry = e.target.closest('[role="menuitem"]');
+  if (!ctx || !entry) return;
+  const view = entry.dataset.act === 'ctx-view' ? entry.dataset.view : '';
+  if (view) {
+    clearTimeout(ctxHoverTimer);
+    // Only where it fits beside the menu: a hover never swaps the menu for
+    // the in-place list; a click or a key does.
+    if (ctx.sub !== view && ctxSubFits()) ctxHoverTimer = setTimeout(() => ctxOpenSub(view, false), 150);
+  } else if (ctx.sub) {
+    clearTimeout(ctxHoverTimer);
+    ctxHoverTimer = setTimeout(() => ctxCloseSub(false), 300);
+  }
 });
 
 /* The menu's keys, in it or on the page itself: a mouse arming lets go of the
@@ -3378,8 +3492,13 @@ document.addEventListener('keydown', (e) => {
   if (!ctx || layer.hidden) return;
   const t = e.target;
   if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); return; }
-  if (t !== document.body && !layer.contains(t)) return;
-  if (e.key === 'Escape' && ctx.view) {
+  const sub = document.getElementById('ctxSub');
+  const inSub = !!sub && !sub.hidden && sub.contains(t);
+  if (t !== document.body && !layer.contains(t) && !inSub) return;
+  if (inSub && (e.key === 'Escape' || e.key === 'ArrowLeft')) { e.preventDefault(); ctxCloseSub(true); return; }
+  if (!inSub && e.key === 'Escape' && ctx.sub) { e.preventDefault(); ctxCloseSub(true); return; }
+  if (!inSub && e.key === 'ArrowRight' && t.dataset?.act === 'ctx-view' && t.dataset.view) { e.preventDefault(); ctxOpenSub(t.dataset.view, true); return; }
+  if ((e.key === 'Escape' || e.key === 'ArrowLeft') && ctx.view) {
     e.preventDefault();
     ctx.view = null;
     renderCtxMenu();
@@ -3394,7 +3513,7 @@ document.addEventListener('keydown', (e) => {
     ctxFocusBack(back);
     return;
   }
-  const entries = [...layer.querySelectorAll('[role="menuitem"]:not([aria-disabled])')];
+  const entries = [...(inSub ? sub : layer).querySelectorAll('[role="menuitem"]:not([aria-disabled])')];
   const i = entries.indexOf(t);
   const to = { ArrowDown: i + 1, ArrowUp: i < 0 ? -1 : i - 1, Home: 0, End: entries.length - 1 }[e.key];
   if (to !== undefined) {
@@ -3409,10 +3528,10 @@ document.addEventListener('keydown', (e) => {
 // window changing size or losing the focus, or a drag starting, shuts it. A
 // scroll does not: every redraw puts the lists' scroll back, and that fires
 // scroll events of its own.
-document.addEventListener('pointerdown', (e) => { if (ctx && !$('#ctxMenu').contains(e.target)) closeCtxMenu(); }, true);
+document.addEventListener('pointerdown', (e) => { if (ctx && !inCtx(e.target)) closeCtxMenu(); }, true);
 document.addEventListener('wheel', (e) => {
   const layer = $('#ctxMenu');
-  if (!ctx || (layer.contains(e.target) && layer.scrollHeight > layer.clientHeight)) return;
+  if (!ctx || (layer.contains(e.target) && layer.scrollHeight > layer.clientHeight) || document.getElementById('ctxSub')?.contains(e.target)) return;
   closeCtxMenu();
 }, { capture: true, passive: true });
 window.addEventListener('resize', closeCtxMenu);

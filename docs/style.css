@@ -389,6 +389,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    fixed width, so a redraw never changes where an entry is. */
 .ctx-menu { position: absolute; z-index: 8; width: min(280px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 4px; }
 .ctx-menu[hidden] { display: none; }
+/* A submenu, beside its entry: above the menu it opens from. */
+.ctx-sub { z-index: 9; }
+.ctx-item.open { background: var(--concrete); }
 .ctx-menu:focus { outline: none; }
 .ctx-head { margin: 0; padding: 4px 8px 6px; font: 600 12px var(--head); color: var(--muted); overflow-wrap: anywhere; }
 .ctx-sep { height: 1px; margin: 4px 0; background: var(--line); }
