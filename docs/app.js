@@ -120,6 +120,28 @@ function defaults() {
 
 let state = defaults();
 let tab = 'plan';
+
+/* ---------- colours: follow the computer, or this browser's choice ----------
+   theme.js applies a stored Light or Dark before the page draws. This applies
+   it again for a cached index.html from before theme.js, and when another tab
+   changes it. Neither writes. Only 'light' and 'dark' count; anything else is
+   Follow the computer, which is no attribute at all. */
+function applyTheme(choice) {
+  let t = choice;
+  if (t === undefined) {
+    if (typeof Store === 'undefined' || typeof Store.pref !== 'function') return;   // an older cached store.js
+    t = Store.pref('theme');
+  }
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+applyTheme();
+window.addEventListener('storage', (e) => {
+  if (e.key !== null && e.key !== 'carcoord:pref:theme') return;
+  applyTheme();
+  // Once the page is drawn, redraw it, so the Colours buttons follow too.
+  if ($('#tab-data')?.children.length) renderKeepingFocus();
+});
 let armed = null;
 let notices = [];
 

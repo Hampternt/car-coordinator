@@ -3569,6 +3569,71 @@ check('the saved colours, the Export and the share code are the same made in dar
 check('the label colour cases log no console errors', lcErrors.length === 0, lcErrors.join(' | '));
 await lcCtx.close();
 
+// --- a stored Light or Dark is on the page before anything is drawn ---
+// theme.js runs in <head>, so the attribute is there when the top bar is
+// inserted; app.js applies it again for an index.html from before theme.js,
+// and follows a change made in another tab. Only light and dark count.
+const themeProbe = async ({ scheme, stored, setup }) => {
+  const ctx = await browser.newContext({ colorScheme: scheme });
+  await ctx.addInitScript(() => {
+    window.__themeAtBar = 'no bar seen';
+    new MutationObserver((ms, obs) => {
+      if (!document.querySelector('header.topbar')) return;
+      window.__themeAtBar = document.documentElement.dataset.theme || null;
+      obs.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  if (setup) await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  if (stored !== undefined) {
+    await pg.evaluate((v) => { try { localStorage.setItem('carcoord:pref:theme', v); } catch { /* refused */ } }, stored);
+    await pg.reload({ waitUntil: 'networkidle' });
+  }
+  const got = await pg.evaluate(() => ({ atBar: window.__themeAtBar, now: document.documentElement.dataset.theme || null }));
+  return { ctx, pg, errs, got };
+};
+for (const [stored, scheme] of [['dark', 'light'], ['light', 'dark']]) {
+  const t = await themeProbe({ scheme, stored });
+  check(`${stored} kept here, on a ${scheme} computer, is on the page before the top bar`, t.got.atBar === stored && t.got.now === stored, JSON.stringify(t.got));
+  check(`and logs no console errors (${stored})`, !t.errs.length, t.errs.join(' | '));
+  await t.ctx.close();
+}
+const garbage = await themeProbe({ scheme: 'dark', stored: 'purple' });
+check('a stored value that is not light or dark follows the computer', garbage.got.atBar === null && garbage.got.now === null && !garbage.errs.length, JSON.stringify(garbage.got) + garbage.errs.join(' | '));
+await garbage.ctx.close();
+const refused = await themeProbe({ scheme: 'dark', stored: 'dark', setup: (ctx) => ctx.addInitScript(() => {
+  const get = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (k) { if (k === 'carcoord:pref:theme') throw new Error('refused on purpose'); return get.call(this, k); };
+}) });
+check('a browser that refuses to read the choice follows the computer, quietly', refused.got.now === null && !refused.errs.length, JSON.stringify(refused.got) + refused.errs.join(' | '));
+await refused.ctx.close();
+// A second tab follows a change made in the first.
+const tabs = await themeProbe({ scheme: 'light' });
+const other = await tabs.ctx.newPage();
+await other.goto(base, { waitUntil: 'networkidle' });
+await other.evaluate(() => localStorage.setItem('carcoord:pref:theme', 'dark'));
+await tabs.pg.waitForFunction(() => document.documentElement.dataset.theme === 'dark', null, { timeout: 3000 }).catch(() => {});
+const followedDark = await tabs.pg.evaluate(() => document.documentElement.dataset.theme || null);
+await other.evaluate(() => localStorage.removeItem('carcoord:pref:theme'));
+await tabs.pg.waitForFunction(() => !document.documentElement.dataset.theme, null, { timeout: 3000 }).catch(() => {});
+const followedBack = await tabs.pg.evaluate(() => document.documentElement.dataset.theme || null);
+check('another tab follows a change of colours, both ways', followedDark === 'dark' && followedBack === null, `${followedDark} then ${followedBack}`);
+check('and logs no console errors', !tabs.errs.length, tabs.errs.join(' | '));
+await tabs.ctx.close();
+// An index.html cached from before theme.js: app.js applies the choice itself.
+const noThemeJs = await themeProbe({ scheme: 'light', stored: 'dark', setup: (ctx) => ctx.route(/\/(index\.html)?(\?.*)?$/, async (route) => {
+  const res = await route.fetch();
+  route.fulfill({ response: res, body: (await res.text()).replace(/\s*<script src="theme\.js[^"]*"><\/script>/, '') });
+}) });
+check('without theme.js, app.js still applies Dark', noThemeJs.got.now === 'dark'
+  && (await noThemeJs.pg.evaluate(() => ![...document.scripts].some((s) => /theme\.js/.test(s.src)))), JSON.stringify(noThemeJs.got));
+check('and logs no console errors (no theme.js)', !noThemeJs.errs.length, noThemeJs.errs.join(' | '));
+await noThemeJs.ctx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.
