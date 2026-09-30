@@ -321,7 +321,7 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
 
 ## Items
 
-- [ ] **1. One next-working-day helper, used by new plans and Clear the day.** Design A:
+- [x] **1. One next-working-day helper, used by new plans and Clear the day.** Design A:
   - the five helpers;
   - `defaults()` (`:92`) and Clear the day (`:1729`) switch to `nextWorkingDay()`;
   - the calendar context in `smoke.mjs`, per Design H.
@@ -521,3 +521,4 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
 ## Ledger
 
 - **2026-09-30, start (combined pack, part 4).** Built on `review-round`, base 2088fb9 (0.5.0). Line numbers are re-found by symbol. The start notes are in: INVENTORY's 💭 line is a 🚧 pointer under Day plan; the container's pack 7 section, the context-menus manifest and the tour manifest each carry one line on this pack's wording and `#dateLine`. **Confirmed:** pack 1's `archive-restore` installs a new state object (`state = next` from `Store.parseImport`), so Keep's staleness check catches it. **Batched rule:** items are gated by `check.sh` only; their smoke cases, screens and the one upgrade check (from v0.2.4) run at the end of part 9. Item 8's run "from the previous dev build" is dropped by that rule.
+- Item 1 done, 91140b7. Design A's five helpers beside `today()`, plus `pad2` and `dayString`; `planWeekday()` is `parseDay(state.date)?.getDay() ?? -1`. `defaults()` and Clear the day use `nextWorkingDay()`. Smoke: the calendar context (`calCtx`, Europe/Oslo, `calOpen(instant, items)` asserting the page's `today()` first) with the edge table and the Friday first run and Clear the day; later items add their cases before its "the calendar: done" line. Gate: `check.sh` OK.
