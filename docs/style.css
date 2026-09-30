@@ -163,6 +163,11 @@ h2 { font: 700 20px var(--head); margin: 0 0 12px; }
 
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .bar label { font-weight: 600; }
+/* What day the plan is for, under the Date. Quiet when it is the next working
+   day; a warning with Set to tomorrow when not. Never .warn, which is for
+   the route rows. */
+.date-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: -6px 0 14px; color: var(--muted); }
+.date-line.off { color: var(--ink); border-left: 4px solid var(--caution); padding-left: 8px; }
 
 table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .grid th { text-align: left; font: 600 14px var(--head); padding: 8px; border-bottom: 2px solid var(--ink); }

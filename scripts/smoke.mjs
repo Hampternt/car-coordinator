@@ -3818,6 +3818,55 @@ for (const [seededAt, wantNew, what] of [
   await pg.close();
 }
 
+// Item 3: the line under the Date says what day the plan is for.
+{
+  const line = (pg) => pg.evaluate(() => {
+    const el = document.getElementById('dateLine');
+    return { text: el?.innerText.replace(/\s+/g, ' ').trim() || '', off: el?.classList.contains('off'), button: !!el?.querySelector('[data-act="set-tomorrow"]') };
+  });
+  // Tuesday 2026-09-29: the next working day is Wednesday 30/09.
+  const pg = await calOpen('2026-09-29T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30') });
+  const quiet = await line(pg);
+  check('the date line is quiet for the next working day', quiet.text === 'Wednesday 30/09, the next working day.' && !quiet.off && !quiet.button, JSON.stringify(quiet));
+  const cases = [
+    ['2026-09-29', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
+    ['2026-09-28', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
+    ['2026-10-01', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
+    ['', 'The date is not a real day. The next working day is Wednesday 30/09.'],
+  ];
+  for (const [typed, want] of cases) {
+    await pg.fill('#date', typed);
+    const got = await line(pg);
+    check(`typing ${typed || 'nothing'}: the line warns and offers Set to tomorrow`, got.text.startsWith(want) && got.off && got.button, JSON.stringify(got));
+    check(`and the focus stays in the Date box (${typed || 'nothing'})`, await pg.evaluate(() => document.activeElement?.id === 'date'));
+  }
+  check('typing a date leaves the warnings and stripes as they were', (await pg.locator('#tab-plan tbody tr.warn').count()) === 0);
+  await pg.click('[data-act="set-tomorrow"]');
+  check('Set to tomorrow sets the date and saves it', (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-09-30,2026-09-30');
+  await pg.fill('#date', '2026-10-01');
+  await pg.focus('[data-act="set-tomorrow"]');
+  await pg.keyboard.press('Enter');
+  check('from the keyboard, Set to tomorrow leaves the focus in the Date box', await pg.evaluate(() => state.date === '2026-09-30' && document.activeElement?.id === 'date'));
+  // A day later, coming back to the window redraws the line.
+  await pg.clock.setFixedTime(new Date('2026-09-30T09:00:00+02:00'));
+  await pg.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  const nextDay = await line(pg);
+  check('coming back to the window the next day redraws the line', nextDay.text.startsWith('This plan is dated today, Wednesday 30/09.') && nextDay.button, JSON.stringify(nextDay));
+  await pg.setViewportSize({ width: 390, height: 844 });
+  check('the warning fits a phone screen', await pg.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+  await pg.close();
+}
+for (const [at, date, what] of [
+  ['2026-10-02T09:00:00+02:00', '2026-10-03', 'a Friday open of a Saturday plan'],
+  ['2026-10-03T09:00:00+02:00', '2026-10-04', 'a Saturday open of a Sunday plan'],
+  ['2026-09-29T09:00:00+02:00', '2026-13-45', 'a date that is not a real day'],
+]) {
+  const pg = await calOpen(at, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4(date) });
+  const got = await pg.evaluate(() => { const el = document.getElementById('dateLine'); return { off: el.classList.contains('off'), button: !!el.querySelector('[data-act="set-tomorrow"]'), date: state.date }; });
+  check(`${what} warns and offers Set to tomorrow`, got.off && got.button && got.date === date, JSON.stringify(got));
+  await pg.close();
+}
+
 // --- the calendar: done ---
 check('the calendar cases log no console errors', calErrors.length === 0, calErrors.join(' | '));
 await calCtx.close();

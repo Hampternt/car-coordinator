@@ -122,6 +122,34 @@ function dayLabel(s) {
 // The weekday of the plan's own date, 0 for Sunday, or -1 when it is not a day.
 const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
 
+/* Under the Date: what day the plan is for. Quiet when it is the next
+   working day; otherwise a warning with Set to tomorrow, which never blocks
+   anything. The cases are checked in this order, and the last one catches
+   every other date, a weekend one included. */
+function dateLine() {
+  const now = today(), nwd = nextWorkingDay(), d = state.date;
+  if (!parseDay(d)) return { off: true, text: `The date is not a real day. The next working day is ${dayLabel(nwd)}.` };
+  if (d === nwd) return { off: false, text: `${dayLabel(d)}, the next working day.` };
+  if (d === now) return { off: true, text: `This plan is dated today, ${dayLabel(d)}. The next working day is ${dayLabel(nwd)}.` };
+  if (d < now) return { off: true, text: `${dayLabel(d)} has passed. The next working day is ${dayLabel(nwd)}.` };
+  return { off: true, text: `${dayLabel(d)} is not the next working day, ${dayLabel(nwd)}.` };
+}
+const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off
+  ? ` <button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>` : ''}`;
+const dateLineHtml = () => { const l = dateLine(); return `<p id="dateLine" class="date-line${l.off ? ' off' : ''}">${dateLineInner(l)}</p>`; };
+/* Only the line, never the Date box beside it: redrawing the box would take
+   the focus out of it mid-typing. */
+function drawDateLine() {
+  const el = document.getElementById('dateLine');
+  if (!el) return;
+  const l = dateLine();
+  el.className = `date-line${l.off ? ' off' : ''}`;
+  el.innerHTML = dateLineInner(l);
+}
+// A window left open overnight does not vouch for yesterday's "tomorrow".
+window.addEventListener('focus', drawDateLine);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') drawDateLine(); });
+
 function newRoute(name, gapBefore = false) {
   return { id: uid(), name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore };
 }
@@ -772,6 +800,7 @@ function renderPlan() {
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
+    ${dateLineHtml()}
     <div class="plan">
       <div class="plan-table" data-keep-scroll="table"><table class="grid">
         <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
@@ -1327,7 +1356,7 @@ document.addEventListener('input', (e) => {
   else if (el.tagName === 'SELECT') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
-  else { renderSheet(); renderPicker(); }
+  else { renderSheet(); renderPicker(); if (kind === 'meta' && name === 'date') drawDateLine(); }
 });
 
 /* Redraw the lot without interrupting the typing that caused it: render()
@@ -2034,6 +2063,10 @@ document.addEventListener('click', (e) => {
         const ref = kind === 'car' ? 'carId' : 'positionId';
         state.templates.forEach((t) => t.routes.forEach((r) => { if (r[ref] === id) r[ref] = ''; }));
       }
+      break;
+    case 'set-tomorrow':
+      state.date = nextWorkingDay();
+      if (e.detail === 0) refocus = '#date';
       break;
     case 'clear-day':
       if (!confirmTwice('clear', e.detail === 0)) return;
