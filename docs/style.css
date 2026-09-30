@@ -715,4 +715,33 @@ body.show-sheet .sheet {
   table.grid { min-width: 700px; }
 }
 
+/* Wide screens (owner, 2026-10-01). What a layout sees is the width in the
+   browser's own pixels: a 27" 1440p screen at 100 % and a 4K one at 150 %
+   are both 2560. From 1900 the page is centred and the Day plan takes the
+   width the other tabs leave, which read best at 1680. From 2200 the parking
+   map moves up beside the route table, so the plan and where the cars stand
+   are on one screen; not before, since at 1920 the table would be left
+   narrower than it is at 1440 (868 against about 1060, measured), its car
+   and spot boxes cut short. From 2400 the templates and the week sit side by
+   side under them. */
+@media (min-width: 1900px) {
+  main { margin: 0 auto; }
+  main:has(#tab-plan.active) { max-width: 2800px; }
+}
+@media (min-width: 2200px) {
+  .plan-main {
+    display: grid; column-gap: 16px; align-items: start;
+    grid-template-columns: minmax(0, 1fr) minmax(660px, 0.75fr);
+    grid-template-areas: "table map" "tpl tpl" "week week";
+  }
+  .plan-main > .plan-table { grid-area: table; }
+  .plan-main > #planTemplates { grid-area: tpl; }
+  .plan-main > #planWeek { grid-area: week; }
+  .plan-main > #planMap { grid-area: map; }
+  .plan-main > #planMap .parking { margin-top: 0; }
+}
+@media (min-width: 2400px) {
+  .plan-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "table map" "tpl week"; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

@@ -4299,6 +4299,34 @@ for (const [at, date, what] of [
   await pg.close();
 }
 
+// Wide screens (owner, 2026-10-01): from 2200 the map sits beside the route
+// table, from 2400 the templates and the week side by side; below 1900
+// nothing moves, and the other tabs keep their width, centred.
+{
+  const ctxW = await browser.newContext();
+  const pw = await ctxW.newPage();
+  await pw.goto(base, { waitUntil: 'networkidle' });
+  await pw.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:pref:infoHint', 'done'); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  const boxes = () => pw.evaluate(() => Object.fromEntries(['.plan-table', '#planMap', '#planTemplates', '#planWeek', 'main'].map((sel) => {
+    const b = document.querySelector(sel).getBoundingClientRect();
+    return [sel, { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top + scrollY), bottom: Math.round(b.bottom + scrollY) }];
+  })));
+  for (const [w, beside, twoUnder] of [[1680, false, false], [1920, false, false], [2200, true, false], [2560, true, true], [3840, true, true]]) {
+    await pw.setViewportSize({ width: w, height: 1200 });
+    await pw.reload({ waitUntil: 'networkidle' });
+    const b = await boxes();
+    const mapBeside = b['#planMap'].left >= b['.plan-table'].right && b['#planMap'].top === b['.plan-table'].top;
+    const sideBySide = b['#planWeek'].left >= b['#planTemplates'].right && b['#planWeek'].top === b['#planTemplates'].top;
+    check(`at ${w}, the map ${beside ? 'sits beside' : 'stays under'} the route table, and the templates and the week ${twoUnder ? 'sit side by side' : 'stack'}`,
+      mapBeside === beside && sideBySide === twoUnder && (await pw.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)), JSON.stringify(b));
+  }
+  await pw.setViewportSize({ width: 2560, height: 1200 });
+  await pw.click('[data-act="tab"][data-tab="drivers"]');
+  const main = await pw.evaluate(() => { const r = document.querySelector('main').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; });
+  same('another tab keeps its 1680, centred', main, [440, 1680]);
+  await ctxW.close();
+}
+
 // Item 7: a passed date moves on open, in memory, with Keep.
 {
   const TUE = '2026-09-29T09:00:00+02:00';
