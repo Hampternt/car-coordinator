@@ -1,6 +1,6 @@
 # Pack: Plan for tomorrow
 
-**Status:** 🚧 building, since 2026-09-30, as part 4 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and the owner question approved (a window left open overnight is not moved).
+**Status:** 🚧 all 10 items built on `review-round` (combined pack, part 4), cut at 0.6.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (items 5 and 7 individually) and the walkthrough.
 **Date:** 2026-09-29.
 **Branch:** cut when execution starts. It is `plan-for-tomorrow`, cut from `dev` after pack 3 has merged into `dev`. It merges back into `dev` through a PR (the container's Branch line).
 
@@ -452,7 +452,7 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
   - the quiet line.
 
   *Done when:* `CHROMIUM_PATH=/usr/bin/google-chrome npm run screens` writes them with no console errors, and still flags exactly 4 rows.
-- [ ] **10. Announce Plan for tomorrow and cut 0.6.0.** Pack 1's Design H, in one commit:
+- [x] **10. Announce Plan for tomorrow and cut 0.6.0.** Pack 1's Design H, in one commit:
   - a new entry at the top of `docs/updates.js`, `must: true`, following rule G;
   - the six version places set to 0.6.0;
   - the `?v=` tags following `APP_VERSION`.
@@ -530,3 +530,5 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
 - Item 7 done, a881efe. **Awaiting individual review** (in the combined review). Design B and C as planned: `moveDateOnOpen()` after `Store.dailySnapshot` and before the offers, in its own try/catch (the catch restores the saved date and drops Keep); `dateMove` with `saved` (set in `save()`) and `inFile` (set in `dataAction` when `link-file` / `reconnect-file` changed `Store.file.lastSaved`); `Store.saveFile`; `keep-date` on its own return path; `dropKeep()` in Clear the day and Set to tomorrow; `dropOffers` spares Keep; `render()` prunes a stale Keep right after draining the Store's notices. The Keep button reads "Keep 28/09". Smoke (calendar cases, written, to run at the end): the Tuesday move with v1 byte-identical over a load and a reload, the Start of day backup unmoved, Keep before and after a change, Keep gone after a typed date, Set to tomorrow, Clear the day and an Import (with a `keep-date` sent anyway doing nothing), Friday/Saturday/Sunday opens, five no-move cases, a newer-version save, Keep above the update note, 390px, Reconnect then Keep putting the old date in the file only, and a forced throw. **Not covered by a case of its own:** Restore, `share-apply` and `archive-restore` of a past-dated archive (all install a new state object, which the same prune catches), Choose save file… onto an empty file, and a Reconnect with the marker set asking with both dates. Gate: `check.sh` OK.
 - Item 8 done, 8fa7557. Every scenario's persistent context runs with `timezoneId: 'Europe/Oslo'` and `context.clock.install` at 2026-10-06T12:00+02:00. `asOpened` allows the date's move to 2026-10-07 when the old date has passed; on each all-new open with a moved date, Keep must sit above the update note (which the existing check keeps last); the reload already counts only `.notice.update`; scenario (d) already requires the linked file byte for byte at open. **Under the owner's rule** the check runs once, from v0.2.4, at the end of the whole build; the run from the previous dev build and the tried `save()` in `moveDateOnOpen` are not done. Gate: `check.sh` OK.
 - Item 9 done, 084ab3c. 22-date-moved-with-keep, 23-date-line-warning and 24-date-line-quiet, on a page of its own after the dark captures (the numbers continue from part 3's 21 rather than sitting after the PDF at 11, so nothing is renumbered). The main page's "exactly 4 flagged rows" check is untouched. Runs at the end. Gate: `check.sh` OK.
+- Item 10 done, fd99353. The drafted entry as written, `must: true`. `versions.mjs`: "5 entries, newest first, newest 0.6.0, must set where required". Gate: `check.sh` OK.
+- **Part 4 closed (0.6.0), under the batched rule.** Its smoke cases, screens and the upgrade check from v0.2.4 run at the end of part 9; then the combined review (items 5 and 7 individually) and the walkthrough. **Pack close is left for the manager:** INVENTORY's ✅ entry, the container's status line, and the two "Found while planning" notes (the no-op saves, fixed by item 5; after a move, the save-file question can come from the date alone).
