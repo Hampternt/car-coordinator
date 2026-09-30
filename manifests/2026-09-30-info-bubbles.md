@@ -1,6 +1,6 @@
 # Pack: Info bubbles instead of the tour
 
-**Status:** PROPOSED. Owner's answers taken 2026-09-30; waiting for the go.
+**Status:** APPROVED. The owner's go came 2026-09-30; it starts when `weekday-templates` is merged into `dev`.
 **Branch:** its own, `info-bubbles`, cut from `dev` **after `weekday-templates` is merged**, since both rewrite parts of `app.js`. Merged back into `dev` when green. Ships as 0.14.0.
 
 Observable: a small ⓘ sits beside each part of the app. Clicking one opens a short bubble right next to it, saying what that part does and how to use it. The Tour button and the "Show me around" offer are gone.
@@ -61,3 +61,4 @@ Each is one or two short sentences: what it is, then how to use it.
 ## Ledger
 
 - 2026-09-30: planned with the owner's three answers. It waits for `weekday-templates` to merge.
+- 2026-09-30: the owner's go: "go, start it after the templates merge".
