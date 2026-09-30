@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.9.0',
+    must: false,
+    title: 'Usual days, tags and notes for drivers',
+    changed: 'Each driver\'s row has Usual days, Monday to Friday, a Tag and a Note; a tag never sets anyone Away. The In today button now reads In.',
+    affects: 'Drivers tab, the week under the route list, and Labels tab: deleting a label takes it off drivers too. Share codes are unchanged: they send day groups, never drivers\' tags or notes. Printed sheet unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.8.0',
     must: false,
     title: 'A parking map under the route list',
