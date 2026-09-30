@@ -77,3 +77,10 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **Part 8 start.** Base e6f7656 (0.9.0). `update-note` and `origin/dev` had not moved.
 - **Part 8 done** (right-click menus, 0.10.0): start af3e402; items 1-14 at b644c6b, 7d1cd8b, **4abe7ec ⚠️**, c4f7317, **ffd08e9 ⚠️**, 4ce9386, d3bd956, 12c7f21, fb73d8b, 0f69c96, 6505b03, **9309dde ⚠️**, 1037e42, 7f3b541. `check.sh` per item.
 - **Part 9 start.** Base 48b5535 (0.10.0). `update-note` and `origin/dev` had not moved.
+- **Part 9 done** (first-use tour, 0.11.0): start dceda29; items 1-8 at **2e02c78 ⚠️**, 672e40f, 9dc4693, 57af757, **0633d44 ⚠️**, **dac608d ⚠️**, f6ec40d, d383d48. `check.sh` per item.
+- **End of run, 2026-09-30** (all with `CHROMIUM_PATH=/usr/bin/google-chrome`; the pinned Playwright Chromium is not installed here, so none of this ran on CI's browser). First `npm test` stopped at the part 4 Keep cases; the fixes, each its own commit:
+  - app: da484a5 (a label's dot was never lifted on a dark screen: part 3's rule came before the plain dot rule), 4a66f58 (menu hover focus only on a pointer that moved), 092a9cb and 3e2dddf (tour card placement), 8987c78 (an index.html cached from before parts 8 and 9 stopped the app loading: found by the upgrade check);
+  - tests only: bf570ab, 0049e7a, dccc1de, 9198816, 564816b, d4c48d6, b88efbe, a6e7da9, 990be37, 5a5bee4.
+  - Final `npm test` (tree at 8987c78): exit 0, 1264 ok, 0 FAIL — "map checks passed", "all checks passed", "all tour checks passed", "all passed" (Breadify).
+  - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 33 files (29-33 new).
+  - `npm run upgrade -- <v0.2.4 worktree>`: exit 0, 67 ok, "upgrade check passed: 0.2.4 to 0.11.0". The v0.2.4 worktree was removed afterwards.
