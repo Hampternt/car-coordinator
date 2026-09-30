@@ -1481,6 +1481,9 @@ check('the Save counts who is in when it is pressed, and fills the empty crew ra
 // tick names).
 await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
 
+// The week sits under 40 routes, below the fold: brought into view first, as
+// the leader would scroll to it, so the click itself scrolls nothing.
+await page.locator('#planWeek .week-col[data-day="1"] [data-act="apply-group"]').scrollIntoViewIfNeeded();
 const weekTopWas = await page.locator('#planWeek').evaluate((b) => b.getBoundingClientRect().top);
 await loadDay(1);
 check('a Load adds no notice, so the week stays under the pointer',
