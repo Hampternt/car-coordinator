@@ -65,6 +65,40 @@ const Sheet = (() => {
     return parent;
   }
 
+  /**
+   * A bread marked "pay attention" on Configure (the owner, 2026-10-01): one
+   * the pickers often get wrong — a name close to another's, say. Wherever
+   * its name prints, on the pick line, the check line and the route total, it
+   * carries a warning triangle and is set in bold. The triangle is drawn, not
+   * a character, so no printer falls back to a face without it. The ids come
+   * from the settings each route is laid out with (paginate).
+   */
+  let marked = new Set();
+  const SVG = 'http://www.w3.org/2000/svg';
+  function attentionMark() {
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('class', 'bf-attn-mark');
+    svg.setAttribute('viewBox', '0 0 20 18');
+    svg.setAttribute('aria-label', 'Pay attention');
+    svg.setAttribute('role', 'img');
+    const sign = document.createElementNS(SVG, 'path');
+    sign.setAttribute('d', 'M10 0.6 19.6 17.4H0.4Z');
+    sign.setAttribute('fill', 'currentColor');
+    const bang = document.createElementNS(SVG, 'path');
+    bang.setAttribute('d', 'M8.9 5.6h2.2l-0.4 6.6h-1.4ZM8.8 13.6h2.4v2.2H8.8Z');
+    bang.setAttribute('fill', '#fff');
+    svg.append(sign, bang);
+    return svg;
+  }
+  function productName(className, product) {
+    const span = element('span', className, product.name);
+    if (marked.has(product.id)) {
+      span.classList.add('bf-attn');
+      span.prepend(attentionMark());
+    }
+    return span;
+  }
+
   // ── Measuring ──────────────────────────────────────────────────────────
 
   /**
@@ -375,7 +409,7 @@ const Sheet = (() => {
       row.appendChild(
         append(
           element('span', 'bf-product-cell'),
-          element('span', 'bf-product', line.product.name),
+          productName('bf-product', line.product),
           element('span', 'bf-note-field', '.'.repeat(120)),
         ),
       );
@@ -383,7 +417,7 @@ const Sheet = (() => {
       append(boxes, tickBox('M'), tickBox('F'));
       row.appendChild(boxes);
     } else {
-      row.appendChild(element('span', 'bf-product', line.product.name));
+      row.appendChild(productName('bf-product', line.product));
       // A leader of full stops, clipped to whatever room the name left. A name
       // long enough to leave none simply has no field — nothing wraps (F8).
       // A line of a shared block departs from that: its name wraps when the
@@ -840,7 +874,7 @@ const Sheet = (() => {
     append(
       row,
       element('span', 'bf-total-qty', line.units),
-      element('span', 'bf-total-product', line.product.name),
+      productName('bf-total-product', line.product),
       withDots ? tenDots(line.fullTens) : null,
     );
     return row;
@@ -1328,6 +1362,7 @@ const Sheet = (() => {
    * with, set narrower than the real one to prove the re-cut.
    */
   function paginate(route, settings, context, options) {
+    marked = new Set(settings.attention || []);
     const wordmark = (options && options.wordmark) || 'assets/matvare-expressen.svg';
     const measure = measuringHost(options && options.host);
 

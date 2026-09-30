@@ -12,8 +12,10 @@
 
   const STEPS = ['open', 'check', 'configure', 'print'];
 
-  /** How much room each bread takes is remembered; nothing else is. */
+  /** How much room each bread takes is remembered, and which breads need the
+   *  pickers' attention (the owner, 2026-10-01); nothing else is. */
   const CRATE_KEY = 'breadify:crates:v1';
+  const ATTENTION_KEY = 'breadify:attention:v1';
 
   const state = {
     filename: '',
@@ -29,8 +31,14 @@
       kind: Model.BREAD,
       showOrderId: true,
       crates: Model.defaultCrateRules(),
+      /** Product ids to print with a warning triangle, wherever they appear. */
+      attention: new Set(),
     },
   };
+
+  /** Each marked bread's name as last seen, kept for a person reading the
+   *  stored list back; the app goes by the id. */
+  let attentionLabels = {};
 
   // ── Remembering the crate rules (D22) ──────────────────────────────────
 
@@ -59,6 +67,42 @@
       // A browser with storage switched off still prints; it just forgets.
     }
     return rules;
+  }
+
+  // ── Remembering the breads that need attention ─────────────────────────
+
+  /**
+   * A bread the pickers often get wrong — a name close to another's, say — is
+   * marked once on Configure and printed with a warning triangle from then
+   * on, like the crate sizes: a fact about the warehouse, kept on this PC.
+   * Read back defensively, like them: anything unreadable is skipped.
+   */
+  function loadAttention() {
+    const ids = new Set();
+    try {
+      const stored = JSON.parse(localStorage.getItem(ATTENTION_KEY) || 'null');
+      if (stored && Array.isArray(stored.ids)) {
+        for (const id of stored.ids) if (Number.isFinite(id)) ids.add(id);
+      }
+      if (stored && stored.labels && typeof stored.labels === 'object') attentionLabels = { ...stored.labels };
+    } catch {
+      // A browser with storage switched off still prints; it just forgets.
+    }
+    return ids;
+  }
+
+  function saveAttention() {
+    try {
+      const labels = {};
+      for (const id of state.settings.attention) {
+        const product = productsById().get(id);
+        labels[id] = product ? product.name : attentionLabels[id] || '';
+      }
+      attentionLabels = labels;
+      localStorage.setItem(ATTENTION_KEY, JSON.stringify({ ids: [...state.settings.attention], labels }));
+    } catch {
+      // Nothing to do: the print itself does not depend on this.
+    }
   }
 
   function saveCrateRules() {
@@ -268,9 +312,58 @@
 
   // ── 03 Configure ───────────────────────────────────────────────────────
 
+  /**
+   * Every bread in today's file, A to Z, each with a Pay attention tick; a
+   * find box narrows a long list, and the marked ones this file does not
+   * carry are named underneath so none is forgotten. Bread and freezer
+   * alike: a freezer line can be picked wrong too.
+   */
+  function renderAttention() {
+    const products = Array.from(productsById().values()).sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+    );
+    const find = $('attentionFind').value.trim().toLowerCase();
+    $('attentionList').replaceChildren(
+      ...products
+        .filter((product) => !find || product.name.toLowerCase().includes(find))
+        .map((product) => {
+          const row = document.createElement('label');
+          row.className = 'attention';
+          const tick = document.createElement('input');
+          tick.type = 'checkbox';
+          tick.checked = state.settings.attention.has(product.id);
+          row.dataset.on = String(tick.checked);
+          tick.onchange = () => {
+            if (tick.checked) state.settings.attention.add(product.id);
+            else state.settings.attention.delete(product.id);
+            row.dataset.on = String(tick.checked);
+            saveAttention();
+            renderAttentionCount();
+          };
+          const name = document.createElement('span');
+          name.className = 'attention-name';
+          name.textContent = product.name;
+          name.title = product.name;
+          row.append(tick, name);
+          return row;
+        }),
+    );
+    renderAttentionCount();
+  }
+
+  function renderAttentionCount() {
+    const here = productsById();
+    const marked = [...state.settings.attention];
+    const elsewhere = marked.filter((id) => !here.has(id)).map((id) => attentionLabels[id] || `product ${id}`);
+    $('attentionCount').textContent = marked.length
+      ? `${marked.length} marked on this PC.${elsewhere.length ? ` Not in this file: ${elsewhere.join(', ')}.` : ''}`
+      : 'None marked yet.';
+  }
+
   function renderConfigure() {
     const bread = state.settings.kind === Model.BREAD;
     $('showOrderId').checked = state.settings.showOrderId;
+    renderAttention();
 
     // Nothing on a freezer sheet reads the crate sizes (F4), so the step does
     // not offer them there.
@@ -424,6 +517,8 @@
 
   function wire() {
     state.settings.crates = loadCrateRules();
+    state.settings.attention = loadAttention();
+    $('attentionFind').oninput = renderAttention;
 
     const drop = $('drop');
     $('choose').onclick = () => $('file').click();

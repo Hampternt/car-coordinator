@@ -575,6 +575,53 @@ input[type='number'] {
   margin: 0 4px;
 }
 
+/* Pay attention (the owner, 2026-10-01): a tick per bread, the marked ones
+ * set in bold with the same triangle the sheet prints. */
+.attention-find {
+  width: 100%;
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.attentions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.attention {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.attention:hover {
+  background: var(--raised);
+}
+
+.attention-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attention[data-on='true'] .attention-name {
+  font-weight: 700;
+}
+
+.attention[data-on='true'] .attention-name::before {
+  content: '\26A0\FE0E  ';
+}
+
 .sizes {
   display: flex;
   flex-direction: column;
