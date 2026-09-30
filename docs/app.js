@@ -1110,7 +1110,7 @@ function renderPositions() {
     <td class="btns">${moveDel('position', p.id)}</td></tr>`).join('');
   $('#tab-positions').innerHTML = `
     <h2>Positions</h2>
-    <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning.</p>
+    <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning. The parking map on the Day plan finds Spot 1 to Spot 5 and the gate by name; a renamed spot moves to the list under it.</p>
     <div class="bar">
       <input id="newPos" type="text" placeholder="Name, e.g. Spot 6 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>

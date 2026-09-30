@@ -4459,8 +4459,9 @@ await loadWeek();
   v = await mapView();
   check(`a first run: no notices, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
     v.notes === 0 && v.boxes.slice(0, 5).every((t) => t.endsWith('Free')) && v.boxes[5].includes(`No position named ${GATE_NAME}`), JSON.stringify(v));
-  // A spot renamed on the Positions tab moves to the list.
+  // A spot renamed on the Positions tab moves to the list, as its hint says.
   await lp.click('[data-act="tab"][data-tab="positions"]');
+  check('the Positions tab says how the map finds spots', (await lp.locator('#tab-positions .hint', { hasText: 'finds Spot 1 to Spot 5 and the gate by name' }).count()) === 1);
   await lp.locator('#tab-positions [data-field="name"][value="Spot 3"]').fill('Spot 3b');
   await lp.click('[data-act="tab"][data-tab="plan"]');
   v = await mapView();
