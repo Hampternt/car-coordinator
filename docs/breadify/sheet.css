@@ -833,6 +833,23 @@
 /* D23: the names wrap inside their column. Before that they were set from
  * the left edge with nothing bounding the right, and the longest freezer name
  * ran to 214 mm on a 210 mm page. */
+/* A bread marked "pay attention" on Configure (the owner, 2026-10-01): a
+ * warning triangle before its name, and the name in bold, wherever it prints.
+ * Black on any printer. */
+.bf-product.bf-attn,
+.bf-total-product.bf-attn {
+  font-weight: 700;
+}
+
+.bf-attn-mark {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.12em;
+  margin-right: 0.3em;
+  vertical-align: -0.16em;
+  color: #000;
+}
+
 /* `anywhere` broke "Sandnes" into "Sandn" and "es". `break-word` wraps
  * between words first and only splits one that could not fit a line by
  * itself, which is how a person would have set it. */

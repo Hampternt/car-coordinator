@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.14.1';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -84,6 +84,23 @@ function dayCrews() {
   return { byDay, others };
 }
 
+/* The plan's day's crew in, and everyone else away, when the date is set to
+   that day by hand (owner, 2026-10-01): the week's Load for it, done for you.
+   Typing, picking, the day and month steps and Set to tomorrow do it; a date
+   moved on open does not, since nothing is written at open. A day with no
+   crew, or an empty one, changes nobody. Like Load, it sets everyone, a
+   driver tagged Sick in that crew included. True when anyone changed. */
+function loadDayCrew() {
+  const day = planWeekday();
+  const g = day >= 0 ? dayCrews().byDay.get(day) : null;
+  const ids = g ? crewIds(g) : new Set();
+  if (!ids.size) return false;
+  let changed = false;
+  state.drivers.forEach((d) => { const on = ids.has(d.id); if (d.available !== on) { d.available = on; changed = true; } });
+  if (changed) delete planScroll.drivers;
+  return changed;
+}
+
 /* ---------- the calendar ----------
    Local days throughout: a plan is for a day on the leader's own calendar,
    not a UTC one. Days are built at local noon, so a clock change can never
@@ -122,6 +139,60 @@ function dayLabel(s) {
   return `${WEEKDAYS[d.getDay()]} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}${year}`;
 }
 
+/* The Date box shows dd/mm/yyyy whatever language the browser is in; a date
+   field of the browser's own would show mm/dd/yyyy in an American one. The
+   plan still keeps YYYY-MM-DD, so nothing saved changes. */
+function dmyOf(s) {
+  const d = parseDay(s);
+  return d ? `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}` : '';
+}
+/* What was typed in the Date box, as YYYY-MM-DD, or '' while it is not a real
+   day. dd/mm/yyyy with / . or - between, a one-digit day or month allowed; a
+   YYYY-MM-DD pasted in is taken as it is. The year is always four digits, so
+   a date half typed ("01/10/20") never reads as a real day in 2020. */
+function typedDay(text) {
+  const t = String(text || '').trim();
+  const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  const s = m ? `${m[3]}-${pad2(m[2])}-${pad2(m[1])}` : t;
+  return parseDay(s) ? s : '';
+}
+/* A date half typed, while the Date box has the focus: the plan keeps the day
+   it has until the box reads a real one, and a redraw meanwhile (a disarm, a
+   write to the save file) draws the box with what was typed, not the day. */
+function dateTyping() {
+  const box = document.getElementById('date');
+  return box && document.activeElement === box && box.value.trim() && !typedDay(box.value) ? box.value : null;
+}
+const dateBoxText = () => dateTyping() ?? dmyOf(state.date);
+/* A day or a month on from a date: a month on keeps the day of the month, or
+   the month's last where it has fewer (31/01 to 28/02). From a date that is
+   not a real day, the steps start at today. */
+function stepDate(s, unit, by) {
+  const d = parseDay(s) || parseDay(today());
+  if (unit === 'month') {
+    const last = new Date(d.getFullYear(), d.getMonth() + by + 1, 0, 12).getDate();
+    return dayString(new Date(d.getFullYear(), d.getMonth() + by, Math.min(d.getDate(), last), 12));
+  }
+  return dayString(new Date(d.getFullYear(), d.getMonth(), d.getDate() + by, 12));
+}
+/* The calendar is the browser's own, on a date field kept out of sight under
+   the Date box, set to the plan's day first so that day is the one marked;
+   what is picked there is typed into the box (the change handler). */
+function openDatePicker() {
+  const p = document.getElementById('datePick');
+  if (!p) return;
+  p.value = parseDay(state.date) ? state.date : '';
+  try { p.showPicker(); } catch (err) { /* no picker here: the box still types */ }
+}
+// A date put in the box by a button goes in as if typed, so it takes exactly
+// the path a typed date does.
+function putDate(day) {
+  const box = document.getElementById('date');
+  if (!box || !parseDay(day)) return;
+  box.value = dmyOf(day);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // The weekday of the plan's own date, 0 for Sunday, or -1 when it is not a day.
 const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
 
@@ -131,23 +202,61 @@ const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
    every other date, a weekend one included. */
 function dateLine() {
   const now = today(), nwd = nextWorkingDay(), d = state.date;
+  if (dateTyping() !== null) return { off: true, text: `Not a real day yet: type it as dd/mm/yyyy, or click the box for the calendar. The plan keeps ${parseDay(d) ? dayLabel(d) : 'no date'} until then.` };
   if (!parseDay(d)) return { off: true, text: `The date is not a real day. The next working day is ${dayLabel(nwd)}.` };
   if (d === nwd) return { off: false, text: `${dayLabel(d)}, the next working day.` };
   if (d === now) return { off: true, text: `This plan is dated today, ${dayLabel(d)}. The next working day is ${dayLabel(nwd)}.` };
   if (d < now) return { off: true, text: `${dayLabel(d)} has passed. The next working day is ${dayLabel(nwd)}.` };
   return { off: true, text: `${dayLabel(d)} is not the next working day, ${dayLabel(nwd)}.` };
 }
-const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off
-  ? ` <button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>` : ''}`;
+const setTomorrowBtn = () => `<button class="btn" data-act="set-tomorrow" title="Set the date to ${esc(dayLabel(nextWorkingDay()))}">Set to tomorrow</button>`;
+const dateLineInner = ({ off, text }) => `<span>${esc(text)}</span>${off ? ` ${setTomorrowBtn()}` : ''}`;
 const dateLineHtml = () => { const l = dateLine(); return `<p id="dateLine" class="date-line${l.off ? ' off' : ''}">${dateLineInner(l)}</p>`; };
-/* Only the line, never the Date box beside it: redrawing the box would take
-   the focus out of it mid-typing. */
+
+/* Above the line: the plan's day, large, and how far it is from today, so the
+   day being planned is plain at a glance (owner, 2026-10-01): "Thursday
+   01/10/2026" and "Planning tomorrow". Calendar days on the leader's own
+   clock; both days are built at noon, so a clock change still rounds right. */
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function daysFromToday(s) {
+  const d = parseDay(s), t = parseDay(today());
+  return d && t ? Math.round((d - t) / 86400000) : null;
+}
+function planningWords(n) {
+  if (n === 0) return 'Planning today';
+  if (n === 1) return 'Planning tomorrow';
+  if (n === -1) return 'Planning yesterday';
+  const w = Math.abs(n) <= 10 ? NUMBER_WORDS[Math.abs(n)] : String(Math.abs(n));
+  return n > 0 ? `Planning ${w} days ahead` : `Planning ${w} days ago`;
+}
+function dateHeadInner() {
+  if (dateTyping() !== null) return '<span class="date-big">Not a date yet</span>';
+  const d = parseDay(state.date);
+  if (!d) return '<span class="date-big">No date set</span>';
+  return `<span class="date-big">${WEEKDAYS[d.getDay()]} ${esc(dmyOf(state.date))}</span>`
+    + `<span class="date-away">${esc(planningWords(daysFromToday(state.date)))}</span>`;
+}
+const dateHeadHtml = () => `<div id="dateHead" class="date-head">${dateHeadInner()}</div>`;
+
+/* Only the day and the line, never the Date box above them: redrawing the box
+   would take the focus out of it mid-typing. */
 function drawDateLine() {
+  const head = document.getElementById('dateHead');
+  const big = dateHeadInner();
+  if (head && head.dataset.drawn !== big) { head.innerHTML = big; head.dataset.drawn = big; }
   const el = document.getElementById('dateLine');
   if (!el) return;
   const l = dateLine();
   el.className = `date-line${l.off ? ' off' : ''}`;
-  el.innerHTML = dateLineInner(l);
+  // In place, never redrawn whole: pressing Set to tomorrow takes the focus out
+  // of the Date box, and a line redrawn between the press and the release
+  // would take the button away from under the pointer, and the click with it.
+  const words = el.querySelector('span');
+  if (words) words.textContent = l.text; else el.innerHTML = dateLineInner(l);
+  const btn = el.querySelector('[data-act="set-tomorrow"]');
+  if (l.off && !btn) el.insertAdjacentHTML('beforeend', ` ${setTomorrowBtn()}`);
+  else if (!l.off && btn) btn.remove();
+  else if (btn) btn.title = `Set the date to ${dayLabel(nextWorkingDay())}`;
 }
 // A window left open overnight does not vouch for yesterday's "tomorrow".
 window.addEventListener('focus', drawDateLine);
@@ -748,12 +857,20 @@ function ctxRoute(r, part, view) {
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
   const clear = { act: 'clear-route', data: d, arm: `clear:${r.id}`, text: 'Clear driver, car, position and round',
     cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
-  // Right-clicked on its car or its position: the way to that one first.
+  // Right-clicked on its car or its position: the way to that one first. On
+  // its car or its driver, that one's status or tag too: the list its own
+  // tab's menu opens (owner, 2026-10-01). A driver is the roster entry of
+  // that name; a name typed that is on no roster has no tag to set.
   const car = part === 'carId' && byId(state.cars, r.carId);
+  const driver = part === 'driver' && fold(r.driver) && state.drivers.find((x) => fold(x.name) === fold(r.driver));
   if (part === 'positionId' && view === 'status' && byId(state.positions, r.positionId)) return ctxRoutePosition(r, view);
+  if (view === 'status' && car) return [[ctxBack], ctxStatusList('car', car)];
+  if (view === 'status' && driver) return [[ctxBack], ctxStatusList('driver', driver)];
   const [posOwn, posMoves] = part === 'positionId' ? ctxRoutePosition(r) : [[], []];
   return [[
     car && ctxGo(`Go to ${car.reg} on the Cars tab`, 'cars', 'car', car.id, 'reg'),
+    car && ctxStatusOpen('car', car),
+    driver && ctxStatusOpen('driver', driver),
   ].filter(Boolean), posOwn, posMoves, [
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
@@ -897,7 +1014,7 @@ function ctxTemplate(t) {
     { act: 'ask-template', data: t0, text: 'Load\u2026' },
     { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
   ] : [], [
-    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Update from plan',
+    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Save the plan into it',
       cost: t.routes.length ? `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}`
         : `It holds nothing yet; it becomes the plan's ${plural(state.routes.length, 'route')}` },
     { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
@@ -1070,7 +1187,7 @@ function ctxHit(t) {
     if (!row) continue;
     const del = row.querySelector('[data-act="del"][data-kind][data-id]');
     if (!del) return null;
-    const part = surface === 'route' ? t.closest('select[data-field="carId"], select[data-field="positionId"]')?.dataset.field || '' : '';
+    const part = surface === 'route' ? t.closest('select[data-field="carId"], select[data-field="positionId"], input[data-field="driver"]')?.dataset.field || '' : '';
     return { row, surface, kind: del.dataset.kind, id: del.dataset.id, part };
   }
   return null;
@@ -1283,10 +1400,19 @@ function renderPlan() {
     </div>` : ''}
     <div class="bar" id="planBar">
       <label for="date">Date</label>${infoBtn('plan-date')}
-      <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
+      <span class="date-box">
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="month" data-by="-1" title="A month earlier" aria-label="A month earlier">«</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="day" data-by="-1" title="A day earlier" aria-label="A day earlier">‹</button>
+        <input id="date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" title="Click for the calendar, or type the date as dd/mm/yyyy" data-kind="meta" data-field="date" value="${esc(dateBoxText())}">
+        <button type="button" class="btn date-cal" data-act="pick-date" title="Pick the date from a calendar" aria-label="Pick the date from a calendar">\u{1F4C5}</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="day" data-by="1" title="A day later" aria-label="A day later">›</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="month" data-by="1" title="A month later" aria-label="A month later">»</button>
+        <input id="datePick" type="date" tabindex="-1" aria-hidden="true" value="${esc(parseDay(state.date) ? state.date : '')}">
+      </span>
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
     </div>
+    ${dateHeadHtml()}
     ${dateLineHtml()}
     <div class="plan">
       <div class="plan-main">
@@ -1354,34 +1480,138 @@ function templateContents(t) {
   </div>`;
 }
 
-function renderTemplates() {
-  // An empty template (the weekday ones, until Update from plan) has nothing
+/* A template's contents, beside its card, the way a right-click submenu opens
+   beside its menu (owner, 2026-10-01): resting the mouse on a card shows
+   them, moving to another card swaps them, and leaving both the card and the
+   layer lets them go. The card's route count pins them open, for a click, a
+   finger or the keyboard, until Esc, a click elsewhere, its ✕ or the count
+   again. One layer, made on first use outside the redrawn page, so a redraw
+   fills it again rather than losing it; the table keeps its scroll while it
+   shows the same template. */
+let tplHover = null;
+let tplHoverTimer = 0;
+const tplShown = () => tplOpen || tplHover;
+function drawTplPeek() {
+  if (tplOpen && !byId(state.templates, tplOpen)) tplOpen = null;
+  if (tplHover && !byId(state.templates, tplHover)) tplHover = null;
+  const t = byId(state.templates, tplShown() || '');
+  const on = t && t.routes.length && tab === 'plan' ? t : null;
+  document.querySelectorAll('#planTemplates .tpl-head[data-tpl]').forEach((h) => {
+    h.classList.toggle('shown', !!on && h.dataset.tpl === on.id);
+    h.querySelector('[data-act="peek-template"]')?.setAttribute('aria-expanded', String(!!on && tplOpen === h.dataset.tpl));
+  });
+  let layer = document.getElementById('tplPeek');
+  if (!on) {
+    if (layer) { layer.hidden = true; layer.innerHTML = ''; delete layer.dataset.tpl; delete layer.dataset.html; }
+    return;
+  }
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'tplPeek';
+    layer.className = 'tpl-peek-layer';
+    layer.setAttribute('role', 'dialog');
+    document.body.append(layer);
+  }
+  layer.setAttribute('aria-label', `What the ${on.name} template holds`);
+  const html = `<div class="tpl-peek-head"><b>${esc(on.name)}</b><span>${plural(on.routes.length, 'route')}</span>${tplOpen === on.id
+    ? `<button type="button" class="btn" data-act="peek-template" data-kind="template" data-id="${esc(on.id)}" title="Close" aria-label="Close">✕</button>` : ''}</div>${templateContents(on)}`;
+  if (layer.dataset.tpl !== on.id) layer.innerHTML = html;
+  else if (layer.dataset.html !== html) {
+    const was = layer.querySelector('.tpl-body')?.scrollTop || 0;
+    layer.innerHTML = html;
+    const body = layer.querySelector('.tpl-body');
+    if (body) body.scrollTop = was;
+  }
+  layer.dataset.tpl = on.id;
+  layer.dataset.html = html;
+  // Shown on hover it is a glance: the pointer passes through it to the cards
+  // under it, so the next card still swaps it and its Load and Save still
+  // click (review, 2026-10-01). Pinned, it takes the pointer, to scroll it.
+  layer.classList.toggle('pinned', tplOpen === on.id);
+  layer.hidden = false;
+  placeTplPeek();
+}
+/* Beside the card, on its right where there is room and on its left where
+   not, its top level with the card's; on a screen too narrow for either,
+   under or over it, as the picker opens. */
+function placeTplPeek() {
+  const layer = document.getElementById('tplPeek');
+  if (!layer || !layer.dataset.tpl) return;
+  const card = document.querySelector(`#planTemplates .tpl-head[data-tpl="${CSS.escape(layer.dataset.tpl)}"]`);
+  const a = card && card.getBoundingClientRect();
+  if (!a || !a.width) { layer.hidden = true; return; }
+  layer.hidden = false;
+  layer.style.maxHeight = '';
+  const w = layer.offsetWidth, h = layer.offsetHeight;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const ceiling = Math.max(0, $('.topbar').getBoundingClientRect().bottom) + 8;
+  const side = a.right + 6 + w <= vw - 8 ? a.right + 6 : (a.left - 6 - w >= 8 ? a.left - 6 - w : null);
+  let left, top, tall;
+  if (side !== null) {
+    left = side;
+    tall = Math.max(0, Math.min(h, vh - 8 - ceiling));
+    top = Math.min(Math.max(a.top, ceiling), vh - 8 - tall);
+  } else ({ left, top, tall } = besideAnchor(a, w, h));
+  layer.style.maxHeight = `${tall}px`;
+  layer.style.left = `${left + window.scrollX}px`;
+  layer.style.top = `${top + window.scrollY}px`;
+}
+
+/* The shelf, laid out as the week under it is (owner, 2026-10-01): Monday to
+   Friday in five columns, each day's template in its day's column, found by
+   its name the way the week finds a crew. A weekday with no template shows an
+   empty slot; every other template (a second one for a day, Saturday,
+   "Standard weekday") follows on the rows after, in shelf order. What a card
+   holds opens beside it (drawTplPeek), never in the grid, so no card moves.
+   A card says two things and does two things: its name and what it holds,
+   Load and Save. Load asks which parts first (the notice at the top); Save
+   puts the plan on screen into it, on a second click, after a backup. */
+function templateCard(t) {
+  const n = t.routes.length;
+  const saving = armed === `resave:${t.id}`, deleting = armed === `del:${t.id}`;
+  // The name on its own row with its ✕, wrapping rather than cut short, so
+  // two templates can always be told apart; then what it holds; then Load and
+  // Save. An empty template (the weekday ones, until saved into) has nothing
   // to load, so it has no Load: loading it would only empty the plan.
-  const shelf = state.templates.map((t) => `<div class="tpl ${tplOpen === t.id ? 'open' : ''}">
-      <div class="tpl-head">
-      ${t.routes.length
-        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
-      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}`
-        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet \u2014 Update from plan fills it</span>`}
-      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', armed === `resave:${t.id}` ? 'armed' : '',
-        `title="Make this template the ${state.routes.length} routes on the plan now; its name and day stay"`)}
-      <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
-        <option value="">Never offer it</option>
-        ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
-      </select>
-      ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
+  return `<div class="tpl${n ? '' : ' tpl-blank'}">
+      <div class="tpl-head${n && tplShown() === t.id ? ' shown' : ''}" data-tpl="${esc(t.id)}"${n ? ' data-filled="1"' : ''}>
+        <div class="tpl-title">
+          <span class="tpl-name" title="${esc(t.name)}">${esc(t.name)}</span>
+          ${actBtn('del', 'template', t.id, deleting ? 'Sure?' : '✕', `tpl-del${deleting ? ' armed' : ''}`, `title="Delete the ${esc(t.name)} template"`)}
+        </div>
+        ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'}`, 'tpl-peek',
+          `title="What is in ${esc(t.name)}: rest the mouse on the card, or click here to keep it open" aria-haspopup="dialog" aria-expanded="${tplOpen === t.id}"`)
+          : '<span class="tpl-empty">Not saved yet</span>'}
+        <div class="tpl-acts">
+          ${n ? actBtn('ask-template', 'template', t.id, 'Load', 'primary-ish tpl-load', `title="Put the ${esc(t.name)} template on the plan; it asks which parts to take first"`) : ''}
+          ${actBtn('resave-template', 'template', t.id, saving ? 'Sure?' : 'Save', `tpl-save${saving ? ' armed' : ''}`,
+            `title="Save the ${state.routes.length} routes on the plan into ${esc(t.name)}${n ? `, in place of its ${n}` : ''}"`)}
+        </div>
       </div>
-      ${tplOpen === t.id ? templateContents(t) : ''}
-    </div>`).join('');
+    </div>`;
+}
+
+function renderTemplates() {
+  const slot = new Map();
+  const rest = [];
+  for (const t of state.templates) {
+    const day = groupWeekday(t.name);
+    if (WORK_WEEK.includes(day) && !slot.has(day)) slot.set(day, t);
+    else rest.push(t);
+  }
+  const days = WORK_WEEK.map((day) => (slot.has(day) ? templateCard(slot.get(day))
+    : `<div class="tpl-none"><span class="tpl-name">${WEEKDAYS[day]}</span><span class="tpl-empty">No template</span></div>`)).join('');
   return `<section id="planTemplates" class="templates">
-    <h3>Day templates${infoBtn('plan-templates')}</h3>
-    <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
-    <div class="bar">
-      <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
-      <button class="btn" data-act="save-template">Save as template</button>
+    <div class="tpl-top">
+      <h3>Day templates${infoBtn('plan-templates')}</h3>
+      <div class="bar">
+        <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
+        <button class="btn" data-act="save-template">Save as template</button>
+      </div>
     </div>
-    ${shelf ? `<div class="shelf">${shelf}</div>
-      <p class="hint" style="margin:8px 0 0">A template can offer itself when the plan is for its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+    <p class="hint">Load puts a template on the plan, asking which parts to take first. Save puts the plan on screen into that template.</p>
+    ${state.templates.length ? `<div class="shelf" data-keep-scroll="templates">${days}${rest.map(templateCard).join('')}</div>`
+      : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
   </section>`;
 }
 
@@ -1991,6 +2221,7 @@ function render() {
   renderTagMenu();
   renderCtxMenu();
   placeInfoBubble();
+  drawTplPeek();
 }
 
 /* ---------- events ---------- */
@@ -2018,18 +2249,32 @@ document.addEventListener('input', (e) => {
   const weekSig = () => state.driverGroups.map((g) => groupWeekday(g.name)).join();
   const regroup = kind === 'driverGroup' && name === 'name';
   const weekWas = regroup ? weekSig() : null;
-  if (kind === 'meta') state[name] = value;
+  // A date half typed is not a day yet: nothing changes and nothing is saved;
+  // only the day and the line under the box say so, until it reads one.
+  if (kind === 'meta' && name === 'date' && dateTyping() !== null) { drawDateLine(); return; }
+  const dayWas = state.date;
+  if (kind === 'meta') state[name] = name === 'date' ? typedDay(value) : value;
   else {
     const item = byId(listFor(kind) || [], id);
     if (!item) return;
     item[name] = value;
   }
+  // The day's crew loads only when the date really changes, and only to a
+  // date written out whole: editing "05/10/2026" in place passes through
+  // "2/10/2026", which is a real day, and loading its crew on the way would
+  // overwrite who is in (review, 2026-10-01). A date retyped as it was loads
+  // nothing, so availability set by hand stays.
+  const crewMoved = kind === 'meta' && name === 'date' && state.date !== dayWas && !!parseDay(state.date)
+    && /^\d{2}\/\d{2}\/\d{4}$/.test(String(value).trim()) && loadDayCrew();
   save();
   // A tick is often pressed with Space, and the next Tab has to go on from it.
   if (el.type === 'checkbox') renderKeepingFocus();
   else if (el.tagName === 'SELECT') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
+  // A day's crew loaded: the rail and the week redraw, the focus staying where
+  // it was (the Date box, or the step button pressed).
+  else if (crewMoved) { if (document.activeElement === el) redrawKeepingCaret(el); else renderKeepingFocus(); }
   else { renderSheet(); renderPicker(); renderMap(); if (kind === 'meta' && name === 'date') drawDateLine(); }
 });
 
@@ -2043,7 +2288,10 @@ function redrawKeepingCaret(el) {
   const { kind, id, field: name } = el.dataset;
   const sel = [el.selectionStart, el.selectionEnd, el.selectionDirection];
   render();
-  const again = document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
+  // By its id where it has one: the Date box has no data-id, and looking for
+  // data-id="undefined" lost it, and the focus with it (review, 2026-10-01).
+  const again = el.id ? document.getElementById(el.id)
+    : document.querySelector(`[data-kind="${kind}"][data-id="${CSS.escape(id)}"][data-field="${name}"]`);
   if (!again) return;
   again.focus();
   again.setSelectionRange(...sel);
@@ -2644,32 +2892,6 @@ function offerSpotRoundSplit() {
     spotRoundLines(plan));
 }
 
-/* The calendar half of templates, and the whole of it: a template offers
-   itself on its day and never applies itself. It is opt-in per template —
-   nothing has a weekday until one is chosen — because the plan on screen may
-   already have someone's morning in it, and the app does not know that. */
-/* A template set for the plan's weekday offers itself: the plan's day, not the
-   calendar's, because the plan is usually for tomorrow. It only asks. A new
-   offer replaces the one before it (the offer carries `day` to be found by),
-   and a quiet one leaves the page where it is. A date that is not a real day
-   offers nothing. */
-function offerPlanDayTemplate({ quiet = false } = {}) {
-  notices = notices.filter((n) => !(n.offer && n.offer.day));
-  const day = planWeekday();
-  if (day < 0) return;
-  // An empty template is never offered: there is nothing in it to use.
-  const set = state.templates.filter((t) => t.weekday === String(day) && t.routes.length);
-  if (!set.length) return;                             // the default, and the point of it
-  const t = set[0];
-  // More than one set for the same day is allowed: the offer names the first
-  // and mentions the rest, rather than stacking questions on top of each other.
-  const others = set.length - 1;
-  const raised = offerRaised;
-  note('info', `This plan is for ${dayLabel(state.date)}. Your ${t.name} template is set for ${WEEKDAYS[day]}s${others ? `, and so ${others === 1 ? 'is one other' : `are ${others} others`}` : ''}.`,
-    { act: 'ask-template', kind: 'template', id: t.id, text: `Use ${t.name}`, day: true });
-  if (quiet) offerRaised = raised;
-}
-
 /* Loading a template in parts. Each tick takes one thing from the template:
    Routes is the route list itself (names, order, marks and gaps); Drivers;
    Cars; Positions and rounds, together, since a round is a round at a spot.
@@ -2760,7 +2982,7 @@ function templateQuestion(t, parts) {
    plan: they are how this one load is to be done, not part of the plan. */
 function askTemplate(t) {
   dropOffers();
-  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Update from plan fills it.`); return; }
+  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Save puts the plan on screen into it.`); return; }
   const n = note('warn', `Load the ${t.name} template over the plan on screen? Untick what the plan should keep.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
   n.parts = allParts();
@@ -2826,7 +3048,6 @@ document.addEventListener('click', (e) => {
       if (!m || state !== m.plan || state.date !== m.to) { render(); return; }
       state.date = m.from;
       note('info', `Kept ${dayLabel(m.from)}. That day has passed, so the date moves again the next time the app is opened.`);
-      offerPlanDayTemplate({ quiet: true });
       if (m.saved) save();
       else if (m.inFile && typeof Store.saveFile === 'function') Store.saveFile(state);
       render();
@@ -2922,12 +3143,24 @@ document.addEventListener('click', (e) => {
         state.templates.forEach((t) => t.routes.forEach((r) => { if (r[ref] === id) r[ref] = ''; }));
       }
       break;
-    case 'set-tomorrow':
+    // The calendar is the browser's own, on a date field kept out of sight
+    // under the Date box; what is picked in it is typed into the box (below).
+    case 'pick-date':
+      openDatePicker();
+      return;
+    // « ‹ › »: a month or a day either way, as if typed; the focus stays on the
+    // button, so it can be pressed again.
+    case 'date-step':
+      putDate(stepDate(state.date, b.dataset.unit, Number(b.dataset.by)));
+      return;
+    case 'set-tomorrow': {
+      const was = state.date;
       state.date = nextWorkingDay();
+      if (state.date !== was) loadDayCrew();
       dropKeep();
-      offerPlanDayTemplate({ quiet: true });
       if (e.detail === 0) refocus = '#date';
       break;
+    }
     case 'clear-day':
       if (!confirmTwice('clear', e.detail === 0)) return;
       Store.snapshot(state, 'Clearing the day');
@@ -2937,7 +3170,6 @@ document.addEventListener('click', (e) => {
       // it is stale: it goes explicitly, or it could write a passed date
       // over the day just cleared.
       dropKeep();
-      offerPlanDayTemplate({ quiet: true });
       break;
     // A blank route beside the one clicked. Directly above it, the clicked
     // row keeps its gap, so deleting the new row later never takes a gap
@@ -3034,10 +3266,10 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
-    // Update from plan, on the card and in its menu: this template, found by
-    // its id rather than by its name, so the one clicked is the one updated
-    // even when two share a name. It keeps its id, name and weekday, after a
-    // backup.
+    // Save, on the card and in its menu (Update from plan until 0.14.1): this
+    // template, found by its id rather than by its name, so the one clicked
+    // is the one updated even when two share a name. It keeps its id, name
+    // and saved weekday, after a backup.
     case 'resave-template': {
       if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
       const t = list[i];
@@ -3048,10 +3280,19 @@ document.addEventListener('click', (e) => {
       if (e.detail === 0 && b.closest('#planTemplates')) refocus = `#planTemplates [data-act="resave-template"][data-id="${CSS.escape(id)}"]`;
       break;
     }
-    case 'peek-template':
-      tplOpen = tplOpen === id ? null : id;
+    case 'peek-template': {
+      const pinning = tplOpen !== id;
+      tplOpen = pinning ? id : null;
+      tplHover = null;
       render();
+      // From the keyboard the focus follows: into the layer to read and shut
+      // it, and back to the card's route count when it shuts.
+      if (e.detail === 0) {
+        (pinning ? $('#tplPeek [data-act="peek-template"]')
+          : $(`#planTemplates .tpl-head[data-tpl="${CSS.escape(id)}"] [data-act="peek-template"]`))?.focus();
+      }
       return;
+    }
     // The parts the question has ticked; all of them for a question without
     // ticks. Nothing ticked has no button, and does nothing.
     case 'load-template': {
@@ -3673,6 +3914,49 @@ document.addEventListener('scroll', (e) => {
 }, { capture: true, passive: true });
 window.addEventListener('resize', placeInfoBubble);
 
+// A click on the Date box opens the calendar (owner, 2026-10-01): a click on a
+// date means picking one. Typing still works: from the keyboard, which never
+// opens it, or after Esc shuts it.
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'date' && e.detail > 0) openDatePicker();
+});
+
+// A template's contents on hover: a moment's rest on a card before the first
+// shows, at once from one card to the next, and a moment's grace to cross
+// from the card to the layer before they go. The mouse only; a finger or the
+// keyboard uses the route count, which pins them.
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType && e.pointerType !== 'mouse') return;
+  const t = e.target;
+  if (!t || !t.closest) return;
+  clearTimeout(tplHoverTimer);
+  if (t.closest('#tplPeek')) return;
+  const id = t.closest('#planTemplates .tpl-head[data-filled]')?.dataset.tpl || null;
+  if (id === tplHover) return;
+  tplHoverTimer = setTimeout(() => { tplHover = id; drawTplPeek(); }, id ? (tplHover ? 60 : 350) : 250);
+});
+// A right-click on a card is for its menu: the contents on hover make way.
+document.addEventListener('contextmenu', () => { clearTimeout(tplHoverTimer); if (tplHover) { tplHover = null; drawTplPeek(); } }, true);
+// Pinned, they go with a press anywhere but the layer or a route count (which
+// pins another, or unpins this one), and with Esc, handing the focus back.
+document.addEventListener('pointerdown', (e) => {
+  if (!tplOpen || e.button !== 0 || !e.target.closest) return;
+  if (e.target.closest('#tplPeek') || e.target.closest('[data-act="peek-template"]')) return;
+  tplOpen = null;
+  drawTplPeek();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !tplOpen || ctx || infoOpen) return;
+  const id = tplOpen;
+  tplOpen = null;
+  drawTplPeek();
+  document.querySelector(`#planTemplates .tpl-head[data-tpl="${CSS.escape(id)}"] [data-act="peek-template"]`)?.focus();
+});
+document.addEventListener('scroll', (e) => {
+  if (tplShown() && !document.getElementById('tplPeek')?.contains(e.target)) placeTplPeek();
+}, { capture: true, passive: true });
+window.addEventListener('resize', placeTplPeek);
+
 /* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
    key on a control in one. Everywhere else, in any box that is typed in, with
    Shift held, over selected text or while the share dialog is open, the
@@ -3850,6 +4134,20 @@ document.addEventListener('dragstart', closeCtxMenu, true);
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
+  // Leaving the Date box tidies what was typed ("1.10.2026") into dd/mm/yyyy,
+  // and a date left half typed goes back to the day the plan kept.
+  if (e.target.id === 'date') { e.target.value = dmyOf(state.date); drawDateLine(); return; }
+  // A day picked from the calendar goes in as if typed, so it takes exactly
+  // the path a typed date does.
+  if (e.target.id === 'datePick') {
+    const box = $('#date');
+    if (!box || !parseDay(e.target.value)) return;
+    box.value = dmyOf(e.target.value);
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    // A crew loaded redraws the plan: the box to focus is the new one.
+    $('#date')?.focus();
+    return;
+  }
   if (e.target.id !== 'importFile') return;
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -3945,7 +4243,9 @@ async function start() {
   // Read before Share.readHash() clears it: an open by share link keeps the
   // update note for the next ordinary open.
   const link = /^#d=/.test(location.hash || '');
-  state = await Store.init(defaults, render, APP_VERSION);
+  // A write to the save file redraws after it lands; keeping the focus where
+  // it is, so typing (a date half typed, a name) goes on (review, 2026-10-01).
+  state = await Store.init(defaults, () => renderKeepingFocus(), APP_VERSION);
   // The untouched copy, before anything below can change what is saved. In a
   // try of its own, and so is the note: whatever goes wrong in either, the
   // save-file check between them still runs, exactly as in 0.2.5.
@@ -3968,12 +4268,10 @@ async function start() {
   // of its own: whatever goes wrong, the plan is drawn as it was saved.
   const savedDate = state.date;
   try { moveDateOnOpen(); } catch (e) { state.date = savedDate; dropKeep(); console.warn('date move skipped', e); }
-  // Offers, never applications: these only ever add a notice with a button in
-  // it. The spot names come first because they are about the data itself
-  // rather than about today, and because the question scrolled into view
-  // should be the one that has to be answered before share codes work again.
+  // An offer, never an application: it only ever adds a notice with a button
+  // in it. (Templates no longer offer themselves on their day: owner,
+  // 2026-10-01. A template's saved day stays in the plan, unused.)
   offerSpotRoundSplit();
-  offerPlanDayTemplate();
   // What the Store said since the drain above (a start-of-day backup that
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();

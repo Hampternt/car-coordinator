@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.14.1',
+    must: false,
+    title: 'The date, its crew, and plainer templates',
+    changed: 'Click the date for a calendar, or step it with \u00ab \u2039 \u203a \u00bb; setting it brings that weekday\'s crew in. Templates show their routes on hover, with Load and Save.',
+    affects: 'The Day plan, wider on big screens, and a route\'s right-click menu. Share codes and the printed sheet are unchanged. An older copy still offers templates set for a day.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.14.0',
     must: false,
     title: 'Info buttons instead of the tour',

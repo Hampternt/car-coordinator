@@ -2651,6 +2651,54 @@ same('the three typefaces ship their licences, and the page links them', colopho
 
 same('no console errors', errors.slice(0, 5), []);
 
+// ── Pay attention (the owner, 2026-10-01) ─────────────────────────────────
+// A bread marked on Configure prints with a warning triangle and in bold
+// wherever it appears, on the pick line and in the route total, and the mark
+// is remembered on this PC. On a page of its own, so the sheets pinned above
+// are laid out without it.
+{
+  const attn = await browser.newPage();
+  const attnErrors = [];
+  attn.on('pageerror', (e) => attnErrors.push(String(e)));
+  await attn.goto(`${base}breadify/`, { waitUntil: 'networkidle' });
+  await attn.evaluate(() => localStorage.removeItem('breadify:attention:v1'));
+  await attn.setInputFiles('#file', `scripts/fixtures/${BREAD}`);
+  await attn.waitForSelector('#step-check:not([hidden])', { timeout: 20000 });
+  await attn.click('#advance');
+  await attn.waitForSelector('#step-configure:not([hidden])');
+  check('Configure lists every bread with a Pay attention tick', (await attn.locator('#attentionList .attention').count()) === 35);
+  const target = 'Dansk Rugbrød Hel Sandnes Bakeri';
+  await attn.fill('#attentionFind', 'rugbrød hel');
+  check('the find box narrows the list', (await attn.locator('#attentionList .attention').count()) >= 1
+    && (await attn.locator('#attentionList .attention').allInnerTexts()).every((t) => t.toLowerCase().includes('rugbrød hel')));
+  await attn.locator('#attentionList .attention', { hasText: target }).locator('input').check();
+  check('and says how many are marked', (await attn.locator('#attentionCount').innerText()) === '1 marked on this PC.');
+  await attn.click('#advance');
+  await attn.waitForSelector('#step-print:not([hidden])');
+  await attn.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0, { timeout: 30000 });
+  const marks = await attn.evaluate((name) => {
+    const named = [...document.querySelectorAll('#preview .bf-product, #preview .bf-total-product')].filter((e) => e.textContent.trim() === name);
+    const marked = [...document.querySelectorAll('#preview .bf-attn')];
+    return {
+      named: named.length,
+      allMarked: named.every((e) => e.classList.contains('bf-attn') && e.querySelector('svg.bf-attn-mark')),
+      lines: marked.filter((e) => e.classList.contains('bf-product')).length,
+      totals: marked.filter((e) => e.classList.contains('bf-total-product')).length,
+      others: marked.filter((e) => e.textContent.trim() !== name).length,
+      bold: marked.every((e) => getComputedStyle(e).fontWeight === '700'),
+    };
+  }, target);
+  check('the marked bread carries the triangle everywhere it prints, in bold', marks.named > 0 && marks.allMarked && marks.bold, JSON.stringify(marks));
+  check('on its pick lines and in the route totals alike', marks.lines > 0 && marks.totals > 0, JSON.stringify(marks));
+  check('and no other bread does', marks.others === 0, JSON.stringify(marks));
+  await attn.reload({ waitUntil: 'networkidle' });
+  same('the mark is remembered on this PC', await attn.evaluate(() => JSON.parse(localStorage.getItem('breadify:attention:v1')).labels),
+    { 3474: target });
+  check('with no errors', attnErrors.length === 0, attnErrors.join(' | '));
+  await attn.evaluate(() => localStorage.removeItem('breadify:attention:v1'));
+  await attn.close();
+}
+
 await browser.close();
 server.close();
 

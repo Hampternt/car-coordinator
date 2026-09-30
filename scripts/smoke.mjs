@@ -1005,7 +1005,8 @@ const shelf = page.locator('#tab-plan .tpl');
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
 check('saving puts a template on the shelf under the plan',
-  (await shelf.count()) === 1 && (await shelf.innerText()).replace(/\s+/g, ' ').includes('Monday 3 routes'),
+  (await shelf.count()) === 1 && (await shelf.locator('.tpl-name').innerText()) === 'Monday'
+  && (await shelf.locator('[data-act="peek-template"]').innerText()) === '3 routes',
   await shelf.innerText());
 check('and says what it saved', (await page.locator('#notices .notice').last().innerText()).includes('Saved Monday: a template of 3 routes'),
   await page.locator('#notices .notice').last().innerText());
@@ -1019,7 +1020,8 @@ check('a template carries every route field the plan does, and no date', await p
 }));
 
 await page.reload({ waitUntil: 'networkidle' });
-check('a saved template survives a reload', (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Monday');
+check('a saved template survives a reload', (await shelf.filter({ has: page.locator('[data-act="ask-template"]') }).locator('.tpl-name').innerText()) === 'Monday'
+  && (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Load');
 
 // Saving a name that is already used replaces it: the second Monday is a
 // correction of the first, not a second Monday to choose between.
@@ -1131,62 +1133,44 @@ check('a template that brings back a car in the workshop warns, and still loads'
   && (await page.locator('#tab-plan tbody tr').count()) === 3,
   await page.locator('#tab-plan .problems').innerText());
 
-// --- the weekday offer: off by default, and an offer even when it is on ---
-// The rule the pack exists for. A template never applies itself: the most it
-// ever does is raise the same question the shelf raises.
+// --- no offers: a template never raises itself (owner, 2026-10-01) ---
+// Templates used to offer themselves on a weekday chosen under them. That is
+// gone: the shelf's Load is the only way in. A plan saved with a day on a
+// template keeps it, unused, so an older copy still reads what it wrote.
 await loadPlan(withMonday);
-check('a template is set for no day when it is saved', await page.evaluate(() => state.templates[0].weekday === ''));
-check('so opening the app raises nothing, whatever day it is',
-  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-const weekday = page.locator('#tab-plan .tpl select[data-field="weekday"]');
-// The plan's weekday, which is what a template offers itself for.
+check('a template is saved with no day', await page.evaluate(() => state.templates[0].weekday === ''));
+check('and the shelf has no day box to set one', (await page.locator('#tab-plan .tpl select').count()) === 0);
 const dayNow = await page.evaluate(() => planWeekday());
-await weekday.selectOption(String((dayNow + 1) % 7));
-await page.reload({ waitUntil: 'networkidle' });
-check('a weekday sticks to the template it was set on',
-  (await page.evaluate(() => state.templates[0].weekday)) === String((dayNow + 1) % 7));
-check("and a template set for another day says nothing for the plan's day",
+await loadPlan({ ...withMonday, templates: withMonday.templates.map((t) => ({ ...t, weekday: String(dayNow) })) });
+check("a template saved set for the plan's day by an older copy raises nothing",
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-await weekday.selectOption(String(dayNow));
-await page.reload({ waitUntil: 'networkidle' });
-check("a template set for the plan's day offers itself on the way in",
-  (await page.locator('#notices .notice [data-act="ask-template"]').innerText()) === 'Use Monday',
-  await page.locator('#notices').innerText());
-check('and has loaded nothing while it waits to be asked',
-  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
-
-await page.click('#notices [data-act="ask-template"]');
-check('taking the offer asks the same question the shelf asks',
+check('and keeps that day in the plan, unused', await page.evaluate((d) => state.templates[0].weekday === String(d), dayNow));
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check("the shelf's Load asks the question",
   (await page.locator('#notices .notice.warn').innerText()).includes("Replaces your 1 route with Monday's 3, with their drivers, cars, positions and rounds."),
   await page.locator('#notices .notice.warn').innerText());
+check('and has loaded nothing while it waits to be answered',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
 await page.click('#notices [data-act="load-template"]');
-check('and only then is anything replaced, with the same backup taken first',
+check('and only then is anything replaced, with a backup taken first',
   (await page.evaluate(() => state.routes.length)) === 3
   && (await page.evaluate(() => Store.backups()[0].label)) === 'Loading the Monday template',
   await page.evaluate(() => Store.backups()[0].label));
 
-// Back to no day, and the offer goes with it.
-await weekday.selectOption('');
-await page.reload({ waitUntil: 'networkidle' });
-check('turning the weekday off again stops the offer',
-  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-// A repair notice and the offer, on screen together: exactly what a template
-// that lost a car, on its own weekday, produces. Dismiss buttons carry the
-// notice's index, so the wrong one going away would be quiet and wrong.
+// A repair notice and the question, on screen together: exactly what loading
+// a template that lost a car produces. Dismiss buttons carry the notice's
+// index, so the wrong one going away would be quiet and wrong.
 await loadPlan({
   ...withMonday,
   templates: [{
-    id: 't1', name: 'Monday', weekday: String(dayNow),
+    id: 't1', name: 'Monday', weekday: '',
     routes: [{ name: '1', driver: 'Weekday One', carId: 'gone' }, ...mondayRoutes.slice(1)],
   }],
 });
-check('a repair notice and an offer sit side by side', (await page.locator('#notices .notice').count()) === 2,
+check('a repair notice stands alone', (await page.locator('#notices .notice').count()) === 1,
   await page.locator('#notices').innerText());
-await page.click('#notices [data-act="ask-template"]');
-check('and the question joins them rather than piling up',
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check('and the question joins it rather than piling up',
   (await page.locator('#notices .notice').count()) === 2 && (await page.locator('#notices .notice.warn').count()) === 1,
   await page.locator('#notices').innerText());
 await page.click('#notices .notice.warn [data-act="dismiss"]');
@@ -1214,28 +1198,27 @@ check('dismissing the question takes the question, not the notice beside it',
 
   // An empty card: its name and what fills it, and nothing to load.
   const tue = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-2"]') });
-  check('an empty template reads "Not saved yet — Update from plan fills it"', (await tue.innerText()).includes('Not saved yet — Update from plan fills it'));
+  check('an empty template reads "Not saved yet", above its Save', (await tue.locator('.tpl-empty').innerText()) === 'Not saved yet'
+    && (await tue.locator('[data-act="resave-template"]').count()) === 1);
   check('and has no Load and no contents to show',
     (await tue.locator('[data-act="ask-template"]').count()) === 0 && (await tue.locator('[data-act="peek-template"]').count()) === 0);
   await page.evaluate(() => { askTemplate(state.templates[1]); render(); });
   check('asked to load anyway, it says it is not saved yet, and offers no Load',
     (await page.locator('#notices [data-act="load-template"]').count()) === 0
     && (await page.locator('#notices').innerText()).includes('The Tuesday template is not saved yet'));
-  await page.evaluate(() => { notices = []; state.templates[1].weekday = String(planWeekday()); offerPlanDayTemplate(); render(); });
-  check('and set for the plan\'s day, it is not offered', (await page.locator('#notices [data-act="ask-template"]').count()) === 0);
-  await page.evaluate(() => { state.templates[1].weekday = ''; save(); render(); });
 
-  // Update from plan fills it: two clicks, a backup, the name and day kept.
+  // Save fills it: two clicks, a backup, the name and day kept.
   const update = tue.locator('[data-act="resave-template"]');
   await update.click();
-  check('one click on Update from plan only arms it', (await update.innerText()) === 'Sure?'
+  check('one click on Save only arms it', (await update.innerText()) === 'Sure?'
     && (await page.evaluate(() => state.templates[1].routes.length)) === 0);
   await update.click();
   same('two clicks fill it with the plan\'s routes, keeping its id, name and day',
     await page.evaluate(() => { const t = state.templates[1]; return [t.id, t.name, t.weekday, t.routes.map((r) => r.driver).join()]; }),
     ['tpl-weekday-2', 'Tuesday', '', 'Weekday One,Weekday Two,']);
   check('after an "Updating the Tuesday template from the plan" backup', (await page.evaluate(() => Store.backups()[0].label)) === 'Updating the Tuesday template from the plan');
-  check('and now it can be loaded', (await tue.locator('[data-act="ask-template"]').innerText()) === 'Tuesday');
+  check('and now it can be loaded', (await tue.locator('[data-act="ask-template"]').innerText()) === 'Load'
+    && (await tue.locator('.tpl-name').innerText()) === 'Tuesday');
 
   // A weekday template deleted stays deleted.
   const wed = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-3"]') }).locator('[data-act="del"]');
@@ -1444,15 +1427,62 @@ check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"
 // A template says what is in it, not only what it is called.
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
-check('a template is closed on the shelf to begin with', (await page.locator('.tpl-body').count()) === 0);
-await page.locator('[data-act="peek-template"]').first().click();
-check('opening one lists the routes it would put on the plan',
-  (await page.locator('.tpl-body tbody tr').count()) === 15);
+check('a template\'s contents are not on show to begin with', (await page.locator('.tpl-body').count()) === 0);
+// Laid out as the week under it is (owner, 2026-10-01): Monday to Friday in
+// five columns on one row, in day order, and every other template after.
+// Where each card sits in the shelf, measured from the shelf, so a scroll
+// between two looks does not read as a card moving.
+const tplCards = () => page.evaluate(() => {
+  const shelf = document.querySelector('#planTemplates .shelf').getBoundingClientRect();
+  return [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
+    const r = c.getBoundingClientRect();
+    return { name: c.querySelector('.tpl-name').textContent.trim(), at: `${Math.round(r.left - shelf.left)},${Math.round(r.top - shelf.top)}` };
+  });
+});
+const cardsBefore = await tplCards();
+same('the shelf puts Monday to Friday first, in day order', cardsBefore.slice(0, 5).map((c) => c.name), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+check('side by side on one row, as the week\'s columns are', new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[1])).size === 1
+  && new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[0])).size === 5, JSON.stringify(cardsBefore));
+// Resting the mouse on a card shows what it holds beside it, as a submenu
+// opens beside its menu (owner, 2026-10-01); leaving lets it go.
+const peek = page.locator('#tplPeek');
+const filled = page.locator('#planTemplates .tpl-head[data-filled]').first();
+await filled.hover();
+await page.waitForTimeout(600);
+check('resting the mouse on a card shows the routes it would put on the plan, beside it',
+  await peek.isVisible() && (await peek.locator('.tpl-body tbody tr').count()) === 15 && await page.evaluate(() => {
+    const l = document.getElementById('tplPeek').getBoundingClientRect(), c = document.querySelector('#planTemplates .tpl-head.shown').getBoundingClientRect();
+    return l.left >= c.right || l.right <= c.left;
+  }));
+same('and moves no card', (await tplCards()).map((c) => c.at), cardsBefore.map((c) => c.at));
 check('with the driver and car each route was saved with',
-  (await page.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
-  await page.locator('.tpl-body tbody tr').nth(2).innerText());
-await page.locator('[data-act="peek-template"]').first().click();
-check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
+  (await peek.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
+  await peek.locator('.tpl-body tbody tr').nth(2).innerText());
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('moving away lets it go', await peek.isHidden() && (await page.locator('.tpl-body').count()) === 0);
+// The route count pins it, for a click, a finger or the keyboard.
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('a click on its route count keeps it open when the mouse leaves', await peek.isVisible()
+  && (await page.locator('#planTemplates [data-act="peek-template"]').first().getAttribute('aria-expanded')) === 'true');
+await page.keyboard.press('Escape');
+check('and Esc shuts it', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek [data-act="peek-template"]').click();
+check('so does its ✕', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.mouse.click(5, 300);
+check('and a click anywhere else', await peek.isHidden());
+// From the keyboard the focus goes into it, and back to the count when it shuts.
+await page.locator('#planTemplates [data-act="peek-template"]').first().focus();
+await page.keyboard.press('Enter');
+check('Enter on the route count pins it and puts the focus on its ✕', await peek.isVisible()
+  && await page.evaluate(() => !!document.activeElement?.closest('#tplPeek')));
+await page.keyboard.press('Enter');
+check('and Enter there shuts it, handing the focus back to the count', await peek.isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'peek-template' && !!document.activeElement.closest('#planTemplates')));
 
 // --- the tag menu is never cut off ---
 // It was drawn inside its row, and the rows sit in a list that scrolls, so the
@@ -1690,11 +1720,12 @@ check('a click into a text box with a tag menu open is not lost',
 await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
   routes: Array.from({ length: 30 }, (_, i) => ({ name: String(i + 1), driver: `${name} ${i}`, carId: '', positionId: '', round: '', highlight: false, gapBefore: false })) })) });
 await page.reload({ waitUntil: 'networkidle' });
-await page.locator('[data-act="peek-template"]').first().click();
-await page.locator('.tpl-body').evaluate((b) => { b.scrollTop = 300; });
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek .tpl-body').evaluate((b) => { b.scrollTop = 300; });
 await page.waitForTimeout(50);
-await page.locator('[data-act="peek-template"]').nth(1).click();
-check('a second template opens at its own top, not where the first was left', (await page.locator('.tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.locator('#planTemplates [data-act="peek-template"]').nth(1).click();
+check('a second template opens at its own top, not where the first was left', (await page.locator('#tplPeek .tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.keyboard.press('Escape');
 
 // A group renamed into a day is badged as it is typed.
 await page.click('[data-act="tab"][data-tab="drivers"]');
@@ -4096,10 +4127,11 @@ for (const [seededAt, wantNew, what] of [
   const pg = await calOpen('2026-09-29T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30') });
   const quiet = await line(pg);
   check('the date line is quiet for the next working day', quiet.text === 'Wednesday 30/09, the next working day.' && !quiet.off && !quiet.button, JSON.stringify(quiet));
+  check('the Date box shows the plan\'s day as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
   const cases = [
-    ['2026-09-29', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
-    ['2026-09-28', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
-    ['2026-10-01', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
+    ['29/09/2026', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
+    ['28/09/2026', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
+    ['01/10/2026', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
     ['', 'The date is not a real day. The next working day is Wednesday 30/09.'],
   ];
   for (const [typed, want] of cases) {
@@ -4109,8 +4141,74 @@ for (const [seededAt, wantNew, what] of [
     check(`and the focus stays in the Date box (${typed || 'nothing'})`, await pg.evaluate(() => document.activeElement?.id === 'date'));
   }
   check('typing a date leaves the warnings and stripes as they were', (await pg.locator('#tab-plan tbody tr.warn').count()) === 0);
+  // Above the line, the plan's day large, and how far it is from today
+  // (owner, 2026-10-01). Today here is Tuesday 29/09.
+  const head = () => pg.locator('#dateHead').evaluate((el) => el.innerText.replace(/\s+/g, ' ').trim());
+  for (const [typed, want] of [['30/09/2026', 'Wednesday 30/09/2026 Planning tomorrow'], ['29/09/2026', 'Tuesday 29/09/2026 Planning today'],
+    ['28/09/2026', 'Monday 28/09/2026 Planning yesterday'], ['02/10/2026', 'Friday 02/10/2026 Planning three days ahead'],
+    ['25/09/2026', 'Friday 25/09/2026 Planning four days ago'], ['20/10/2026', 'Tuesday 20/10/2026 Planning 21 days ahead'], ['', 'No date set']]) {
+    await pg.fill('#date', typed);
+    same(`typing ${typed || 'nothing'}, the day above the line reads`, await head(), want);
+  }
+  check('in larger type than the page', await pg.locator('#dateHead .date-big').evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 24));
   await pg.click('[data-act="set-tomorrow"]');
   check('Set to tomorrow sets the date and saves it', (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-09-30,2026-09-30');
+  check('and the Date box shows it as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
+  // The Date box reads dd/mm/yyyy in any browser language, and a few other
+  // ways of writing it; the plan keeps YYYY-MM-DD, as it always has.
+  const typedAs = async (typed) => { await pg.fill('#date', typed); return pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join()); };
+  for (const typed of ['02/10/2026', '2.10.2026', '2-10-2026', '2026-10-02']) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} in the Date box sets and saves 2026-10-02`, got === '2026-10-02,2026-10-02', got);
+  }
+  // Half typed, or not a real day: the plan keeps its day and nothing is
+  // saved; the day above the line and the line itself say so.
+  for (const typed of ['02/10/20', '02/10/202', '31/09/2026', '10/13/2026']) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} keeps the plan's day, 2026-10-02, and saves nothing new`, got === '2026-10-02,2026-10-02'
+      && (await head()) === 'Not a date yet' && (await line(pg)).text.startsWith('Not a real day yet'), got);
+  }
+  await pg.fill('#date', '02/10/20');
+  await pg.evaluate(() => render());
+  check('a redraw meanwhile keeps what was typed in the box', (await pg.inputValue('#date')) === '02/10/20');
+  await pg.fill('#date', '2.10.2026');
+  await pg.locator('#date').blur();
+  check('leaving the Date box writes what was typed as dd/mm/yyyy', (await pg.inputValue('#date')) === '02/10/2026', await pg.inputValue('#date'));
+  await pg.fill('#date', '31/09/2026');
+  await pg.locator('#date').blur();
+  check('and a day left half typed goes back to the day the plan kept', (await pg.inputValue('#date')) === '02/10/2026'
+    && (await head()) === 'Friday 02/10/2026 Planning three days ahead');
+  // « ‹ › »: a month or a day either way, as if typed; the focus stays put.
+  const stepBy = async (unit, by) => { await pg.click(`[data-act="date-step"][data-unit="${unit}"][data-by="${by}"]`); return pg.evaluate(() => [state.date, document.getElementById('date').value].join()); };
+  same('› is a day later', await stepBy('day', 1), '2026-10-03,03/10/2026');
+  same('‹ a day earlier', await stepBy('day', -1), '2026-10-02,02/10/2026');
+  same('» a month later', await stepBy('month', 1), '2026-11-02,02/11/2026');
+  same('« a month earlier', await stepBy('month', -1), '2026-10-02,02/10/2026');
+  check('and the button keeps the focus, for another press', await pg.evaluate(() => document.activeElement?.dataset.unit === 'month'));
+  await pg.fill('#date', '31/01/2027');
+  same('a month on from the 31st is the month\'s last day', await stepBy('month', 1), '2027-02-28,28/02/2027');
+  check('and it is saved', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).date)) === '2027-02-28');
+  check('everything on the Date row is one height', new Set(await pg.locator('#planBar .btn, #date').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)))).size === 1);
+  // A click on the box opens the calendar, set to the plan's day; the keyboard
+  // never does, so typing still works.
+  await pg.evaluate(() => { window.pickerOpened = []; HTMLInputElement.prototype.showPicker = function () { window.pickerOpened.push(this.value); }; });
+  await pg.click('#date');
+  same('a click on the Date box opens the calendar, on the plan\'s day', await pg.evaluate(() => window.pickerOpened), ['2027-02-28']);
+  await pg.focus('[data-act="date-step"][data-unit="day"][data-by="-1"]');
+  await pg.keyboard.press('Tab');
+  check('reaching it with Tab does not', await pg.evaluate(() => document.activeElement?.id === 'date' && window.pickerOpened.length === 1));
+  await pg.fill('#date', '02/10/2026');
+  // The calendar button opens the browser's own picker, on a date field kept
+  // out of sight; a day picked there goes into the box as if typed.
+  check('the calendar button sits beside the Date box, and its field is out of sight',
+    await pg.locator('.date-box [data-act="pick-date"]').isVisible() && (await pg.locator('#datePick').evaluate((i) => getComputedStyle(i).opacity)) === '0');
+  await pg.click('[data-act="pick-date"]');
+  await pg.keyboard.press('Escape');
+  await pg.locator('#datePick').evaluate((i) => { i.value = '2026-10-05'; i.dispatchEvent(new Event('change', { bubbles: true })); });
+  check('a day picked from the calendar is written in the box as dd/mm/yyyy, set and saved',
+    (await pg.inputValue('#date')) === '05/10/2026' && (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-10-05,2026-10-05');
+  check('and the focus is back in the Date box', await pg.evaluate(() => document.activeElement?.id === 'date'));
+  await pg.click('[data-act="set-tomorrow"]');
   await pg.fill('#date', '2026-10-01');
   await pg.focus('[data-act="set-tomorrow"]');
   await pg.keyboard.press('Enter');
@@ -4135,35 +4233,99 @@ for (const [at, date, what] of [
   await pg.close();
 }
 
-// Item 4: template offers and the week row follow the plan's day.
+// Item 4: the week row follows the plan's day; templates, even ones an older
+// copy set for a weekday, never offer themselves (owner, 2026-10-01).
 {
   const tpl = (id, name, weekday) => ({ id, name, weekday, routes: [{ name: '1', driver: name, carId: '', positionId: '', round: '', highlight: false, gapBefore: false }] });
-  const offers = (pg) => pg.locator('#notices [data-act="ask-template"]').allInnerTexts();
+  const offers = (pg) => pg.locator('#notices [data-act="ask-template"]').count();
   // Friday 2026-10-02, the plan dated Monday 10-05.
   const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-10-05', {
     templates: [tpl('tm', 'Mondays', '1'), tpl('tw', 'Wednesdays', '3'), tpl('tf', 'Fridays', '5')],
     drivers: [{ id: 'd1', name: 'Ana', available: true }], driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   }) });
-  same("on a Friday, a Monday plan offers the Monday template and not Friday's", await offers(pg), ['Use Mondays']);
+  check('a Monday plan with a template set for Mondays raises no offer', (await offers(pg)) === 0, await pg.locator('#notices').innerText());
   check("the week marks the plan's day", (await pg.locator('#planWeek .week-col[aria-current="date"]').getAttribute('data-day')) === '1');
   check('no word in the rail says today', !/today/i.test(await pg.locator('#tab-plan [data-panel="drivers"]').evaluate((el) => el.outerHTML)));
   const before = await pg.locator('#notices').innerHTML();
-  await pg.fill('#date', '2026-10-07');
+  await pg.fill('#date', '07/10/2026');
   check('typing a date leaves the notices alone', (await pg.locator('#notices').innerHTML()) === before);
   await pg.click('[data-act="tab"][data-tab="plan"]');
-  await pg.evaluate(() => { offerPlanDayTemplate({ quiet: true }); render(); });
-  same('a Wednesday plan offers the Wednesday template', await offers(pg), ['Use Wednesdays']);
   await pg.click('[data-act="set-tomorrow"]');
-  same('Set to tomorrow switches the offer to Monday, and only one stays', await offers(pg), ['Use Mondays']);
+  check('nor does Set to tomorrow raise one', (await offers(pg)) === 0);
+  same('and the templates keep the days they were saved with', await pg.evaluate(() => ['tm', 'tw', 'tf'].map((id) => byId(state.templates, id).weekday)), ['1', '3', '5']);
   await pg.close();
 }
+
+// The plan's day's crew comes in with the date (owner, 2026-10-01): typing,
+// picking, a day step and Set to tomorrow load that weekday's crew, as the
+// week's Load does; a day with no crew changes nobody.
 {
-  const tpl = (id, name, weekday) => ({ id, name, weekday, routes: [{ name: '1', driver: name, carId: '', positionId: '', round: '', highlight: false, gapBefore: false }] });
-  const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-13-45', {
-    templates: ['0', '1', '2', '3', '4', '5', '6'].map((d) => tpl(`t${d}`, `Day ${d}`, d)),
-  }) });
-  check('a date that is not a real day offers no template', (await pg.locator('#notices [data-act="ask-template"]').count()) === 0);
+  const pg = await calOpen('2026-10-01T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': devPlan });
+  const inNow = () => pg.evaluate(() => state.drivers.filter((d) => d.available).map((d) => d.name).sort().join());
+  const crewOf = (name) => pg.evaluate((n) => {
+    const g = state.driverGroups.find((x) => x.name === n);
+    return state.drivers.filter((d) => g.driverIds.includes(d.id)).map((d) => d.name).sort().join();
+  }, name);
+  await pg.fill('#date', '05/10/2026');
+  same('typing a Monday brings Monday\'s crew in and sends the rest away', await inNow(), await crewOf('Monday crew'));
+  check('and saves it', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).drivers.filter((d) => d.available).length))
+    === (await crewOf('Monday crew')).split(',').length);
+  await pg.fill('#date', '02/10/2026');
+  same('a Friday, Friday\'s', await inNow(), await crewOf('Friday'));
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a step to Saturday loads the Saturday crew', await inNow(), await crewOf('Lørdag gjeng'));
+  const sat = await inNow();
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a Sunday, which has no crew, changes nobody', await inNow(), sat);
+  check('the rail and the week show it', (await pg.locator('#planWeek .week-load.lit').count()) === 0
+    && (await pg.locator('#tab-plan [data-panel="drivers"] .rail-row.away').count()) > 0);
+  await pg.click('[data-act="set-tomorrow"]');
+  same('Set to tomorrow loads its day\'s crew too', await inNow(), await crewOf('Friday'));
+  check('with the week\'s Friday Load lit', (await pg.locator('#planWeek .week-col[data-day="5"] .week-load.lit').count()) === 1);
+  // Only a real change to a whole date loads a crew (review, 2026-10-01).
+  await pg.evaluate(() => { state.drivers.find((d) => d.name === 'Camilla').available = false; save(); render(); });
+  await pg.fill('#date', '02/10/2026');
+  check('retyping the day the plan has loads nothing: a driver set away by hand stays away',
+    await pg.evaluate(() => !state.drivers.find((d) => d.name === 'Camilla').available));
+  // Editing the day in place, key by key: "05" over "02" passes through
+  // "0/10/2026", and the crew loads once, for the day finally written, with
+  // the focus kept in the box all along.
+  await pg.locator('#date').focus();
+  await pg.keyboard.press('Home');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.type('05');
+  same('editing the day in place loads the crew of the day written', await inNow(), await crewOf('Monday crew'));
+  check('and keeps the focus in the Date box, reading 05/10/2026', await pg.evaluate(() => document.activeElement?.id === 'date' && document.activeElement.value === '05/10/2026'));
   await pg.close();
+}
+
+// Wide screens (owner, 2026-10-01): from 2200 the map sits beside the route
+// table, from 2400 the templates and the week side by side; below 1900
+// nothing moves, and the other tabs keep their width, centred.
+{
+  const ctxW = await browser.newContext();
+  const pw = await ctxW.newPage();
+  await pw.goto(base, { waitUntil: 'networkidle' });
+  await pw.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:pref:infoHint', 'done'); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  const boxes = () => pw.evaluate(() => Object.fromEntries(['.plan-table', '#planMap', '#planTemplates', '#planWeek', 'main'].map((sel) => {
+    const b = document.querySelector(sel).getBoundingClientRect();
+    return [sel, { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top + scrollY), bottom: Math.round(b.bottom + scrollY) }];
+  })));
+  for (const [w, beside, twoUnder] of [[1680, false, false], [1920, false, false], [2200, true, false], [2560, true, true], [3840, true, true]]) {
+    await pw.setViewportSize({ width: w, height: 1200 });
+    await pw.reload({ waitUntil: 'networkidle' });
+    const b = await boxes();
+    const mapBeside = b['#planMap'].left >= b['.plan-table'].right && b['#planMap'].top === b['.plan-table'].top;
+    const sideBySide = b['#planWeek'].left >= b['#planTemplates'].right && b['#planWeek'].top === b['#planTemplates'].top;
+    check(`at ${w}, the map ${beside ? 'sits beside' : 'stays under'} the route table, and the templates and the week ${twoUnder ? 'sit side by side' : 'stack'}`,
+      mapBeside === beside && sideBySide === twoUnder && (await pw.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)), JSON.stringify(b));
+  }
+  await pw.setViewportSize({ width: 2560, height: 1200 });
+  await pw.click('[data-act="tab"][data-tab="drivers"]');
+  const main = await pw.evaluate(() => { const r = document.querySelector('main').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; });
+  same('another tab keeps its 1680, centred', main, [440, 1680]);
+  await ctxW.close();
 }
 
 // Item 7: a passed date moves on open, in memory, with Keep.
@@ -5430,6 +5592,37 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
 }
 
+// A route's car and driver: their status and tag, the same list their own
+// tabs' menus open (owner, 2026-10-01).
+{
+  await cmOpen();
+  const reg = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  same('a right-click on a route\'s car offers its status, after Go to', (await cmEntries()).slice(0, 2), [`Go to ${reg} on the Cars tab`, 'Status: OK ›']);
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  same('a right-click on a route\'s driver offers the driver\'s tag first', (await cmEntries())[0], 'Tag: No tag ›');
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  const subOpen = await cm.locator('#ctxSub').isVisible().catch(() => false);
+  const layer = subOpen ? cm.locator('#ctxSub') : cmMenu;
+  same('which lists No tag and every driver tag, No tag ticked', await layer.locator('[data-act="setLabel"] span').allTextContents(),
+    await cm.evaluate(() => ['✓ No tag', ...state.driverTags.map((t) => t.name)]));
+  await layer.locator('[data-act="setLabel"]', { hasText: 'Sick' }).click();
+  check('choosing Sick tags that driver, and saves it', await cm.evaluate(() => {
+    const d = state.drivers.find((x) => x.name === 'Guro');
+    const saved = JSON.parse(localStorage.getItem('carcoord:v1')).drivers.find((x) => x.name === 'Guro');
+    return byId(state.driverTags, d.tagId)?.name === 'Sick' && saved.tagId === d.tagId;
+  }));
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('and the menu then says it', (await cmEntries())[0] === 'Tag: Sick ›');
+  await cm.keyboard.press('Escape');
+  await cmRoute('7').locator('[data-field="driver"]').fill('Nobody Listed');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('a name on no roster has no tag to offer', !(await cmEntries()).some((x) => x.startsWith('Tag:')));
+  await cm.keyboard.press('Escape');
+}
+
 // The rail's rows: a driver's and a car's menus, opened from anywhere on the
 // row but its name box.
 {
@@ -5697,23 +5890,24 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   const before = await cmStored();
   const card = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="ask-template"][data-id="tpl-weekday"]') });
   await cmRight(card.locator('[data-act="peek-template"]'));
-  same('a template card opens the template\'s menu', await cmEntries(), ['Load…', 'Show contents', 'Update from plan', 'Delete template']);
+  same('a template card opens the template\'s menu', await cmEntries(), ['Load…', 'Show contents', 'Save the plan into it', 'Delete template']);
   check('and never offers to load it outright', (await cmMenu.locator('[data-act="load-template"]').count()) === 0);
   await cmMenu.locator('[data-act="ask-template"]').click();
-  check('Load… raises the same question as the name button', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
+  check('Load… raises the same question as the card\'s Load', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
   check('and saves nothing', (await cmStored()) === before);
-  await cmRight(card.locator('select[data-field="weekday"]'));
-  check('the weekday box opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
+  await cmRight(card.locator('.tpl-name'));
+  check('its name opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
   await cmMenu.locator('[data-act="peek-template"]').click();
-  check('Show contents opens the table', await card.locator('.tpl-table').isVisible() && await cmMenu.isHidden());
-  await cmRight(card.locator('.tpl-table tbody td').first());
-  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Update from plan', 'Delete template']);
-  await cm.keyboard.press('Escape');
+  check('Show contents opens the table beside the card', await cm.locator('#tplPeek .tpl-table').isVisible() && await cmMenu.isHidden());
+  await cmRight(card.locator('.tpl-name'));
+  same('and the card\'s menu now offers to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Save the plan into it', 'Delete template']);
+  await cmMenu.locator('[data-act="peek-template"]').click();
+  check('which it does', await cm.locator('#tplPeek').isHidden());
   // An empty weekday template: nothing to load or show, as on its card.
   const monday = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="resave-template"][data-id="tpl-weekday-1"]') });
-  await cmRight(monday.locator('select[data-field="weekday"]'));
-  same("an empty template's menu offers Update from plan and Delete only", await cmEntries(), ['Update from plan', 'Delete template']);
-  same('and its Update says what it becomes', await cmMenu.locator('[data-act="resave-template"] small').textContent(),
+  await cmRight(monday.locator('.tpl-name'));
+  same("an empty template's menu offers Save and Delete only", await cmEntries(), ['Save the plan into it', 'Delete template']);
+  same('and its Save says what it becomes', await cmMenu.locator('[data-act="resave-template"] small').textContent(),
     `It holds nothing yet; it becomes the plan's ${await cm.evaluate(() => state.routes.length)} routes`);
   await cm.keyboard.press('Escape');
 }
@@ -5726,9 +5920,9 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   const cmCard = (id) => cm.locator('#tab-plan .tpl', { has: cm.locator(`[data-act="resave-template"][data-id="${id}"]`) });
   const plan = await cm.evaluate(() => state.routes.map((r) => ({ name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId, round: r.round, highlight: r.highlight, gapBefore: r.gapBefore })));
   const sat = await cmTpl('tpl-saturday');
-  await cmRight(cmCard('tpl-saturday').locator('select[data-field="weekday"]'));
+  await cmRight(cmCard('tpl-saturday').locator('.tpl-name'));
   const replace = cmMenu.locator('[data-act="resave-template"]');
-  same('Update from plan says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
+  same('Save the plan into it says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
   await replace.click();
   same('one click alone changes nothing', await cmTpl('tpl-saturday'), sat);
   await replace.click();
@@ -5742,7 +5936,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmOpen();
   await cm.evaluate(() => { state.templates.push({ id: 'tpl-sat2', name: 'SATURDAY', weekday: '', routes: [] }); save(); render(); });
   const first = await cmTpl('tpl-saturday');
-  await cmRight(cmCard('tpl-sat2').locator('select[data-field="weekday"]'));
+  await cmRight(cmCard('tpl-sat2').locator('.tpl-name'));
   await replace.click();
   await replace.click();
   check('with two templates of the same name, the one clicked is the one replaced', (await cmTpl('tpl-sat2')).routes.length === plan.length
@@ -5841,7 +6035,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await ib.keyboard.press('Enter');
   await ib.keyboard.press('Tab');
   check('Tab through it goes on past its ⓘ and shuts it', await ib.locator('#infoBubble').isHidden()
-    && await ib.evaluate(() => document.activeElement?.id === 'date'));
+    && await ib.evaluate(() => document.activeElement?.dataset.act === 'date-step'));
   await ib.locator('.info-btn[data-info="plan-date"]').focus();
   await ib.keyboard.press('Enter');
   await ib.locator('#tab-plan tbody tr').first().locator('[data-field="name"]').focus();

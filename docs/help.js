@@ -11,7 +11,7 @@
 const HELP = {
   // ---------- Day plan ----------
   'plan-date': { title: 'The date',
-    text: 'The date printed at the top of the sheet, normally the next working day. The line under it says when it is not and offers Set to tomorrow; a passed date moved forward when the app opened can be put back with Keep.' },
+    text: 'The date printed at the top of the sheet, normally the next working day. Type it as dd/mm/yyyy, or pick it with the calendar button. The line under it says when it is not the next working day and offers Set to tomorrow; a passed date moved forward when the app opened can be put back with Keep.' },
   'plan-warnings': { title: 'Routes to look at',
     text: 'A car on two routes, a spot taken twice in one round, or a car or spot with a status label on a route. Nothing is ever blocked, since sometimes it is meant, and none of this goes on the printed sheet.' },
   'plan-routes': { title: 'The routes',
@@ -21,7 +21,7 @@ const HELP = {
   'plan-cars': { title: 'The Cars panel',
     text: 'The fleet, each car with its route, Free, or its status label. Drag a registration onto a route to put it there; 🏷 or a right-click sets its status.' },
   'plan-templates': { title: 'Day templates',
-    text: 'Saved copies of the routes, with their drivers, cars, positions, rounds and marks, but never the date. Update from plan fills a template with the plan on screen; loading one asks which parts to take and says what will happen before anything changes.' },
+    text: 'Saved copies of the routes, with their drivers, cars, positions, rounds and marks, but never the date. Monday to Friday sit in their own columns, as in the week below. Load puts a template on the plan: it asks which parts to take and says what will happen before anything changes. Save puts the plan on screen into the template, after a backup; click it twice.' },
   'plan-week': { title: 'The week',
     text: 'Monday to Friday, each with its crew: the drivers whose usual days include it. Load makes that crew the ones in and everyone else away; a day with no crew can save the drivers in now as its crew.' },
   'plan-map': { title: 'Parking map',

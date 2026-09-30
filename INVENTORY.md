@@ -16,8 +16,8 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Driver roster** — an editable list of drivers, offered to the day plan's driver box as suggestions while it stays free text. Starts empty.
 - ✅ **Drivers tab: usual days, tags and notes** — tick the weekdays (Monday to Friday) a driver usually works, which puts them in that day's group, plus one tag from the shared list and a free note per driver.
 - ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in.
-- ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself when the plan is for its weekday, but that is off unless you turn it on, and even then it only asks.
-- ✅ **Weekday templates, Update from plan, loading in parts** — Monday to Friday templates ready on the shelf (empty until Update from plan fills them), an Update from plan button on each card, and a load that asks which parts to take (routes, drivers, cars, positions and rounds) and says exactly what it will do (0.13.0).
+- ✅ **Day templates** — save the plan as it stands under a name, and Load it back. Loading asks first, naming what it replaces, and takes a backup. Monday to Friday sit in columns like the week; each card has Load and Save. Templates no longer offer themselves on a weekday (0.14.1).
+- ✅ **Weekday templates, saving into a template, loading in parts** — Monday to Friday templates ready on the shelf (empty until Save fills them), a Save button on each card (Update from plan until 0.14.1), and a load that asks which parts to take (routes, drivers, cars, positions and rounds) and says exactly what it will do (0.13.0).
 - ✅ **Parking map** — a plain drawing of the yard under the week: Spot 1 to Spot 5 and the Gate, each with its routes by round, red when taken twice in one round; other positions listed under it.
 - ✅ **Day plan layout** — day templates straight under the route list, then the week: a column per weekday listing that day's crew, with Load above each, replacing the Mon–Sun buttons.
 - ✅ **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for.
@@ -83,6 +83,8 @@ stays where it is and stays the source of truth for the printed page.
 ## Printing
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
 - ✅ **Route selection** — all ticked, untick any you don't want; the preview and the sheet count follow.
+- ✅ **Pay attention marks** — a tick per bread on Configure, remembered on this PC; a marked bread prints with a warning triangle and in bold wherever it appears.
+- 🚧 **Faster ticks, and no bread left off quietly** — a route untick lays out only what changed; a text quantity prints as written (20 characters at most) and counts as the number it starts with; a new file clears the old sheets; a red warning holds Print when a ticked route's pages do not carry every line the file gives it. `manifests/2026-10-01-breadify-fixes.md`.
 - ✅ **Crate rules remembered** — capacities and per-bread sizes, because those are facts about the warehouse. Nothing else about today's print is kept.
 - ✅ **Two jokes at low opacity** behind the steps that carry them: a bread roll at a computer behind Check, and Megamind asking `NO BREAD?` behind Open while nothing has been opened. The Check step's finding cards are translucent for the first one's sake.
 
@@ -95,3 +97,4 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
+- 💭 **Plan ahead, saved to a date** — plan tomorrow and submit it as that day's list, then plan two days ahead and submit that, each kept under its own date in a separate saved-days area, with a Plan ahead / Save to date button. Not for the current version.
