@@ -136,6 +136,9 @@ function applyTheme(choice) {
   else delete document.documentElement.dataset.theme;
 }
 applyTheme();
+// False once this browser has refused to keep a choice: it then lasts only
+// until the page is closed or reloaded, and the Data tab says so.
+let themeKept = true;
 window.addEventListener('storage', (e) => {
   if (e.key !== null && e.key !== 'carcoord:pref:theme') return;
   applyTheme();
@@ -974,6 +977,16 @@ function renderLabels() {
     <table class="grid"><thead><tr><th>Name</th><th>Colour</th>${ticks ? '<th>Printout</th>' : ''}<th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+/* The Colours switch, in the This browser card. Which button is pressed is
+   read from the page itself: no attribute on <html> is Follow the computer. */
+function coloursRow() {
+  const now = document.documentElement.dataset.theme || 'follow';
+  const choice = (v, name) => `<button class="btn colour-choice${now === v ? ' lit' : ''}" data-act="theme" data-colours="${v}" aria-pressed="${now === v}">${name}</button>`;
+  return `<p class="colours" role="group" aria-label="Colours">Colours: ${choice('follow', 'Follow the computer')}${choice('light', 'Light')}${choice('dark', 'Dark')}</p>
+      <p class="hint">Light or Dark is kept in this browser only. The printed sheet looks the same whichever you pick.</p>
+      ${themeKept ? '' : `<p class="status warn-status">This browser couldn't keep the choice, so it lasts only until this page is closed or reloaded.</p>`}`;
+}
+
 const when = (d) => {
   if (!d) return '';
   const t = new Date(d);
@@ -1129,6 +1142,7 @@ function renderData() {
       <h3>This browser</h3>
       <p class="status ${p === 'granted' ? 'on' : 'off'}">${esc(persistText)}</p>
       <p class="hint">If this page ever won't start, <a href="recover.html">recover.html</a> downloads everything this browser holds.</p>
+      ${coloursRow()}
     </div>
 
     <div class="card" id="shareCard"></div>
@@ -1923,6 +1937,15 @@ document.addEventListener('click', (e) => {
     // browser could not read, on the very click (the Data tab) the warning
     // sends you to.
     case 'tab': tab = b.dataset.tab; render(); return;
+    // The colours belong to this browser, never to the plan: a pref, and like
+    // switching tabs it saves nothing. Follow the computer removes the pref.
+    case 'theme': {
+      const t = b.dataset.colours === 'light' || b.dataset.colours === 'dark' ? b.dataset.colours : null;
+      applyTheme(t);
+      themeKept = typeof Store.setPref === 'function' && Store.setPref('theme', t) === true;
+      renderKeepingFocus();
+      return;
+    }
     case 'show-data': tab = 'data'; render(); return;
     case 'print': doPrint(); return;
     case 'up': if (i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]]; break;

@@ -3378,6 +3378,7 @@ const pairs = [
   ['a day with no crew', '#tab-plan .day.none', 'color', TEXT],
   ['a day with a crew', '#tab-plan .day:not(.none):not(.on)', 'color', TEXT],
   ['the recovery page link', '#tab-data a[href="recover.html"]', 'color', TEXT],
+  ['the pressed Colours button', '#tab-data .colour-choice.lit', 'color', TEXT],
   ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
   ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
   ['a grip', '.grip', 'color', MARK],
@@ -3633,6 +3634,108 @@ check('without theme.js, app.js still applies Dark', noThemeJs.got.now === 'dark
   && (await noThemeJs.pg.evaluate(() => ![...document.scripts].some((s) => /theme\.js/.test(s.src)))), JSON.stringify(noThemeJs.got));
 check('and logs no console errors (no theme.js)', !noThemeJs.errs.length, noThemeJs.errs.join(' | '));
 await noThemeJs.ctx.close();
+
+// --- the Colours switch: this browser's choice, and never a save ---
+// Three buttons in the This browser card. Each press sets the page's colours
+// at once; Light and Dark are kept as a pref, Follow the computer removes it.
+// Nothing about the plan is written: not on a lost plan, not to a linked
+// file, not on a plain profile.
+const swCtx = await browser.newContext({ colorScheme: 'light' });
+const sw = await swCtx.newPage();
+const swErrors = [];
+sw.on('console', (m) => m.type() === 'error' && swErrors.push(m.text()));
+sw.on('pageerror', (e) => swErrors.push(String(e)));
+await sw.goto(base, { waitUntil: 'networkidle' });
+const swState = () => sw.evaluate(() => ({
+  attr: document.documentElement.dataset.theme || null,
+  pref: localStorage.getItem('carcoord:pref:theme'),
+  pressed: document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours || null,
+}));
+const press = async (colours, keyboard) => {
+  const sel = `#tab-data [data-act="theme"][data-colours="${colours}"]`;
+  if (keyboard) { await sw.focus(sel); await sw.keyboard.press('Enter'); } else await sw.click(sel);
+};
+check('a plain open writes no colour choice', await sw.evaluate(() => localStorage.getItem('carcoord:pref:theme') === null));
+await sw.click('[data-act="tab"][data-tab="data"]');
+check('the Colours row has three buttons, Follow the computer pressed',
+  (await sw.locator('#tab-data [data-act="theme"]').count()) === 3 && (await swState()).pressed === 'follow');
+await press('dark');
+const swDark = await swState();
+check('Dark sets the page dark and keeps the choice', swDark.attr === 'dark' && swDark.pref === 'dark' && swDark.pressed === 'dark', JSON.stringify(swDark));
+await press('light');
+const swLight = await swState();
+check('Light sets it light and keeps that', swLight.attr === 'light' && swLight.pref === 'light' && swLight.pressed === 'light', JSON.stringify(swLight));
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.click('[data-act="tab"][data-tab="data"]');
+const swReload = await swState();
+check('a reload keeps the choice', swReload.attr === 'light' && swReload.pressed === 'light', JSON.stringify(swReload));
+await press('follow', true);
+const swFollow = await swState();
+check('Follow the computer removes it', swFollow.attr === null && swFollow.pref === null && swFollow.pressed === 'follow', JSON.stringify(swFollow));
+check('and a key press leaves the focus on the pressed button',
+  await sw.evaluate(() => document.activeElement?.matches('[data-act="theme"][data-colours="follow"]')));
+// Another tab follows, pressed button and all.
+const sw2 = await swCtx.newPage();
+await sw2.goto(base, { waitUntil: 'networkidle' });
+await sw2.click('[data-act="tab"][data-tab="data"]');
+await press('dark');
+await sw2.waitForFunction(() => document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours === 'dark', null, { timeout: 3000 }).catch(() => {});
+check('another tab follows, its pressed button too', await sw2.evaluate(() => document.documentElement.dataset.theme === 'dark'
+  && document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours === 'dark'));
+await sw2.close();
+await press('follow');
+
+// Never saves, on a plan this browser could not read.
+await sw.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.click('[data-act="tab"][data-tab="data"]');
+for (const keyboard of [false, true]) for (const c of ['follow', 'light', 'dark']) await press(c, keyboard);
+check('pressing every colour, by mouse and by key, leaves an unreadable plan exactly as it was',
+  await sw.evaluate(() => localStorage.getItem('carcoord:v1') === '{not json at all'));
+await press('follow');
+
+// Never saves, with a linked save file allowed to write.
+await sw.evaluate(() => localStorage.clear());
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.evaluate((t) => localStorage.setItem('carcoord:v1', t), devPlan);
+await sw.reload({ waitUntil: 'networkidle' });
+await linkStandIn(sw, devPlan, { perm: 'granted' });
+await sw.evaluate(() => { window.__saves = 0; const save = Store.save; Store.save = (...a) => { window.__saves++; return save(...a); }; });
+const keptBefore = await sw.evaluate(() => ({ v1: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups') }));
+await sw.click('[data-act="tab"][data-tab="data"]');
+for (const keyboard of [false, true]) for (const c of ['dark', 'light', 'follow']) await press(c, keyboard);
+await sw.evaluate(() => Store.flush());
+const swWrites = await sw.evaluate(() => ({ disk: window.__disk.writes, saves: window.__saves, v1: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups') }));
+check('with a linked file, no press writes the file or calls a save', swWrites.disk === 0 && swWrites.saves === 0, JSON.stringify({ disk: swWrites.disk, saves: swWrites.saves }));
+check('and the saved plan and Backups are byte for byte as they were', swWrites.v1 === keptBefore.v1 && swWrites.backups === keptBefore.backups);
+// Export and share codes carry no colours.
+await press('dark');
+const [swDl] = await Promise.all([sw.waitForEvent('download'), sw.click('[data-act="export"]')]);
+const swExport = await readFile(await swDl.path(), 'utf8');
+const swCodes = await sw.evaluate(async () => [await Share.encode(state, 'day'), await Share.encode(state, 'all')]);
+await press('follow');
+const swCodesFollow = await sw.evaluate(async () => [await Share.encode(state, 'day'), await Share.encode(state, 'all')]);
+check('an Export made in dark carries no colours', !/theme|colours/i.test(swExport));
+check('and share codes are the same whatever the colours', swCodes.join() === swCodesFollow.join());
+// A browser that will not keep the choice: it still applies, and says so.
+await sw.evaluate(() => {
+  const set = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:pref:theme') throw new Error('refused on purpose'); return set.call(this, k, v); };
+});
+await press('dark');
+check("a browser that refuses to keep it still turns dark, and says it couldn't keep it",
+  (await sw.evaluate(() => document.documentElement.dataset.theme)) === 'dark'
+  && (await sw.locator('#tab-data', { hasText: "couldn't keep the choice" }).count()) === 1);
+// Pack 1's layout: no table in the card, Backups last, no sideways scroll.
+check('the This browser card has no table, and Backups is still the last card',
+  await sw.evaluate(() => {
+    const card = [...document.querySelectorAll('#tab-data .card')].find((c) => c.querySelector('[data-act="theme"]'));
+    return card && !card.querySelector('table') && /Backups/.test(document.querySelector('#tab-data .card:last-child h3')?.textContent || '');
+  }));
+await sw.setViewportSize({ width: 390, height: 844 });
+check('the Data tab fits a phone screen with the switch', await sw.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+check('the Colours switch logs no console errors', swErrors.length === 0, swErrors.join(' | '));
+await swCtx.close();
 
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the

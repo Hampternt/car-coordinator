@@ -247,6 +247,11 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .card .older { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
 .arch-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 0; border-top: 1px solid var(--line); }
 .arch-row .what { flex: 1 1 24em; min-width: 0; }
+/* The Colours switch: the pressed choice is lit hi-vis like a crew in force,
+   not pink, which is for the printed sheet. */
+.colours { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.card .colours .btn { margin-right: 0; }
+.colour-choice.lit { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); font-weight: 700; }
 .btn.primary-ish { background: var(--hivis); border-color: var(--on-bright); color: var(--on-bright); font-weight: 600; }
 .status { margin: 0 0 10px; padding-left: 24px; position: relative; }
 .status::before { position: absolute; left: 0; top: 0; font-weight: 700; }
