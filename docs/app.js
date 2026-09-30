@@ -3695,6 +3695,20 @@ function clearOfBar(el) {
   else if (a.bottom > window.innerHeight - 8) window.scrollBy(0, a.bottom - window.innerHeight + 8);
 }
 
+/* The running version, quietly at the foot of every tab, with the way to
+   What's new (owner, 2026-09-30). Drawn here rather than in index.html, so a
+   cached older index.html still shows it; never printed. */
+function drawFooter() {
+  let f = document.getElementById('appFooter');
+  if (!f) {
+    f = document.createElement('footer');
+    f.id = 'appFooter';
+    f.className = 'app-footer';
+    document.body.appendChild(f);
+  }
+  f.innerHTML = `Car Coordinator ${esc(APP_VERSION)} \u00b7 <button type="button" class="linkish" data-act="show-data">What's new</button>`;
+}
+
 async function start() {
   // First, before anything can draw: Store.init draws the page before it
   // returns, and every draw asks the tour where its card goes.
@@ -3708,6 +3722,7 @@ async function start() {
     });
   }
   clearTheBar();
+  drawFooter();
   // Read before Share.readHash() clears it: an open by share link keeps the
   // update note for the next ordinary open.
   const link = /^#d=/.test(location.hash || '');

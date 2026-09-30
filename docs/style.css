@@ -654,10 +654,15 @@ body.show-sheet .sheet {
 .sheet .extra h4 { margin: 3mm 0 1mm; font-size: 14pt; }
 .sheet .extra p { margin: 0; }
 
+/* The version at the foot of the page. */
+.app-footer { padding: 8px 20px 24px; color: var(--quiet); font-size: 12px; }
+.app-footer .linkish { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.app-footer .linkish:hover { color: var(--ink); }
+
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #tour, #tourRing { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #tour, #tourRing, .app-footer { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 
