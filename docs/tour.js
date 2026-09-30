@@ -16,14 +16,33 @@
    beside app.js, and a top-level name of its own could clash with app.js's
    and stop the app from starting. */
 const Tour = (() => {
-  // Each step: the tab it shows, one selector for what it points at, the
-  // words, and `align: 'right'` to line the card up with the target's right
-  // edge.
+  /* Each step: the tab it shows, one selector for what it points at, the
+     words, and `align: 'right'` to line the card up with the target's right
+     edge. The words name what is on screen exactly as it reads there.
+
+     ANY CHANGE THAT MOVES OR RENAMES A TARGET UPDATES THESE STEPS IN THE SAME
+     COMMIT. The ids they use (#addCarBar, #addDriverBar, #planBar, #fileCard,
+     #backupsCard) are there for the tour; scripts/tour.mjs fails as soon as a
+     selector stops matching exactly one thing that can be seen. */
   const STEPS = [
-    { tab: 'cars', target: '#newCar', title: 'Start with your cars',
-      text: 'Paste the whole fleet into this box at once, with spaces between registrations, and press Add car.' },
-    { tab: 'plan', target: '#tab-plan .plan-table', title: 'Filling a route',
-      text: 'Each row is one line of the sheet on the pillar.' },
+    { tab: 'cars', target: '#addCarBar', title: 'Start with your cars',
+      text: 'Paste the whole fleet into this box at once, with spaces between registrations, and press + Add car. A Workshop or Out of service label keeps a car pickable, but the plan warns when it is used.' },
+    { tab: 'positions', target: '#tab-positions tbody tr:first-child', title: 'Your packing spots',
+      text: 'The app starts you with Spot 1 to 5 and a Garage; rename them to match your yard. Tick Many cars for a spot several routes share, like the Garage.' },
+    { tab: 'drivers', target: '#addDriverBar', title: 'Your drivers',
+      text: 'Type names separated by commas; In or Away on each row says who is working. Tick a driver\'s usual days to make each weekday\'s crew, which the week under the route list puts in with one click.' },
+    { tab: 'plan', target: '#tab-plan .plan-table tbody tr:first-child', title: 'Filling a route',
+      text: 'Each row is one line of the sheet on the pillar: pick the driver, car, position and round, or drag a name in from the Drivers and Cars lists. Mark prints the row pink, Gap leaves a blank line above it, a right-click on a row shows what else it can do, and Day templates under the routes keep a plan you use again.' },
+    { tab: 'plan', target: '#planBar', title: 'Warnings, never blocks',
+      text: 'Set the date here; it prints at the top of the sheet, and the line under it offers Set to tomorrow when the plan is not for the next working day. A car on two routes or a spot used twice in a round shows in an amber box above and in red on the parking map further down, but nothing is ever blocked.' },
+    { tab: 'preview', target: '.topbar [data-act="print"]', title: 'Printing',
+      text: 'Print preview shows exactly what goes on paper. Print / save PDF opens the print dialog; pick Microsoft Print to PDF for a file.' },
+    { tab: 'data', target: '#shareCard > h3:first-child', align: 'right', title: 'Sending the list to another PC',
+      text: 'Copy the day plan makes a code to paste into a chat or an email; nothing is uploaded. The other PC pastes it under Load a list someone sent you, presses Read the list, sees what it holds and presses Load it, and a backup is taken there first.' },
+    { tab: 'data', target: '#fileCard > h3', align: 'right', title: 'Where your data lives',
+      text: 'New here: Choose save file… (OneDrive, a network drive, a stick) and your changes are also written there; after a restart this card asks you to Reconnect first. Already have a file, on a new PC, a cleared browser or the other version of the app: use Open an existing file…, because Choose writes the plan on screen over the file you pick. The web version and the Windows app keep separate lists.' },
+    { tab: 'data', target: '#backupsCard > h3', align: 'right', title: 'Backups',
+      text: 'A copy is taken the first time the app is opened each day and before anything is cleared or deleted; the last 12 are kept, so a lot of deleting pushes the older ones out. Restore saves what is on screen first; for a copy you want to keep, use Export a copy… on this tab.' },
   ];
 
   let hooks = null;     // from app.js: showTab, tab, closeLayers, besideAnchor, setPref

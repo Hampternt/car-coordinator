@@ -169,6 +169,28 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
   await ctx.close();
 }
 
+// (e) Step sync: every step's tab is one of the seven, and its selector
+// matches exactly one thing that can be seen, on a first open, on the
+// fixture, and on the fixture with a template's contents open (which once
+// gave the plan a second first row), at every width the app is used at.
+const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview'];
+for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600]]) {
+  for (const [what, plan, peek] of [['a first open', null, false], ['the fixture', devPlan, false], ['the fixture with a template open', devPlan, true]]) {
+    const { ctx, pg } = await openPage({ plan, width, height });
+    if (peek) await pg.evaluate(() => { tplOpen = state.templates[0].id; render(); });
+    const found = await pg.evaluate((tabs) => Tour.STEPS.map((s, i) => {
+      tab = s.tab;
+      render();
+      const seen = [...document.querySelectorAll(s.target)].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      return { step: i + 1, target: s.target, tabOk: tabs.includes(s.tab), seen: seen.length };
+    }), TABS);
+    const bad = found.filter((f) => !f.tabOk || f.seen !== 1);
+    check(`at ${width}, on ${what}, every step's selector matches exactly one thing on a real tab`, !bad.length && found.length === 9,
+      bad.map((f) => `step ${f.step} ${f.target}: ${f.tabOk ? '' : 'no such tab, '}${f.seen} seen`).join('; '));
+    await ctx.close();
+  }
+}
+
 // --- tour: done ---
 check('the tour cases log no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();

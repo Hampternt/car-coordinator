@@ -1023,13 +1023,14 @@ function renderPlan() {
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
 
+  // #planBar is the tour's step 5 (tour.js).
   $('#tab-plan').innerHTML = `
     ${noCars}
     ${found.length ? `<div class="problems">
       <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
       <ul>${found.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
     </div>` : ''}
-    <div class="bar">
+    <div class="bar" id="planBar">
       <label for="date">Date</label>
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
       <button class="btn" data-act="add-route">+ Add route</button>
@@ -1297,10 +1298,11 @@ function renderDrivers() {
       <td>${field('driver', d.id, 'note', d.note, 'placeholder="Note (e.g. back Monday)"')}</td>
       <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
   }).join('');
+  // #addDriverBar is the tour's step 3 (tour.js).
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
     <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups. A tag or a note never sets anyone Away.</p>
-    <div class="bar">
+    <div class="bar" id="addDriverBar">
       <input id="newDriver" type="text" placeholder="Name(s), separated by commas">
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
@@ -1364,11 +1366,12 @@ function renderCars() {
     <td>${labelChips('car', c)}</td>
     <td>${field('car', c.id, 'note', c.note, 'placeholder="Note (e.g. back Friday)"')}</td>
     <td class="btns">${moveDel('car', c.id)}</td></tr>`).join('');
+  // #addCarBar is the tour's step 1 (tour.js).
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
     <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning. A parked car is listed on the printout when its label has Show on printout ticked, on the Labels tab.</p>
     <p class="counts"><span class="assign yes">${onRoute} on a route</span><span class="assign none">${free} free</span><span class="assign down">${down} parked and marked</span></p>
-    <div class="bar">
+    <div class="bar" id="addCarBar">
       <input id="newCar" type="text" placeholder="Registration(s), e.g. SD12345 SE67890">
       <button class="btn" data-act="add-car">+ Add car</button>
     </div>
@@ -1567,11 +1570,12 @@ function renderData() {
     </tr>`;
   }).join('');
 
+  // #fileCard and #backupsCard are the tour's steps 8 and 9 (tour.js).
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
     <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
 
-    <div class="card">
+    <div class="card" id="fileCard">
       <h3>Auto-save to a file</h3>
       ${fileStatus()}
     </div>
@@ -1597,7 +1601,7 @@ function renderData() {
 
     ${archivesCard()}
 
-    <div class="card">
+    <div class="card" id="backupsCard">
       <h3>Backups</h3>
       <p class="hint">Automatic snapshots taken before anything is cleared or deleted, and once at the start of each day. Restoring replaces everything on screen \u2014 the current state is snapshotted first, so you can undo it.</p>
       ${list.length
