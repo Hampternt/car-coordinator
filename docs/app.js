@@ -1695,6 +1695,9 @@ function render() {
   renderPicker();
   renderTagMenu();
   renderCtxMenu();
+  // The tour follows its target through every redraw. It must never stop
+  // one: whatever it throws is logged and the page is drawn regardless.
+  if (typeof Tour !== 'undefined') { try { Tour.place(); } catch (e) { console.error(e); } }
 }
 
 /* ---------- events ---------- */
@@ -2380,6 +2383,8 @@ document.addEventListener('click', (e) => {
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
+  // The tour only points: it goes nowhere near the save below.
+  if (act === 'tour') { if (typeof Tour !== 'undefined') Tour.start(b); return; }
   const list = listFor(kind);
   const i = list ? list.findIndex((x) => x.id === id) : -1;
   // Every act below that reads list[i] needs there to be an i. There should
@@ -3321,6 +3326,17 @@ function clearOfBar(el) {
 }
 
 async function start() {
+  // First, before anything can draw: Store.init draws the page before it
+  // returns, and every draw asks the tour where its card goes.
+  if (typeof Tour !== 'undefined') {
+    Tour.init({
+      showTab: (t) => { tab = t; render(); },
+      tab: () => tab,
+      closeLayers: () => { closePicker(); closeTagMenu(); closeCtxMenu(); },
+      besideAnchor,
+      setPref: (name, value) => Store.setPref(name, value),
+    });
+  }
   clearTheBar();
   // Read before Share.readHash() clears it: an open by share link keeps the
   // update note for the next ordinary open.

@@ -7,10 +7,11 @@
     "tauri:dev": "tauri dev",
     "build": "tauri build",
     "icon": "tauri icon app-icon.png",
-    "test": "node scripts/versions.mjs && node scripts/map.mjs && node scripts/smoke.mjs && node scripts/breadify.mjs",
+    "test": "node scripts/versions.mjs && node scripts/map.mjs && node scripts/smoke.mjs && node scripts/tour.mjs && node scripts/breadify.mjs",
     "screens": "node scripts/screens.mjs",
     "test:car": "node scripts/smoke.mjs",
     "test:map": "node scripts/map.mjs",
+    "test:tour": "node scripts/tour.mjs",
     "test:breadify": "node scripts/breadify.mjs",
     "upgrade": "node scripts/upgrade.mjs",
     "colours": "node scripts/colours.mjs"

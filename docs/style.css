@@ -379,6 +379,20 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .ctx-cost { font-size: 12px; color: var(--quiet); }
 .ctx-item.armed .ctx-cost { color: var(--on-fill); }
 @media (pointer: coarse) { .ctx-item { min-height: 40px; } }
+/* The first-use tour: a card beside what it points at, and a ring round
+   that, which never takes a click. Above the top bar (5), under the car grid,
+   the tag menu (7) and the right-click menu (8). No dimming: the page stays
+   usable while it is open. */
+.tour { position: absolute; z-index: 6; width: min(340px, calc(100vw - 16px)); overflow-y: auto; background: var(--field); color: var(--ink); border: 1px solid var(--ink); border-top: 4px solid var(--hivis); box-shadow: 0 8px 24px var(--shadow-picker); padding: 10px 14px 12px; }
+.tour[hidden], #tourRing[hidden] { display: none; }
+.tour h3 { margin: 0 0 6px; font: 700 17px var(--head); }
+.tour p { margin: 0 0 8px; font-size: 14px; }
+.tour .tour-count { margin-bottom: 2px; font: 600 12px var(--head); color: var(--muted); }
+.tour .tour-extra { font-size: 13px; color: var(--muted); }
+.tour-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.tour-acts [data-tour="end"] { margin-left: auto; }
+#tourRing { position: absolute; z-index: 6; pointer-events: none; border: 3px solid var(--hivis); box-shadow: 0 0 0 2px var(--ink); }
+
 /* The row a Go to landed on, lit for a moment. */
 .grid tr.ctx-found td, .rail-row.ctx-found { background: var(--drop); }
 
@@ -599,7 +613,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #tour, #tourRing { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 
