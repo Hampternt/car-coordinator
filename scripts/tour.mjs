@@ -146,7 +146,14 @@ const measure = (pg) => pg.evaluate(() => {
 });
 for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600], [390, 844]]) {
   const { ctx, pg } = await openPage({ plan: devPlan, width, height });
-  const baseline = await pg.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  // Each tab's own sideways scroll with the tour closed: the print preview's
+  // A4 sheet is wider than a phone.
+  const baselines = await pg.evaluate((steps) => Object.fromEntries(steps.map((s) => {
+    tab = s.tab;
+    render();
+    return [s.tab, document.documentElement.scrollWidth - document.documentElement.clientWidth];
+  })), PLACES);
+  await pg.evaluate(() => { tab = 'plan'; render(); });
   await pg.evaluate((steps) => { Tour.STEPS.splice(0, Tour.STEPS.length, ...steps); }, PLACES);
   await startTour(pg);
   for (let i = 0; i < PLACES.length; i++) {
@@ -156,6 +163,7 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
     check(`${name}: the card is inside the window and under the top bar`, m.inWindow && m.underBar, JSON.stringify(m));
     if (PLACES[i].target === '#noSuchThing') check(`${name}: no ring`, !m.ring);
     else check(`${name}: the target is in view and not covered`, m.inView && m.uncovered, JSON.stringify(m));
+    const baseline = baselines[PLACES[i].tab];
     check(`${name}: no sideways scroll beyond the page's own (${baseline}px)`, m.sideways <= baseline, `${m.sideways}px`);
   }
   // Typing while the tour points at a box lands in the box.
