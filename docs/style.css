@@ -409,6 +409,7 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 /* the grey of an away driver in the rail */
 .week-col li.away { color: var(--quiet); }
 .week-none { margin: 0; font-size: 13px; }
+.week-save { width: 100%; text-align: left; color: var(--ink); }
 
 /* ---------- day templates, straight under the route list ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf

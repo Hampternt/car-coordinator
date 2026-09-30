@@ -4304,6 +4304,61 @@ await loadWeek();
   await lp.setViewportSize({ width: 1680, height: 940 });
 }
 
+// An empty weekday saves who is in as its crew, from its own column.
+{
+  const writes = () => lp.evaluate(() => {
+    window.__w = 0;
+    const save = Store.save; Store.save = (...a) => { window.__w++; return save(...a); };
+    const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:v1') window.__w++; return set.call(this, k, v); };
+  });
+  // Everything but the groups, and who is in, which this test itself changes.
+  const groupsOnly = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.driverGroups; delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(p); });
+  const wed = '#planWeek .week-col[data-day="3"]';
+  await loadWeek();
+  const allIn = (await lp.locator(`${wed} [data-act="save-day-crew"]`).innerText()).trim();
+  check('with everyone in, the button says so and warns', allIn === "Save all 5 as Wednesday's crew"
+    && (await lp.locator(`${wed} [data-act="save-day-crew"]`).getAttribute('title')).startsWith('That is everyone on the roster'), allIn);
+  // Efe goes away in the page, without a redraw: the count is taken at the click.
+  const rest = await groupsOnly();
+  const notes = await lp.locator('#notices .notice').count();
+  await lp.evaluate(() => { state.drivers[4].available = false; });
+  await lp.focus(`${wed} [data-act="save-day-crew"]`);
+  await lp.keyboard.press('Enter');
+  const saved = await lp.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 3).map((g) => g.driverIds.join()));
+  check("Wednesday's Save takes who is in at the click", JSON.stringify(saved) === '["d0,d1,d2,d3"]', JSON.stringify(saved));
+  check('and the column lists that crew with its Load lit', await lp.evaluate((sel) => {
+    const c = document.querySelector(sel);
+    return !!c.querySelector('.week-load.lit') && [...c.querySelectorAll('li')].map((l) => l.textContent).join() === 'Ana,Bo,Cai,Dee';
+  }, wed));
+  check('from the keyboard, the focus lands on the new Load', await lp.evaluate((sel) => document.activeElement?.matches(`${sel} [data-act="apply-group"]`), wed));
+  // Thursday next: still no notice, and only the groups changed.
+  await lp.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+  check('saving Wednesday then Thursday adds no notice', (await lp.locator('#notices .notice').count()) === notes);
+  check('and changes the saved plan only in its day groups', (await groupsOnly()) === rest);
+  // An empty Thursday crew is filled, not doubled, and nobody is sent away.
+  await layPlan({ drivers: weekDrivers, driverGroups: [...weekGroups, { id: 'gt', name: 'Thursday', driverIds: [] }] });
+  await lp.reload({ waitUntil: 'networkidle' });
+  await lp.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+  check("an empty Thursday crew is filled, not doubled, and nobody goes away", await lp.evaluate(() =>
+    state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1 && state.driverGroups.find((g) => g.id === 'gt').driverIds.length === 5
+    && state.drivers.every((d) => d.available)));
+  // Nothing to do: nobody in, or a crew added meanwhile. No write either way.
+  await loadWeek();
+  await lp.evaluate(() => { state.drivers.forEach((d) => { d.available = false; }); });
+  await writes();
+  await lp.click(`${wed} [data-act="save-day-crew"]`);
+  check('a Save that finds nobody in writes nothing, and says why', (await lp.evaluate(() => window.__w)) === 0
+    && (await lp.locator(`${wed} .week-none`, { hasText: 'Nobody is in to save' }).count()) === 1);
+  await loadWeek();
+  await lp.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d0'] }); });
+  await writes();
+  await lp.click(`${wed} [data-act="save-day-crew"]`);
+  check('a Save that finds a crew added meanwhile writes nothing, and shows the crew with Load and no Save',
+    (await lp.evaluate(() => window.__w)) === 0 && (await lp.locator(`${wed} [data-act="apply-group"]`).count()) === 1
+    && (await lp.locator(`${wed} [data-act="save-day-crew"]`).count()) === 0);
+  await lp.reload({ waitUntil: 'networkidle' });
+}
+
 // --- under the route list: done ---
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();

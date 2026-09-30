@@ -945,6 +945,7 @@ function renderWeek() {
     if (!ids.size) {
       return `<div class="week-col quiet${marked ? ' plan-day' : ''}" ${attrs}>${head}
         <p class="week-none">${g ? 'Nobody in this crew yet' : 'No crew yet'}</p>
+        ${weekSave(day)}
       </div>`;
     }
     const crew = state.drivers.filter((d) => ids.has(d.id));
@@ -963,6 +964,19 @@ function renderWeek() {
     <p class="hint">Each weekday's crew, from the day groups on the Drivers tab. Load makes that crew the ones in and sets everyone else to away. Greyed names are away.</p>
     <div class="week-cols" data-keep-scroll="week">${cols}</div>
   </section>`;
+}
+
+/* An empty weekday's one button: who is in now, saved as that day's crew. It
+   is counted again when pressed, and fills an empty crew rather than making a
+   second one. Nobody in, and there is nothing to save. */
+function weekSave(day) {
+  const n = state.drivers.filter((d) => d.available).length;
+  const name = WEEKDAYS[day];
+  if (!n) return '<p class="week-none">Nobody is in to save. Set who is in first, or tick names into a crew on the Drivers tab.</p>';
+  const all = n === state.drivers.length && n > 1;
+  return `<button class="btn week-save" data-act="save-day-crew" data-day="${day}"${all
+    ? ' title="That is everyone on the roster: set anyone who is off to away first, if the crew is smaller."' : ''}>${all
+    ? `Save all ${n} as ${name}'s crew` : `Save the ${n} in as ${name}'s crew`}</button>`;
 }
 
 /* Saving over a name that is already used replaces it, rather than leaving two
@@ -2294,22 +2308,29 @@ document.addEventListener('click', (e) => {
     // Counted when pressed, not when asked: who is in may have changed since.
     case 'save-day-crew': {
       const day = Number(b.dataset.day);
-      if (!WEEKDAYS[day]) break;
+      // From the week's column: no question is set or read, and no notice is
+      // raised; the column filling and lighting up is the answer.
+      const fromWeek = !!b.closest('#planWeek');
       const driverIds = state.drivers.filter((d) => d.available).map((d) => d.id);
-      const crew = dayCrews().byDay.get(day);
-      // Nobody in, or a crew made on the Drivers tab while the question was
-      // up: the question redraws itself saying so, and nothing is saved.
-      // A crew made on the Drivers tab meanwhile, or nobody in: the question
-      // redraws itself saying so, and nothing is saved.
-      if ((crew && crewIds(crew).size) || !driverIds.length) {
-        dayAsk = { day };
-        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
-        break;
+      const crew = WEEKDAYS[day] ? dayCrews().byDay.get(day) : null;
+      // Nothing to do: not a day, nobody in, or a crew made on the Drivers tab
+      // meanwhile. The page redraws to say so, and nothing is saved.
+      if (!WEEKDAYS[day] || (crew && crewIds(crew).size) || !driverIds.length) {
+        if (!fromWeek && WEEKDAYS[day]) dayAsk = { day };
+        render();
+        if (e.detail === 0) {
+          document.querySelector(fromWeek ? `#planWeek .week-col[data-day="${day}"] button` : `#tab-plan .day-bar [data-day="${day}"]`)?.focus();
+        }
+        return;
       }
       if (crew) crew.driverIds = driverIds;
       else state.driverGroups.push({ id: uid(), name: WEEKDAYS[day], driverIds });
-      dayAsk = { day, saved: driverIds };
-      if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
+      if (fromWeek) {
+        if (e.detail === 0) refocus = `#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`;
+      } else {
+        dayAsk = { day, saved: driverIds };
+        if (e.detail === 0) refocus = `#tab-plan .day-bar [data-day="${day}"]`;
+      }
       break;
     }
     case 'add-day-group': {
