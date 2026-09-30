@@ -83,6 +83,8 @@ stays where it is and stays the source of truth for the printed page.
 ## Printing
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
 - ✅ **Route selection** — all ticked, untick any you don't want; the preview and the sheet count follow.
+- ✅ **Pay attention marks** — a tick per bread on Configure, remembered on this PC; a marked bread prints with a warning triangle and in bold wherever it appears.
+- 🚧 **Faster ticks, and no bread left off quietly** — a route untick lays out only what changed; a text quantity prints as written (20 characters at most) and counts as the number it starts with; a new file clears the old sheets; a red warning holds Print when a ticked route's pages do not carry every line the file gives it. `manifests/2026-10-01-breadify-fixes.md`.
 - ✅ **Crate rules remembered** — capacities and per-bread sizes, because those are facts about the warehouse. Nothing else about today's print is kept.
 - ✅ **Two jokes at low opacity** behind the steps that carry them: a bread roll at a computer behind Check, and Megamind asking `NO BREAD?` behind Open while nothing has been opened. The Check step's finding cards are translucent for the first one's sake.
 
