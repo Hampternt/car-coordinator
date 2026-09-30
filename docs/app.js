@@ -605,6 +605,7 @@ let ctxReturn = null;
 // deletes, so no row needs markup of its own.
 const CTX_ROWS = [
   ['route', '#tab-plan tr[data-route]'],
+  ['rail', '#tab-plan .rail-row'],
 ];
 // The only inputs a right-click opens the page's menu on. Any other box is
 // typed in, and keeps the browser's own Cut, Copy and Paste.
@@ -664,10 +665,55 @@ function ctxRoute(r, part) {
   ]];
 }
 
+/* The routes an item is on, as Go to entries: one each for one or two, and
+   past that a single line saying how many, which keeps every menu short. */
+function ctxRoutes(on, field) {
+  if (on.length > 2) return [{ off: true, text: `On ${on.length} routes` }];
+  return on.map(({ r }) => ctxGo(`Go to route ${r.name.trim() || '-'}`, 'plan', 'route', r.id, field));
+}
+
+// "route 7", "2 routes": the routes half of a cost line.
+const ctxRouteCount = (on) => (on.length === 1 ? `route ${on[0].r.name.trim() || '-'}` : `${on.length} routes`);
+
+/* A driver, in the rail or on the Drivers tab. Deleting one takes it out of
+   every day group, and only that: the day plan keeps the name typed in. */
+function ctxDriver(d, surface) {
+  const d0 = { kind: 'driver', id: d.id };
+  const on = driverUsage()[fold(d.name)] || [];
+  const groups = state.driverGroups.filter((g) => g.driverIds.includes(d.id)).length;
+  return [[
+    { act: 'toggle', data: { ...d0, field: 'available' }, text: d.available ? 'Set away' : 'Bring back in' },
+    // The tag menu opens at the rail row's tag button, so only there.
+    surface === 'rail' && { act: 'tag', data: d0, text: 'Tag\u2026' },
+  ].filter(Boolean), ctxRoutes(on, 'driver'), [
+    { act: 'del', data: d0, arm: `del:${d.id}`, text: 'Delete driver',
+      cost: `${groups ? `Taken out of ${plural(groups, 'day group')}` : 'In no day group'}. Routes keep the name.` },
+  ]];
+}
+
+/* A car, in the rail or on the Cars tab. Deleting one takes it off every
+   route and template, which is what the cost line counts. */
+function ctxCar(c, surface) {
+  const c0 = { kind: 'car', id: c.id };
+  const on = usage().cars[c.id] || [];
+  const tpl = state.templates.filter((t) => t.routes.some((r) => r.carId === c.id)).length;
+  const cost = on.length && tpl ? `On ${ctxRouteCount(on)} and in ${plural(tpl, 'template')}`
+    : on.length ? `On ${ctxRouteCount(on)}` : tpl ? `In ${plural(tpl, 'template')}` : 'Not used anywhere';
+  return [
+    surface === 'rail' ? [{ act: 'tag', data: c0, text: 'Tag\u2026' }] : [],
+    // Its note and status can only be changed on the Cars tab.
+    [...ctxRoutes(on, 'carId'), surface === 'rail' && ctxGo(`Go to ${c.reg} on the Cars tab`, 'cars', 'car', c.id, 'reg')].filter(Boolean),
+    [{ act: 'del', data: c0, arm: `del:${c.id}`, text: 'Delete car', cost }],
+  ];
+}
+
 // Each surface's menu: the header's name, and the entries in groups that a
 // separator divides.
 const CTX_MENUS = {
   route: (r, c) => ({ name: routeTitle(r), groups: ctxRoute(r, c.part) }),
+  rail: (x, c) => (c.kind === 'car'
+    ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail') }
+    : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
 };
 
 /* Drawn from `state` on every render, so its words, its "Sure?" and its
@@ -749,7 +795,7 @@ function railRow(kind, item, label, where, extra = '', cls = '') {
     ${extra}
     <button class="btn tag-btn ${tagOpenFor(kind, item.id) ? 'on' : ''}" data-act="tag" data-kind="${kind}" data-id="${esc(item.id)}"
       title="Tag ${esc(item[field])}" aria-label="Tag ${esc(item[field])}" aria-haspopup="true" aria-expanded="${!!tagOpenFor(kind, item.id)}">🏷</button>
-    ${actBtn('del', kind, item.id, armed === `del:${item.id}` ? 'Sure?' : '✕', armed === `del:${item.id}` ? 'armed' : '', `title="Remove ${esc(item[field])}"`)}
+    ${actBtn('del', kind, item.id, armed === `del:${item.id}` ? 'Sure?' : '✕', armed === `del:${item.id}` ? 'armed' : '', `title="Delete ${esc(item[field])}"`)}
   </li>`;
 }
 

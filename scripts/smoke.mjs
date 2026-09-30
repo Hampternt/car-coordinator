@@ -5148,6 +5148,83 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
 }
 
+// The rail's rows: a driver's and a car's menus, opened from anywhere on the
+// row but its name box.
+{
+  await cmOpen();
+  const cmRail = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"]`);
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag…', 'Go to route 1', 'Delete driver']);
+  same('its delete says what it costs', await cmMenu.locator('[data-act="del"] small').textContent(),
+    await cm.evaluate(() => { const n = state.driverGroups.filter((g) => g.driverIds.includes('drv-anders')).length; return `${n ? `Taken out of ${n} day group${n === 1 ? '' : 's'}` : 'In no day group'}. Routes keep the name.`; }));
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRail('driver', 'drv-anders').locator('.rail-name'));
+  check('the rail\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  check('and the rail\'s ✕ reads Delete, not Remove', (await cmRail('driver', 'drv-anders').locator('[data-act="del"]').getAttribute('title')) === 'Delete Anders');
+
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Set away flips the rail row\'s tick', await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-anders').available === false)
+    && (await cmRail('driver', 'drv-anders').locator('[data-act="toggle"]').textContent()).trim() === '↺');
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  same('and then offers Bring back in', (await cmEntries())[0], 'Bring back in');
+  await cm.keyboard.press('Escape');
+
+  // Tag…: the tag menu, at the row's own tag button, and no tag chosen.
+  await cmRight(cmRail('driver', 'drv-guro').locator('.assign'));
+  await cmMenu.locator('[data-act="tag"]').click();
+  check('Tag… opens the tag menu at that row\'s tag button, and shuts this one', await cm.locator('#tagMenu').isVisible()
+    && (await cm.locator('#tagMenu').getAttribute('data-for')) === 'driver:drv-guro' && await cmMenu.isHidden());
+  await cm.keyboard.press('Escape');
+  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId);
+  await cmRail('driver', 'drv-guro').locator('[data-act="tag"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('ArrowDown');
+  await cm.keyboard.press('Enter');
+  check('Enter on Tag… opens the tag menu without choosing a tag', await cm.locator('#tagMenu').isVisible() && await cmMenu.isHidden()
+    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId)) === tagWas);
+  await cm.keyboard.press('Escape');
+
+  // Go to route 7: the focus in that route's driver box.
+  await cmRight(cmRail('driver', 'drv-guro').locator('.assign'));
+  await cmMenu.locator('[data-act="go"]', { hasText: 'Go to route 7' }).click();
+  check('Go to route 7 puts the focus in that route\'s driver box', await cm.evaluate(() => document.activeElement.dataset.kind === 'route' && document.activeElement.dataset.id === 'rt-07' && document.activeElement.dataset.field === 'driver'));
+
+  // A car: its cost line counts routes and templates.
+  const cost = await cm.evaluate(() => {
+    const t = state.templates.filter((x) => x.routes.some((r) => r.carId === 'car-07')).length;
+    return t ? `On route 7 and in ${t} template${t === 1 ? '' : 's'}` : 'On route 7';
+  });
+  await cmRight(cmRail('car', 'car-07').locator('.assign'));
+  const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  same('a rail car\'s menu', await cmEntries(), ['Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Delete car']);
+  same('and its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), cost);
+  await cm.keyboard.press('Escape');
+
+  // A blank-named route reads "Route -"; a car on three routes gets one line.
+  await cm.evaluate(() => { const r = state.routes.find((x) => x.id === 'rt-14'); r.name = ''; r.carId = 'car-02'; save(); render(); });
+  await cmRight(cmRail('car', 'car-02').locator('.assign'));
+  check('a route with no name reads "route -"', (await cmEntries()).includes('Go to route -'), JSON.stringify(await cmEntries()));
+  await cm.keyboard.press('Escape');
+  await cm.evaluate(() => { state.routes.find((x) => x.id === 'rt-14').carId = 'car-01'; save(); render(); });
+  await cmRight(cmRail('car', 'car-01').locator('.assign'));
+  const three = cmMenu.locator('[role="menuitem"][aria-disabled]', { hasText: 'On 3 routes' });
+  check('a car on 3 routes shows one disabled "On 3 routes" line and no Go to route', (await three.count()) === 1
+    && !(await cmEntries()).some((t) => t.startsWith('Go to route')));
+  await cm.keyboard.press('Escape');
+
+  // With the drivers list scrolled, one click on Delete driver stays on Sure?.
+  await cmOpen();
+  await cm.evaluate(() => { const l = document.querySelector('#tab-plan [data-keep-scroll="drivers"]'); if (l) l.scrollTop = 200; });
+  await cm.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const low = cm.locator('#tab-plan .rail-row[data-drag="driver"]').nth(14);
+  await cmRight(low.locator('.grip'));
+  await cmMenu.locator('[data-act="del"]').click();
+  check('with the drivers list scrolled, one click on Delete driver leaves the menu open on Sure?', await cmMenu.isVisible()
+    && (await cmMenu.locator('[data-act="del"] span').textContent()) === 'Sure? Click again');
+  await cm.keyboard.press('Escape');
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();
