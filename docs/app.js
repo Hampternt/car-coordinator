@@ -877,15 +877,17 @@ function ctxDriverTag(t) {
 }
 
 /* A template card, its open contents included. Load only asks, as the name
-   button does: the question's own Load is the only thing that writes. */
+   button does: the question's own Load is the only thing that writes. An
+   empty template has nothing to load or show, as on its card. */
 function ctxTemplate(t) {
   const t0 = { kind: 'template', id: t.id };
-  return [[
-    { act: 'ask-template', data: t0, text: 'Load over the plan\u2026' },
+  return [t.routes.length ? [
+    { act: 'ask-template', data: t0, text: 'Load\u2026' },
     { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
-  ], [
-    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Replace with the plan as it is now',
-      cost: `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}` },
+  ] : [], [
+    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Update from plan',
+      cost: t.routes.length ? `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}`
+        : `It holds nothing yet; it becomes the plan's ${plural(state.routes.length, 'route')}` },
     { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
   ]];
 }
