@@ -46,7 +46,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - ✅ **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start.
-- 🚧 **Info bubbles instead of the tour** — a small ⓘ beside each part of the app opens a short explanation next to it, and a first-ever open shows one line pointing at them; they replace the first-use tour and its Tour button. `manifests/2026-09-30-info-bubbles.md`.
+- ✅ **Info bubbles instead of the tour** — a small ⓘ beside each part of the app opens a short explanation next to it, and a first-ever open shows one line pointing at them; they replace the first-use tour and its Tour button (0.14.0).
 
 ## Packaging
 - ✅ **GitHub Pages** — the primary delivery; `docs/` is the published folder.
