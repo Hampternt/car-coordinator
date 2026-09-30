@@ -1110,7 +1110,7 @@ function railCars(use) {
   const out = state.cars.filter((c) => use.cars[c.id]).length;
   const free = state.cars.filter((c) => !c.labelId && !use.cars[c.id]).length;
   return `<section class="rail-panel" data-panel="cars">
-    <h3>Cars <span class="rail-count">${out} out · ${free} free</span></h3>
+    <h3>Cars${infoBtn('plan-cars')} <span class="rail-count">${out} out · ${free} free</span></h3>
     <div class="rail-add">
       <input id="railCar" type="text" placeholder="Registration(s)" aria-label="Add a registration">
       <button class="btn" data-act="add-car" data-from="#railCar" title="Add to the fleet">+</button>
@@ -1191,7 +1191,7 @@ function railDrivers() {
       `aria-pressed="${on}" title="${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in"`);
   }).join('');
   return `<section class="rail-panel" data-panel="drivers">
-    <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
+    <h3>Drivers${infoBtn('plan-drivers')} <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
     ${state.drivers.length ? `<p class="rail-groups" role="group" aria-label="Who is in">${all}${groups}</p>` : ''}
     ${dayQuestion()}
     <div class="rail-add">
@@ -1279,11 +1279,11 @@ function renderPlan() {
   $('#tab-plan').innerHTML = `
     ${noCars}
     ${found.length ? `<div class="problems">
-      <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b> \u2014 nothing is blocked, check they are on purpose.
+      <b>${flagged.size} route${flagged.size > 1 ? 's' : ''} to look at</b>${infoBtn('plan-warnings')} \u2014 nothing is blocked, check they are on purpose.
       <ul>${found.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
     </div>` : ''}
     <div class="bar" id="planBar">
-      <label for="date">Date</label>
+      <label for="date">Date</label>${infoBtn('plan-date')}
       <input id="date" type="date" data-kind="meta" data-field="date" value="${esc(state.date)}">
       <button class="btn" data-act="add-route">+ Add route</button>
       <button class="btn ${armed === 'clear' ? 'armed' : ''}" data-act="clear-day">${armed === 'clear' ? 'Sure? Click again' : 'Clear drivers, cars, positions and rounds'}</button>
@@ -1292,7 +1292,7 @@ function renderPlan() {
     <div class="plan">
       <div class="plan-main">
         <div class="plan-table" data-keep-scroll="table"><table class="grid">
-          <thead><tr><th>Route</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
+          <thead><tr><th>Route${infoBtn('plan-routes')}</th><th>Driver</th><th>Car</th><th>Position</th><th>Round</th><th></th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table></div>
         ${renderTemplates()}
@@ -1375,7 +1375,7 @@ function renderTemplates() {
       ${tplOpen === t.id ? templateContents(t) : ''}
     </div>`).join('');
   return `<section id="planTemplates" class="templates">
-    <h3>Day templates</h3>
+    <h3>Day templates${infoBtn('plan-templates')}</h3>
     <p class="hint">A saved copy of the routes as they stand \u2014 drivers, cars, positions, rounds and marks, but never the date. Monday to Friday are on the shelf from the start, empty until Update from plan fills them with the plan on screen. Loading one asks which parts to take. Save as template makes one of any other name.</p>
     <div class="bar">
       <input id="newTemplate" type="text" placeholder="Template name, e.g. Monday">
@@ -1425,7 +1425,7 @@ function renderWeek() {
     </div>`;
   }).join('');
   return `<section id="planWeek" class="week">
-    <h3>The week</h3>
+    <h3>The week${infoBtn('plan-week')}</h3>
     <p class="hint">Each weekday's crew, from the day groups on the Drivers tab. Load makes that crew the ones in and sets everyone else to away. Greyed names are away.</p>
     <div class="week-cols" data-keep-scroll="week">${cols}</div>
   </section>`;
@@ -1473,7 +1473,7 @@ function renderMap() {
 function mapSlot(use) {
   const { drawing, list } = mapParts(use);
   return `<section class="parking">
-    <h3>Parking map</h3>
+    <h3>Parking map${infoBtn('plan-map')}</h3>
     <p class="hint">Spots are found by name, so a renamed spot moves to the list under the map. The Garage is left off.</p>
     <div id="parkingDrawing" class="parking-scroll" data-keep-scroll="parking">${drawing}</div>
     <div id="parkingList" class="parking-under">${list}</div>
@@ -1565,7 +1565,7 @@ function renderDrivers() {
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
     ${state.drivers.length
-      ? `<table class="grid"><thead><tr><th>Name</th><th>Route</th><th>In or away</th><th>Usual days</th><th>Tag</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Route</th><th>In or away</th><th>Usual days${infoBtn('drivers-days')}</th><th>Tag${infoBtn('drivers-tags')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
     ${driverGroups()}`;
 }
@@ -1600,7 +1600,7 @@ function driverGroups() {
       ${state.drivers.length ? `<div class="chips">${members}</div>` : '<p class="hint" style="margin:0">Add drivers above, then tick them into this group.</p>'}
     </div>`;
   }).join('');
-  return `<h2 style="margin-top:22px">Day groups</h2>
+  return `<h2 style="margin-top:22px">Day groups${infoBtn('drivers-groups')}</h2>
     <p class="hint">A group is a set of names you use again \u2014 a Monday crew, a weekend crew. Name one after a weekday and it becomes that day's column under the route list; Saturday and Sunday crews get a button in the Drivers panel. "Use for today" makes exactly those drivers the ones in; everyone else goes to away.</p>
     <div class="bar">
       <input id="newGroup" type="text" placeholder="Group name, e.g. Monday">
@@ -1634,7 +1634,7 @@ function renderCars() {
       <button class="btn" data-act="add-car">+ Add car</button>
     </div>
     ${state.cars.length
-      ? `<table class="grid"><thead><tr><th>Reg.</th><th>Assigned to</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Reg.</th><th>Assigned to${infoBtn('cars-assigned')}</th><th>Status${infoBtn('cars-status')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : `<p class="empty">No cars yet. Paste the whole fleet into the box above at once \u2014 separate registrations with spaces, commas or semicolons.</p>`}`;
 }
 
@@ -1646,13 +1646,13 @@ function renderPositions() {
     <td>${field('position', p.id, 'note', p.note, 'placeholder="Note"')}</td>
     <td class="btns">${moveDel('position', p.id)}</td></tr>`).join('');
   $('#tab-positions').innerHTML = `
-    <h2>Positions</h2>
+    <h2>Positions${infoBtn('positions-map')}</h2>
     <p class="hint">Packing spots, garage, ports. "Many cars" lets several routes share it (like Garage) without a warning. The parking map on the Day plan finds Spot 1 to Spot 5 and the gate by name; a renamed spot moves to the list under it.</p>
     <div class="bar">
       <input id="newPos" type="text" placeholder="Name, e.g. Spot 6 or Port 3">
       <button class="btn" data-act="add-position">+ Add position</button>
     </div>
-    <table class="grid"><thead><tr><th>Name</th><th>Sharing</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    <table class="grid"><thead><tr><th>Name</th><th>Sharing${infoBtn('positions-many')}</th><th>Status${infoBtn('positions-status')}</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderLabels() {
@@ -1666,7 +1666,7 @@ function renderLabels() {
     ${ticks ? `<td><label><input type="checkbox" data-kind="label" data-id="${esc(l.id)}" data-field="onSheet" ${l.onSheet === true ? 'checked' : ''}> Show on printout</label></td>` : ''}
     <td class="btns">${moveDel('label', l.id)}</td></tr>`).join('');
   $('#tab-labels').innerHTML = `
-    <h2>Car and position labels</h2>
+    <h2>Car and position labels${infoBtn('labels-labels')}</h2>
     <p class="hint">${ownDriverTags() ? 'These become the one-click buttons on cars and positions. Drivers have tags of their own, under Driver tags below.' : 'These become the one-click buttons on cars, positions and drivers.'} Tick Show on printout to list a label's parked cars under Cars not available on the printed sheet; a parked car whose label is not ticked is on neither list.</p>
     <div class="bar">
       <input id="newLabel" type="text" placeholder="Label name, e.g. No fuel card">
@@ -1685,7 +1685,7 @@ function driverTagSection() {
     <td>${field('driverTag', t.id, 'name', t.name)}</td>
     <td><input type="color" data-kind="driverTag" data-id="${esc(t.id)}" data-field="color" value="${esc(colour(t.color))}"></td>
     <td class="btns">${moveDel('driverTag', t.id)}</td></tr>`).join('');
-  return `<h2 style="margin-top:22px">Driver tags</h2>
+  return `<h2 style="margin-top:22px">Driver tags${infoBtn('labels-driver-tags')}</h2>
     <p class="hint">These become the one-click buttons on the Drivers tab and the choices in a driver's tag menu. A tag never sets anyone Away, and it is never on the printout or in a share code.</p>
     <div class="bar">
       <input id="newDriverTag" type="text" placeholder="Tag name, e.g. Parental leave">
@@ -1702,7 +1702,7 @@ function driverTagSection() {
 function coloursRow() {
   const now = document.documentElement.dataset.theme || 'follow';
   const choice = (v, name) => `<button class="btn colour-choice${now === v ? ' lit' : ''}" data-act="theme" data-colours="${v}" aria-pressed="${now === v}">${name}</button>`;
-  return `<p class="colours" role="group" aria-label="Colours">Colours: ${choice('follow', 'Follow the computer')}${choice('light', 'Light')}${choice('dark', 'Dark')}</p>
+  return `<p class="colours" role="group" aria-label="Colours">Colours: ${choice('follow', 'Follow the computer')}${choice('light', 'Light')}${choice('dark', 'Dark')}${infoBtn('data-colours')}</p>
       <p class="hint">Light or Dark is kept in this browser only. The printed sheet looks the same whichever you pick.</p>
       ${themeKept ? '' : `<p class="status warn-status">This browser couldn't keep the choice, so it lasts only until this page is closed or reloaded.</p>`}`;
 }
@@ -1776,7 +1776,7 @@ function fileStatus() {
 function whatsNewCard() {
   const releases = typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) ? UPDATES.filter(Boolean) : null;
   const running = `<p class="hint">You are running version ${esc(APP_VERSION)}.</p>`;
-  if (!releases) return `<div class="card"><h3>What's new</h3>${running}</div>`;
+  if (!releases) return `<div class="card"><h3>What's new${infoBtn('data-news')}</h3>${running}</div>`;
   const full = releases.slice(0, 3).map((r) => `<div class="release">
       <h4>${esc(r.version)} \u00b7 ${esc(r.title)}</h4>
       <p>${esc(r.changed)}</p>
@@ -1785,7 +1785,7 @@ function whatsNewCard() {
     </div>`).join('');
   const older = releases.slice(3).map((r) => `<p class="older">${esc(r.version)} \u00b7 ${esc(r.title)}. Your data: ${esc(r.data)}${r.must
     ? `<br>What it affects: ${esc(r.affects)}` : ''}</p>`).join('');
-  return `<div class="card whatsnew"><h3>What's new</h3>${running}${full}${older}</div>`;
+  return `<div class="card whatsnew"><h3>What's new${infoBtn('data-news')}</h3>${running}${full}${older}</div>`;
 }
 
 /* parseImport, for drawing a row rather than importing: it also warns about
@@ -1804,7 +1804,7 @@ function parseQuietly(text) {
    only table. What an update copy holds is read before it is offered, so
    Restore is only ever offered for a plan. */
 function archivesCard() {
-  if (typeof Store.archives !== 'function') return '<div class="card"><h3>Archives</h3><p class="empty">Reload the page to see Archives.</p></div>';
+  if (typeof Store.archives !== 'function') return `<div class="card"><h3>Archives${infoBtn('data-archives')}</h3><p class="empty">Reload the page to see Archives.</p></div>`;
   const rows = Store.archives().map((a) => {
     const at = esc(when(a.t));
     const down = actBtn('archive-download', esc(a.kind), a.t, 'Download');
@@ -1817,7 +1817,7 @@ function archivesCard() {
       armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}</span></div>`;
   }).join('');
   return `<div class="card">
-      <h3>Archives</h3>
+      <h3>Archives${infoBtn('data-archives')}</h3>
       <p class="hint">A copy of everything as it was just before each update, kept in this browser like Backups but never pushed out by them. Restore puts that whole plan and setup back, replacing everything changed since; what is on screen goes into Backups first. Download keeps the copy as a file you can Import later or send on.</p>
       ${rows || '<p class="empty">No archives yet.</p>'}
     </div>`;
@@ -1855,7 +1855,7 @@ function renderData() {
     <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
 
     <div class="card" id="fileCard">
-      <h3>Auto-save to a file</h3>
+      <h3>Auto-save to a file${infoBtn('data-file')}</h3>
       ${fileStatus()}
     </div>
 
@@ -1869,7 +1869,7 @@ function renderData() {
     <div class="card" id="shareCard"></div>
 
     <div class="card">
-      <h3>Your own copy</h3>
+      <h3>Your own copy${infoBtn('data-copy')}</h3>
       <p class="hint">A plain JSON file you can email to yourself or drop on a stick.</p>
       <button class="btn" data-act="export">Export a copy\u2026</button>
       <button class="btn" data-act="import">Import a copy\u2026</button>
@@ -1881,7 +1881,7 @@ function renderData() {
     ${archivesCard()}
 
     <div class="card" id="backupsCard">
-      <h3>Backups</h3>
+      <h3>Backups${infoBtn('data-backups')}</h3>
       <p class="hint">Automatic snapshots taken before anything is cleared or deleted, and once at the start of each day. Restoring replaces everything on screen \u2014 the current state is snapshotted first, so you can undo it.</p>
       ${list.length
         ? `<table class="grid"><thead><tr><th>When</th><th>Taken before</th><th>Contents</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
@@ -1986,6 +1986,10 @@ function render() {
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
   renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  // The preview's hint is static markup; its ⓘ goes in a slot there. A cached
+  // index.html without the slot gets none.
+  const previewInfo = document.getElementById('previewInfo');
+  if (previewInfo) previewInfo.innerHTML = infoBtn('preview');
   renderNotices();
   renderPicker();
   renderTagMenu();
@@ -2136,7 +2140,7 @@ function renderShare() {
   const el = $('#shareCard');
   if (!el) return;
   el.innerHTML = `
-    <h3>Send this list to another PC</h3>
+    <h3>Send this list to another PC${infoBtn('data-share')}</h3>
     <p class="hint">Makes a code holding the finished list. Paste it into a chat or an email; the other PC pastes it back in below. Nothing is uploaded \u2014 the code <em>is</em> the list.</p>
     <button class="btn primary-ish" data-act="share-make" data-mode="day">Copy the day plan</button>
     <button class="btn" data-act="share-make" data-mode="all">Copy everything (cars, positions, labels)</button>

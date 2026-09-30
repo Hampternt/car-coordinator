@@ -329,6 +329,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .rail-panel { background: var(--panel); padding: 10px 12px; }
 .rail-panel h3 { font: 600 15px var(--head); margin: 0 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .rail-count { font: 400 12px var(--body); color: var(--muted); }
+/* The heading's ⓘ stays beside its word; the count keeps the right edge. */
+.rail-panel h3 .info-btn { margin-right: auto; margin-left: -4px; }
 .rail-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
 /* Beside a plan longer than the window (templates and the week sit under
    the routes), the rail still fits the window under the top bar: its two
