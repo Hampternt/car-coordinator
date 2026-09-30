@@ -33,25 +33,7 @@ await page.evaluate(() => { localStorage.clear(); });
 await page.reload({ waitUntil: 'networkidle' });
 
 console.log('first run');
-// The one notice a first-ever open shows is the offer of the tour.
-if ((await page.locator('#notices .notice [data-act="tour"]').count()) !== 1) {
-  console.log('\na first-ever open did not offer the tour');
-  process.exit(1);
-}
 await shot('01-first-run');
-
-// --- the tour's first step, then Skip tour. Starting it took the offer
-// away, so no later picture carries it.
-console.log('the tour');
-await page.click('#notices [data-act="tour"]');
-await page.waitForSelector('#tour:not([hidden])');
-await shot('33-tour-step-1');
-await page.click('#tour [data-tour="end"]');
-await page.waitForSelector('#tour', { state: 'hidden' });
-if (await page.locator('#notices .notice [data-act="tour"]').count()) {
-  console.log('\nthe offer of the tour was still up after the tour');
-  process.exit(1);
-}
 
 // --- build a fleet, the way you would on day one: paste the lot in at once
 console.log('cars');

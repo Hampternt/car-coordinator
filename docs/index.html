@@ -34,9 +34,6 @@
       <button data-act="tab" data-tab="preview">Print preview</button>
     </nav>
     <button class="primary" data-act="print">Print / save PDF</button>
-    <!-- The first-use tour, any time: the way in for someone who inherits a
-         PC already set up, who never gets the first-open offer. -->
-    <button class="tour-btn" data-act="tour" title="A short walk round the app">Tour</button>
   </header>
 
   <!-- Plain markup, so it shows even when no script runs: a broken or
@@ -66,9 +63,6 @@
   <div id="tagMenu" class="tag-menu" role="dialog" hidden></div>
   <!-- A row's right-click menu, out here for the same reason. -->
   <div id="ctxMenu" class="ctx-menu" role="menu" tabindex="-1" hidden></div>
-  <!-- The first-use tour's card and the ring round what it points at. -->
-  <div id="tourRing" hidden></div>
-  <div id="tour" class="tour" role="dialog" aria-labelledby="tourTitle" hidden></div>
 
   <div id="sheet" class="sheet"></div>
 
@@ -79,7 +73,6 @@
   <script src="map.js?v=0.13.0"></script>
   <script src="updates.js?v=0.13.0"></script>
   <script src="help.js?v=0.13.0"></script>
-  <script src="tour.js?v=0.13.0"></script>
   <script src="app.js?v=0.13.0"></script>
 </body>
 </html>

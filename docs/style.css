@@ -157,20 +157,14 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .sibling::after { content: ' \2192'; color: var(--hivis); }
 .sibling:hover, .sibling:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
 .sibling:hover::after, .sibling:focus-visible::after { color: var(--on-bright); }
-/* The Tour button, right of Print: set like the Breadify link, a way in
-   rather than an action on the plan. */
-.tour-btn {
-  padding: 7px 13px; background: none; border: 1px solid var(--bar-edge); border-left: 4px solid var(--hivis);
-  color: var(--on-bar); font: 700 14px var(--head); white-space: nowrap; flex: none; cursor: pointer;
-}
-.tour-btn:hover, .tour-btn:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
-/* Below 1300px the bar has no room for the tabs beside everything else: a
-   tab name went onto two lines, and at 900 (the Windows app's smallest
-   window) the page scrolled sideways. The tabs take a row of their own
-   instead, scrolling inside it on a phone, and Print and Tour stay right.
-   1300 rather than the 1245 measured in headless Chrome, to leave room for
-   fonts that draw wider than the test browser's. */
-@media (max-width: 1300px) {
+/* Below 1055px the bar has no room for the tabs beside everything else, and
+   at 900 (the Windows app's smallest window) the page would scroll
+   sideways. The tabs take a row of their own instead, scrolling inside it on
+   a phone, and Print stays right. Measured in headless Chrome with the tabs
+   forced onto one row: they fit down to 1000px since the Tour button went
+   (1075px with it); 1055 keeps the 55px of room the first measurement left
+   for fonts that draw wider than the test browser's. */
+@media (max-width: 1055px) {
   .topbar { flex-wrap: wrap; gap: 10px 16px; }
   .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
   .topbar .primary { margin-left: auto; }
@@ -422,19 +416,6 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .ctx-cost { font-size: 12px; color: var(--quiet); }
 .ctx-item.armed .ctx-cost { color: var(--on-fill); }
 @media (pointer: coarse) { .ctx-item { min-height: 40px; } }
-/* The first-use tour: a card beside what it points at, and a ring round
-   that, which never takes a click. Above the top bar (5), under the car grid,
-   the tag menu (7) and the right-click menu (8). No dimming: the page stays
-   usable while it is open. */
-.tour { position: absolute; z-index: 6; width: min(340px, calc(100vw - 16px)); overflow-y: auto; background: var(--field); color: var(--ink); border: 1px solid var(--ink); border-top: 4px solid var(--hivis); box-shadow: 0 8px 24px var(--shadow-picker); padding: 10px 14px 12px; }
-.tour[hidden], #tourRing[hidden] { display: none; }
-.tour h3 { margin: 0 0 6px; font: 700 17px var(--head); }
-.tour p { margin: 0 0 8px; font-size: 14px; }
-.tour .tour-count { margin-bottom: 2px; font: 600 12px var(--head); color: var(--muted); }
-.tour .tour-extra { font-size: 13px; color: var(--muted); }
-.tour-acts { display: flex; flex-wrap: wrap; gap: 6px; }
-.tour-acts [data-tour="end"] { margin-left: auto; }
-#tourRing { position: absolute; z-index: 6; pointer-events: none; border: 3px solid var(--hivis); box-shadow: 0 0 0 2px var(--ink); }
 
 /* The row a Go to landed on, lit for a moment, and a spot shown on the map. */
 .parking-box.ctx-found { outline: 3px solid var(--hivis); outline-offset: 2px; }
@@ -681,7 +662,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #tour, #tourRing, #infoBubble, .app-footer { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu, #ctxSub, #infoBubble, .app-footer { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 

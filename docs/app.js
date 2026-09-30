@@ -1275,7 +1275,6 @@ function renderPlan() {
     ? ''
     : `<p class="empty">No cars yet. Add your registrations on the <b>Cars</b> tab and they become pickable here.</p>`;
 
-  // #planBar is the tour's step 5 (tour.js).
   $('#tab-plan').innerHTML = `
     ${noCars}
     ${found.length ? `<div class="problems">
@@ -1556,7 +1555,6 @@ function renderDrivers() {
       <td>${field('driver', d.id, 'note', d.note, 'placeholder="Note (e.g. back Monday)"')}</td>
       <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
   }).join('');
-  // #addDriverBar is the tour's step 3 (tour.js).
   $('#tab-drivers').innerHTML = `
     <h2>Drivers</h2>
     <p class="hint">The people who might drive. The day plan's driver box still takes anything you type \u2014 this list only offers the names, and shows who is in. Tick a driver's usual days to put them in that day's group under Day groups.${ownDriverTags() ? ' The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.' : ''} A tag or a note never sets anyone Away.</p>
@@ -1624,7 +1622,6 @@ function renderCars() {
     <td>${labelChips('car', c)}</td>
     <td>${field('car', c.id, 'note', c.note, 'placeholder="Note (e.g. back Friday)"')}</td>
     <td class="btns">${moveDel('car', c.id)}</td></tr>`).join('');
-  // #addCarBar is the tour's step 1 (tour.js).
   $('#tab-cars').innerHTML = `
     <h2>Cars</h2>
     <p class="hint">Click a label to mark a car. Marked cars still appear in the day plan, but picking one shows a warning. A parked car is listed on the printout when its label has Show on printout ticked, on the Labels tab.</p>
@@ -1849,7 +1846,6 @@ function renderData() {
     </tr>`;
   }).join('');
 
-  // #fileCard and #backupsCard are the tour's steps 10 and 11 (tour.js).
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
     <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
@@ -1995,9 +1991,6 @@ function render() {
   renderTagMenu();
   renderCtxMenu();
   placeInfoBubble();
-  // The tour follows its target through every redraw. It must never stop
-  // one: whatever it throws is logged and the page is drawn regardless.
-  if (typeof Tour !== 'undefined') { try { Tour.place(); } catch (e) { console.error(e); } }
 }
 
 /* ---------- events ---------- */
@@ -2449,8 +2442,8 @@ function archiveNeeded({ version, from, usableText, archives, seen }) {
 }
 
 /* Whether this open is a first run: nothing saved in this browser and
-   nothing recovered from the save file. Set once, at start-up, for the tour
-   (pack 9) to read as well. */
+   nothing recovered from the save file. Set once, at start-up, for the
+   first-open hint to read as well. */
 let firstRun = false;
 
 /* The first write at boot: the saved text, byte for byte, into Archives
@@ -2530,30 +2523,6 @@ function raiseUpdateNote({ link, recovered, copy }) {
   if (show) note('update', updateNoteText(copy, recovered), null, updateNoteLines(show));
 }
 
-/* The tour, offered once there is reason to think this is someone's first
-   look: a first-ever open (nothing saved, nothing read from a save file), not
-   by a share link, with no warning up (an unreadable save is one), no save
-   file linked (a linked file means this browser was used before, even with
-   its plan gone), and the tour not seen here. It only offers: the tour opens
-   when Show me around is pressed. Kept, so starting the tour takes this
-   notice away and no other: the update note never carries this button, but
-   removing by act would be one change away from taking the note too. */
-let tourOffer = null;
-function offerTour(link) {
-  if (!firstRun || link || typeof Tour === 'undefined' || typeof Store.pref !== 'function') return;
-  if (notices.some((n) => n.kind === 'warn') || (Store.file && Store.file.handle)) return;
-  // null is "never seen"; undefined is storage that could not be read, which
-  // is no reason to offer.
-  if (Store.pref('tour') !== null) return;
-  note('info', 'New here? A two-minute tour shows where everything is. The tour only points at things; anything you type on the page is saved as usual. Used Car Coordinator before? Open your save file or an exported copy from the Data tab first.',
-    { act: 'tour', kind: '', id: '', text: 'Show me around' });
-  tourOffer = notices[notices.length - 1];
-}
-const dropTourOffer = () => {
-  if (!tourOffer) return;
-  notices = notices.filter((n) => n !== tourOffer);
-  tourOffer = null;
-};
 
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
@@ -2799,8 +2768,6 @@ document.addEventListener('click', (e) => {
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
-  // The tour only points: it goes nowhere near the save below.
-  if (act === 'tour') { if (typeof Tour !== 'undefined') Tour.start(b); return; }
   // A tick in a template's load question changes the question, never the plan.
   if (act === 'tpl-part') {
     const n = notices[Number(b.dataset.index)];
@@ -3948,17 +3915,6 @@ function drawFooter() {
 }
 
 async function start() {
-  // First, before anything can draw: Store.init draws the page before it
-  // returns, and every draw asks the tour where its card goes.
-  if (typeof Tour !== 'undefined') {
-    Tour.init({
-      showTab: (t) => { tab = t; render(); },
-      tab: () => tab,
-      closeLayers: () => { closePicker(); closeTagMenu(); closeCtxMenu(); dropTourOffer(); },
-      besideAnchor,
-      setPref: (name, value) => Store.setPref(name, value),
-    });
-  }
   clearTheBar();
   drawFooter();
   // Read before Share.readHash() clears it: an open by share link keeps the
@@ -3997,8 +3953,6 @@ async function start() {
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
-  // After the note, which is what works out whether this is a first run.
-  try { offerTour(link); } catch (e) { console.warn('tour offer skipped', e); }
   render();
 
   const fromLink = Share.readHash();
