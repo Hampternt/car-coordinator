@@ -1005,7 +1005,8 @@ const shelf = page.locator('#tab-plan .tpl');
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
 check('saving puts a template on the shelf under the plan',
-  (await shelf.count()) === 1 && (await shelf.innerText()).replace(/\s+/g, ' ').includes('Monday 3 routes'),
+  (await shelf.count()) === 1 && (await shelf.locator('.tpl-name').innerText()) === 'Monday'
+  && (await shelf.locator('[data-act="peek-template"]').innerText()) === '3 routes',
   await shelf.innerText());
 check('and says what it saved', (await page.locator('#notices .notice').last().innerText()).includes('Saved Monday: a template of 3 routes'),
   await page.locator('#notices .notice').last().innerText());
