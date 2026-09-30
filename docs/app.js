@@ -627,7 +627,8 @@ const CTX_ROWS = [
   ['drivers', '#tab-drivers tbody tr'],
   ['cars', '#tab-cars tbody tr'],
   ['positions', '#tab-positions tbody tr'],
-  ['labels', '#tab-labels tbody tr'],
+  ['labels', '#labelList tbody tr'],
+  ['driverTags', '#driverTagList tbody tr'],
   ['template', '#tab-plan .tpl'],
 ];
 // The inputs a right-click opens the row's menu on. A text box is one of them
@@ -815,17 +816,26 @@ function ctxPosition(p) {
 }
 
 /* A label: its printout tick, offered where the tab offers it, and its delete,
-   which takes it off every car, position and driver wearing it. */
+   which takes it off every car and position wearing it. Drivers wear driver
+   tags, so they are counted only under a store.js from before those. */
 function ctxLabel(l) {
   const l0 = { kind: 'label', id: l.id };
   const counts = [['car', state.cars], ['position', state.positions], ['driver', state.drivers]]
-    .map(([word, list]) => [word, list.filter((x) => x.labelId === l.id).length]).filter(([, n]) => n);
+    .filter(([word]) => tagList(word) === state.labels)
+    .map(([word, list]) => [word, list.filter((x) => x[tagField(word)] === l.id).length]).filter(([, n]) => n);
   const total = counts.reduce((sum, [, n]) => sum + n, 0);
   const cost = total ? `${andList(counts.map(([word, n]) => plural(n, word)))} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
   return [
     Store.SCHEMA >= 5 ? [{ act: 'toggle', data: { ...l0, field: 'onSheet' }, text: l.onSheet === true ? 'Stop showing on the printout' : 'Show on the printout' }] : [],
     [{ act: 'del', data: l0, arm: `del:${l.id}`, text: 'Delete label', cost }],
   ];
+}
+
+/* A driver tag: only its delete, which takes it off every driver wearing it. */
+function ctxDriverTag(t) {
+  const n = state.drivers.filter((d) => d.tagId === t.id).length;
+  return [[{ act: 'del', data: { kind: 'driverTag', id: t.id }, arm: `del:${t.id}`, text: 'Delete driver tag',
+    cost: n ? `${plural(n, 'driver')} ${n === 1 ? 'has' : 'have'} it` : 'No driver has it' }]];
 }
 
 /* A template card, its open contents included. Load only asks, as the name
@@ -853,6 +863,7 @@ const CTX_MENUS = {
   cars: (c) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars') }),
   positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
   labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),
+  driverTags: (t) => ({ name: labelName(t), groups: ctxDriverTag(t) }),
   template: (t) => ({ name: t.name.trim() || '-', groups: ctxTemplate(t) }),
 };
 
