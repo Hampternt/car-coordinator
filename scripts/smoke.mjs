@@ -1541,12 +1541,14 @@ await page.evaluate(() => { notices = []; render(); });
 // column's Save sits where it was pressed and asks nothing anywhere else.
 await page.evaluate(() => { window.scrollTo(0, 0); });
 
-// A click into a box while a tag menu is open lands in the box.
+// A click into a box while a tag menu is open lands in the box. The click
+// is at the box's middle, so the caret can land inside the name rather than
+// after it, depending on how wide the rail draws: the X only has to arrive.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
 await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').click();
 await page.keyboard.type('X');
 check('a click into a text box with a tag menu open is not lost',
-  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).endsWith('X'));
+  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).includes('X'));
 
 // Templates: each keeps its own place in its list.
 await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
