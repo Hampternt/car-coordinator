@@ -624,7 +624,7 @@ function railDrivers() {
       ? `<span class="assign yes">Route ${routeNames(on)}</span>`
       : `<span class="assign ${d.available ? 'none' : 'away'}">${d.available ? 'Free' : 'Away'}</span>`;
     const inOut = actBtn('toggle', 'driver', d.id, d.available ? '\u2713' : '\u21ba', d.available ? 'on' : '',
-      `data-field="available" title="${d.available ? 'In today \u2014 click to set away' : 'Away \u2014 click to bring back in'}"`);
+      `data-field="available" title="${d.available ? 'In \u2014 click to set away' : 'Away \u2014 click to bring back in'}"`);
     // Someone marked away who is still written into a route keeps the route
     // badge — that is the fact worth seeing, and the one most likely to be a
     // mistake — so the row itself carries the away state, not the badge.
@@ -641,7 +641,7 @@ function railDrivers() {
     }
     const on = crewInForce(ids);
     return actBtn('apply-group', 'driverGroup', g.id, esc(g.name), on ? 'on' : '',
-      `aria-pressed="${on}" title="${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in today"`);
+      `aria-pressed="${on}" title="${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in"`);
   }).join('');
   return `<section class="rail-panel" data-panel="drivers">
     <h3>Drivers <span class="rail-count">${inToday.length} in${away ? ` \u00b7 ${away} away` : ''}</span></h3>
@@ -708,7 +708,7 @@ function dayQuestion() {
 function dayBar(inToday) {
   const { byDay } = dayCrews();
   const inIds = new Set(inToday.map((d) => d.id));
-  const today = new Date().getDay();
+  const today = planWeekday();   // the plan's day, which is usually tomorrow
   // A crew left empty — made with no names ticked, or whose names all left —
   // is not a crew to send everyone away with, so it looks and acts like a day
   // that has none, and never lights up.
@@ -718,16 +718,16 @@ function dayBar(inToday) {
     const ids = g ? crewIds(g) : new Set();
     const on = crewInForce(ids);
     const cls = ['day', day === today && 'today', !ids.size && 'none', on && 'on', dayAsk && dayAsk.day === day && !dayAsk.saved && 'asking'].filter(Boolean).join(' ');
-    const when = `${WEEKDAYS[day]}${day === today ? ' (today)' : ''}`;
+    const when = `${WEEKDAYS[day]}${day === today ? " (this plan's day)" : ''}`;
     if (!ids.size) {
       return `<button class="${cls}" data-act="day-missing" data-day="${day}" aria-pressed="false"
         title="${when}: ${g ? 'the crew is empty' : 'no crew yet'} — click to save who is in now as ${WEEKDAYS[day]}'s">${WEEKDAYS[day].slice(0, 3)}</button>`;
     }
     return `<button class="${cls}" data-act="apply-group" data-kind="driverGroup" data-id="${esc(g.id)}" data-day="${day}" aria-pressed="${on}"
-      title="${esc(when)}: ${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in today">${WEEKDAYS[day].slice(0, 3)}</button>`;
+      title="${esc(when)}: ${ids.size} driver${ids.size === 1 ? '' : 's'} — click to make them the ones in">${WEEKDAYS[day].slice(0, 3)}</button>`;
   }).join('');
-  return `<div class="day-bar" role="group" aria-label="Who is in today">
-    <button class="day all${everyone ? ' on' : ''}" data-act="all-in" aria-pressed="${everyone}" title="Everyone on the roster is in today">All</button>${days}
+  return `<div class="day-bar" role="group" aria-label="Who is in">
+    <button class="day all${everyone ? ' on' : ''}" data-act="all-in" aria-pressed="${everyone}" title="Everyone on the roster is in">All</button>${days}
   </div>`;
 }
 
@@ -868,7 +868,7 @@ function renderTemplates() {
       <div class="tpl-head">
       ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
       ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}
-      <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the app is opened on that day">
+      <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
         <option value="">Never offer it</option>
         ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
       </select>
@@ -884,7 +884,7 @@ function renderTemplates() {
       <button class="btn" data-act="save-template">Save as template</button>
     </div>
     ${shelf ? `<div class="shelf">${shelf}</div>
-      <p class="hint" style="margin:8px 0 0">A template can offer itself when you open the app on its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
+      <p class="hint" style="margin:8px 0 0">A template can offer itself when the plan is for its day — "Never offer it" until you pick one, and even then it only asks.</p>` : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
   </section>`;
 }
 
@@ -1943,16 +1943,25 @@ function offerSpotRoundSplit() {
    itself on its day and never applies itself. It is opt-in per template —
    nothing has a weekday until one is chosen — because the plan on screen may
    already have someone's morning in it, and the app does not know that. */
-function offerTodaysTemplate() {
-  const day = new Date().getDay();
-  const todays = state.templates.filter((t) => t.weekday === String(day));
-  if (!todays.length) return;                          // the default, and the point of it
-  const t = todays[0];
+/* A template set for the plan's weekday offers itself: the plan's day, not the
+   calendar's, because the plan is usually for tomorrow. It only asks. A new
+   offer replaces the one before it (the offer carries `day` to be found by),
+   and a quiet one leaves the page where it is. A date that is not a real day
+   offers nothing. */
+function offerPlanDayTemplate({ quiet = false } = {}) {
+  notices = notices.filter((n) => !(n.offer && n.offer.day));
+  const day = planWeekday();
+  if (day < 0) return;
+  const set = state.templates.filter((t) => t.weekday === String(day));
+  if (!set.length) return;                             // the default, and the point of it
+  const t = set[0];
   // More than one set for the same day is allowed: the offer names the first
   // and mentions the rest, rather than stacking questions on top of each other.
-  const others = todays.length - 1;
-  note('info', `It is ${WEEKDAYS[day]}. Your ${t.name} template is set for ${WEEKDAYS[day]}s${others ? `, and so ${others === 1 ? 'is one other' : `are ${others} others`}` : ''}.`,
-    { act: 'ask-template', kind: 'template', id: t.id, text: `Use ${t.name}` });
+  const others = set.length - 1;
+  const raised = offerRaised;
+  note('info', `This plan is for ${dayLabel(state.date)}. Your ${t.name} template is set for ${WEEKDAYS[day]}s${others ? `, and so ${others === 1 ? 'is one other' : `are ${others} others`}` : ''}.`,
+    { act: 'ask-template', kind: 'template', id: t.id, text: `Use ${t.name}`, day: true });
+  if (quiet) offerRaised = raised;
 }
 
 function askTemplate(t) {
@@ -2066,6 +2075,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'set-tomorrow':
       state.date = nextWorkingDay();
+      offerPlanDayTemplate({ quiet: true });
       if (e.detail === 0) refocus = '#date';
       break;
     case 'clear-day':
@@ -2073,6 +2083,7 @@ document.addEventListener('click', (e) => {
       Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = nextWorkingDay();
+      offerPlanDayTemplate({ quiet: true });
       break;
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
@@ -2726,7 +2737,7 @@ async function start() {
   // rather than about today, and because the question scrolled into view
   // should be the one that has to be answered before share codes work again.
   offerSpotRoundSplit();
-  offerTodaysTemplate();
+  offerPlanDayTemplate();
   // What the Store said since the drain above (a start-of-day backup that
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();

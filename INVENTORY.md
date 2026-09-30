@@ -14,8 +14,8 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Warnings, not blocks** — a car on two routes, a spot taken twice **in the same round**, or a marked-up car still in use are listed in an amber box and stripe the row, but never prevent the choice. The same spot in different rounds is not a clash.
 - ✅ **Left rail** — drivers and cars in two compact panels beside the plan, each showing status and where it is assigned. Stacks above the table on a narrow screen.
 - ✅ **Driver roster** — an editable list of drivers, offered to the day plan's driver box as suggestions while it stays free text. Starts empty.
-- ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in today.
-- ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself on its weekday, but that is off unless you turn it on, and even then it only asks.
+- ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in.
+- ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself when the plan is for its weekday, but that is off unless you turn it on, and even then it only asks.
 - 🚧 **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for. `manifests/2026-09-29-plan-for-tomorrow.md`.
 
 ## Fleet

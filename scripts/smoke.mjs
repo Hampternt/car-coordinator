@@ -1106,17 +1106,18 @@ check('so opening the app raises nothing, whatever day it is',
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 const weekday = page.locator('#tab-plan .tpl select[data-field="weekday"]');
-const dayNow = new Date().getDay();
+// The plan's weekday, which is what a template offers itself for.
+const dayNow = await page.evaluate(() => planWeekday());
 await weekday.selectOption(String((dayNow + 1) % 7));
 await page.reload({ waitUntil: 'networkidle' });
 check('a weekday sticks to the template it was set on',
   (await page.evaluate(() => state.templates[0].weekday)) === String((dayNow + 1) % 7));
-check('and a template set for another day says nothing today',
+check("and a template set for another day says nothing for the plan's day",
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 await weekday.selectOption(String(dayNow));
 await page.reload({ waitUntil: 'networkidle' });
-check('a template set for today offers itself on the way in',
+check("a template set for the plan's day offers itself on the way in",
   (await page.locator('#notices .notice [data-act="ask-template"]').innerText()) === 'Use Monday',
   await page.locator('#notices').innerText());
 check('and has loaded nothing while it waits to be asked',
@@ -1397,8 +1398,8 @@ const week = () => page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => b
 const dayBtn = (text) => page.locator('#tab-plan .day-bar .day', { hasText: text });
 same('the drivers panel shows the week: All, then Monday to Sunday, the days with no crew quiet',
   await week(), ['All*', 'Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-check("today's day is marked", await page.evaluate(() =>
-  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]));
+check("the plan's day is marked", await page.evaluate(() =>
+  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][planWeekday()]));
 same('a group that is not a day, or is a day twice over, keeps a button of its own',
   await page.locator('#tab-plan .rail-groups .btn').allInnerTexts(), ['Weekend crew', 'Mon']);
 
@@ -3293,25 +3294,26 @@ check('Light picked under a dark computer is plain light', lightPicked.join() ==
 // A plan with every state the lists below name: a car on two routes, a pink
 // row, a driver away, a crew for today (lit), a template, a label, and the
 // update note with an info and a warning line beside it.
-const todayName = await dk.evaluate(() => WEEKDAYS[new Date().getDay()]);
+// Dated the next working day, so nothing moves, with a crew for its weekday.
+const [dkDay, todayName] = await dk.evaluate(() => { const d = nextWorkingDay(); return [d, WEEKDAYS[parseDay(d).getDay()]]; });
 await dk.evaluate((crew) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 5, date: '2026-09-29', qrOnSheet: false,
+  schemaVersion: 5, date: crew[1], qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
   cars: [{ id: 'c1', reg: 'DK11111', labelId: 'L1', note: '' }, { id: 'c2', reg: 'DK22222', labelId: '', note: '' }, { id: 'c3', reg: 'DK33333', labelId: '', note: '' }],
   positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
   drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: true }, { id: 'd3', name: 'Cai', available: false }],
-  driverGroups: [{ id: 'g1', name: crew, driverIds: ['d1', 'd2'] }],
+  driverGroups: [{ id: 'g1', name: crew[0], driverIds: ['d1', 'd2'] }],
   templates: [{ id: 't1', name: 'Monday', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: false, gapBefore: false }] }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: true, gapBefore: false },
     { id: 'r2', name: '2', driver: 'Bo', carId: 'c2', positionId: '', round: '', highlight: false, gapBefore: false },
     { id: 'r3', name: '3', driver: 'Cai', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false },
   ],
-})); }, todayName);
+})); }, [todayName, dkDay]);
 await themeAs('light');
 await dk.reload({ waitUntil: 'networkidle' });
 await dk.evaluate(() => { note('info', 'An information line.'); note('warn', 'A warning line.'); render(); });
-await dk.click('#tab-plan .day.today');   // today's crew, lit
+await dk.click('#tab-plan .day.today');   // the plan's day's crew, lit
 check('the dark cases have their states: the update note, today lit, a clash',
   (await dk.locator('#notices .notice.update').count()) === 1 && (await dk.locator('#tab-plan .day.today.on').count()) === 1
   && (await dk.locator('#tab-plan tbody tr.warn').count()) >= 2);
@@ -3864,6 +3866,36 @@ for (const [at, date, what] of [
   const pg = await calOpen(at, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4(date) });
   const got = await pg.evaluate(() => { const el = document.getElementById('dateLine'); return { off: el.classList.contains('off'), button: !!el.querySelector('[data-act="set-tomorrow"]'), date: state.date }; });
   check(`${what} warns and offers Set to tomorrow`, got.off && got.button && got.date === date, JSON.stringify(got));
+  await pg.close();
+}
+
+// Item 4: template offers and the week row follow the plan's day.
+{
+  const tpl = (id, name, weekday) => ({ id, name, weekday, routes: [{ name: '1', driver: name, carId: '', positionId: '', round: '', highlight: false, gapBefore: false }] });
+  const offers = (pg) => pg.locator('#notices [data-act="ask-template"]').allInnerTexts();
+  // Friday 2026-10-02, the plan dated Monday 10-05.
+  const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-10-05', {
+    templates: [tpl('tm', 'Mondays', '1'), tpl('tw', 'Wednesdays', '3'), tpl('tf', 'Fridays', '5')],
+    drivers: [{ id: 'd1', name: 'Ana', available: true }], driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
+  }) });
+  same("on a Friday, a Monday plan offers the Monday template and not Friday's", await offers(pg), ['Use Mondays']);
+  check("the week row marks the plan's day", (await pg.locator('#tab-plan .day-bar .day.today').innerText()).trim() === 'Mon');
+  check('no word in the rail says today', !/today/i.test(await pg.locator('#tab-plan [data-panel="drivers"]').evaluate((el) => el.outerHTML)));
+  const before = await pg.locator('#notices').innerHTML();
+  await pg.fill('#date', '2026-10-07');
+  check('typing a date leaves the notices alone', (await pg.locator('#notices').innerHTML()) === before);
+  await pg.click('[data-act="tab"][data-tab="plan"]');
+  await pg.evaluate(() => { offerPlanDayTemplate({ quiet: true }); render(); });
+  same('a Wednesday plan offers the Wednesday template', await offers(pg), ['Use Wednesdays']);
+  await pg.click('[data-act="set-tomorrow"]');
+  same('Set to tomorrow switches the offer to Monday, and only one stays', await offers(pg), ['Use Mondays']);
+  await pg.close();
+}
+{
+  const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-13-45', {
+    templates: ['0', '1', '2', '3', '4', '5', '6'].map((d) => ({ id: `t${d}`, name: `Day ${d}`, weekday: d, routes: [] })),
+  }) });
+  check('a date that is not a real day offers no template', (await pg.locator('#notices [data-act="ask-template"]').count()) === 0);
   await pg.close();
 }
 
