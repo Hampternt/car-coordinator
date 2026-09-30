@@ -39,6 +39,7 @@ const oldVersion = JSON.parse(await readFile(join(oldRoot, 'package.json'), 'utf
 // browser holding its cached files is not a blank slate for this build.
 const OLD_HAS_NOTES = existsSync(join(OLD_DOCS, 'updates.js'));
 const NEW = JSON.parse(await readFile(join(HERE, 'package.json'), 'utf8')).version;
+const NEW_SCHEMA = Number((await readFile(join(NEW_DOCS, 'store.js'), 'utf8')).match(/const SCHEMA = (\d+);/)[1]);
 const devPlan = await readFile(join(HERE, 'scripts', 'fixtures', 'dev-data.json'), 'utf8');
 const ctx = vm.createContext({});
 vm.runInContext(await readFile(join(NEW_DOCS, 'updates.js'), 'utf8'), ctx);
@@ -67,10 +68,18 @@ const CLOCK_DAY = '2026-10-06';
 const NEXT_WORKING_DAY = '2026-10-07';
 const passed = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && date < CLOCK_DAY;
 
+// The ready-made driver tags, written out here rather than read from the
+// build, so the check says what the move-over must give.
+const READY_TAGS = [['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']];
+const sameTagName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+
 // The plan as this build reads the old build's saved text, in memory, with
 // only the changes the packs name: schema 5's Show on printout tick, unticked
-// unless it was ticked, the QR fixed off, and a passed date moved to the next
-// working day (0.6.0), which is not written until the next change.
+// unless it was ticked, the QR fixed off, a passed date moved to the next
+// working day (0.6.0), which is not written until the next change, and
+// schema 6's move-over: each label a driver wears becomes a driver tag of the
+// same name and colour, in the labels' order, then the ready-made tags not
+// already there, and a driver's labelId becomes its tagId.
 function asOpened(oldPlan, schema) {
   const p = JSON.parse(JSON.stringify(oldPlan));
   delete p.extra;   // makeOdd's field, which no build keeps
@@ -78,6 +87,27 @@ function asOpened(oldPlan, schema) {
   p.qrOnSheet = false;
   for (const l of p.labels || []) l.onSheet = l.onSheet === true;
   if (passed(p.date)) p.date = NEXT_WORKING_DAY;
+  if (schema >= 6 && !Array.isArray(p.driverTags)) {
+    const worn = new Set((p.drivers || []).map((d) => d.labelId).filter(Boolean));
+    p.driverTags = (p.labels || []).filter((l) => worn.has(l.id)).map((l) => ({ id: `moved:${l.id}`, name: l.name, color: l.color }));
+    for (const [name, color] of READY_TAGS) if (!p.driverTags.some((t) => sameTagName(t.name, name))) p.driverTags.push({ id: `ready:${name}`, name, color });
+    for (const d of p.drivers || []) {
+      d.tagId = p.driverTags.some((t) => t.id === `moved:${d.labelId}`) ? `moved:${d.labelId}` : '';
+      delete d.labelId;
+    }
+  }
+  return p;
+}
+
+// A moved-over driver tag gets a fresh id on every load, so tags are compared
+// by what they read: the list without its ids, and a driver's tagId as the
+// name of the tag it points at.
+function tagsByName(plan) {
+  if (!Array.isArray(plan?.driverTags)) return plan;
+  const p = JSON.parse(JSON.stringify(plan));
+  const names = new Map(p.driverTags.map((t) => [t.id, t.name]));
+  for (const d of p.drivers || []) if (d.tagId) d.tagId = `tag:${names.get(d.tagId)}`;
+  p.driverTags = p.driverTags.map(({ name, color }) => ({ name, color }));
   return p;
 }
 
@@ -188,8 +218,9 @@ async function expectKeptAndNoted(label, profile, before, extra = async () => {}
   const changed = Object.keys(before).filter((k) => !k.startsWith('carcoord:pref:') && after[k] !== before[k]);
   check(`${label}: every other saved key as it was`, !changed.length, changed.join(', '));
   const read = await now.page.evaluate(() => ({ plan: state, schema: Store.SCHEMA }));
-  const want5 = asOpened(JSON.parse(before['carcoord:v1']), read.schema);
-  check(`${label}: the plan on screen is the old one, but for the changes the packs name`, sameData(read.plan, want5), differing(read.plan, want5).join(', '));
+  const onScreen = tagsByName(read.plan);
+  const wanted = tagsByName(asOpened(JSON.parse(before['carcoord:v1']), read.schema));
+  check(`${label}: the plan on screen is the old one, but for the changes the packs name`, sameData(onScreen, wanted), differing(onScreen, wanted).join(', '));
   let arch = [];
   try { arch = JSON.parse(after['carcoord:archives']); } catch { /* none */ }
   check(`${label}: one update archive, equal to the old carcoord:v1`,
@@ -340,6 +371,13 @@ const scenarios = {
       await now.page.click('[data-act="tab"][data-tab="labels"]');
       const ticks = await now.page.locator('#tab-labels [data-field="onSheet"]').count();
       if (checks.schema < 5) check('mixed files: an old store.js means no Printout column on the Labels tab', ticks === 0, `${ticks} ticks`);
+      // Driver tags only on schema 6: under an old store.js a driverTags list
+      // would be saved under the old schema and the move-over would never run.
+      if (checks.schema < 6) {
+        const section = await now.page.locator('#driverTagList, [data-act="add-driver-tag"]').count();
+        check('mixed files: an old store.js means no Driver tags section, and no driver tags in memory', section === 0
+          && await now.page.evaluate(() => state.driverTags === undefined && state.drivers.every((d) => !('tagId' in d))), `${section} section parts`);
+      }
       check('mixed files: no console errors', !now.errors.length, now.errors.join(' | '));
       await now.context.close();
 
@@ -356,16 +394,18 @@ const scenarios = {
     await expectKeptAndNoted('mixed files, then all new', profile, before);
   },
 
-  // (f) v5 data meeting an older build: this build saves ticks, then the
-  // old one opens them, and in another profile imports this build's Export.
-  // Only an old build from before schema 5 has anything to show here.
-  async 'f v5 data in an older build'(profile) {
+  // (f) This build's data meeting an older build: this build saves ticks
+  // and driver tags, then the old one opens them, and in another profile
+  // imports this build's Export. Only an old build on an older schema has
+  // anything to show here.
+  async 'f new data in an older build'(profile) {
     const probe = await open(profile, OLD_DOCS);
     await assertBuild(probe.page, 'old');
     const oldSchema = await probe.page.evaluate(() => Store.SCHEMA);
     await probe.context.close();
     await rm(profile, { recursive: true, force: true });
-    if (oldSchema >= 5) { console.log(`  --   skipped: the old build already saves schema ${oldSchema}`); return; }
+    if (oldSchema >= NEW_SCHEMA) { console.log(`  --   skipped: the old build already saves schema ${oldSchema}`); return; }
+    const v = `v${NEW_SCHEMA}`;
 
     const now = await open(profile, NEW_DOCS);
     await assertBuild(now.page, 'new');
@@ -374,35 +414,43 @@ const scenarios = {
     const tick = (name) => now.page.locator('#tab-labels tbody tr', { has: now.page.locator(`[data-field="name"][value="${name}"]`) }).locator('[data-field="onSheet"]').check();
     await tick('Out of service');
     await tick('Workshop');
-    const v5 = await now.page.evaluate(() => localStorage.getItem('carcoord:v1'));
+    const saved6 = await now.page.evaluate(() => localStorage.getItem('carcoord:v1'));
     await now.page.click('[data-act="tab"][data-tab="data"]');
     const [dl] = await Promise.all([now.page.waitForEvent('download'), now.page.click('[data-act="export"]')]);
     const exportDir = await mkdtemp(join(tmpdir(), 'cc-upgrade-export-'));
-    const exportPath = join(exportDir, 'v5.json');
+    const exportPath = join(exportDir, `${v}.json`);
     try {
       await dl.saveAs(exportPath);
       const exported = await readFile(exportPath, 'utf8');
-      const ticked = JSON.parse(v5).labels.filter((l) => l.onSheet === true).map((l) => l.name);
-      check('v5 in an older build: this build saved two ticks, schema 5', JSON.parse(v5).schemaVersion === 5 && ticked.join() === 'Out of service,Workshop', ticked.join());
-      check('v5 in an older build: this build logged no console errors', !now.errors.length, now.errors.join(' | '));
+      const mine = JSON.parse(saved6);
+      const ticked = mine.labels.filter((l) => l.onSheet === true).map((l) => l.name);
+      check(`${v} in an older build: this build saved two ticks, schema ${NEW_SCHEMA}`, mine.schemaVersion === NEW_SCHEMA && ticked.join() === 'Out of service,Workshop', ticked.join());
+      const tagged = mine.drivers.filter((d) => d.tagId).map((d) => `${d.name}=${mine.driverTags.find((t) => t.id === d.tagId)?.name}`);
+      check(`${v} in an older build: this build moved the drivers' tags over on import`, tagged.join() === 'Petter=Holiday,Randi=Course'
+        && mine.driverTags.map((t) => t.name).join() === 'Holiday,Course,Sick,Vacation,Special situation', `${tagged.join()} | ${mine.driverTags.map((t) => t.name).join()}`);
+      check(`${v} in an older build: this build logged no console errors`, !now.errors.length, now.errors.join(' | '));
       await now.context.close();
 
       const old = await open(profile, OLD_DOCS);
       await assertBuild(old.page, 'old');
       await old.page.waitForTimeout(600);   // an old build draws its QR after 400 ms
       const warned = async (pg) => (await pg.locator('#notices .notice').allInnerTexts()).some((t) => t.includes('saved by a newer version'));
-      check('v5 in an older build: the newer-version warning shows', await warned(old.page));
-      check('v5 in an older build: no QR on its sheet', (await old.page.locator('#sheet .qr').count()) === 0);
-      check('v5 in an older build: the plan is drawn', (await old.page.locator('#tab-plan tbody tr').count()) === JSON.parse(v5).routes.length);
+      check(`${v} in an older build: the newer-version warning shows`, await warned(old.page));
+      check(`${v} in an older build: no QR on its sheet`, (await old.page.locator('#sheet .qr').count()) === 0);
+      check(`${v} in an older build: the plan is drawn`, (await old.page.locator('#tab-plan tbody tr').count()) === mine.routes.length);
       await old.page.click('[data-act="tab"][data-tab="plan"]');
       await old.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Changed in the old build');
       const oldSaved = JSON.parse(await old.page.evaluate(() => localStorage.getItem('carcoord:v1')));
-      const want = JSON.parse(v5);
+      const want = JSON.parse(saved6);
       want.schemaVersion = oldSchema;
       want.routes[0].driver = 'Changed in the old build';
-      for (const l of want.labels) delete l.onSheet;
-      check('v5 in an older build: one change later, only the change, the schema and the ticks differ', sameData(oldSaved, want) && oldSaved.qrOnSheet === false, differing(oldSaved, want).join(', '));
-      check('v5 in an older build: the old build logged no console errors', !old.errors.length, old.errors.join(' | '));
+      if (oldSchema < 5) for (const l of want.labels) delete l.onSheet;
+      // An older build knows no driver tags: the list goes, and its drivers
+      // come back with no tag, as the update note says.
+      delete want.driverTags;
+      for (const d of want.drivers) { delete d.tagId; d.labelId = ''; }
+      check(`${v} in an older build: one change later, only the change, the schema, the ticks and the driver tags differ`, sameData(oldSaved, want) && oldSaved.qrOnSheet === false, differing(oldSaved, want).join(', '));
+      check(`${v} in an older build: the old build logged no console errors`, !old.errors.length, old.errors.join(' | '));
       await old.context.close();
 
       const other = await mkdtemp(join(tmpdir(), 'cc-upgrade-profile-'));
@@ -411,11 +459,12 @@ const scenarios = {
         await assertBuild(imp.page, 'old');
         await importPlan(imp.page, exported);
         await imp.page.waitForTimeout(300);
-        check('v5 Export into an older build: the newer-version warning shows', await warned(imp.page));
+        check(`${v} Export into an older build: the newer-version warning shows`, await warned(imp.page));
         const saved = await imp.page.evaluate(() => localStorage.getItem('carcoord:v1'));
-        check('v5 Export into an older build: its saved plan has no tick anywhere', !saved.includes('onSheet'));
-        check('v5 Export into an older build: the Export file itself is unchanged', (await readFile(exportPath, 'utf8')) === exported);
-        check('v5 Export into an older build: no console errors', !imp.errors.length, imp.errors.join(' | '));
+        if (oldSchema < 5) check(`${v} Export into an older build: its saved plan has no tick anywhere`, !saved.includes('onSheet'));
+        check(`${v} Export into an older build: its saved plan has no driver tag anywhere`, !saved.includes('driverTags') && !saved.includes('tagId'));
+        check(`${v} Export into an older build: the Export file itself is unchanged`, (await readFile(exportPath, 'utf8')) === exported);
+        check(`${v} Export into an older build: no console errors`, !imp.errors.length, imp.errors.join(' | '));
         await imp.context.close();
       } finally { await rm(other, { recursive: true, force: true }); }
     } finally { await rm(exportDir, { recursive: true, force: true }); }
