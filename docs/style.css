@@ -479,21 +479,24 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .plan-map:empty { display: none; }
 
 /* ---------- the parking map, under the week ----------
-   The yard as a grid, each part in its real relative place: correcting the
-   drawing is this one grid-template-areas rule. Nothing in it can be
-   clicked. It scrolls sideways in its own box, never the page, and print
-   never shows it, because print hides main. */
+   The yard as a grid, each part in its real relative place, after the
+   owner's drawing: Spots 1 to 3 one behind another up the right of the lane,
+   Spot 5 above them, all four parked upright (a narrow column, tall boxes),
+   and Entrance 1 at the foot, under Spot 1 (owner, 2026-09-30). Nothing in
+   it can be clicked. It scrolls sideways in its own box, never the page, and
+   print never shows it, because print hides main. */
 .parking { margin-top: 22px; background: var(--panel); padding: 12px; }
 .parking h3 { font: 600 17px var(--head); margin: 0 0 6px; }
 .parking-scroll { overflow-x: auto; }
 .parking-yard {
   display: grid; gap: 6px; min-width: 620px; max-width: 960px; padding: 6px; border: 2px solid var(--ink);
-  grid-template-columns: 1fr .6fr 1.4fr 1fr;
+  grid-template-columns: 1fr .5fr minmax(120px, 150px) 1fr;
   grid-template-areas:
-    "room-a spot5 spot5 gate"
+    "room-a lane  spot5 gate"
     "spot4  lane  spot3 dock"
     "room-b lane  spot2 dock"
-    "room-b lane  spot1 dock";
+    "room-b lane  spot1 dock"
+    "room-b .     entry dock";
 }
 .parking-room-a { grid-area: room-a; }
 .parking-room-b { grid-area: room-b; }
@@ -505,8 +508,11 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .parking-spot4 { grid-area: spot4; }
 .parking-spot5 { grid-area: spot5; }
 .parking-gate { grid-area: gate; }
+.parking-entry { grid-area: entry; text-align: center; color: var(--muted); font-size: 12px; }
+/* Parked front to back: taller than the column is wide. */
+.parking-spot1, .parking-spot2, .parking-spot3, .parking-spot5 { min-height: 170px; }
 .parking-hatch { min-height: 48px; background: repeating-linear-gradient(45deg, var(--hatch) 0 2px, transparent 2px 10px); }
-.parking-lane { display: flex; align-items: flex-end; justify-content: center; min-height: 48px; border: 1px dashed var(--dash); color: var(--muted); font-size: 12px; }
+.parking-lane { min-height: 48px; border: 1px dashed var(--dash); }
 .parking-entrance { padding: 2px 4px; }
 .parking-box, .parking-item { min-width: 0; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
 .parking-box.parking-none { background: none; border-style: dashed; border-color: var(--dash); color: var(--quiet); }
@@ -515,7 +521,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .parking-title { font: 700 14px var(--head); }
 .parking-caption, .parking-round { font-size: 12px; color: var(--muted); }
 .parking-round { margin-top: 4px; font-weight: 600; }
-.parking-status { display: flex; align-items: center; gap: 5px; }
+.parking-status { display: flex; align-items: flex-start; gap: 5px; }
+.parking-status .parking-dot { margin-top: 4px; }
 .parking-dot { flex: none; width: 10px; height: 10px; background: var(--c, var(--quiet)); border: 1px solid var(--dot-edge); }
 @supports (color: color-mix(in srgb, red 50%, white)) {
   .parking-dot { background: color-mix(in srgb, var(--c, var(--quiet)), var(--ink) var(--lift)); }

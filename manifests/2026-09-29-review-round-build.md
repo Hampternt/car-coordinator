@@ -84,3 +84,11 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
   - Final `npm test` (tree at 8987c78): exit 0, 1264 ok, 0 FAIL — "map checks passed", "all checks passed", "all tour checks passed", "all passed" (Breadify).
   - `npm run screens`: exit 0, "no console errors, 4 warnings raised and asserted", 33 files (29-33 new).
   - `npm run upgrade -- <v0.2.4 worktree>`: exit 0, 67 ok, "upgrade check passed: 0.2.4 to 0.11.0". The v0.2.4 worktree was removed afterwards.
+- **2026-09-30, after the run: a check from the build live on `main`, and one correction from the owner's walkthrough.**
+  - `npm run upgrade` from `origin/main` 798a4f5 itself, whose Car Coordinator files equal v0.2.4's, to 21579ae: exit 0, 67 ok, "upgrade check passed: 0.2.4 to 0.11.0".
+  - **Parking map drawn to the owner's drawing** (owner, on the preview): "The 1 2 3 spots are wrongly marked they are parked front to back not alongside each other same for spot 5 the entrance is at the bottom beneath spot 1".
+    - Spots 5, 3, 2 and 1 now stand upright, one behind another, in a narrow column up the right of the lane.
+    - Entrance 1 has its own cell under Spot 1.
+    - The lane runs to the top.
+    - Checks: `check.sh` OK and `node scripts/map.mjs` "map checks passed". A screenshot with the example data shows Spot 1 at 150×170.
+    - It rides in 0.11.0 with no patch cut, because 0.11.0 hasn't shipped (as 64fdcde did in 0.5.0). 0.8.0's note still reads true.

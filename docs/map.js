@@ -146,7 +146,8 @@ const ParkingMap = (() => {
     }).join('');
     return `<div class="parking-yard">
       ${hatch('room-a')}${hatch('room-b')}${hatch('dock')}
-      <div class="parking-lane"><span class="parking-entrance">Entrance 1</span></div>
+      <div class="parking-lane"></div>
+      <div class="parking-entry"><span class="parking-entrance">\u25B2 Entrance 1</span></div>
       ${boxes}
     </div>`;
   }
