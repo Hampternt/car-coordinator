@@ -1342,10 +1342,16 @@ function templateContents(t) {
 }
 
 function renderTemplates() {
+  // An empty template (the weekday ones, until Update from plan) has nothing
+  // to load, so it has no Load: loading it would only empty the plan.
   const shelf = state.templates.map((t) => `<div class="tpl ${tplOpen === t.id ? 'open' : ''}">
       <div class="tpl-head">
-      ${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
-      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}
+      ${t.routes.length
+        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish', 'title="Put this template back over the plan"')}
+      ${actBtn('peek-template', 'template', t.id, `${t.routes.length} route${t.routes.length === 1 ? '' : 's'} ${tplOpen === t.id ? '\u25b4' : '\u25be'}`, 'tpl-peek', `title="${tplOpen === t.id ? 'Hide' : 'Show'} what is in this template"`)}`
+        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet \u2014 Update from plan fills it</span>`}
+      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', armed === `resave:${t.id}` ? 'armed' : '',
+        `title="Make this template the ${state.routes.length} routes on the plan now; its name and day stay"`)}
       <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
         <option value="">Never offer it</option>
         ${WEEKDAYS.map((d, n) => `<option value="${n}" ${t.weekday === String(n) ? 'selected' : ''}>On ${d}s</option>`).join('')}
@@ -2630,7 +2636,8 @@ function offerPlanDayTemplate({ quiet = false } = {}) {
   notices = notices.filter((n) => !(n.offer && n.offer.day));
   const day = planWeekday();
   if (day < 0) return;
-  const set = state.templates.filter((t) => t.weekday === String(day));
+  // An empty template is never offered: there is nothing in it to use.
+  const set = state.templates.filter((t) => t.weekday === String(day) && t.routes.length);
   if (!set.length) return;                             // the default, and the point of it
   const t = set[0];
   // More than one set for the same day is allowed: the offer names the first
@@ -2644,6 +2651,7 @@ function offerPlanDayTemplate({ quiet = false } = {}) {
 
 function askTemplate(t) {
   dropOffers();
+  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Update from plan fills it.`); return; }
   const now = state.routes.length;
   note('warn', `Load the ${t.name} template over the plan on screen? That replaces the ${now} route${now === 1 ? '' : 's'} there now with the template's ${t.routes.length}. A backup is taken first, so Backups can undo it.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
@@ -2912,16 +2920,18 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
-    // A menu's Replace: this template, found by its id rather than by its
-    // name, so the one clicked is the one replaced even when two share a
-    // name. It keeps its id, name and weekday, after a backup.
+    // Update from plan, on the card and in its menu: this template, found by
+    // its id rather than by its name, so the one clicked is the one updated
+    // even when two share a name. It keeps its id, name and weekday, after a
+    // backup.
     case 'resave-template': {
       if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
       const t = list[i];
-      Store.snapshot(state, `Replacing the ${t.name} template`);
+      Store.snapshot(state, `Updating the ${t.name} template from the plan`);
       const routes = templateRoutes();
       list[i] = { ...t, routes };
-      note('info', `Replaced the ${t.name} template with the ${routes.length} routes on the plan now.`);
+      note('info', `Updated the ${t.name} template from the plan: it holds the ${routes.length} routes on the plan now. What it held before is in Backups.`);
+      if (e.detail === 0 && b.closest('#planTemplates')) refocus = `#planTemplates [data-act="resave-template"][data-id="${CSS.escape(id)}"]`;
       break;
     }
     case 'peek-template':

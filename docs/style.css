@@ -561,6 +561,8 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    shelf is a shelf, and four open templates are a wall. */
 .tpl.open { flex-basis: 100%; }
 .tpl-peek { font-size: 12px; white-space: nowrap; }
+.tpl-name { font-weight: 600; padding: 2px 7px; }
+.tpl-empty { font-size: 12px; color: var(--muted); }
 /* Bounded, and scrolling past that: the whole point of opening one is to read
    a day down a column, and a four-column table spread across a 1680 monitor is
    four columns with a lot of nothing between them. */
