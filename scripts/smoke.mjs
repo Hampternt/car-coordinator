@@ -4007,7 +4007,13 @@ for (const [at, date, what] of [
   // Replaced plans and dates: Keep goes, and a keep-date sent anyway does nothing.
   for (const [what, act] of [
     ['a typed date', async () => { await pg.fill('#date', '2026-10-02'); await pg.click('[data-act="tab"][data-tab="plan"]'); }],
-    ['Set to tomorrow', () => pg.click('[data-act="set-tomorrow"]')],
+    // Set to tomorrow is only offered for a date that is not the next working
+    // day, and a moved date always is: so, a window left open into Wednesday.
+    ['Set to tomorrow', async () => {
+      await pg.clock.setFixedTime(new Date('2026-09-30T09:00:00+02:00'));
+      await pg.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await pg.click('[data-act="set-tomorrow"]');
+    }],
     ['Clear the day', async () => { await pg.click('[data-act="clear-day"]'); await pg.click('[data-act="clear-day"]'); }],
     ['an import', async () => {
       await pg.click('[data-act="tab"][data-tab="data"]');
@@ -4016,6 +4022,7 @@ for (const [at, date, what] of [
       await pg.click('[data-act="tab"][data-tab="plan"]');
     }],
   ]) {
+    await pg.clock.setFixedTime(new Date(TUE));
     await pg.evaluate((t) => { localStorage.setItem('carcoord:v1', t); }, mon);
     await pg.reload({ waitUntil: 'networkidle' });
     await act();
