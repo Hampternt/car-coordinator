@@ -759,6 +759,8 @@ function ctxTemplate(t) {
     { act: 'ask-template', data: t0, text: 'Load over the plan\u2026' },
     { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
   ], [
+    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Replace with the plan as it is now',
+      cost: `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}` },
     { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
   ]];
 }
@@ -1236,11 +1238,15 @@ function weekSave(day) {
    Mondays to choose between: the second save is a correction of the first. It
    is an overwrite, so it is snapshotted first, and the weekday already chosen
    for that template stays put — the plan changed, not what it is for. */
+// The plan's routes as a template keeps them: no ids, and never the date.
+// One mapping for Save as template and for a menu's Replace.
+const templateRoutes = () => state.routes.map((r) => ({
+  name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId,
+  round: r.round, highlight: r.highlight, gapBefore: r.gapBefore,
+}));
+
 function saveTemplate(name) {
-  const routes = state.routes.map((r) => ({
-    name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId,
-    round: r.round, highlight: r.highlight, gapBefore: r.gapBefore,
-  }));
+  const routes = templateRoutes();
   const at = state.templates.findIndex((t) => fold(t.name) === fold(name));
   if (at >= 0) {
     // The name it already has, not the one just typed: "monday" over "Monday"
@@ -2577,6 +2583,18 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
+    // A menu's Replace: this template, found by its id rather than by its
+    // name, so the one clicked is the one replaced even when two share a
+    // name. It keeps its id, name and weekday, after a backup.
+    case 'resave-template': {
+      if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
+      const t = list[i];
+      Store.snapshot(state, `Replacing the ${t.name} template`);
+      const routes = templateRoutes();
+      list[i] = { ...t, routes };
+      note('info', `Replaced the ${t.name} template with the ${routes.length} routes on the plan now.`);
+      break;
+    }
     case 'peek-template':
       tplOpen = tplOpen === id ? null : id;
       render();
@@ -3255,7 +3273,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field

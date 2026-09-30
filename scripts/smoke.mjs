@@ -5350,7 +5350,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   const before = await cmStored();
   const card = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="ask-template"][data-id="tpl-weekday"]') });
   await cmRight(card.locator('[data-act="peek-template"]'));
-  same('a template card opens the template\'s menu', await cmEntries(), ['Load over the plan…', 'Show contents', 'Delete template']);
+  same('a template card opens the template\'s menu', await cmEntries(), ['Load over the plan…', 'Show contents', 'Replace with the plan as it is now', 'Delete template']);
   check('and never offers to load it outright', (await cmMenu.locator('[data-act="load-template"]').count()) === 0);
   await cmMenu.locator('[data-act="ask-template"]').click();
   check('Load over the plan… raises the same question as the name button', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
@@ -5360,8 +5360,39 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmMenu.locator('[data-act="peek-template"]').click();
   check('Show contents opens the table', await card.locator('.tpl-table').isVisible() && await cmMenu.isHidden());
   await cmRight(card.locator('.tpl-table tbody td').first());
-  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load over the plan…', 'Hide contents', 'Delete template']);
+  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load over the plan…', 'Hide contents', 'Replace with the plan as it is now', 'Delete template']);
   await cm.keyboard.press('Escape');
+}
+
+// Replace a template with the plan: two clicks, by id, after a backup; its id,
+// name and weekday stay.
+{
+  await cmOpen();
+  const cmTpl = (id) => cm.evaluate((x) => JSON.parse(JSON.stringify(state.templates.find((t) => t.id === x) || null)), id);
+  const cmCard = (id) => cm.locator('#tab-plan .tpl', { has: cm.locator(`[data-act="ask-template"][data-id="${id}"]`) });
+  const plan = await cm.evaluate(() => state.routes.map((r) => ({ name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId, round: r.round, highlight: r.highlight, gapBefore: r.gapBefore })));
+  const sat = await cmTpl('tpl-saturday');
+  await cmRight(cmCard('tpl-saturday').locator('[data-act="peek-template"]'));
+  const replace = cmMenu.locator('[data-act="resave-template"]');
+  same('Replace says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
+  await replace.click();
+  same('one click alone changes nothing', await cmTpl('tpl-saturday'), sat);
+  await replace.click();
+  const now = await cmTpl('tpl-saturday');
+  same('two clicks put the plan\'s routes in the template', now.routes, plan);
+  check('and keep its id, name and weekday', now.id === sat.id && now.name === sat.name && now.weekday === sat.weekday);
+  check('after a "Replacing the Saturday template" backup holding what it was', await cm.evaluate((n) => Store.backups().some((b) => b.label === 'Replacing the Saturday template'
+    && JSON.parse(b.json).templates.find((t) => t.id === 'tpl-saturday').routes.length === n), sat.routes.length));
+
+  // Two templates with the same folded name: the one clicked is replaced.
+  await cmOpen();
+  await cm.evaluate(() => { state.templates.push({ id: 'tpl-sat2', name: 'SATURDAY', weekday: '', routes: [] }); save(); render(); });
+  const first = await cmTpl('tpl-saturday');
+  await cmRight(cmCard('tpl-sat2').locator('[data-act="peek-template"]'));
+  await replace.click();
+  await replace.click();
+  check('with two templates of the same name, the one clicked is the one replaced', (await cmTpl('tpl-sat2')).routes.length === plan.length
+    && JSON.stringify(await cmTpl('tpl-saturday')) === JSON.stringify(first));
 }
 
 // --- right-click menus: done ---
