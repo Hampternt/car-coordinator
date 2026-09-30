@@ -4208,7 +4208,7 @@ for (const [at, date, what] of [
   await pg.click('[data-act="tab"][data-tab="plan"]');
   await pg.click('[data-act="set-tomorrow"]');
   check('nor does Set to tomorrow raise one', (await offers(pg)) === 0);
-  same('and the templates keep the days they were saved with', await pg.evaluate(() => state.templates.map((t) => t.weekday)), ['1', '3', '5']);
+  same('and the templates keep the days they were saved with', await pg.evaluate(() => ['tm', 'tw', 'tf'].map((id) => byId(state.templates, id).weekday)), ['1', '3', '5']);
   await pg.close();
 }
 

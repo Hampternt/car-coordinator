@@ -1489,9 +1489,8 @@ function placeTplPeek() {
    Friday in five columns, each day's template in its day's column, found by
    its name the way the week finds a crew. A weekday with no template shows an
    empty slot; every other template (a second one for a day, Saturday,
-   "Standard weekday") follows on the rows after, in shelf order. Each card is
-   display: contents, so an open one's table is a grid item of its own that
-   spans the whole row under the cards: nothing moves across to make room.
+   "Standard weekday") follows on the rows after, in shelf order. What a card
+   holds opens beside it (drawTplPeek), never in the grid, so no card moves.
    A card says two things and does two things: its name and what it holds,
    Load and Save. Load asks which parts first (the notice at the top); Save
    puts the plan on screen into it, on a second click, after a backup. */

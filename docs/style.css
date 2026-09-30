@@ -571,11 +571,11 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tpl-top .bar { margin: 0; }
 .templates .hint { margin: 4px 0 10px; font-size: 13px; }
 /* The week's grid: Monday to Friday a column each, and the other templates on
-   the rows after. dense, so the cards after an open table still fill the row
-   it left. Each .tpl is display: contents, so its card and its open table are
-   the grid's own items. */
-.shelf { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); grid-auto-flow: row dense; gap: 8px; overflow-x: auto; }
-.tpl { display: contents; }
+   the rows after. A template's contents open beside its card, never in the
+   grid, so no card moves (drawTplPeek). */
+.shelf { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); gap: 8px; overflow-x: auto; }
+.tpl { display: flex; flex-direction: column; min-width: 0; }
+.tpl-head { flex: 1; }
 .tpl-head, .tpl-none { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); }
 .tpl.empty .tpl-head, .tpl-none { background: none; border-style: dashed; border-color: var(--dash); }
 .tpl-head.shown { box-shadow: inset 0 -3px var(--steel); }
