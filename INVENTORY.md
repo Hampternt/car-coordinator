@@ -17,6 +17,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Drivers tab: usual days, tags and notes** — tick the weekdays (Monday to Friday) a driver usually works, which puts them in that day's group, plus one tag from the shared list and a free note per driver.
 - ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in.
 - ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself when the plan is for its weekday, but that is off unless you turn it on, and even then it only asks.
+- 🚧 **Weekday templates, Update from plan, loading in parts** — Monday to Friday templates ready on the shelf, an Update from plan button on each, and a load that asks which parts to take. `manifests/2026-09-30-weekday-templates.md`.
 - ✅ **Parking map** — a plain drawing of the yard under the week: Spot 1 to Spot 5 and the Gate, each with its routes by round, red when taken twice in one round; other positions listed under it.
 - ✅ **Day plan layout** — day templates straight under the route list, then the week: a column per weekday listing that day's crew, with Load above each, replacing the Mon–Sun buttons.
 - ✅ **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for.
