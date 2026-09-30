@@ -157,14 +157,15 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .sibling::after { content: ' \2192'; color: var(--hivis); }
 .sibling:hover, .sibling:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
 .sibling:hover::after, .sibling:focus-visible::after { color: var(--on-bright); }
-/* Below 1055px the bar has no room for the tabs beside everything else, and
-   at 900 (the Windows app's smallest window) the page would scroll
-   sideways. The tabs take a row of their own instead, scrolling inside it on
-   a phone, and Print stays right. Measured in headless Chrome with the tabs
-   forced onto one row: they fit down to 1000px since the Tour button went
-   (1075px with it); 1055 keeps the 55px of room the first measurement left
-   for fonts that draw wider than the test browser's. */
-@media (max-width: 1055px) {
+/* Below 1205px the bar has no room for the tabs beside everything else: the
+   name and Print break onto two lines first, and at 900 (the Windows app's
+   smallest window) the page would scroll sideways. The tabs take a row of
+   their own instead, scrolling inside it on a phone, and Print stays right.
+   Measured in headless Chrome on every item in the bar, not only the tabs:
+   all of it stays on one line down to 1150px since the Tour button went;
+   1205 keeps the 55px of room the first measurement left for fonts that draw
+   wider than the test browser's (the scrollbar's kept room comes out of it). */
+@media (max-width: 1205px) {
   .topbar { flex-wrap: wrap; gap: 10px 16px; }
   .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
   .topbar .primary { margin-left: auto; }
