@@ -73,3 +73,5 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **Part 6 done** (parking map, 0.8.0): start 1fcd19c; items 1-9 at b264d69, 36c34f4, ae02da0, **df37b50 ⚠️**, 5ccd33d, c25022e, 8e596a4, 2c0afe4, 1d135d8. `check.sh` per item.
 - **Merged `update-note` before part 7** (4e3f164: 898d819, "Skip the linked-file cases where the test browser crashes on them"): clean, smoke only. Gate: `check.sh` OK.
 - **Part 7 start.** Base 4e3f164 (0.8.0).
+- **Part 7 done** (drivers tab, 0.9.0): start 6fe387c; items 1, 3-11 at 9a3173f, 4fdb69c, **5b8a877 ⚠️**, 16b990e, d6bbad0, 973094d, d40c6c6, 3225022, e021dc9, 44db090 (item 2 dropped). `check.sh` per item.
+- **Part 8 start.** Base e6f7656 (0.9.0). `update-note` and `origin/dev` had not moved.
