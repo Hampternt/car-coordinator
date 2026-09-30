@@ -1032,7 +1032,7 @@ function renderDrivers() {
   const rows = state.drivers.map((d) => {
     const on = assigned[fold(d.name)];
     return `<tr class="${d.available ? '' : 'away'}">
-      <td>${field('driver', d.id, 'name', d.name, 'style="width:200px"')}</td>
+      <td>${field('driver', d.id, 'name', d.name, 'style="width:150px"')}</td>
       <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
       <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
       <td>${usualDays(d, byDay)}</td>

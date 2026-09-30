@@ -1833,6 +1833,10 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
+  // Two drivers, one tagged and one with a note, and a group: the widest the
+  // Drivers tab's row gets.
+  drivers: [{ id: 'd1', name: 'Ana Ruiz', available: true, labelId: 'L1', note: '' }, { id: 'd2', name: 'Bo Lind', available: true, labelId: '', note: 'Back Monday' }],
+  driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   // A saved template too: the shelf card is the widest row the day plan can
   // grow — name button, route count, weekday select and delete, side by side.
   templates: [{ id: 't1', name: 'Monday', weekday: '1',
@@ -1844,6 +1848,11 @@ for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check(`the ${name} tab fits a phone screen`, !wide);
 }
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check("on a phone, a driver's five usual days sit on one line, and the note box has room", await page.evaluate(() => {
+  const tops = new Set([...document.querySelectorAll('#tab-drivers tbody tr:first-child .day-tick')].map((b) => Math.round(b.getBoundingClientRect().top)));
+  return tops.size === 1 && document.querySelector('#tab-drivers tbody tr:first-child [data-field="note"]').getBoundingClientRect().width > 0;
+}));
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
@@ -4793,6 +4802,27 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
   check('the Drivers tab says nothing the old day row said, and no "in today"', !stale.length, stale.join(', '));
   check("its hint says what a usual day does, and that a tag never sets anyone Away",
     words.includes("Tick a driver's usual days to put them in that day's group under Day groups.") && words.includes('A tag or a note never sets anyone Away.'));
+}
+
+// The wider row at the Windows app's smallest windows, on the dev fixture:
+// the page never scrolls sideways, and the note box keeps 120px.
+{
+  await dvOpen(devPlan);
+  for (const width of [900, 1024]) {
+    await dv.setViewportSize({ width, height: 700 });
+    const fit = await dv.evaluate(() => {
+      const tab = document.getElementById('tab-drivers'), table = tab.querySelector('table.grid');
+      return {
+        page: document.documentElement.scrollWidth <= innerWidth + 1,
+        note: Math.round(tab.querySelector('tbody tr [data-field="note"]').getBoundingClientRect().width),
+        over: Math.round(table.getBoundingClientRect().right - tab.getBoundingClientRect().right),
+        row: Math.round(tab.querySelector('tbody tr').getBoundingClientRect().height),
+      };
+    });
+    check(`at ${width}, the Drivers tab never scrolls the page sideways, and the note box keeps 120px (table overhang ${fit.over}px, row ${fit.row}px)`,
+      fit.page && fit.note >= 120, JSON.stringify(fit));
+  }
+  await dv.setViewportSize({ width: 1280, height: 720 });
 }
 
 // --- the Drivers tab: done ---

@@ -198,6 +198,19 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .btns { white-space: nowrap; }
 
 /* status label chips: colour comes from the label */
+/* The Drivers tab's usual days: five compact buttons on one line, lit like a
+   group's member chips when the driver is in that day's group. */
+.day-ticks { display: inline-flex; gap: 2px; white-space: nowrap; }
+.day-tick { width: 36px; padding: 3px 0; border: 1px solid var(--line); background: var(--field); font: 600 12px var(--head); cursor: pointer; text-align: center; }
+.day-tick:hover { border-color: var(--ink); }
+.day-tick.on { background: var(--steel-fill); border-color: var(--steel-fill); color: var(--on-fill); }
+/* A driver's tag chips wrap, as the Cars tab's do, and the note keeps room to
+   be read. */
+#tab-drivers td.driver-tags { min-width: 120px; }
+#tab-drivers [data-field="note"] { min-width: 120px; }
+/* The Windows app's smallest window: should the row still not fit, the table
+   scrolls inside the tab rather than pushing the page sideways. */
+#tab-drivers { overflow-x: auto; }
 .chip { border: 2px solid var(--c, var(--ink)); background: var(--field); padding: 3px 10px; margin: 2px; cursor: pointer; font-weight: 600; }
 .chip.on { background: var(--c, var(--ink)); color: var(--on-fill); }
 .chip.ok.on { --c: var(--ok-fill); }
