@@ -199,6 +199,31 @@ for (const [width, height, name] of [[1280, 850, '25-week-at-1280'], [390, 844, 
 await page.setViewportSize({ width: 1360, height: 940 });
 await page.evaluate(() => window.scrollTo(0, 0));
 
+// The parking map under the week, as the walkthrough left the plan: Spot 5
+// renamed Port 3, Spot 6 added out of service, and Spot 1 taken twice in
+// round 1. Asserted against the map's own gate name.
+const parking = await page.evaluate(() => {
+  const box = (key) => document.querySelector(`#planMap .parking-${key}`)?.innerText.replace(/\s+/g, ' ').trim() || '';
+  return {
+    gate: ParkingMap.GATE_NAMES[0],
+    spot1: box('spot1'), spot1Red: !!document.querySelector('#planMap .parking-spot1.parking-red'),
+    spot5: box('spot5'), gateBox: box('gate'),
+    listed: [...document.querySelectorAll('#planMap .parking-item')].map((i) => i.innerText.replace(/\s+/g, ' ').trim()),
+  };
+});
+const listedHas = (name, more = '') => parking.listed.some((t) => t.startsWith(name) && t.includes(more));
+if (!parking.spot5.includes('No position named Spot 5') || !listedHas('Port 3') || !listedHas('Spot 6', 'Out of service · Pallet jack parked in it')
+  || !parking.spot1Red || !/Round 1 Taken by 2 routes in round 1 route 1 .*route 5 .*Round 2 route 8/.test(parking.spot1)
+  || !parking.gateBox.includes(`No position named ${parking.gate}`)) {
+  console.log(`\nthe parking map does not show the plan as expected:\n${JSON.stringify(parking, null, 1)}`);
+  process.exit(1);
+}
+await page.locator('#planMap .parking').scrollIntoViewIfNeeded();
+await page.waitForTimeout(150);
+await page.locator('#planMap .parking').screenshot({ path: `${OUT}/27-parking-map.png` });
+console.log(`  ${OUT}/27-parking-map.png`);
+await page.evaluate(() => window.scrollTo(0, 0));
+
 // The question that guards the one destructive button on the main screen. It
 // is dismissed rather than answered: the plan below it is the day being built.
 await page.click('#tab-plan .tpl [data-act="ask-template"]');

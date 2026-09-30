@@ -20,6 +20,7 @@ Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Br
 ## Features
 - **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A working rail beside the table holds the roster and the fleet: **add, rename, tag and delete** there, **drag a name or a registration straight onto the route it is driving**, and drag within the rail to reorder it. Everything in it is saved as you do it, and the Drivers and Cars tabs are still the full editors. Under the route list sit the day templates, then **the week**: a column for each day from Monday to Friday listing that day's crew, with **Load** at the top to make that crew the ones in and everyone else away.
 - **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Drivers carry a status label of their own, from the same list cars and positions use. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in. A Monday-to-Friday crew is that day's column under the route list; **All**, Saturday's and Sunday's crews and any other group are buttons in the Drivers panel beside the day plan.
+- **Parking map**: under the week, a plain drawing of the yard with Spot 1 to Spot 5 and the Gate, each listing its routes by round. A spot the warnings call taken twice in one round is red and says so. Spots are found by name, so a position the map doesn't know is listed under it; the Garage is left off.
 - **Day templates**: open one on the shelf to read the day it holds — route by route, with the driver, car and packing each was saved with. Save the plan as it stands — drivers, cars, positions, rounds and marks, but never the date — and put it back another day. Loading one asks first, saying how many routes it replaces, and takes a backup before it writes, so the Data tab can undo it. A template can offer itself when the plan is for its day: that is off until you pick a day for it, and even then it only offers.
 - **Cars / Positions**: add, rename, reorder, delete. One-click status buttons (OK, Out of service, Unavailable, Workshop, your own) plus a note.
 - **Warnings, not blocks**: a car on two routes, a spot taken twice **in the same round**, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it. Warnings are for before printing, so the printed sheet carries none.
@@ -52,8 +53,9 @@ A fresh checkout starts empty. For a full plan to work against, open the Data ta
 ## Tests
 ```
 npm install
-npm test               # both suites
+npm test               # every suite below but the screenshots and the upgrade check
 npm run test:car       # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
+npm run test:map       # the parking map's matching and markup, in node, without a browser
 npm run test:breadify  # drives Breadify with both real exports and checks the sheets against the spec's figures
 python3 scripts/make_edge_fixtures.py   # regenerates scripts/fixtures/edge/, only needed if you change those shapes
 npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
