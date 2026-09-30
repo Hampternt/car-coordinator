@@ -444,7 +444,7 @@ Kept and re-run as they are:
 
 ## Items
 
-- [ ] **1. Templates under the route list.**
+- [x] **1. Templates under the route list.**
   - In `renderPlan` (app.js:697-718), add `.plan-main` (`min-width: 0`) inside `.plan`. It holds `.plan-table`, then `renderTemplates()`, whose section gains `id="planTemplates"`.
   - The rail stays the grid's second child, still sticky. Template markup, acts and keep-scroll keys are unchanged.
   - Correct the stale comment at style.css:235 ("at the foot of the plan").
@@ -643,3 +643,4 @@ Kept and re-run as they are:
 ## Ledger
 
 - **2026-09-30, start (combined pack, part 5).** Built on `review-round`, base 06b9477 (0.6.0). Design A done: INVENTORY's two Considered lines are one 🚧 pointer under Day plan; the container's row 5 reads "None: Load only sets who is in", its "Use for today" finding is marked as this pack's item 8, and Design G's contract is written into its pack 6 section. **Pack 4 as built:** its helpers are `planWeekday()` and `nextWorkingDay()`, with no working-week list, so this pack adds `WORK_WEEK = [1, 2, 3, 4, 5]`; its template offer is `offerPlanDayTemplate`; the rail's day row already underlines `planWeekday()`. **Batched rule:** `check.sh` per item; smoke cases, screens and the one upgrade check (from v0.2.4) at the end of part 9.
+- Item 1 done, f28d86d. `.plan-main` holds `.plan-table` then `renderTemplates()` (`#planTemplates`); the rail stays the grid's second child. The CSS comment now says "straight under the route list". Smoke: a layout context (`layCtx`, 1680 wide, 20 drivers and 17 cars so the rail is the taller) checks the shelf within 30px under the table and left-aligned, and rail, table, shelf in order at 1100; later items add their cases before its "under the route list: done" line. The shelf-question case (the old smoke 1757-1774) is left as it is; if centring breaks it, the end-of-run suite says so. Gate: `check.sh` OK.
