@@ -571,19 +571,21 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    the grid's own items. */
 .shelf { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); grid-auto-flow: row dense; gap: 8px; overflow-x: auto; }
 .tpl { display: contents; }
-.tpl-head, .tpl-none { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px; background: var(--field); border: 1px solid var(--line); }
+.tpl-head, .tpl-none { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--field); border: 1px solid var(--line); }
 .tpl.empty .tpl-head, .tpl-none { background: none; border-style: dashed; border-color: var(--dash); }
 .tpl.open .tpl-head { box-shadow: inset 0 -3px var(--steel); }
 .tpl .btn { padding: 2px 7px; color: var(--muted); }
 .tpl .btn.primary-ish { color: var(--muted-on-bright); }
-.tpl-load { width: 100%; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tpl-update { width: 100%; white-space: nowrap; }
-.tpl-peek { align-self: flex-start; font-size: 12px; white-space: nowrap; }
-.tpl-name { font: 700 14px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; }
-.tpl-empty { font-size: 12px; color: var(--muted); }
+/* The name, with its ✕ at the far end; then what it holds; then Load and Save,
+   side by side, the same width. */
+.tpl-title { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tpl-name { flex: 1; min-width: 0; font: 700 14px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tpl-none .tpl-name { color: var(--quiet); }
-.tpl-foot { display: flex; align-items: center; gap: 4px; }
-.tpl-foot select { flex: 1; min-width: 0; font-size: 13px; }
+.tpl .btn.tpl-del { flex: none; padding: 0 6px; }
+.tpl-peek { align-self: flex-start; font-size: 12px; white-space: nowrap; }
+.tpl-empty { font-size: 12px; color: var(--muted); }
+.tpl-acts { display: flex; gap: 6px; }
+.tpl-acts .btn { flex: 1; min-width: 0; padding: 4px 6px; font-weight: 700; white-space: nowrap; }
 /* Open, a template says what it would put on the plan, across the row under
    the cards. Bounded, and scrolling past that: the whole point of opening one
    is to read a day down a column, and a four-column table spread across a

@@ -923,7 +923,7 @@ function ctxTemplate(t) {
     { act: 'ask-template', data: t0, text: 'Load\u2026' },
     { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
   ] : [], [
-    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Update from plan',
+    { act: 'resave-template', data: t0, arm: `resave:${t.id}`, text: 'Save the plan into it',
       cost: t.routes.length ? `Its ${plural(t.routes.length, 'route')} ${t.routes.length === 1 ? 'becomes' : 'become'} the plan's ${state.routes.length}`
         : `It holds nothing yet; it becomes the plan's ${plural(state.routes.length, 'route')}` },
     { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
@@ -1390,27 +1390,29 @@ function templateContents(t) {
    empty slot; every other template (a second one for a day, Saturday,
    "Standard weekday") follows on the rows after, in shelf order. Each card is
    display: contents, so an open one's table is a grid item of its own that
-   spans the whole row under the cards: nothing moves across to make room. */
+   spans the whole row under the cards: nothing moves across to make room.
+   A card says two things and does two things: its name and what it holds,
+   Load and Save. Load asks which parts first (the notice at the top); Save
+   puts the plan on screen into it, on a second click, after a backup. */
 function templateCard(t) {
   const open = tplOpen === t.id;
   const n = t.routes.length;
-  // An empty template (the weekday ones, until Update from plan) has nothing
-  // to load, so it has no Load: loading it would only empty the plan.
+  const saving = armed === `resave:${t.id}`, deleting = armed === `del:${t.id}`;
+  // An empty template (the weekday ones, until saved into) has nothing to
+  // load, so it has no Load: loading it would only empty the plan.
   return `<div class="tpl${open ? ' open' : ''}${n ? '' : ' empty'}">
       <div class="tpl-head">
-      ${n
-        ? `${actBtn('ask-template', 'template', t.id, esc(t.name), 'primary-ish tpl-load', 'title="Put this template back over the plan"')}
-      ${actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'} ${open ? '▴' : '▾'}`, 'tpl-peek', `title="${open ? 'Hide' : 'Show'} what is in this template"`)}`
-        : `<span class="tpl-name">${esc(t.name)}</span><span class="tpl-empty">Not saved yet</span>`}
-      ${actBtn('resave-template', 'template', t.id, armed === `resave:${t.id}` ? 'Sure?' : 'Update from plan', `tpl-update${armed === `resave:${t.id}` ? ' armed' : ''}`,
-        `title="Make this template the ${state.routes.length} routes on the plan now; its name and day stay"`)}
-      <div class="tpl-foot">
-        <select data-kind="template" data-id="${esc(t.id)}" data-field="weekday" title="Offer this template when the plan is for that day">
-          <option value="">Never offer it</option>
-          ${WEEKDAYS.map((d, i) => `<option value="${i}" ${t.weekday === String(i) ? 'selected' : ''}>On ${d}s</option>`).join('')}
-        </select>
-        ${actBtn('del', 'template', t.id, armed === `del:${t.id}` ? 'Sure?' : '✕', armed === `del:${t.id}` ? 'armed' : '', 'title="Delete this template"')}
-      </div>
+        <div class="tpl-title">
+          <span class="tpl-name" title="${esc(t.name)}">${esc(t.name)}</span>
+          ${actBtn('del', 'template', t.id, deleting ? 'Sure?' : '✕', `tpl-del${deleting ? ' armed' : ''}`, `title="Delete the ${esc(t.name)} template"`)}
+        </div>
+        ${n ? actBtn('peek-template', 'template', t.id, `${n} route${n === 1 ? '' : 's'} ${open ? '▴' : '▾'}`, 'tpl-peek', `title="${open ? 'Hide' : 'Show'} what is in this template"`)
+          : '<span class="tpl-empty">Not saved yet</span>'}
+        <div class="tpl-acts">
+          ${n ? actBtn('ask-template', 'template', t.id, 'Load', 'primary-ish tpl-load', `title="Put the ${esc(t.name)} template on the plan; it asks which parts to take first"`) : ''}
+          ${actBtn('resave-template', 'template', t.id, saving ? 'Sure?' : 'Save', `tpl-save${saving ? ' armed' : ''}`,
+            `title="Save the ${state.routes.length} routes on the plan into ${esc(t.name)}${n ? `, in place of its ${n}` : ''}"`)}
+        </div>
       </div>
       ${open ? templateContents(t) : ''}
     </div>`;
@@ -1434,7 +1436,7 @@ function renderTemplates() {
         <button class="btn" data-act="save-template">Save as template</button>
       </div>
     </div>
-    <p class="hint">Click a template's name to load it; it asks which parts to take first. Update from plan fills it with the plan on screen.</p>
+    <p class="hint">Load puts a template on the plan, asking which parts to take first. Save puts the plan on screen into that template.</p>
     ${state.templates.length ? `<div class="shelf" data-keep-scroll="templates">${days}${rest.map(templateCard).join('')}</div>`
       : '<p class="empty">No templates yet. Set the plan up the way it usually runs, then save it here.</p>'}
   </section>`;
@@ -2699,32 +2701,6 @@ function offerSpotRoundSplit() {
     spotRoundLines(plan));
 }
 
-/* The calendar half of templates, and the whole of it: a template offers
-   itself on its day and never applies itself. It is opt-in per template —
-   nothing has a weekday until one is chosen — because the plan on screen may
-   already have someone's morning in it, and the app does not know that. */
-/* A template set for the plan's weekday offers itself: the plan's day, not the
-   calendar's, because the plan is usually for tomorrow. It only asks. A new
-   offer replaces the one before it (the offer carries `day` to be found by),
-   and a quiet one leaves the page where it is. A date that is not a real day
-   offers nothing. */
-function offerPlanDayTemplate({ quiet = false } = {}) {
-  notices = notices.filter((n) => !(n.offer && n.offer.day));
-  const day = planWeekday();
-  if (day < 0) return;
-  // An empty template is never offered: there is nothing in it to use.
-  const set = state.templates.filter((t) => t.weekday === String(day) && t.routes.length);
-  if (!set.length) return;                             // the default, and the point of it
-  const t = set[0];
-  // More than one set for the same day is allowed: the offer names the first
-  // and mentions the rest, rather than stacking questions on top of each other.
-  const others = set.length - 1;
-  const raised = offerRaised;
-  note('info', `This plan is for ${dayLabel(state.date)}. Your ${t.name} template is set for ${WEEKDAYS[day]}s${others ? `, and so ${others === 1 ? 'is one other' : `are ${others} others`}` : ''}.`,
-    { act: 'ask-template', kind: 'template', id: t.id, text: `Use ${t.name}`, day: true });
-  if (quiet) offerRaised = raised;
-}
-
 /* Loading a template in parts. Each tick takes one thing from the template:
    Routes is the route list itself (names, order, marks and gaps); Drivers;
    Cars; Positions and rounds, together, since a round is a round at a spot.
@@ -2815,7 +2791,7 @@ function templateQuestion(t, parts) {
    plan: they are how this one load is to be done, not part of the plan. */
 function askTemplate(t) {
   dropOffers();
-  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Update from plan fills it.`); return; }
+  if (!t.routes.length) { note('info', `The ${t.name} template is not saved yet, so there is nothing to load. Save puts the plan on screen into it.`); return; }
   const n = note('warn', `Load the ${t.name} template over the plan on screen? Untick what the plan should keep.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
   n.parts = allParts();
@@ -2881,7 +2857,6 @@ document.addEventListener('click', (e) => {
       if (!m || state !== m.plan || state.date !== m.to) { render(); return; }
       state.date = m.from;
       note('info', `Kept ${dayLabel(m.from)}. That day has passed, so the date moves again the next time the app is opened.`);
-      offerPlanDayTemplate({ quiet: true });
       if (m.saved) save();
       else if (m.inFile && typeof Store.saveFile === 'function') Store.saveFile(state);
       render();
@@ -2987,7 +2962,6 @@ document.addEventListener('click', (e) => {
     case 'set-tomorrow':
       state.date = nextWorkingDay();
       dropKeep();
-      offerPlanDayTemplate({ quiet: true });
       if (e.detail === 0) refocus = '#date';
       break;
     case 'clear-day':
@@ -2999,7 +2973,6 @@ document.addEventListener('click', (e) => {
       // it is stale: it goes explicitly, or it could write a passed date
       // over the day just cleared.
       dropKeep();
-      offerPlanDayTemplate({ quiet: true });
       break;
     // A blank route beside the one clicked. Directly above it, the clicked
     // row keeps its gap, so deleting the new row later never takes a gap
@@ -3096,10 +3069,10 @@ document.addEventListener('click', (e) => {
     case 'ask-template':
       askTemplate(list[i]);
       break;
-    // Update from plan, on the card and in its menu: this template, found by
-    // its id rather than by its name, so the one clicked is the one updated
-    // even when two share a name. It keeps its id, name and weekday, after a
-    // backup.
+    // Save, on the card and in its menu (Update from plan until 0.14.1): this
+    // template, found by its id rather than by its name, so the one clicked
+    // is the one updated even when two share a name. It keeps its id, name
+    // and saved weekday, after a backup.
     case 'resave-template': {
       if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
       const t = list[i];
@@ -4043,12 +4016,10 @@ async function start() {
   // of its own: whatever goes wrong, the plan is drawn as it was saved.
   const savedDate = state.date;
   try { moveDateOnOpen(); } catch (e) { state.date = savedDate; dropKeep(); console.warn('date move skipped', e); }
-  // Offers, never applications: these only ever add a notice with a button in
-  // it. The spot names come first because they are about the data itself
-  // rather than about today, and because the question scrolled into view
-  // should be the one that has to be answered before share codes work again.
+  // An offer, never an application: it only ever adds a notice with a button
+  // in it. (Templates no longer offer themselves on their day: owner,
+  // 2026-10-01. A template's saved day stays in the plan, unused.)
   offerSpotRoundSplit();
-  offerPlanDayTemplate();
   // What the Store said since the drain above (a start-of-day backup that
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();

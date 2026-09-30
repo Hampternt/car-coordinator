@@ -21,7 +21,7 @@ const HELP = {
   'plan-cars': { title: 'The Cars panel',
     text: 'The fleet, each car with its route, Free, or its status label. Drag a registration onto a route to put it there; 🏷 or a right-click sets its status.' },
   'plan-templates': { title: 'Day templates',
-    text: 'Saved copies of the routes, with their drivers, cars, positions, rounds and marks, but never the date. Monday to Friday sit in their own columns, as in the week below. Update from plan fills a template with the plan on screen; loading one asks which parts to take and says what will happen before anything changes. The day box under a template ("On Mondays") has it offer itself when the plan is for that day; it only ever asks.' },
+    text: 'Saved copies of the routes, with their drivers, cars, positions, rounds and marks, but never the date. Monday to Friday sit in their own columns, as in the week below. Load puts a template on the plan: it asks which parts to take and says what will happen before anything changes. Save puts the plan on screen into the template, after a backup; click it twice.' },
   'plan-week': { title: 'The week',
     text: 'Monday to Friday, each with its crew: the drivers whose usual days include it. Load makes that crew the ones in and everyone else away; a day with no crew can save the drivers in now as its crew.' },
   'plan-map': { title: 'Parking map',
