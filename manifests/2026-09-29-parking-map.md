@@ -1,6 +1,6 @@
 # Pack: Parking map
 
-**Status:** 💭 planned (owner questions answered) — item list awaiting the owner's approval; nothing built.
+**Status:** 🚧 building, since 2026-09-30, as part 6 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (the yard as drawn; the gate is named `Gate`).
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `parking-map`, from `dev` after pack 5 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line). Items 1–2 can start earlier, but only on their own branch, `parking-map-model` (Design H).
 
@@ -477,3 +477,5 @@ Playwright locators are strict, and several tests count across the whole Day pla
   - `git log` since pack 5 is swept into the docs.
 
 ## Ledger
+
+- **2026-09-30, start (combined pack, part 6).** Built on `review-round` after part 5, base 737117a (0.7.0); no `parking-map-model` carve-out, since one builder works in order (Design H's steps 1-2 collapse into items 1-2 on the same branch). INVENTORY's 💭 line is a 🚧 pointer under Day plan, and the container's parallel-work sentence says `scripts/map.mjs`, not a smoke case. **Owner question 2:** `GATE_NAMES` is exactly `['Gate']`. Every expectation that assumed Port 1 is read against that: the dev fixture's Port 1 and Port 2 are both under Not on the map, and the gate box reads "No position named Gate". **Reconciled with part 5 as built (deviation):** part 5 left a `#planMap` slot drawn by `mapSlot(use)` against a `ParkingMap.render(state, use)` contract. This pack's Design F (app.js draws the card and its two containers even without `map.js`, and fills them from `ParkingMap.model/drawing/others` behind a `typeof` guard and a try/catch) is built inside that same slot, in `mapSlot`; the `render` hook is not used, and part 5's item-9 smoke case is rewritten in item 4 to this behaviour. The contract's safety rules (pure, a string, no writes, the markup rules) all still hold. **Batched rule:** `check.sh` per item; `scripts/map.mjs`, smoke and screens run at the end of part 9, and the upgrade check only from v0.2.4.

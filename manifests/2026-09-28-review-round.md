@@ -63,8 +63,8 @@ Someone missing their data is exactly the person likely to press Reconnect, hopi
 
 **One pack at a time.** Every pack writes `docs/app.js`, and packs 1, 4 and 9
 all add to `start()`. The only safe parallel work: pack 6's map logic can be
-built as a separate module (`docs/map.js`, with its own smoke case) while pack
-5 runs, and mounted after pack 5 merges.
+built as a separate module (`docs/map.js`, checked in node by
+`scripts/map.mjs`) while pack 5 runs, and mounted after pack 5 merges.
 
 **Why this order:**
 - **Update note first:** every pack after it announces itself.

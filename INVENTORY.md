@@ -16,6 +16,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Driver roster** — an editable list of drivers, offered to the day plan's driver box as suggestions while it stays free text. Starts empty.
 - ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in.
 - ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself when the plan is for its weekday, but that is off unless you turn it on, and even then it only asks.
+- 🚧 **Parking map** — a plain drawing of the yard under the week: Spot 1 to Spot 5 and the Gate, each with its routes by round, red when taken twice in one round; other positions listed under it. `manifests/2026-09-29-parking-map.md`.
 - 🚧 **Day plan layout** — day templates straight under the route list, then the week: a column per weekday listing that day's crew, with Load above each, replacing the Mon–Sun buttons. `manifests/2026-09-29-day-plan-layout.md`.
 - 🚧 **Plan for tomorrow** — a passed date moves to the next working day when the app opens, with Keep to put it back, and a line under the Date says what day the plan is for. `manifests/2026-09-29-plan-for-tomorrow.md`.
 
@@ -86,7 +87,6 @@ stays where it is and stays the source of truth for the printed page.
 Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
-- 💭 **A map of the parking areas** under the route list, drawn from the layout the warehouse uses. A position the map doesn't know still works; it just isn't on the picture.
 - 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
 - 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
