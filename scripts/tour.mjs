@@ -191,6 +191,33 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
   }
 }
 
+// The Tour button, right of Print, opens the tour from every tab and never
+// saves: the saved plan is byte-identical either side of the press. Tabs are
+// reached with the app's own switch, not a tab click, which saves.
+{
+  const { ctx, pg } = await openPage({ plan: devPlan });
+  const opened = [];
+  for (const t of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview']) {
+    await pg.evaluate((x) => { tab = x; render(); }, t);
+    const before = await pg.evaluate(() => localStorage.getItem('carcoord:v1'));
+    await pg.click('.topbar [data-act="tour"]');
+    const open = await tourOpen(pg) && (await step(pg)).startsWith('1 of');
+    const after = await pg.evaluate(() => localStorage.getItem('carcoord:v1'));
+    if (!open || after !== before) opened.push(t);
+    await pg.keyboard.press('Escape');
+  }
+  check('the Tour button opens the tour from every tab, and the saved plan is byte-identical either side of the press', !opened.length, opened.join(', '));
+  await pg.click('.topbar [data-act="tour"]');
+  await pg.keyboard.press('Escape');
+  check('closing it puts the focus back on the Tour button', await pg.evaluate(() => document.activeElement.dataset.act === 'tour'));
+  check('and it sits right of Print', await pg.evaluate(() => document.querySelector('.topbar [data-act="print"]').nextElementSibling?.dataset.act === 'tour'));
+  await pg.click('.topbar [data-act="tour"]');
+  await pg.evaluate(() => Tour.go(Tour.STEPS.length - 1));
+  check('the last step says where the Tour button is', (await pg.locator('#tour').innerText()).includes('Tour button, right of Print in the top bar'));
+  await pg.keyboard.press('Escape');
+  await ctx.close();
+}
+
 // --- tour: done ---
 check('the tour cases log no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();

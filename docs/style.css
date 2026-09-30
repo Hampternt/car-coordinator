@@ -157,6 +157,13 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .sibling::after { content: ' \2192'; color: var(--hivis); }
 .sibling:hover, .sibling:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
 .sibling:hover::after, .sibling:focus-visible::after { color: var(--on-bright); }
+/* The Tour button, right of Print: set like the Breadify link, a way in
+   rather than an action on the plan. */
+.tour-btn {
+  padding: 7px 13px; background: none; border: 1px solid var(--bar-edge); border-left: 4px solid var(--hivis);
+  color: var(--on-bar); font: 700 14px var(--head); white-space: nowrap; flex: none; cursor: pointer;
+}
+.tour-btn:hover, .tour-btn:focus-visible { color: var(--on-bright); background: var(--hivis); border-color: var(--hivis); }
 
 /* 1200 was right when the plan was a table with a narrow rail beside it. The
    rail is a working panel now and lives to the right of the table, so the page

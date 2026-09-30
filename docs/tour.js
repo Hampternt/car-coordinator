@@ -62,6 +62,7 @@ const Tour = (() => {
       <h3 id="tourTitle">${esc(step.title)}</h3>
       <p>${esc(step.text)}</p>
       ${at === 0 ? '<p class="tour-extra">The tour only points at things. Anything you type while it is open is saved as usual.</p>' : ''}
+      ${last ? '<p class="tour-extra">Open this tour again any time from the Tour button, right of Print in the top bar.</p>' : ''}
       <div class="tour-acts">
         <button type="button" class="btn" data-tour="back"${at === 0 ? ' disabled' : ''}>Back</button>
         <button type="button" class="btn primary-ish" data-tour="next">${last ? 'Done' : 'Next'}</button>
