@@ -130,7 +130,9 @@ const measure = (pg) => pg.evaluate(() => {
   const el = document.querySelector(Tour.STEPS[Number(document.querySelector('#tour .tour-count').textContent.split(' ')[0]) - 1].target);
   const a = el && el.getBoundingClientRect();
   const cx = a && a.left + a.width / 2, cy = a && a.top + a.height / 2;
-  const inView = !!a && a.width > 0 && cy >= bar && cy <= innerHeight && cx >= 0 && cx <= document.documentElement.clientWidth;
+  // A target in the top bar is in view in the bar; any other, below it.
+  const ceiling = el && el.closest('.topbar') ? 0 : bar;
+  const inView = !!a && a.width > 0 && cy >= ceiling && cy <= innerHeight && cx >= 0 && cx <= document.documentElement.clientWidth;
   const hit = inView ? document.elementFromPoint(cx, cy) : null;
   return {
     inWindow: c.left >= -0.5 && c.right <= document.documentElement.clientWidth + 0.5 && c.bottom <= innerHeight + 0.5,
@@ -139,6 +141,7 @@ const measure = (pg) => pg.evaluate(() => {
     inView,
     sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     ring: !document.querySelector('#tourRing').hidden,
+    at: [Math.round(c.top), Math.round(c.bottom), Math.round(bar), a && Math.round(a.top), Math.round(scrollY)],
   };
 });
 for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600], [390, 844]]) {
