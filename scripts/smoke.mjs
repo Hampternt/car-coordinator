@@ -4143,17 +4143,47 @@ for (const [seededAt, wantNew, what] of [
   // The Date box reads dd/mm/yyyy in any browser language, and a few other
   // ways of writing it; the plan keeps YYYY-MM-DD, as it always has.
   const typedAs = async (typed) => { await pg.fill('#date', typed); return pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join()); };
-  for (const [typed, want] of [['02/10/2026', '2026-10-02'], ['2.10.2026', '2026-10-02'], ['2-10-2026', '2026-10-02'], ['2026-10-02', '2026-10-02'],
-    ['02/10/20', ''], ['02/10/202', ''], ['31/09/2026', ''], ['10/13/2026', '']]) {
+  for (const typed of ['02/10/2026', '2.10.2026', '2-10-2026', '2026-10-02']) {
     const got = await typedAs(typed);
-    check(`typing ${typed} in the Date box keeps ${want || 'no day'}`, got === `${want},${want}`, got);
+    check(`typing ${typed} in the Date box sets and saves 2026-10-02`, got === '2026-10-02,2026-10-02', got);
   }
+  // Half typed, or not a real day: the plan keeps its day and nothing is
+  // saved; the day above the line and the line itself say so.
+  for (const typed of ['02/10/20', '02/10/202', '31/09/2026', '10/13/2026']) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} keeps the plan's day, 2026-10-02, and saves nothing new`, got === '2026-10-02,2026-10-02'
+      && (await head()) === 'Not a date yet' && (await line(pg)).text.startsWith('Not a real day yet'), got);
+  }
+  await pg.fill('#date', '02/10/20');
+  await pg.evaluate(() => render());
+  check('a redraw meanwhile keeps what was typed in the box', (await pg.inputValue('#date')) === '02/10/20');
   await pg.fill('#date', '2.10.2026');
   await pg.locator('#date').blur();
   check('leaving the Date box writes what was typed as dd/mm/yyyy', (await pg.inputValue('#date')) === '02/10/2026', await pg.inputValue('#date'));
   await pg.fill('#date', '31/09/2026');
   await pg.locator('#date').blur();
-  check('and leaves a day that is not real as typed, to be put right', (await pg.inputValue('#date')) === '31/09/2026');
+  check('and a day left half typed goes back to the day the plan kept', (await pg.inputValue('#date')) === '02/10/2026'
+    && (await head()) === 'Friday 02/10/2026 Planning three days ahead');
+  // « ‹ › »: a month or a day either way, as if typed; the focus stays put.
+  const stepBy = async (unit, by) => { await pg.click(`[data-act="date-step"][data-unit="${unit}"][data-by="${by}"]`); return pg.evaluate(() => [state.date, document.getElementById('date').value].join()); };
+  same('› is a day later', await stepBy('day', 1), '2026-10-03,03/10/2026');
+  same('‹ a day earlier', await stepBy('day', -1), '2026-10-02,02/10/2026');
+  same('» a month later', await stepBy('month', 1), '2026-11-02,02/11/2026');
+  same('« a month earlier', await stepBy('month', -1), '2026-10-02,02/10/2026');
+  check('and the button keeps the focus, for another press', await pg.evaluate(() => document.activeElement?.dataset.unit === 'month'));
+  await pg.fill('#date', '31/01/2027');
+  same('a month on from the 31st is the month\'s last day', await stepBy('month', 1), '2027-02-28,28/02/2027');
+  check('and it is saved', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).date)) === '2027-02-28');
+  check('everything on the Date row is one height', new Set(await pg.locator('#planBar .btn, #date').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)))).size === 1);
+  // A click on the box opens the calendar, set to the plan's day; the keyboard
+  // never does, so typing still works.
+  await pg.evaluate(() => { window.pickerOpened = []; HTMLInputElement.prototype.showPicker = function () { window.pickerOpened.push(this.value); }; });
+  await pg.click('#date');
+  same('a click on the Date box opens the calendar, on the plan\'s day', await pg.evaluate(() => window.pickerOpened), ['2027-02-28']);
+  await pg.focus('[data-act="date-step"][data-unit="day"][data-by="-1"]');
+  await pg.keyboard.press('Tab');
+  check('reaching it with Tab does not', await pg.evaluate(() => document.activeElement?.id === 'date' && window.pickerOpened.length === 1));
+  await pg.fill('#date', '02/10/2026');
   // The calendar button opens the browser's own picker, on a date field kept
   // out of sight; a day picked there goes into the box as if typed.
   check('the calendar button sits beside the Date box, and its field is out of sight',
@@ -4209,6 +4239,35 @@ for (const [at, date, what] of [
   await pg.click('[data-act="set-tomorrow"]');
   check('nor does Set to tomorrow raise one', (await offers(pg)) === 0);
   same('and the templates keep the days they were saved with', await pg.evaluate(() => ['tm', 'tw', 'tf'].map((id) => byId(state.templates, id).weekday)), ['1', '3', '5']);
+  await pg.close();
+}
+
+// The plan's day's crew comes in with the date (owner, 2026-10-01): typing,
+// picking, a day step and Set to tomorrow load that weekday's crew, as the
+// week's Load does; a day with no crew changes nobody.
+{
+  const pg = await calOpen('2026-10-01T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': devPlan });
+  const inNow = () => pg.evaluate(() => state.drivers.filter((d) => d.available).map((d) => d.name).sort().join());
+  const crewOf = (name) => pg.evaluate((n) => {
+    const g = state.driverGroups.find((x) => x.name === n);
+    return state.drivers.filter((d) => g.driverIds.includes(d.id)).map((d) => d.name).sort().join();
+  }, name);
+  await pg.fill('#date', '05/10/2026');
+  same('typing a Monday brings Monday\'s crew in and sends the rest away', await inNow(), await crewOf('Monday crew'));
+  check('and saves it', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).drivers.filter((d) => d.available).length))
+    === (await crewOf('Monday crew')).split(',').length);
+  await pg.fill('#date', '02/10/2026');
+  same('a Friday, Friday\'s', await inNow(), await crewOf('Friday'));
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a step to Saturday loads the Saturday crew', await inNow(), await crewOf('Lørdag gjeng'));
+  const sat = await inNow();
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a Sunday, which has no crew, changes nobody', await inNow(), sat);
+  check('the rail and the week show it', (await pg.locator('#planWeek .week-load.lit').count()) === 0
+    && (await pg.locator('#tab-plan [data-panel="drivers"] .rail-row.away').count()) > 0);
+  await pg.click('[data-act="set-tomorrow"]');
+  same('Set to tomorrow loads its day\'s crew too', await inNow(), await crewOf('Friday'));
+  check('with the week\'s Friday Load lit', (await pg.locator('#planWeek .week-col[data-day="5"] .week-load.lit').count()) === 1);
   await pg.close();
 }
 

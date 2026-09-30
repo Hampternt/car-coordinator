@@ -84,6 +84,23 @@ function dayCrews() {
   return { byDay, others };
 }
 
+/* The plan's day's crew in, and everyone else away, when the date is set to
+   that day by hand (owner, 2026-10-01): the week's Load for it, done for you.
+   Typing, picking, the day and month steps and Set to tomorrow do it; a date
+   moved on open does not, since nothing is written at open. A day with no
+   crew, or an empty one, changes nobody. Like Load, it sets everyone, a
+   driver tagged Sick in that crew included. True when anyone changed. */
+function loadDayCrew() {
+  const day = planWeekday();
+  const g = day >= 0 ? dayCrews().byDay.get(day) : null;
+  const ids = g ? crewIds(g) : new Set();
+  if (!ids.size) return false;
+  let changed = false;
+  state.drivers.forEach((d) => { const on = ids.has(d.id); if (d.available !== on) { d.available = on; changed = true; } });
+  if (changed) delete planScroll.drivers;
+  return changed;
+}
+
 /* ---------- the calendar ----------
    Local days throughout: a plan is for a day on the leader's own calendar,
    not a UTC one. Days are built at local noon, so a clock change can never
@@ -139,6 +156,42 @@ function typedDay(text) {
   const s = m ? `${m[3]}-${pad2(m[2])}-${pad2(m[1])}` : t;
   return parseDay(s) ? s : '';
 }
+/* A date half typed, while the Date box has the focus: the plan keeps the day
+   it has until the box reads a real one, and a redraw meanwhile (a disarm, a
+   write to the save file) draws the box with what was typed, not the day. */
+function dateTyping() {
+  const box = document.getElementById('date');
+  return box && document.activeElement === box && box.value.trim() && !typedDay(box.value) ? box.value : null;
+}
+const dateBoxText = () => dateTyping() ?? dmyOf(state.date);
+/* A day or a month on from a date: a month on keeps the day of the month, or
+   the month's last where it has fewer (31/01 to 28/02). From a date that is
+   not a real day, the steps start at today. */
+function stepDate(s, unit, by) {
+  const d = parseDay(s) || parseDay(today());
+  if (unit === 'month') {
+    const last = new Date(d.getFullYear(), d.getMonth() + by + 1, 0, 12).getDate();
+    return dayString(new Date(d.getFullYear(), d.getMonth() + by, Math.min(d.getDate(), last), 12));
+  }
+  return dayString(new Date(d.getFullYear(), d.getMonth(), d.getDate() + by, 12));
+}
+/* The calendar is the browser's own, on a date field kept out of sight under
+   the Date box, set to the plan's day first so that day is the one marked;
+   what is picked there is typed into the box (the change handler). */
+function openDatePicker() {
+  const p = document.getElementById('datePick');
+  if (!p) return;
+  p.value = parseDay(state.date) ? state.date : '';
+  try { p.showPicker(); } catch (err) { /* no picker here: the box still types */ }
+}
+// A date put in the box by a button goes in as if typed, so it takes exactly
+// the path a typed date does.
+function putDate(day) {
+  const box = document.getElementById('date');
+  if (!box || !parseDay(day)) return;
+  box.value = dmyOf(day);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 // The weekday of the plan's own date, 0 for Sunday, or -1 when it is not a day.
 const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
@@ -149,6 +202,7 @@ const planWeekday = () => parseDay(state.date)?.getDay() ?? -1;
    every other date, a weekend one included. */
 function dateLine() {
   const now = today(), nwd = nextWorkingDay(), d = state.date;
+  if (dateTyping() !== null) return { off: true, text: `Not a real day yet: type it as dd/mm/yyyy, or click the box for the calendar. The plan keeps ${parseDay(d) ? dayLabel(d) : 'no date'} until then.` };
   if (!parseDay(d)) return { off: true, text: `The date is not a real day. The next working day is ${dayLabel(nwd)}.` };
   if (d === nwd) return { off: false, text: `${dayLabel(d)}, the next working day.` };
   if (d === now) return { off: true, text: `This plan is dated today, ${dayLabel(d)}. The next working day is ${dayLabel(nwd)}.` };
@@ -176,6 +230,7 @@ function planningWords(n) {
   return n > 0 ? `Planning ${w} days ahead` : `Planning ${w} days ago`;
 }
 function dateHeadInner() {
+  if (dateTyping() !== null) return '<span class="date-big">Not a date yet</span>';
   const d = parseDay(state.date);
   if (!d) return '<span class="date-big">No date set</span>';
   return `<span class="date-big">${WEEKDAYS[d.getDay()]} ${esc(dmyOf(state.date))}</span>`
@@ -1337,8 +1392,12 @@ function renderPlan() {
     <div class="bar" id="planBar">
       <label for="date">Date</label>${infoBtn('plan-date')}
       <span class="date-box">
-        <input id="date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" data-kind="meta" data-field="date" value="${esc(dmyOf(state.date))}">
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="month" data-by="-1" title="A month earlier" aria-label="A month earlier">«</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="day" data-by="-1" title="A day earlier" aria-label="A day earlier">‹</button>
+        <input id="date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" title="Click for the calendar, or type the date as dd/mm/yyyy" data-kind="meta" data-field="date" value="${esc(dateBoxText())}">
         <button type="button" class="btn date-cal" data-act="pick-date" title="Pick the date from a calendar" aria-label="Pick the date from a calendar">\u{1F4C5}</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="day" data-by="1" title="A day later" aria-label="A day later">›</button>
+        <button type="button" class="btn date-step" data-act="date-step" data-unit="month" data-by="1" title="A month later" aria-label="A month later">»</button>
         <input id="datePick" type="date" tabindex="-1" aria-hidden="true" value="${esc(parseDay(state.date) ? state.date : '')}">
       </span>
       <button class="btn" data-act="add-route">+ Add route</button>
@@ -2176,18 +2235,25 @@ document.addEventListener('input', (e) => {
   const weekSig = () => state.driverGroups.map((g) => groupWeekday(g.name)).join();
   const regroup = kind === 'driverGroup' && name === 'name';
   const weekWas = regroup ? weekSig() : null;
+  // A date half typed is not a day yet: nothing changes and nothing is saved;
+  // only the day and the line under the box say so, until it reads one.
+  if (kind === 'meta' && name === 'date' && dateTyping() !== null) { drawDateLine(); return; }
   if (kind === 'meta') state[name] = name === 'date' ? typedDay(value) : value;
   else {
     const item = byId(listFor(kind) || [], id);
     if (!item) return;
     item[name] = value;
   }
+  const crewMoved = kind === 'meta' && name === 'date' && !!parseDay(state.date) && loadDayCrew();
   save();
   // A tick is often pressed with Space, and the next Tab has to go on from it.
   if (el.type === 'checkbox') renderKeepingFocus();
   else if (el.tagName === 'SELECT') render();
   else if (before !== null && liveSig() !== before) redrawKeepingCaret(el);
   else if (regroup && weekSig() !== weekWas) redrawKeepingCaret(el);
+  // A day's crew loaded: the rail and the week redraw, the focus staying where
+  // it was (the Date box, or the step button pressed).
+  else if (crewMoved) { if (document.activeElement === el) redrawKeepingCaret(el); else renderKeepingFocus(); }
   else { renderSheet(); renderPicker(); renderMap(); if (kind === 'meta' && name === 'date') drawDateLine(); }
 });
 
@@ -3055,13 +3121,17 @@ document.addEventListener('click', (e) => {
       break;
     // The calendar is the browser's own, on a date field kept out of sight
     // under the Date box; what is picked in it is typed into the box (below).
-    case 'pick-date': {
-      const p = $('#datePick');
-      try { p.showPicker(); } catch (err) { p.focus(); }
+    case 'pick-date':
+      openDatePicker();
       return;
-    }
+    // « ‹ › »: a month or a day either way, as if typed; the focus stays on the
+    // button, so it can be pressed again.
+    case 'date-step':
+      putDate(stepDate(state.date, b.dataset.unit, Number(b.dataset.by)));
+      return;
     case 'set-tomorrow':
       state.date = nextWorkingDay();
+      loadDayCrew();
       dropKeep();
       if (e.detail === 0) refocus = '#date';
       break;
@@ -3810,6 +3880,13 @@ document.addEventListener('scroll', (e) => {
 }, { capture: true, passive: true });
 window.addEventListener('resize', placeInfoBubble);
 
+// A click on the Date box opens the calendar (owner, 2026-10-01): a click on a
+// date means picking one. Typing still works: from the keyboard, which never
+// opens it, or after Esc shuts it.
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'date' && e.detail > 0) openDatePicker();
+});
+
 // A template's contents on hover: a moment's rest on a card before the first
 // shows, at once from one card to the next, and a moment's grace to cross
 // from the card to the layer before they go. The mouse only; a finger or the
@@ -4023,9 +4100,9 @@ document.addEventListener('dragstart', closeCtxMenu, true);
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
-  // Leaving the Date box tidies what was typed ("1.10.2026") into dd/mm/yyyy;
-  // a date that is not a real day stays as typed, to be put right.
-  if (e.target.id === 'date') { if (parseDay(state.date)) e.target.value = dmyOf(state.date); return; }
+  // Leaving the Date box tidies what was typed ("1.10.2026") into dd/mm/yyyy,
+  // and a date left half typed goes back to the day the plan kept.
+  if (e.target.id === 'date') { e.target.value = dmyOf(state.date); drawDateLine(); return; }
   // A day picked from the calendar goes in as if typed, so it takes exactly
   // the path a typed date does.
   if (e.target.id === 'datePick') {
