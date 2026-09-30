@@ -245,6 +245,66 @@ for (const [width, height] of [[1680, 1000], [1280, 900], [1024, 768], [900, 600
   }
 }
 
+// (g) The offer: on a first-ever open, one notice and it is the offer; never
+// with a saved plan, an unreadable save, a share link, the tour already seen
+// or a save file linked. Show me around takes that notice away and no other.
+{
+  const offers = (pg) => pg.locator('#notices .notice [data-act="tour"]').count();
+  const fresh = await openPage();
+  const pg = fresh.pg;
+  check('a fresh browser shows exactly one notice, the offer of the tour, and no warning', (await pg.locator('#notices .notice').count()) === 1
+    && (await offers(pg)) === 1 && (await pg.locator('#notices .notice.warn').count()) === 0, await pg.locator('#notices').innerText());
+  const before = await storage(pg);
+  await pg.evaluate(() => { note('info', 'Something else to say.'); render(); });
+  await pg.click('#notices [data-act="tour"]');
+  check('Show me around opens the tour and takes the offer away, and only the offer', await tourOpen(pg) && (await offers(pg)) === 0
+    && (await pg.locator('#notices .notice', { hasText: 'Something else to say.' }).count()) === 1);
+  check('and nothing is saved', !(await pg.evaluate(() => localStorage.getItem('carcoord:v1'))));
+  await pg.click('#tour [data-tour="end"]');
+  const after = await storage(pg);
+  const { 'carcoord:pref:tour': seen, ...rest } = after;
+  check('Skip tour writes carcoord:pref:tour and nothing else', seen === 'done' && JSON.stringify(rest) === JSON.stringify(before), JSON.stringify(Object.keys(after)));
+  await pg.reload({ waitUntil: 'networkidle' });
+  check('with the tour seen, the next open offers nothing', (await offers(pg)) === 0);
+  await fresh.ctx.close();
+
+  const cases = [
+    ['a saved plan', async (p) => { await p.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:v1', t); }, devPlan); await p.reload({ waitUntil: 'networkidle' }); }],
+    ['an unreadable save', async (p) => { await p.evaluate(() => { localStorage.clear(); localStorage.setItem('carcoord:v1', '{"schemaVersion":4, broken'); }); await p.reload({ waitUntil: 'networkidle' }); }],
+    ['a share link', async (p) => { await p.evaluate(() => localStorage.clear()); await p.goto(`${base}#d=CC1notarealcode`, { waitUntil: 'networkidle' }); }],
+  ];
+  for (const [what, open] of cases) {
+    const { ctx, pg: p } = await openPage();
+    await open(p);
+    check(`no offer with ${what}`, (await offers(p)) === 0, await p.locator('#notices').innerText());
+    await ctx.close();
+  }
+  // A save file linked: checked on the rule itself, since a real handle
+  // cannot be put in place before the page starts.
+  const { ctx, pg: p } = await openPage();
+  const linked = await p.evaluate(() => {
+    notices = []; tourOffer = null; firstRun = true;
+    Store.file.handle = { name: 'car-coordinator.json' };
+    offerTour(false);
+    const offered = notices.some((n) => n.offer && n.offer.act === 'tour');
+    Store.file.handle = null;
+    notices = []; render();
+    return offered;
+  });
+  check('no offer with a save file linked', linked === false);
+  await ctx.close();
+}
+
+// A right-click on the tour's card is the browser's, with no app entries.
+{
+  const { ctx, pg } = await openPage({ plan: devPlan });
+  await startTour(pg);
+  await pg.evaluate(() => { window.addEventListener('contextmenu', (e) => { window.__native = !e.defaultPrevented; }); });
+  await pg.locator('#tour h3').click({ button: 'right' });
+  check('a right-click on the tour\'s card keeps the browser\'s menu', (await pg.evaluate(() => window.__native)) === true && await pg.locator('#ctxMenu').isHidden());
+  await ctx.close();
+}
+
 // --- tour: done ---
 check('the tour cases log no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();

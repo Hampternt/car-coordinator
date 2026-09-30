@@ -2233,6 +2233,31 @@ function raiseUpdateNote({ link, recovered, copy }) {
   if (show) note('update', updateNoteText(copy, recovered), null, updateNoteLines(show));
 }
 
+/* The tour, offered once there is reason to think this is someone's first
+   look: a first-ever open (nothing saved, nothing read from a save file), not
+   by a share link, with no warning up (an unreadable save is one), no save
+   file linked (a linked file means this browser was used before, even with
+   its plan gone), and the tour not seen here. It only offers: the tour opens
+   when Show me around is pressed. Kept, so starting the tour takes this
+   notice away and no other: the update note never carries this button, but
+   removing by act would be one change away from taking the note too. */
+let tourOffer = null;
+function offerTour(link) {
+  if (!firstRun || link || typeof Tour === 'undefined' || typeof Store.pref !== 'function') return;
+  if (notices.some((n) => n.kind === 'warn') || (Store.file && Store.file.handle)) return;
+  // null is "never seen"; undefined is storage that could not be read, which
+  // is no reason to offer.
+  if (Store.pref('tour') !== null) return;
+  note('info', 'New here? A two-minute tour shows where everything is. The tour only points at things; anything you type on the page is saved as usual. Used Car Coordinator before? Open your save file or an exported copy from the Data tab first.',
+    { act: 'tour', kind: '', id: '', text: 'Show me around' });
+  tourOffer = notices[notices.length - 1];
+}
+const dropTourOffer = () => {
+  if (!tourOffer) return;
+  notices = notices.filter((n) => n !== tourOffer);
+  tourOffer = null;
+};
+
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
    is about to be replaced in words — and because the weekday offer needs a
@@ -3336,7 +3361,7 @@ async function start() {
     Tour.init({
       showTab: (t) => { tab = t; render(); },
       tab: () => tab,
-      closeLayers: () => { closePicker(); closeTagMenu(); closeCtxMenu(); },
+      closeLayers: () => { closePicker(); closeTagMenu(); closeCtxMenu(); dropTourOffer(); },
       besideAnchor,
       setPref: (name, value) => Store.setPref(name, value),
     });
@@ -3378,6 +3403,8 @@ async function start() {
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
+  // After the note, which is what works out whether this is a first run.
+  try { offerTour(link); } catch (e) { console.warn('tour offer skipped', e); }
   render();
 
   const fromLink = Share.readHash();

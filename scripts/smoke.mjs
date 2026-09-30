@@ -52,7 +52,13 @@ const PLAN_DMY = PLAN_DAY.split('-').reverse().join('/');
 // --- first run ---
 // The tab's own empty message, not the template shelf's further down it.
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
-check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+// One notice, and it is the tour's offer: no warning, and no update note.
+check('a first run shows one notice, the offer of the tour, and no warnings', (await page.locator('#notices .notice').count()) === 1
+  && (await page.locator('#notices .notice.info [data-act="tour"]').count()) === 1 && (await page.locator('#notices .notice.warn').count()) === 0,
+  await page.locator('#notices').innerText());
+// Put away, as a leader who does not want it would: the rest of this page's
+// cases count notices from none.
+await page.locator('#notices .notice [data-act="dismiss"]').click();
 check('after a normal start, the static line pointing at the recovery page is gone', (await page.locator('#notices .boot-line').count()) === 0);
 check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
 check('the release notes load, newest first at the running version', await page.evaluate(() =>
