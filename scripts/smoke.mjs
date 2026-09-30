@@ -5441,13 +5441,16 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('Tag… opens the tag menu at that row\'s tag button, and shuts this one', await cm.locator('#tagMenu').isVisible()
     && (await cm.locator('#tagMenu').getAttribute('data-for')) === 'driver:drv-guro' && await cmMenu.isHidden());
   await cm.keyboard.press('Escape');
-  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId);
+  // Down to Tag… by its words: the Tag submenu (0.12.0) sits between it and
+  // Set away, and a fixed count of presses would land on whatever is there.
+  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId);
   await cmRail('driver', 'drv-guro').locator('[data-act="tag"]').focus();
   await cm.keyboard.press('Shift+F10');
-  await cm.keyboard.press('ArrowDown');
+  const onEntry = () => cm.evaluate(() => document.activeElement?.querySelector('span')?.textContent);
+  for (let k = 0; k < 6 && (await onEntry()) !== 'Tag\u2026'; k++) await cm.keyboard.press('ArrowDown');
   await cm.keyboard.press('Enter');
   check('Enter on Tag… opens the tag menu without choosing a tag', await cm.locator('#tagMenu').isVisible() && await cmMenu.isHidden()
-    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').labelId)) === tagWas);
+    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId)) === tagWas);
   await cm.keyboard.press('Escape');
 
   // Go to route 7: the focus in that route's driver box.
