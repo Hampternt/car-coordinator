@@ -55,6 +55,9 @@ await page.addInitScript(() => {
     const collisions = [];
     const clipped = [];
     let printed = '';
+    let fieldLines = 0;
+    let fieldsShown = 0;
+    const fieldsWrong = [];
     for (const sheet of sheets) {
       const body = sheet.querySelector('.bf-body');
       const foot = sheet.querySelector('.bf-footer');
@@ -72,7 +75,7 @@ await page.addInitScript(() => {
         across = Math.max(across, (node.getBoundingClientRect().right - edge) * perPx);
       }
 
-      for (const line of sheet.querySelectorAll('.bf-row, .bf-total-row, .bf-total-head, .bf-head-line')) {
+      for (const line of sheet.querySelectorAll('.bf-row, .bf-product-cell, .bf-total-row, .bf-total-head, .bf-head-line')) {
         const kids = Array.from(line.children)
           .map((node) => ({ name: node.className.split(' ')[0], box: node.getBoundingClientRect() }))
           .filter((k) => k.box.width > 0);
@@ -92,11 +95,33 @@ await page.addInitScript(() => {
       )) {
         if (node.scrollWidth > node.clientWidth + 1) clipped.push(node.className.split(' ')[0]);
       }
+      // Every bread line's dotted field (the owner, 2026-09-30) lies in its
+      // own row, after the name and before whatever follows the name's cell,
+      // or has no room at all. It never overlaps the name or leaves the row.
+      for (const cell of sheet.querySelectorAll('.bf-product-cell')) {
+        fieldLines += 1;
+        const field = cell.querySelector('.bf-note-field');
+        if (!field) {
+          fieldsWrong.push('a bread line with no field');
+          continue;
+        }
+        const f = field.getBoundingClientRect();
+        const name = cell.querySelector('.bf-product').getBoundingClientRect();
+        const box = cell.getBoundingClientRect();
+        const row = cell.closest('.bf-row').getBoundingClientRect();
+        const next = cell.nextElementSibling.getBoundingClientRect();
+        if (f.width * perPx < 0.5) continue; // no room: nothing there
+        fieldsShown += 1;
+        if (f.left < name.right - 0.5) fieldsWrong.push('a field starts inside its name');
+        if (f.right > box.right + 0.5 || f.right > next.left + 0.5) fieldsWrong.push('a field runs past its room');
+        if (f.top < row.top - 0.5 || f.bottom > row.bottom + 0.5) fieldsWrong.push('a field leaves its row');
+      }
       printed += ` ${sheet.textContent}`;
     }
 
     return {
       sheets: sheets.length,
+      fields: { lines: fieldLines, shown: fieldsShown, wrong: Array.from(new Set(fieldsWrong)) },
       // The flag belongs above the stops it covers, never alone at a foot.
       flagLast: sheets
         .filter((sheet) => {
@@ -503,6 +528,7 @@ const inspected = (what, seen) => {
   same(`${what}: nothing is clipped away by the box holding it`, seen.clipped, []);
   same(`${what}: nothing nonsensical is printed`, seen.nonsense, []);
   same(`${what}: no page ends with the "no position assigned" flag`, seen.flagLast, []);
+  same(`${what}: every bread line's dotted field sits in its own slack, or is not there`, seen.fields.wrong, []);
 };
 
 /**
@@ -884,9 +910,16 @@ same(
   spilling.map((s) => [s.route, s.page, Math.round(s.overflow * 10) / 10]),
   [],
 );
-inspected(
-  'the bread day',
-  await page.evaluate(() => inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
+const breadSeen = await page.evaluate(() =>
+  inspectSheets(Array.from(document.querySelectorAll('#preview .bf-sheet'))),
+);
+inspected('the bread day', breadSeen);
+// The owner, 2026-09-30: a dotted place to write on every bread line. All 352
+// lines carry one; it shows wherever the name leaves room.
+check(
+  'every bread line has its dotted field, and most have room to show it',
+  breadSeen.fields.lines === 352 && breadSeen.fields.shown > 300,
+  JSON.stringify(breadSeen.fields),
 );
 
 const breadMarkers = await markerReport();

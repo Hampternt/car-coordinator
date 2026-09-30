@@ -345,6 +345,13 @@ const Sheet = (() => {
    * missing and fixed boxes at the right. The freezer list writes a check line
    * (F8): a *checked* box on the left, a dotted field for a note in the slack
    * after the name, and only the *missing* box on the right.
+   *
+   * The bread line has the dotted field too, a departure from F8, which gives
+   * it to the check line alone (the owner, 2026-09-30: "a neat place to write
+   * if something should be written"). It shares one cell with the name, in
+   * the place the name alone used to have, and takes only what the name
+   * leaves: the name is set exactly where and how it was — it still wraps
+   * where it wrapped — and a name that fills its room leaves no field at all.
    */
   function breadLine(line, settings, tinted) {
     const bread = settings.kind === Model.BREAD;
@@ -358,14 +365,21 @@ const Sheet = (() => {
       tickBox(bread ? 'P' : 'C'),
       element('span', 'bf-qty', line.quantity),
       element('span', 'bf-code', Model.supplierCode(line.product.supplier)),
-      element('span', 'bf-product', line.product.name),
     );
 
     if (bread) {
+      row.appendChild(
+        append(
+          element('span', 'bf-product-cell'),
+          element('span', 'bf-product', line.product.name),
+          element('span', 'bf-note-field', '.'.repeat(120)),
+        ),
+      );
       const boxes = element('span', 'bf-ticks');
       append(boxes, tickBox('M'), tickBox('F'));
       row.appendChild(boxes);
     } else {
+      row.appendChild(element('span', 'bf-product', line.product.name));
       // A leader of full stops, clipped to whatever room the name left. A name
       // long enough to leave none simply has no field — nothing wraps (F8).
       // A line of a shared block departs from that: its name wraps when the

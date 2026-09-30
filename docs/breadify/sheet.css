@@ -559,8 +559,15 @@
 /* The name keeps room to be read. A first line that cannot leave it this much
  * sends its marker onto a line of its own — and only a name that measures can
  * make that call. */
-.bf-row-shared .bf-product {
+.bf-row-shared .bf-product,
+.bf-row-shared .bf-product-cell {
   min-width: 30mm;
+}
+
+/* The bread name keeps the room it always had; only this cell knows about
+ * the dotted field sharing it. */
+.bf-row-shared .bf-product-cell .bf-product {
+  min-width: 0;
 }
 
 /* A check line's name does not wrap (F8) — except on a line of a block of
@@ -669,6 +676,30 @@
   font: 400 11pt/1 'IBM Plex Mono', monospace;
   color: var(--rule-sub);
   margin: 0 3.4mm;
+}
+
+/* The bread line's field (the owner, 2026-09-30; a departure from F8, which
+ * gives the field to the check line alone). The name and the field share the
+ * cell the name used to fill on its own: the name is sized exactly as before
+ * — its natural width, wrapping at the cell's edge — and the field, sized
+ * from nothing, grows into whatever is left. It carries no margin or padding,
+ * which would have taken room from the name; its gap from the name is an
+ * indent inside it, clipped away with the dots when there is no room. */
+.bf-product-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+}
+
+.bf-product-cell .bf-product {
+  flex: 0 1 auto;
+}
+
+.bf-product-cell .bf-note-field {
+  flex: 1 1 0;
+  margin: 0;
+  text-indent: 3.4mm;
 }
 
 /* ── The unsequenced flag ────────────────────────────────────────────── */
