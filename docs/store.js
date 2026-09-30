@@ -22,6 +22,38 @@ const Store = (() => {
   // Two tag names are the same tag when they differ only in case and spacing.
   const sameName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
 
+  // The templates every plan's shelf starts with: Monday to Friday, empty
+  // until Update from plan fills them, and never offered on their day. The
+  // ids are fixed, so a plan given them twice (every load before the first
+  // save) comes out the same both times.
+  const WEEKDAY_TEMPLATES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const weekdayTemplates = () => WEEKDAY_TEMPLATES.map((name, i) => ({ id: `tpl-weekday-${i + 1}`, name, weekday: '', routes: [] }));
+
+  /* Which weekday a name reads as, 0 (Sunday) to 6, or -1: the way the week
+     reads a day group's name, so a template called "Mandag" or "Monday crew"
+     is Monday's. A copy of DAY_NAMES and groupWeekday in app.js, because
+     store.js cannot call app.js; the two must be kept in step, and the smoke
+     test checks they agree. */
+  const DAY_NAMES = [
+    ['SUNDAY', 'SUN', 'SØNDAG', 'SONDAG', 'SØN'],
+    ['MONDAY', 'MON', 'MANDAG', 'MAN'],
+    ['TUESDAY', 'TUE', 'TUES', 'TIRSDAG', 'TIR'],
+    ['WEDNESDAY', 'WED', 'WEDS', 'ONSDAG', 'ONS'],
+    ['THURSDAY', 'THU', 'THUR', 'THURS', 'TORSDAG'],
+    ['FRIDAY', 'FRI', 'FREDAG', 'FRE'],
+    ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG', 'LØR'],
+  ];
+  function weekdayOf(name) {
+    let n = String(name || '').trim().toUpperCase()
+      .replace(/[.!]+$/, '')
+      .replace(/['’]S\b/, '')
+      .replace(/[\s.-]+(CREWS?|GROUPS?|GANG|TEAM|GJENG|LAG|MANNSKAP)$/, '')
+      .replace(/DAYS$/, 'DAY').replace(/DAGER$/, 'DAG');
+    const joined = n.match(/^(MANDAG|TIRSDAG|ONSDAG|TORSDAG|FREDAG|L[ØO]RDAG|S[ØO]NDAG)S?(GJENGEN|GJENG|LAGET|LAG|TEAM|VAKTA|VAKTEN|VAKT|MANNSKAPET|MANNSKAP)$/);
+    if (joined) n = joined[1];
+    return DAY_NAMES.findIndex((names) => names.includes(n));
+  }
+
   /* ---------- validation ----------
      localStorage can hold anything: a half-written blob, data from an older
      build, or something a newer build wrote. Rather than trusting it and
@@ -145,6 +177,19 @@ const Store = (() => {
       }))
       .filter((t) => t.name);
 
+    // The weekday templates, added once: a plan without the weekdayTemplates
+    // mark gets an empty Monday to Friday after its own templates, skipping a
+    // day a template's name already reads as, and skipping one whose id is
+    // already there (a default renamed, back from an older build that dropped
+    // the mark). The mark is then always set, so a weekday template its owner
+    // deleted is never added again.
+    if (raw.weekdayTemplates !== true) {
+      for (const t of weekdayTemplates()) {
+        const day = WEEKDAY_TEMPLATES.indexOf(t.name) + 1;
+        if (!templates.some((x) => x.id === t.id || weekdayOf(x.name) === day)) templates.push(t);
+      }
+    }
+
     // Drop references to things that no longer exist, so the UI never has to
     // guess what a dangling id meant.
     const has = (list, id) => !id || list.some((x) => x.id === id);
@@ -181,7 +226,7 @@ const Store = (() => {
     // dropping it would turn the QR back on in every older copy.
     const qrOnSheet = false;
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverTags, driverGroups, templates }, repaired, usable: true };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverTags, driverGroups, templates, weekdayTemplates: true }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -742,7 +787,7 @@ const Store = (() => {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, readyTags, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
+    SCHEMA, readyTags, weekdayTemplates, weekdayOf, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
     pref, setPref,
     save(state) { writeLocal(state); queueFileWrite(state); },
     // This browser only, leaving the file as it is until the next real change.

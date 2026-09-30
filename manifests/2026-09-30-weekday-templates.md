@@ -1,6 +1,6 @@
 # Pack: Weekday templates, Update from plan, and loading in parts
 
-**Status:** PROPOSED. Owner's answers taken 2026-09-30; waiting for the go.
+**Status:** IN PROGRESS. Owner said go 2026-09-30; building on branch `weekday-templates` (cut from `dev` at a84fdab).
 **Branch:** its own, `weekday-templates`, cut from `dev` and merged back into `dev` when green. It ships as 0.13.0.
 
 Observable: the shelf holds Monday to Friday templates. Each card has an **Update from plan** button. Loading one opens a question with ticks (Routes, Drivers, Cars, Positions and rounds, all ticked) and a sentence and a button that say exactly what will happen.
@@ -35,7 +35,7 @@ It is applied, not offered, because it only adds empty, clearly named templates;
 
 ## Items
 
-- [ ] **1. ⚠ Store: the five, added once.** `weekdayTemplates` in `normalise`, derived ids, name matching as the week reads crews, and new installs getting the same five. Done: a plan with a "Mandag" template gains only Tuesday to Friday; loading its output again changes nothing; a deleted Wednesday stays deleted.
+- [x] **1. ⚠ Store: the five, added once.** `weekdayTemplates` in `normalise`, derived ids, name matching as the week reads crews, and new installs getting the same five. Done: a plan with a "Mandag" template gains only Tuesday to Friday; loading its output again changes nothing; a deleted Wednesday stays deleted.
 - [ ] **2. The card says what it holds.** An empty template reads "Not saved yet — Update from plan fills it", with no Load. Every card gets **Update from plan**: it asks twice, takes a backup, and keeps the template's name and weekday. Done: an empty card cannot be loaded, and Update fills it.
 - [ ] **3. Load in parts.** The load question gets four ticks, all on: Routes (the list, order, marks, gaps), Drivers, Cars, Positions and rounds.
   - A sentence under them says exactly what happens, for example "Replaces your 15 routes with Monday's 15, with their drivers, cars and positions", or "Keeps your 15 routes and puts in Monday's drivers, by route name; 2 of your routes are not in Monday and keep theirs".
@@ -57,3 +57,5 @@ It is applied, not offered, because it only adds empty, clearly named templates;
 ## Ledger
 
 - 2026-09-30: planned with the owner's four answers. Waiting for the go.
+- 2026-09-30: go from the owner; build started on `weekday-templates`.
+- 2026-09-30: item 1 done. `normalise` adds `tpl-weekday-1`…`-5` (Monday to Friday, `weekday: ''`, no routes) after the plan's own templates when `raw.weekdayTemplates !== true`, skipping a day a template's name reads as (`Store.weekdayOf`, a copy of `groupWeekday` and `DAY_NAMES`, comments on both copies) or whose id is already there; `weekdayTemplates: true` is always set. `defaults()` takes `Store.weekdayTemplates()` behind a `typeof` guard (a cached older store.js). Scratch harness, all ok: dev fixture gives Standard weekday, Saturday, Monday…Friday with no repairs; a Mandag plan gains Tuesday to Friday; Monday crew / tues / Onsdagsgjengen / THURSDAYS count as their days; reload and re-load of the same text give the same plan; a deleted Wednesday stays deleted; with the flag dropped only missing names come back, a renamed default is not duplicated; `weekdayOf` gives groupWeekday's tested answers. check.sh: CHECK OK. Awaiting the main session's review.

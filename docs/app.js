@@ -49,6 +49,8 @@ const DAY_NAMES = [
   ['FRIDAY', 'FRI', 'FREDAG', 'FRE'],
   ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG', 'LØR'],
 ];
+// store.js has a copy of DAY_NAMES and this, as Store.weekdayOf, for the
+// weekday templates it adds; the two must be kept in step.
 function groupWeekday(name) {
   let n = fold(name)
     .replace(/[.!]+$/, '')                                            // "Mondays."
@@ -183,7 +185,10 @@ function defaults() {
     drivers: [],
     ...(ownDriverTags() ? { driverTags: Store.readyTags() } : {}),
     driverGroups: [],
-    templates: [],
+    // Monday to Friday, empty, and the mark that they were given. Only from a
+    // store.js that has them: a cached older one pairs with this app.js after
+    // a deploy, and defaults() runs before anything else is drawn.
+    ...(typeof Store.weekdayTemplates === 'function' ? { templates: Store.weekdayTemplates(), weekdayTemplates: true } : { templates: [] }),
     routes: [
       ...['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14'].map((n) => newRoute(n)),
       newRoute('HAU 1', true),
