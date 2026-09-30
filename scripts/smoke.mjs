@@ -5343,6 +5343,27 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.click('[data-act="tab"][data-tab="plan"]');
 }
 
+// A template card: Load over the plan… only asks; Show contents opens it;
+// the open table opens the same menu.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const card = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="ask-template"][data-id="tpl-weekday"]') });
+  await cmRight(card.locator('[data-act="peek-template"]'));
+  same('a template card opens the template\'s menu', await cmEntries(), ['Load over the plan…', 'Show contents', 'Delete template']);
+  check('and never offers to load it outright', (await cmMenu.locator('[data-act="load-template"]').count()) === 0);
+  await cmMenu.locator('[data-act="ask-template"]').click();
+  check('Load over the plan… raises the same question as the name button', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
+  check('and saves nothing', (await cmStored()) === before);
+  await cmRight(card.locator('select[data-field="weekday"]'));
+  check('the weekday box opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
+  await cmMenu.locator('[data-act="peek-template"]').click();
+  check('Show contents opens the table', await card.locator('.tpl-table').isVisible() && await cmMenu.isHidden());
+  await cmRight(card.locator('.tpl-table tbody td').first());
+  same('a right-click inside the open table opens the same menu, now offering to hide it', await cmEntries(), ['Load over the plan…', 'Hide contents', 'Delete template']);
+  await cm.keyboard.press('Escape');
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();

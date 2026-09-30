@@ -610,6 +610,7 @@ const CTX_ROWS = [
   ['cars', '#tab-cars tbody tr'],
   ['positions', '#tab-positions tbody tr'],
   ['labels', '#tab-labels tbody tr'],
+  ['template', '#tab-plan .tpl'],
 ];
 // The only inputs a right-click opens the page's menu on. Any other box is
 // typed in, and keeps the browser's own Cut, Copy and Paste.
@@ -750,6 +751,18 @@ function ctxLabel(l) {
   ];
 }
 
+/* A template card, its open contents included. Load only asks, as the name
+   button does: the question's own Load is the only thing that writes. */
+function ctxTemplate(t) {
+  const t0 = { kind: 'template', id: t.id };
+  return [[
+    { act: 'ask-template', data: t0, text: 'Load over the plan\u2026' },
+    { act: 'peek-template', data: t0, text: tplOpen === t.id ? 'Hide contents' : 'Show contents' },
+  ], [
+    { act: 'del', data: t0, arm: `del:${t.id}`, text: 'Delete template', cost: `${plural(t.routes.length, 'route')}. The plan is not touched.` },
+  ]];
+}
+
 // Each surface's menu: the header's name, and the entries in groups that a
 // separator divides.
 const CTX_MENUS = {
@@ -761,6 +774,7 @@ const CTX_MENUS = {
   cars: (c) => ({ name: c.reg.trim() || '-', groups: ctxCar(c, 'cars') }),
   positions: (p) => ({ name: p.name.trim() || '-', groups: ctxPosition(p) }),
   labels: (l) => ({ name: labelName(l), groups: ctxLabel(l) }),
+  template: (t) => ({ name: t.name.trim() || '-', groups: ctxTemplate(t) }),
 };
 
 /* Drawn from `state` on every render, so its words, its "Sure?" and its
