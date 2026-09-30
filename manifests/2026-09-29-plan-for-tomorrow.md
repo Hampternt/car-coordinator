@@ -333,7 +333,7 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
   - 2026-10-30 gives 11-02, 2026-12-31 gives 2027-01-01, and 2027-12-31 gives 2028-01-03.
   - `parseDay` rejects 2026-13-45, 2026-02-30, 0020-01-01, '' and 'x'.
   - A Friday first run and a Friday Clear the day both date the plan Monday.
-- [ ] **2. The Start of day backup counts days by the local date.** Design G.
+- [x] **2. The Start of day backup counts days by the local date.** Design G.
 
   *Done when:* a Start of day backup is taken once per local day, whatever the UTC date. In the calendar context at 2026-09-29T00:30+02:00 (still 09-28 in UTC):
   - a Start of day backup from 2026-09-28T23:30+02:00 leads to a new one;
@@ -522,3 +522,4 @@ UTC-versus-local bugs then show on CI, which runs in UTC.
 
 - **2026-09-30, start (combined pack, part 4).** Built on `review-round`, base 2088fb9 (0.5.0). Line numbers are re-found by symbol. The start notes are in: INVENTORY's 💭 line is a 🚧 pointer under Day plan; the container's pack 7 section, the context-menus manifest and the tour manifest each carry one line on this pack's wording and `#dateLine`. **Confirmed:** pack 1's `archive-restore` installs a new state object (`state = next` from `Store.parseImport`), so Keep's staleness check catches it. **Batched rule:** items are gated by `check.sh` only; their smoke cases, screens and the one upgrade check (from v0.2.4) run at the end of part 9. Item 8's run "from the previous dev build" is dropped by that rule.
 - Item 1 done, 91140b7. Design A's five helpers beside `today()`, plus `pad2` and `dayString`; `planWeekday()` is `parseDay(state.date)?.getDay() ?? -1`. `defaults()` and Clear the day use `nextWorkingDay()`. Smoke: the calendar context (`calCtx`, Europe/Oslo, `calOpen(instant, items)` asserting the page's `today()` first) with the edge table and the Friday first run and Clear the day; later items add their cases before its "the calendar: done" line. Gate: `check.sh` OK.
+- Item 2 done, d4327d5. Design G: a local `localDay()` formatter in `store.js`; an invalid `t` gives '' and matches nothing. Smoke: two calendar cases at 2026-09-29T00:30+02:00 (a Start of day backup from 23:30 the evening before leads to a new one; one from 00:10 does not), with every `t` still ISO. `calOpen` now takes '@V' for this build's version. Gate: `check.sh` OK.
