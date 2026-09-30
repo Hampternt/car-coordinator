@@ -5253,6 +5253,35 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('an entry left open while its route changed changes nothing', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-12').carId)) === 'car-05');
 }
 
+// The Drivers tab's rows: the rail driver's menu without Tag….
+{
+  await cmOpen();
+  await cm.click('[data-act="tab"][data-tab="drivers"]');
+  const cmDrv = (name) => cm.locator('#tab-drivers tbody tr', { has: cm.locator(`[data-field="name"][value="${name}"]`) });
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  same('a roster row opens the driver\'s menu, with no Tag…', await cmEntries(), ['Set away', 'Go to route 7', 'Take off route 7', 'Delete driver']);
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Set away works from the Drivers tab', await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').available === false));
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  await cmMenu.locator('[data-act="go"]').click();
+  check('Go to route 7 switches to the Day plan, in that route\'s driver box', await cm.evaluate(() => tab === 'plan' && document.activeElement.dataset.id === 'rt-07' && document.activeElement.dataset.field === 'driver'));
+  await cm.click('[data-act="tab"][data-tab="drivers"]');
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  await cmMenu.locator('[data-act="take-off"]').click();
+  check('Take off route 7 empties that route\'s driver', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').driver)) === '');
+  check('and says so, away from the Day plan', (await cm.locator('#notices .notice', { hasText: 'Took Guro off route 7.' }).count()) === 1);
+  await cmRight(cmDrv('Guro').locator('[data-act="toggle"]'));
+  const del = cmMenu.locator('[data-act="del"]');
+  await del.click();
+  await del.click();
+  check('Delete driver deletes with two clicks, after the usual backup', !(await cm.evaluate(() => state.drivers.some((d) => d.id === 'drv-guro')))
+    && (await cm.evaluate(() => Store.backups()[0].label)) === 'Deleting a driver');
+  await cmRight(cmDrv('Anders').locator('[data-field="name"]'));
+  check('a roster name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(cmDrv('Anders').locator('[data-field="note"]'));
+  check('and so does its note box', (await cmNative()) === true && await cmMenu.isHidden());
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();

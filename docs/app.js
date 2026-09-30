@@ -606,6 +606,7 @@ let ctxReturn = null;
 const CTX_ROWS = [
   ['route', '#tab-plan tr[data-route]'],
   ['rail', '#tab-plan .rail-row'],
+  ['drivers', '#tab-drivers tbody tr'],
 ];
 // The only inputs a right-click opens the page's menu on. Any other box is
 // typed in, and keeps the browser's own Cut, Copy and Paste.
@@ -723,6 +724,7 @@ const CTX_MENUS = {
   rail: (x, c) => (c.kind === 'car'
     ? { name: x.reg.trim() || '-', groups: ctxCar(x, 'rail') }
     : { name: x.name.trim() || '-', groups: ctxDriver(x, 'rail') }),
+  drivers: (d) => ({ name: d.name.trim() || '-', groups: ctxDriver(d, 'drivers') }),
 };
 
 /* Drawn from `state` on every render, so its words, its "Sure?" and its
