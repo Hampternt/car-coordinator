@@ -589,6 +589,122 @@ function placeTagMenu(scrolled = false) {
   layer.style.top = `${top + window.scrollY}px`;
 }
 
+/* ---------- right-click menus ----------
+   The actions for the one thing under the pointer, beside it. Every entry is
+   a button the dispatcher already knows, carrying the same data-act, kind, id
+   and field as the control on the page, so a menu is another way in and never
+   writes anything on its own. Kept off `state` like the tag menu, and drawn
+   in a layer of its own (#ctxMenu) for the same reason: opening or closing
+   one saves nothing. */
+let ctx = null;   // { surface, kind, id, part, tab, keyboard, at: { left, top, room } }
+
+// Where a menu opens, tried in this order; the item is the one the row's ✕
+// deletes, so no row needs markup of its own.
+const CTX_ROWS = [
+  ['route', '#tab-plan tr[data-route]'],
+];
+// The only inputs a right-click opens the page's menu on. Any other box is
+// typed in, and keeps the browser's own Cut, Copy and Paste.
+const CTX_INPUTS = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range']);
+
+// Every data-* attribute, as a selector: the entries of one menu differ only
+// in some of them (Mark and Gap in data-field).
+const dataSelector = (el) => Object.entries(el.dataset)
+  .map(([k, v]) => `[data-${k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}="${CSS.escape(v)}"]`).join('');
+
+const routeTitle = (r) => `Route ${r.name.trim() || '-'}`;
+
+/* One entry. A destructive one carries its confirmTwice key in data-arm and
+   has two lines from the start, the act and what it costs, so arming it
+   changes words and never its size: the confirming click lands where the
+   first one did. A disabled one carries no data-act at all. */
+function ctxEntry(s) {
+  const cost = s.cost ? `<small class="ctx-cost">${esc(s.cost)}</small>` : '';
+  if (s.off) return `<button type="button" class="ctx-item" role="menuitem" tabindex="-1" aria-disabled="true"><span>${esc(s.text)}</span>${cost}</button>`;
+  const on = !!s.arm && armed === s.arm;
+  const data = Object.entries(s.data || {}).map(([k, v]) => ` data-${k}="${esc(v)}"`).join('');
+  return `<button type="button" class="ctx-item${on ? ' armed' : ''}" role="menuitem" tabindex="-1" data-act="${s.act}"${data}${s.arm ? ` data-arm="${esc(s.arm)}"` : ''}>`
+    + `<span>${on ? 'Sure? Click again' : esc(s.text)}</span>${cost}</button>`;
+}
+
+// A route's own entries: the same two toggles as its Mark and Gap.
+function ctxRoute(r) {
+  const d = { kind: 'route', id: r.id };
+  return [[
+    { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
+    { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
+  ]];
+}
+
+// Each surface's menu: the header's name, and the entries in groups that a
+// separator divides.
+const CTX_MENUS = {
+  route: (r) => ({ name: routeTitle(r), groups: ctxRoute(r) }),
+};
+
+/* Drawn from `state` on every render, so its words, its "Sure?" and its
+   disabled entries are always current; it goes when its item or its tab
+   does. Where it sits is kept from the open and never worked out again, so a
+   redraw never moves it. */
+function renderCtxMenu() {
+  const layer = $('#ctxMenu');
+  const item = ctx && ctx.tab === tab && byId(listFor(ctx.kind) || [], ctx.id);
+  if (!item) {
+    ctx = null;
+    layer.hidden = true;
+    layer.innerHTML = '';
+    return;
+  }
+  // Put back on the entry it was on, found by what it is.
+  const f = document.activeElement;
+  const kept = f && f !== layer && layer.contains(f) ? dataSelector(f) : null;
+  const { name, groups } = CTX_MENUS[ctx.surface](item, ctx);
+  layer.innerHTML = `<p class="ctx-head" role="none" aria-hidden="true">${esc(name)}</p>`
+    + groups.filter((g) => g.length).map((g) => g.map(ctxEntry).join('')).join('<div class="ctx-sep" role="separator"></div>');
+  layer.setAttribute('aria-label', `Actions for ${name}`);
+  layer.hidden = false;
+  if (ctx.at) {
+    layer.style.left = `${ctx.at.left}px`;
+    layer.style.top = `${ctx.at.top}px`;
+    layer.style.maxHeight = `${ctx.at.room}px`;
+  }
+  if (kept) layer.querySelector(kept)?.focus({ preventScroll: true });
+}
+
+/* Placed once, when it opens, against `a` (screen coordinates): the pointer,
+   or the control the keyboard opened it from. Opened upwards, it keeps the
+   height it was given, since its top is fixed; opened downwards, it may grow
+   into the room below, and scrolls inside itself past that. */
+function placeCtxMenu(a) {
+  const layer = $('#ctxMenu');
+  layer.style.maxHeight = '';
+  const { left, top, tall, up } = besideAnchor(a, layer.offsetWidth, layer.offsetHeight);
+  const room = up ? tall : Math.max(tall, window.innerHeight - a.bottom - 10);
+  ctx.at = { left: left + window.scrollX, top: top + window.scrollY, room };
+  renderCtxMenu();
+}
+
+/* Shut it without redrawing the page, as closeTagMenu does, so the click
+   that shut it still lands. */
+function closeCtxMenu() {
+  if (!ctx) return;
+  ctx = null;
+  renderCtxMenu();
+}
+
+// The row a right-click is in, and the item it is for; null for anywhere else.
+function ctxHit(t) {
+  for (const [surface, sel] of CTX_ROWS) {
+    const row = t.closest(sel);
+    if (!row) continue;
+    const del = row.querySelector('[data-act="del"][data-kind][data-id]');
+    if (!del) return null;
+    const part = surface === 'route' ? t.closest('select[data-field="carId"], select[data-field="positionId"]')?.dataset.field || '' : '';
+    return { row, surface, kind: del.dataset.kind, id: del.dataset.id, part };
+  }
+  return null;
+}
+
 /* One row of the rail: grip, status dot, the name as an editable box, where
    it is today, and the two buttons that act on it. */
 function railRow(kind, item, label, where, extra = '', cls = '') {
@@ -1437,6 +1553,7 @@ function render() {
   renderNotices();
   renderPicker();
   renderTagMenu();
+  renderCtxMenu();
 }
 
 /* ---------- events ---------- */
@@ -2794,6 +2911,66 @@ window.addEventListener('resize', () => {
     requestAnimationFrame(() => requestAnimationFrame(() => { tagSettling = false; placeTagMenu(); }));
   }
 });
+
+/* A right-click on a row opens its menu. Everywhere else, in any box that is
+   typed in, with Shift held, over selected text or while the share dialog is
+   open, the browser's own menu stays. */
+document.addEventListener('contextmenu', (e) => {
+  const t = e.target;
+  const layer = $('#ctxMenu');
+  if (layer.contains(t)) { e.preventDefault(); return; }
+  if (e.button !== 2) return;
+  if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
+  if (t.closest('textarea, a') || (t.tagName === 'INPUT' && !CTX_INPUTS.has(t.type))) return;
+  const hit = ctxHit(t);
+  if (!hit) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.containsNode(hit.row, true)) return;
+  e.preventDefault();
+  // A right-click is neither a click nor a left press, so neither of these
+  // shuts itself.
+  closePicker();
+  closeTagMenu();
+  // Only the layer is drawn: a full render would take the caret out of a
+  // box being typed in elsewhere on the page.
+  ctx = { surface: hit.surface, kind: hit.kind, id: hit.id, part: hit.part, tab, keyboard: false, at: null };
+  renderCtxMenu();
+  placeCtxMenu({ left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
+  layer.focus({ preventScroll: true });
+});
+
+/* A choice in the menu shuts it, before the dispatcher runs the act, except
+   the first click on a destructive entry, which arms it and leaves the menu
+   open on "Sure?". The redraw the act makes then hides the layer. */
+let ctxClosed = false;
+$('#ctxMenu').addEventListener('click', (e) => {
+  ctxClosed = false;
+  const b = e.target.closest('[data-act]');
+  if (!b || !ctx) return;
+  if (b.dataset.arm && b.dataset.arm !== armed) return;
+  ctxClosed = true;
+  ctx = null;
+});
+// After the dispatcher: an act that drew nothing still hides the menu.
+document.addEventListener('click', () => {
+  if (!ctxClosed) return;
+  ctxClosed = false;
+  if (!ctx && !$('#ctxMenu').hidden) renderCtxMenu();
+});
+
+// Any press outside it, a wheel (unless it is scrolling the menu itself), the
+// window changing size or losing the focus, or a drag starting, shuts it. A
+// scroll does not: every redraw puts the lists' scroll back, and that fires
+// scroll events of its own.
+document.addEventListener('pointerdown', (e) => { if (ctx && !$('#ctxMenu').contains(e.target)) closeCtxMenu(); }, true);
+document.addEventListener('wheel', (e) => {
+  const layer = $('#ctxMenu');
+  if (!ctx || (layer.contains(e.target) && layer.scrollHeight > layer.clientHeight)) return;
+  closeCtxMenu();
+}, { capture: true, passive: true });
+window.addEventListener('resize', closeCtxMenu);
+window.addEventListener('blur', closeCtxMenu);
+document.addEventListener('dragstart', closeCtxMenu, true);
 
 document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }

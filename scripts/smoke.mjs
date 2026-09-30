@@ -1292,7 +1292,7 @@ check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
 // It was drawn inside its row, and the rows sit in a list that scrolls, so the
 // list cut it off after its first choice: the rest was there only by
 // scrolling. On a roster of two, which is where it was reported.
-const cutOff = (sel) => page.locator(sel).evaluate((box) => {
+const cutOff = (sel, pg = page) => pg.locator(sel).evaluate((box) => {
   const m = box.getBoundingClientRect();
   const out = [];
   if (m.top < 0 || m.left < 0 || m.bottom > innerHeight + 0.5 || m.right > document.documentElement.clientWidth + 0.5) out.push('the screen');
@@ -4828,6 +4828,104 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
 // --- the Drivers tab: done ---
 check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
 await drvCtx.close();
+
+// --- right-click menus ---
+// A context of its own, on the dev fixture as imported. Waits are short: a
+// menu that never opens shows as FAIL lines, not a run that stops here.
+const cmCtx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+const cm = await cmCtx.newPage();
+cm.setDefaultTimeout(5000);
+const cmErrors = [];
+cm.on('console', (m) => m.type() === 'error' && cmErrors.push(m.text()));
+cm.on('pageerror', (e) => cmErrors.push(String(e)));
+await cm.goto(base, { waitUntil: 'networkidle' });
+// After every right-click, window.__native says whether the browser's own
+// menu was left to open: the page's menu calls preventDefault.
+const cmOpen = async (text = devPlan) => {
+  await cm.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+  await cm.reload({ waitUntil: 'networkidle' });
+  await cm.evaluate(() => { window.addEventListener('contextmenu', (e) => { window.__native = !e.defaultPrevented; }); });
+};
+const cmMenu = cm.locator('#ctxMenu');
+const cmRoute = (name) => cm.locator('#tab-plan tr[data-route]', { has: cm.locator(`[data-field="name"][value="${name}"]`) });
+const cmStored = () => cm.evaluate(() => localStorage.getItem('carcoord:v1'));
+const cmNative = () => cm.evaluate(() => window.__native);
+const cmEntries = () => cmMenu.locator('[role="menuitem"]').evaluateAll((els) => els.map((el) => el.querySelector('span').textContent));
+const cmRight = async (loc, modifiers = []) => { await loc.scrollIntoViewIfNeeded(); await loc.click({ button: 'right', modifiers }); };
+const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((x) => x.name === n); return r && { highlight: r.highlight, gapBefore: r.gapBefore }; }, id);
+
+// The layer, opened with the mouse, on a route's Mark cell.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const mark = cmRoute('7').locator('[data-field="highlight"]');
+  await cmRight(mark);
+  check('a right-click on a route\'s Mark opens the page\'s menu, not the browser\'s', await cmMenu.isVisible() && (await cmNative()) === false);
+  same('with the route\'s two toggles', await cmEntries(), ['Mark pink on the printout', 'Add a blank line above']);
+  check('named for its route', (await cmMenu.getAttribute('aria-label')) === 'Actions for Route 7');
+  check('the menu is absolute, never fixed', (await cmMenu.evaluate((m) => getComputedStyle(m).position)) === 'absolute');
+  await cm.locator('.rail-saved').click();
+  check('a press outside shuts it', await cmMenu.isHidden());
+  check('and opening and shutting it saved nothing', (await cmStored()) === before);
+
+  await cmRight(mark);
+  await cmMenu.locator('[role="menuitem"]').nth(0).click();
+  check('Mark pink on the printout marks the route, and shuts the menu', (await cmFlags('7'))?.highlight === true && await cmMenu.isHidden());
+  await cmRight(mark);
+  same('the toggle then says what it will do', (await cmEntries())[0], 'Remove the pink mark');
+  await cmMenu.locator('[role="menuitem"]').nth(1).click();
+  check('Add a blank line above puts the gap in', (await cmFlags('7'))?.gapBefore === true && await cmMenu.isHidden());
+
+  // The browser's own menu stays in boxes that are typed in, and with Shift.
+  await cmRight(cmRoute('7').locator('[data-field="name"]'));
+  check('a right-click in a route\'s name box keeps the browser\'s menu', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(mark, ['Shift']);
+  check('so does Shift+right-click on Mark', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(cm.locator('#date'));
+  check('and on the date box', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRoute('7').locator('td.warntext').evaluate((td) => { const i = document.createElement('input'); i.type = 'time'; i.id = 'cmTime'; td.appendChild(i); });
+  await cmRight(cm.locator('#cmTime'));
+  check('and on a kind of box the page has never had, inside a route row', (await cmNative()) === true && await cmMenu.isHidden());
+
+  // An open picker or tag menu shuts: a right-click fires neither a click nor
+  // a left press, so neither would on its own.
+  await cmRoute('7').locator('select[data-field="carId"]').click();
+  const picked = await cm.locator('#picker').isVisible();
+  await cmRight(mark);
+  check('an open car grid shuts when the menu opens', picked && await cm.locator('#picker').isHidden() && await cmMenu.isVisible());
+  await cm.locator('.rail-saved').click();
+  await cm.locator('#tab-plan .rail-row[data-drag="car"] [data-act="tag"]').first().click();
+  const tagged = await cm.locator('#tagMenu').isVisible();
+  await cmRight(mark);
+  check('and so does an open tag menu', tagged && await cm.locator('#tagMenu').isHidden() && await cmMenu.isVisible());
+
+  // A wheel shuts it; so does changing tab (a click with no press behind it,
+  // so the press rule is not what shuts it).
+  await cm.mouse.move(20, 300);
+  await cm.mouse.wheel(0, 120);
+  check('a wheel over the page shuts it', await cmMenu.isHidden());
+  await cmRight(mark);
+  await cm.locator('[data-act="tab"][data-tab="cars"]').dispatchEvent('click');
+  check('a change of tab shuts it', await cmMenu.isHidden());
+  await cm.locator('[data-act="tab"][data-tab="plan"]').dispatchEvent('click');
+
+  // Never cut off: near the bottom right of a wide screen, and on a phone.
+  for (const [width, height] of [[1366, 768], [390, 844]]) {
+    await cm.setViewportSize({ width, height });
+    const last = cm.locator('#tab-plan tr[data-route]').last().locator('[data-field="highlight"]');
+    await last.evaluate((el) => el.scrollIntoView({ block: 'end', inline: 'end' }));
+    await last.click({ button: 'right' });
+    const cut = await cutOff('#ctxMenu', cm);
+    check(`at ${width}, the menu opened near the bottom right is never cut off`, await cmMenu.isVisible() && !cut.length, cut.join(', '));
+    await cm.keyboard.press('Escape').catch(() => {});
+    await cm.locator('.rail-saved').click();
+  }
+  await cm.setViewportSize({ width: 1366, height: 768 });
+}
+
+// --- right-click menus: done ---
+check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
+await cmCtx.close();
 
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the

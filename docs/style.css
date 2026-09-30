@@ -363,6 +363,23 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .tag-new input[type=text] { flex: 1; min-width: 0; border: 1px solid var(--line); padding: 4px 5px; font: inherit; font-size: 13px; }
 .tag-new input[type=color] { flex: none; width: 30px; padding: 0; border: 1px solid var(--line); }
 
+/* The right-click menu: one row's actions, beside the pointer. Its own class,
+   not .tag-menu, which a click outside the tag menu is tested against. A
+   fixed width, so a redraw never changes where an entry is. */
+.ctx-menu { position: absolute; z-index: 8; width: min(280px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; background: var(--field); border: 1px solid var(--ink); box-shadow: 0 6px 20px var(--shadow); padding: 4px; }
+.ctx-menu[hidden] { display: none; }
+.ctx-menu:focus { outline: none; }
+.ctx-head { margin: 0; padding: 4px 8px 6px; font: 600 12px var(--head); color: var(--muted); overflow-wrap: anywhere; }
+.ctx-sep { height: 1px; margin: 4px 0; background: var(--line); }
+.ctx-item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; border: 0; background: none; padding: 6px 8px; font-size: 14px; text-align: left; cursor: pointer; }
+.ctx-item:hover, .ctx-item:focus-visible { background: var(--concrete); outline: none; }
+.ctx-item.armed, .ctx-item.armed:hover, .ctx-item.armed:focus-visible { background: var(--warn-fill); color: var(--on-fill); }
+.ctx-item[aria-disabled] { color: var(--quiet); cursor: default; }
+.ctx-item[aria-disabled]:hover { background: none; }
+.ctx-cost { font-size: 12px; color: var(--quiet); }
+.ctx-item.armed .ctx-cost { color: var(--on-fill); }
+@media (pointer: coarse) { .ctx-item { min-height: 40px; } }
+
 .rail-add { display: flex; gap: 4px; margin-bottom: 8px; }
 .rail-add input { flex: 1; min-width: 0; border: 1px solid var(--line); padding: 5px 6px; font: inherit; font-size: 13px; background: var(--field); }
 .rail-add .btn { flex: none; font-weight: 700; padding: 4px 10px; }
@@ -580,7 +597,7 @@ body.show-sheet .sheet {
 @media print {
   @page { size: A4 portrait; margin: 0; }
   body { background: var(--paper); }
-  .topbar, main, #notices, #picker, #tagMenu { display: none !important; }
+  .topbar, main, #notices, #picker, #tagMenu, #ctxMenu { display: none !important; }
   .sheet { display: block !important; box-shadow: none !important; margin: 0 !important; width: auto !important; min-height: 0 !important; }
 }
 
