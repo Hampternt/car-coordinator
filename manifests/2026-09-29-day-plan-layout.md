@@ -1,6 +1,6 @@
 # Pack: Day plan layout
 
-**Status:** 🚧 building, since 2026-09-30, as part 5 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (grey means Away in every column; item 8 is in).
+**Status:** 🚧 all 12 items built on `review-round` (combined pack, part 5), cut at 0.7.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 6 individually) and the walkthrough.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `day-plan-layout`, from `dev` after pack 4 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -563,7 +563,7 @@ Kept and re-run as they are:
   - HANDOFF.md does not mention the row.
 
   *Done when:* README.md describes the shelf, the week, All and the weekend crews where they now are, and no longer implies a row of day buttons.
-- [ ] **12. Announce Day plan layout and cut 0.7.0.** One commit, following pack 1's Design H:
+- [x] **12. Announce Day plan layout and cut 0.7.0.** One commit, following pack 1's Design H:
   - the 0.7.0 entry at the top of `docs/updates.js`, `must: false` by rule G:
 
     ```js
@@ -654,3 +654,5 @@ Kept and re-run as they are:
 - Item 9 done, 37e519f. Design G: `<div id="planMap" class="plan-map">${mapSlot(use)}</div>` right after `renderWeek()` (with no whitespace inside, so `:empty` holds), `.plan-map:empty { display: none }`, and `mapSlot(use)` with its try/catch and `console.warn`. The contract is in the container's pack 6 section (start commit). Smoke (layout context): the slot after `#planWeek` with no height; a stand-in map drawn, surviving a tab trip, with `state` and every `carcoord:*` key unchanged and no `setItem`; a throwing one leaving the plan drawn and a warning. The stand-in is swapped in without `new Function()`, which the page's CSP forbids. Gate: `check.sh` OK.
 - Item 10 done, 443f23f. Shot 03 is retaken by the same step (full page: routes, templates, the week with Monday lit), and the run now fails unless Monday's Load is lit. New: 25-week-at-1280 and 26-week-on-a-phone, element shots of `#planWeek`. The rail and route counts are untouched. Runs at the end. Gate: `check.sh` OK.
 - Item 11 done, fa81461. README's Day plan bullet names the templates and the week (columns, Load) under the route list; the Drivers bullet says weekday crews are columns and All, weekend crews and other groups are buttons in the Drivers panel. HANDOFF.md never mentioned the row. Gate: `check.sh` OK.
+- Item 12 done, 5791df1. The drafted entry with the Drivers-tab sentence (owner question 2 was yes), `must: false`; "Use for today" is still the Drivers tab's label (part 7 may change it). `versions.mjs`: "6 entries, newest first, newest 0.7.0, must set where required". Gate: `check.sh` OK.
+- **Part 5 closed (0.7.0), under the batched rule.** Its smoke cases and screens run at the end of part 9, and the upgrade check only from v0.2.4. Then the combined review (item 6 individually) and the walkthrough. **Pack close is left for the manager:** INVENTORY's ✅ entries (and its Left rail and Driver day groups lines), and the container's status line.
