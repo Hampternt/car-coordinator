@@ -3386,6 +3386,9 @@ const pairs = [
   ["the week's count", '#planWeek .week-count', 'color', TEXT],
   ['a lit Load', '#planWeek .week-load.lit', 'color', TEXT],
   ['a quiet day in the week', '#planWeek .week-col.quiet .week-none', 'color', TEXT],
+  ['a spot on the parking map', '#planMap .parking-box .parking-title', 'color', TEXT],
+  ['a spot with no position, on the parking map', '#planMap .parking-empty-text', 'color', TEXT],
+  ['the entrance on the parking map', '#planMap .parking-entrance', 'color', TEXT],
   ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
   ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
   ['a grip', '.grip', 'color', MARK],
@@ -4487,6 +4490,36 @@ for (const [what, setup, says] of [
     && (await pg.locator('#planMap', { hasText: says }).count()) === 1, JSON.stringify(routes));
   check(`${what}: no console errors`, !errs.length, errs.join(' | '));
   await ctx.close();
+}
+
+// The yard drawn: on a phone it scrolls in its own box and keeps its place
+// across a redraw; in print it has no boxes; its new colours have dark values.
+{
+  await layPlan({ drivers: weekDrivers, driverGroups: weekGroups });
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.reload({ waitUntil: 'networkidle' });
+  const phone = await lp.evaluate(() => {
+    const card = document.querySelector('#planMap .parking'), box = document.getElementById('parkingDrawing');
+    return { card: card.scrollWidth <= card.clientWidth + 1, box: box.scrollWidth > box.clientWidth };
+  });
+  check('on a phone, the map scrolls sideways in its own box, not its card', phone.card && phone.box, JSON.stringify(phone));
+  await lp.evaluate(() => { const b = document.getElementById('parkingDrawing'); b.scrollLeft = 120; b.dispatchEvent(new Event('scroll')); });
+  const left = await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft);
+  await lp.evaluate(() => { state.routes[0].highlight = !state.routes[0].highlight; render(); });
+  check('and keeps its sideways place across a redraw', left > 0 && (await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft)) === left);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+  await lp.emulateMedia({ media: 'print' });
+  check('in print the map has no boxes', await lp.evaluate(() => [...document.querySelectorAll('#planMap .parking-box')].every((b) => b.getClientRects().length === 0)));
+  await lp.emulateMedia({ media: 'screen' });
+  const tokens = await lp.evaluate(() => {
+    const read = () => ['--hatch', '--clash-fill'].map((t) => getComputedStyle(document.documentElement).getPropertyValue(t).trim());
+    const light = read();
+    document.documentElement.dataset.theme = 'dark';
+    const dark = read();
+    delete document.documentElement.dataset.theme;
+    return { light, dark };
+  });
+  check("the map's own colours have dark values", tokens.light.every((v, i) => v && v !== tokens.dark[i]), JSON.stringify(tokens));
 }
 
 // --- under the route list: done ---

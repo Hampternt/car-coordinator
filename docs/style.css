@@ -45,6 +45,9 @@
   --dot-edge: rgba(0, 0, 0, .25);
   --edge-on-bright: rgba(0, 0, 0, .25);
   --lift: 0%;                   /* how far a label's colour moves toward --ink */
+  /* the parking map */
+  --hatch: #b9bcb6;             /* where nobody parks */
+  --clash-fill: #fdecea;        /* a spot taken twice in one round */
   /* the printed sheet: never redefined for dark */
   --paper: #fff;
   --paper-ink: #000;
@@ -84,6 +87,8 @@
     --ok: #66bb6a;
     --dot-edge: rgba(255, 255, 255, .55);
     --lift: 50%;
+    --hatch: #4a5157;
+    --clash-fill: #3a1f1f;
     color-scheme: dark;
   }
 }
@@ -111,6 +116,8 @@
     --ok: #66bb6a;
     --dot-edge: rgba(255, 255, 255, .55);
     --lift: 50%;
+    --hatch: #4a5157;
+    --clash-fill: #3a1f1f;
     color-scheme: dark;
   }
 }
@@ -399,6 +406,55 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 
 /* The parking map's slot: no space at all until the map fills it. */
 .plan-map:empty { display: none; }
+
+/* ---------- the parking map, under the week ----------
+   The yard as a grid, each part in its real relative place: correcting the
+   drawing is this one grid-template-areas rule. Nothing in it can be
+   clicked. It scrolls sideways in its own box, never the page, and print
+   never shows it, because print hides main. */
+.parking { margin-top: 22px; background: var(--panel); padding: 12px; }
+.parking h3 { font: 600 17px var(--head); margin: 0 0 6px; }
+.parking-scroll { overflow-x: auto; }
+.parking-yard {
+  display: grid; gap: 6px; min-width: 620px; max-width: 960px; padding: 6px; border: 2px solid var(--ink);
+  grid-template-columns: 1fr .6fr 1.4fr 1fr;
+  grid-template-areas:
+    "room-a spot5 spot5 gate"
+    "spot4  lane  spot3 dock"
+    "room-b lane  spot2 dock"
+    "room-b lane  spot1 dock";
+}
+.parking-room-a { grid-area: room-a; }
+.parking-room-b { grid-area: room-b; }
+.parking-dock { grid-area: dock; }
+.parking-lane { grid-area: lane; }
+.parking-spot1 { grid-area: spot1; }
+.parking-spot2 { grid-area: spot2; }
+.parking-spot3 { grid-area: spot3; }
+.parking-spot4 { grid-area: spot4; }
+.parking-spot5 { grid-area: spot5; }
+.parking-gate { grid-area: gate; }
+.parking-hatch { min-height: 48px; background: repeating-linear-gradient(45deg, var(--hatch) 0 2px, transparent 2px 10px); }
+.parking-lane { display: flex; align-items: flex-end; justify-content: center; min-height: 48px; border: 1px dashed var(--dash); color: var(--muted); font-size: 12px; }
+.parking-entrance { padding: 2px 4px; }
+.parking-box, .parking-item { min-width: 0; padding: 6px 8px; background: var(--field); border: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.parking-box.parking-none { background: none; border-style: dashed; border-color: var(--dash); color: var(--quiet); }
+/* red is never the colour alone: the box also says "Taken by 2 routes" */
+.parking-red { background: var(--clash-fill); border: 2px solid var(--warn); }
+.parking-title { font: 700 14px var(--head); }
+.parking-caption, .parking-round { font-size: 12px; color: var(--muted); }
+.parking-round { margin-top: 4px; font-weight: 600; }
+.parking-status { display: flex; align-items: center; gap: 5px; }
+.parking-dot { flex: none; width: 10px; height: 10px; background: var(--c, var(--quiet)); border: 1px solid var(--dot-edge); }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .parking-dot { background: color-mix(in srgb, var(--c, var(--quiet)), var(--ink) var(--lift)); }
+}
+.parking-twin { font-size: 12px; color: var(--caution); }
+.parking-tag { font-weight: 700; color: var(--warn); }
+.parking-clash { font-weight: 700; }
+.parking-free, .parking-empty-text, .parking-note { color: var(--quiet); }
+.parking-others-head { margin: 10px 0 4px; font-weight: 700; }
+.parking-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* ---------- day templates, straight under the route list ----------
    A shelf of saved route lists. Loading one replaces the plan, so the shelf
