@@ -617,6 +617,11 @@ const dataSelector = (el) => Object.entries(el.dataset)
 
 const routeTitle = (r) => `Route ${r.name.trim() || '-'}`;
 
+// Go to: where it leads is in data-go-*, never in data-kind, id or field, so
+// no lookup for a box on the page can ever find a menu entry instead.
+const ctxGo = (text, tab, kind, id, field) =>
+  ({ act: 'go', data: { 'go-tab': tab, 'go-kind': kind, 'go-id': id, 'go-field': field }, text });
+
 /* One entry. A destructive one carries its confirmTwice key in data-arm and
    has two lines from the start, the act and what it costs, so arming it
    changes words and never its size: the confirming click lands where the
@@ -636,12 +641,18 @@ function ctxEntry(s) {
    either shows "Sure?" on both) and takes the ✕'s backup; Clear is the
    day's clear on this one row, with a key and a backup of its own. */
 const routeIsBlank = (r) => !r.driver && !r.carId && !r.positionId && !r.round && !r.highlight;
-function ctxRoute(r) {
+function ctxRoute(r, part) {
   const d = { kind: 'route', id: r.id };
   const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
   const clear = { act: 'clear-route', data: d, arm: `clear:${r.id}`, text: 'Clear driver, car, position and round',
     cost: `${routeTitle(r)} only.${r.highlight ? ' The pink mark goes too.' : ''}` };
+  // Right-clicked on its car or its position: the way to that one first.
+  const car = part === 'carId' && byId(state.cars, r.carId);
+  const pos = part === 'positionId' && byId(state.positions, r.positionId);
   return [[
+    car && ctxGo(`Go to ${car.reg} on the Cars tab`, 'cars', 'car', car.id, 'reg'),
+    pos && ctxGo(`Go to ${pos.name} on the Positions tab`, 'positions', 'position', pos.id, 'name'),
+  ].filter(Boolean), [
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
   ], [
@@ -656,7 +667,7 @@ function ctxRoute(r) {
 // Each surface's menu: the header's name, and the entries in groups that a
 // separator divides.
 const CTX_MENUS = {
-  route: (r) => ({ name: routeTitle(r), groups: ctxRoute(r) }),
+  route: (r, c) => ({ name: routeTitle(r), groups: ctxRoute(r, c.part) }),
 };
 
 /* Drawn from `state` on every render, so its words, its "Sure?" and its
@@ -2303,6 +2314,22 @@ document.addEventListener('click', (e) => {
       return;
     }
     case 'show-data': tab = 'data'; render(); return;
+    // A menu's Go to: its tab, and the item's box there focused and clear of
+    // the top bar, with its row lit for a moment. It moves you, and saves
+    // nothing.
+    case 'go': {
+      const g = b.dataset;
+      if (!document.getElementById(`tab-${g.goTab}`)) return;
+      tab = g.goTab;
+      render();
+      const el = document.querySelector(`#tab-${g.goTab} [data-kind="${g.goKind}"][data-id="${CSS.escape(g.goId)}"][data-field="${g.goField}"]`);
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      clearOfBar(el);
+      const row = el.closest('tr, li');
+      if (row) { row.classList.add('ctx-found'); setTimeout(() => row.classList.remove('ctx-found'), 1500); }
+      return;
+    }
     case 'print': doPrint(); return;
     case 'up': if (i > 0) [list[i - 1], list[i]] = [list[i], list[i - 1]]; break;
     case 'down': if (i >= 0 && i < list.length - 1) [list[i + 1], list[i]] = [list[i], list[i + 1]]; break;

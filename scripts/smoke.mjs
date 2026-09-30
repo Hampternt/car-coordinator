@@ -5120,6 +5120,34 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
 }
 
+// Go to, from a route's car or position: that tab, with the box focused and
+// clear of the top bar, and nothing saved.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const reg = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  same('a right-click on a route\'s car lists Go to that car first', (await cmEntries())[0], `Go to ${reg} on the Cars tab`);
+  await cmMenu.locator('[data-act="go"]').click();
+  const landed = await cm.evaluate(() => {
+    const f = document.activeElement;
+    const bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+    return { tab: tab, on: f.closest('section.tab')?.id, id: f.dataset.id, field: f.dataset.field, clear: f.getBoundingClientRect().top >= bar };
+  });
+  same('choosing it shows the Cars tab with that reg box focused, clear of the top bar', landed, { tab: 'cars', on: 'tab-cars', id: 'car-07', field: 'reg', clear: true });
+  check('with the menu shut, and nothing saved', await cmMenu.isHidden() && (await cmStored()) === before);
+
+  await cm.locator('[data-act="tab"][data-tab="plan"]').click();
+  await cmRight(cmRoute('7').locator('select[data-field="positionId"]'));
+  same('a route\'s position lists Go to that position first', (await cmEntries())[0], 'Go to Port 1 on the Positions tab');
+  await cmMenu.locator('[data-act="go"]').click();
+  check('and it lands in that position\'s name box', await cm.evaluate(() => tab === 'positions' && document.activeElement.dataset.id === 'pos-port1' && document.activeElement.dataset.field === 'name'));
+  await cm.locator('[data-act="tab"][data-tab="plan"]').click();
+  await cmRight(cmRoute('7').locator('[data-field="highlight"]'));
+  check('anywhere else on the row, there is no Go to', (await cmMenu.locator('[data-act="go"]').count()) === 0);
+  await cm.keyboard.press('Escape');
+}
+
 // --- right-click menus: done ---
 check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
 await cmCtx.close();
