@@ -59,15 +59,25 @@ const sameData = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b
 const differing = (a, b) => [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])]
   .filter((k) => JSON.stringify(sorted(a?.[k])) !== JSON.stringify(sorted(b?.[k])));
 
+// Both builds run on one clock, in Oslo: Tuesday 6 October 2026 at noon, when
+// the local and the UTC date agree. The dev fixture's 2026-09-28 has passed
+// by then, so this build moves it, in memory, to Wednesday the 7th.
+const CLOCK = '2026-10-06T12:00:00+02:00';
+const CLOCK_DAY = '2026-10-06';
+const NEXT_WORKING_DAY = '2026-10-07';
+const passed = (date) => /^\d{4}-\d{2}-\d{2}$/.test(String(date)) && date < CLOCK_DAY;
+
 // The plan as this build reads the old build's saved text, in memory, with
 // only the changes the packs name: schema 5's Show on printout tick, unticked
-// unless it was ticked, and the QR fixed off.
+// unless it was ticked, the QR fixed off, and a passed date moved to the next
+// working day (0.6.0), which is not written until the next change.
 function asOpened(oldPlan, schema) {
   const p = JSON.parse(JSON.stringify(oldPlan));
   delete p.extra;   // makeOdd's field, which no build keeps
   p.schemaVersion = schema;
   p.qrOnSheet = false;
   for (const l of p.labels || []) l.onSheet = l.onSheet === true;
+  if (passed(p.date)) p.date = NEXT_WORKING_DAY;
   return p;
 }
 
@@ -97,7 +107,8 @@ async function serve(docs) {
 const live = new Set();
 async function open(profile, docs) {
   const base = await serve(docs);
-  const context = await chromium.launchPersistentContext(profile, EXECUTABLE ? { executablePath: EXECUTABLE } : {});
+  const context = await chromium.launchPersistentContext(profile, { timezoneId: 'Europe/Oslo', ...(EXECUTABLE ? { executablePath: EXECUTABLE } : {}) });
+  await context.clock.install({ time: new Date(CLOCK) });
   live.add(context);
   context.on('close', () => live.delete(context));
   const page = context.pages()[0] || await context.newPage();
@@ -189,6 +200,13 @@ async function expectKeptAndNoted(label, profile, before, extra = async () => {}
     note.count === 1 && note.last && JSON.stringify(note.heads) === JSON.stringify(want.full.map((v) => `What's new in ${v}:`))
     && (want.more ? note.more.startsWith(`And ${want.more} other update`) : !note.more), JSON.stringify(note));
   check(`${label}: the marker is set`, after['carcoord:pref:seenUpdate'] === NEW);
+  if (passed(JSON.parse(before['carcoord:v1']).date)) {
+    const order = await now.page.evaluate(() => {
+      const all = [...document.querySelectorAll('#notices .notice')];
+      return { keep: all.findIndex((n) => n.querySelector('[data-act="keep-date"]')), note: all.findIndex((n) => n.classList.contains('update')) };
+    });
+    check(`${label}: the passed date is moved, with Keep above the note`, order.keep >= 0 && order.keep < order.note, JSON.stringify(order));
+  }
   await extra(now, note);
   check(`${label}: no console errors`, !now.errors.length, now.errors.join(' | '));
   await now.page.reload({ waitUntil: 'networkidle' });
