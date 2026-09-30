@@ -630,12 +630,17 @@ function ctxEntry(s) {
     + `<span>${on ? 'Sure? Click again' : esc(s.text)}</span>${cost}</button>`;
 }
 
-// A route's own entries: the same two toggles as its Mark and Gap.
+/* A route's own entries: the same two toggles as its Mark and Gap, and last,
+   after a separator, its delete, which is the ✕'s own act and confirm key
+   (so arming either shows "Sure?" on both) and takes the ✕'s backup. */
 function ctxRoute(r) {
   const d = { kind: 'route', id: r.id };
+  const on = [r.driver.trim(), byId(state.cars, r.carId)?.reg, spotCell(r)].filter(Boolean);
   return [[
     { act: 'toggle', data: { ...d, field: 'highlight' }, text: r.highlight ? 'Remove the pink mark' : 'Mark pink on the printout' },
     { act: 'toggle', data: { ...d, field: 'gapBefore' }, text: r.gapBefore ? 'Remove the blank line above' : 'Add a blank line above' },
+  ], [
+    { act: 'del', data: d, arm: `del:${r.id}`, text: 'Delete route', cost: on.length ? on.join(', ') : 'Nothing on it yet' },
   ]];
 }
 

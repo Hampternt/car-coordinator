@@ -4861,7 +4861,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   const mark = cmRoute('7').locator('[data-field="highlight"]');
   await cmRight(mark);
   check('a right-click on a route\'s Mark opens the page\'s menu, not the browser\'s', await cmMenu.isVisible() && (await cmNative()) === false);
-  same('with the route\'s two toggles', await cmEntries(), ['Mark pink on the printout', 'Add a blank line above']);
+  same('with the route\'s two toggles first', (await cmEntries()).slice(0, 2), ['Mark pink on the printout', 'Add a blank line above']);
   check('named for its route', (await cmMenu.getAttribute('aria-label')) === 'Actions for Route 7');
   check('the menu is absolute, never fixed', (await cmMenu.evaluate((m) => getComputedStyle(m).position)) === 'absolute');
   await cm.locator('.rail-saved').click();
@@ -4938,17 +4938,15 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await mark.focus();
   await cm.keyboard.press('Shift+F10');
   check('Shift+F10 on a focused Mark opens the menu on its first entry', await cmMenu.isVisible() && (await cmFocused()) === 'menu:Mark pink on the printout', await cmFocused());
-  await cm.keyboard.press('ArrowDown');
-  const second = await cmFocused();
-  await cm.keyboard.press('ArrowDown');
-  const wrapped = await cmFocused();
-  await cm.keyboard.press('ArrowUp');
-  const back = await cmFocused();
-  await cm.keyboard.press('End');
-  const end = await cmFocused();
-  await cm.keyboard.press('Home');
-  same('the arrows wrap, and Home and End go to the ends', [second, wrapped, back, end, await cmFocused()],
-    ['menu:Add a blank line above', 'menu:Mark pink on the printout', 'menu:Add a blank line above', 'menu:Add a blank line above', 'menu:Mark pink on the printout']);
+  // Over the enabled entries only, whatever the menu holds by now.
+  const enabled = (await cmMenu.locator('[role="menuitem"]:not([aria-disabled])').evaluateAll((els) => els.map((el) => `menu:${el.querySelector('span').textContent}`)));
+  const walk = [];
+  for (const key of ['ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowDown', 'End', 'Home']) {
+    await cm.keyboard.press(key);
+    walk.push(await cmFocused());
+  }
+  same('the arrows wrap, and Home and End go to the ends', walk,
+    [enabled[1], enabled[0], enabled[enabled.length - 1], enabled[0], enabled[enabled.length - 1], enabled[0]]);
   await cm.keyboard.press('Escape');
   check('Escape shuts it and puts the focus back on Mark', await cmMenu.isHidden() && (await cmFocused()) === 'rt-07:highlight', await cmFocused());
 
@@ -4971,6 +4969,100 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('PageDown and Space do not scroll the page under an open menu', (await cm.evaluate(() => scrollY)) === y && await cmMenu.isVisible());
   await cm.keyboard.press('Escape');
   check('and Escape after a mouse open shuts it without taking the focus anywhere', await cmMenu.isHidden() && !(await cmFocused()).startsWith('rt-07'), await cmFocused());
+}
+
+// Delete from the menu: the ✕'s own act, confirm key and backup. Two clicks,
+// or Enter twice from a keyboard open; nothing else deletes.
+{
+  const cmHas = (id) => cm.evaluate((x) => state.routes.some((r) => r.id === x), id);
+  const cmBackedUp = (label, id) => cm.evaluate(([l, x]) => Store.backups().some((b) => b.label === l && JSON.parse(b.json).routes.some((r) => r.id === x)), [label, id]);
+  const cmDel = cmMenu.locator('[data-act="del"]');
+  const cmDelText = () => cmDel.locator('span').textContent();
+
+  await cmOpen();
+  const x2 = cmRoute('2').locator('[data-act="del"]');
+  await cmRight(x2);
+  same('Delete route comes last, with what is on the route under it', await cmDel.locator('small').textContent(), 'Bjørn, EL 41033, Spot 2/1');
+  await cmDel.click();
+  check('one click on Delete route arms it and leaves the menu open on Sure?', await cmMenu.isVisible() && (await cmDelText()) === 'Sure? Click again');
+  check('with nothing armed holding the focus', await cm.evaluate(() => !document.activeElement.classList.contains('armed')));
+  check('and the row\'s ✕ says Sure? as well', (await x2.textContent()).trim() === 'Sure?');
+  await cmDel.click();
+  check('the second click deletes the route and shuts the menu', !(await cmHas('rt-02')) && await cmMenu.isHidden());
+  check('after a "Deleting a route" backup that still holds it', await cmBackedUp('Deleting a route', 'rt-02'));
+
+  // From the keyboard: Enter twice.
+  await cmOpen();
+  await cmRoute('6').locator('[data-act="del"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.press('Enter');
+  const armedKeyed = await cm.evaluate(() => document.activeElement.classList.contains('armed') && !!document.activeElement.closest('#ctxMenu'));
+  await cm.keyboard.press('Enter');
+  check('Enter twice from a keyboard open deletes, the focus staying on the armed entry between', armedKeyed && !(await cmHas('rt-06')) && await cmBackedUp('Deleting a route', 'rt-06'));
+
+  // None of the single-key paths deletes.
+  await cmOpen();
+  await cmRight(cmRoute('4').locator('[data-act="del"]'));
+  await cmDel.click();
+  await cm.keyboard.press(' ');
+  check('armed with the mouse, a Space pressed next deletes nothing', await cmHas('rt-04'));
+  await cm.keyboard.press('Escape');
+  check('and Escape disarms it', await cmMenu.isHidden() && (await cm.evaluate(() => armed)) === null);
+
+  await cmOpen();
+  const x5 = cmRoute('5').locator('[data-act="del"]');
+  await x5.focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.press('Enter');
+  await cm.keyboard.press('Escape');
+  const backOnX = await cm.evaluate(() => document.activeElement.dataset.act === 'del' && document.activeElement.dataset.id === 'rt-05');
+  await cm.keyboard.press('Enter');
+  check('Shift+F10 on the ✕, End, Enter, Escape, Enter deletes nothing', backOnX && await cmHas('rt-05'));
+
+  await cmOpen();
+  await cmRoute('8').locator('[data-act="del"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.down('Enter');
+  await cm.keyboard.down('Enter');
+  await cm.keyboard.up('Enter');
+  check('a held Enter arms Delete route and does not confirm it', await cmHas('rt-08'));
+
+  // A redraw puts every list's scroll back, which fires scroll events: the
+  // menu stays open through them.
+  await cmOpen();
+  await cm.evaluate(() => {
+    const list = document.querySelector('#tab-plan [data-keep-scroll="drivers"]');
+    if (list) list.scrollTop = 120;
+    const table = document.querySelector('#tab-plan [data-keep-scroll="table"]');
+    if (table) table.scrollLeft = 40;
+  });
+  await cm.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await cmRight(cmRoute('9').locator('select[data-field="positionId"]'));
+  await cmDel.click();
+  check('with the rail list and the table scrolled, one click leaves the menu open on Sure?', await cmMenu.isVisible() && (await cmDelText()) === 'Sure? Click again');
+
+  // The confirming click lands where the first one did: the entry's box holds
+  // the first click's point after arming and after the disarm.
+  for (const [width, height] of [[1366, 768], [390, 844]]) {
+    await cm.setViewportSize({ width, height });
+    await cmOpen();
+    const x = cm.locator('#tab-plan tr[data-route]').last().locator('[data-act="del"]');
+    await x.evaluate((el) => el.scrollIntoView({ block: 'end', inline: 'end' }));
+    await x.click({ button: 'right' });
+    const b = await cmDel.boundingBox();
+    const pt = b && { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    const holds = async () => { const r = await cmDel.boundingBox(); return !!r && !!pt && pt.x >= r.x && pt.x <= r.x + r.width && pt.y >= r.y && pt.y <= r.y + r.height; };
+    if (pt) await cm.mouse.click(pt.x, pt.y);
+    const armedHolds = await holds() && (await cmDelText()) === 'Sure? Click again';
+    await cm.waitForTimeout(3300);
+    const disarmedHolds = await holds() && (await cmDelText()) === 'Delete route';
+    check(`at ${width}, the armed entry still holds the first click's point, and so does the disarmed one after 3 s`, armedHolds && disarmedHolds);
+    check(`at ${width}, one click and 3.3 s change nothing`, await cmHas('rt-hau2'));
+  }
+  await cm.setViewportSize({ width: 1366, height: 768 });
 }
 
 // --- right-click menus: done ---
