@@ -3751,7 +3751,8 @@ const calOpen = async (instant, items = null, { install = false } = {}) => {
   else await pg.clock.setFixedTime(new Date(instant));
   await pg.goto(base, { waitUntil: 'networkidle' });
   if (items) {
-    await pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v); }, items);
+    // '@V' stands for this build's version, which only the page knows.
+    await pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v === '@V' ? APP_VERSION : v); }, items);
     await pg.reload({ waitUntil: 'networkidle' });
   }
   // The clock was set before start() ran: today() is the instant's Oslo day.
@@ -3796,6 +3797,24 @@ const plan4 = (date, extra = {}) => JSON.stringify({
   await pg.click('[data-act="clear-day"]');
   await pg.click('[data-act="clear-day"]');
   check('and so does a Friday Clear the day', (await pg.evaluate(() => state.date)) === '2026-10-05', await pg.evaluate(() => state.date));
+  await pg.close();
+}
+
+// Item 2: one Start of day backup per local day. 00:30 in Oslo on 09-29 is
+// still 09-28 in UTC.
+for (const [seededAt, wantNew, what] of [
+  ['2026-09-28T23:30:00+02:00', true, "yesterday evening's Start of day backup leads to a new one"],
+  ['2026-09-29T00:10:00+02:00', false, "one taken at ten past midnight counts for today"],
+]) {
+  const seeded = [{ t: new Date(seededAt).toISOString(), label: 'Start of day', json: plan4('2026-09-25') }];
+  const pg = await calOpen('2026-09-29T00:30:00+02:00', {
+    'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30'), 'carcoord:backups': JSON.stringify(seeded),
+  });
+  const list = await pg.evaluate(() => Store.backups().map((b) => ({ t: b.t, label: b.label, json: b.json })));
+  const starts = list.filter((b) => b.label === 'Start of day');
+  check(`a Start of day backup per local day: ${what}`, starts.length === (wantNew ? 2 : 1), JSON.stringify(starts.map((b) => b.t)));
+  check('the seeded backup differs from the plan opened, and every t is still an ISO string',
+    seeded[0].json !== plan4('2026-09-30') && list.every((b) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(b.t)));
   await pg.close();
 }
 

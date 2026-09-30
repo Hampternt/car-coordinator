@@ -276,9 +276,14 @@ const Store = (() => {
     return false;
   }
 
+  /* One Start of day backup per day on the leader's own calendar, not UTC's:
+     just after midnight in Oslo is still yesterday in UTC. The stored t stays
+     an ISO string; only the day it counts for is read locally. */
+  const localDay = (d) => (Number.isNaN(d.getTime()) ? ''
+    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   function dailySnapshot(state) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (backups().some((b) => b.t.slice(0, 10) === today && b.label === 'Start of day')) return;
+    const today = localDay(new Date());
+    if (backups().some((b) => b.label === 'Start of day' && localDay(new Date(String(b.t))) === today)) return;
     snapshot(state, 'Start of day');
   }
 
