@@ -3665,7 +3665,12 @@ document.addEventListener('keydown', (e) => {
   // Tab from inside the bubble goes on from its ⓘ, not from the end of the page.
   if (e.key === 'Tab' && document.getElementById('infoBubble')?.contains(e.target)) closeInfo(true);
 });
-window.addEventListener('scroll', placeInfoBubble, { passive: true });
+// Any scroll can move the ⓘ: the page's, or a table scrolling sideways inside
+// it, which never reaches the window. So the bubble follows them all, its own
+// scrolling excepted.
+document.addEventListener('scroll', (e) => {
+  if (infoOpen && !document.getElementById('infoBubble')?.contains(e.target)) placeInfoBubble();
+}, { capture: true, passive: true });
 window.addEventListener('resize', placeInfoBubble);
 
 /* A right-click on a row opens its menu, and so do Shift+F10 and the Menu
