@@ -1739,6 +1739,9 @@ check('a mouse press on a button half under the top bar lands', await page.evalu
 await page.evaluate(() => window.scrollTo(0, 0));
 await planRowN(3).locator('[data-act="del"]').focus();
 await page.keyboard.press('Enter');
+// The press's own focus check runs a frame later (clearing the top bar);
+// a scroll made inside that frame raced it. A person scrolls later than that.
+await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 await page.evaluate(() => window.scrollTo(0, 900));
 await page.waitForTimeout(3300);
 check('a disarm leaves the page where the user scrolled it', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
