@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.12.0',
+    must: true,
+    title: 'Driver tags, apart from car labels',
+    changed: 'Drivers get their own tags, added for everyone: Sick, Holiday, Vacation, Course and Special situation, unless already there. Cars and positions offer only their labels.',
+    affects: 'Drivers tab, the Drivers panel\'s tag menu, and the Labels tab, now in two sections. Share codes and the printed sheet are unchanged.',
+    data: 'Every driver keeps their tag; it now lives in its own Driver tags list. An older copy of the app shows drivers without tags.',
+  },
+  {
     version: '0.11.0',
     must: false,
     title: 'A short tour of the app',
