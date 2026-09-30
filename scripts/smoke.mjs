@@ -4612,6 +4612,38 @@ for (const [what, setup, says] of [
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();
 
+// --- the Drivers tab: usual days, tags and notes ---
+// A context of its own, on the dev fixture as imported.
+const drvCtx = await browser.newContext();
+const dv = await drvCtx.newPage();
+const dvErrors = [];
+dv.on('console', (m) => m.type() === 'error' && dvErrors.push(m.text()));
+dv.on('pageerror', (e) => dvErrors.push(String(e)));
+await dv.goto(base, { waitUntil: 'networkidle' });
+const dvOpen = async (text) => {
+  await dv.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+  await dv.reload({ waitUntil: 'networkidle' });
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+};
+const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[data-field="name"][value="${name}"]`) });
+// Deleting a label takes it off drivers too: no repair notice after a reload.
+{
+  await dvOpen(devPlan);
+  const randi = await dv.evaluate(() => state.drivers.find((d) => d.labelId === 'lbl-course')?.name);
+  await dv.click('[data-act="tab"][data-tab="labels"]');
+  const del = dv.locator('#tab-labels tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
+  await del.click();
+  await del.click();
+  check('deleting a label takes it off the driver wearing it', !!randi && await dv.evaluate((n) => state.drivers.find((d) => d.name === n).labelId === '', randi));
+  check('after the usual backup', (await dv.evaluate(() => Store.backups()[0].label)) === 'Deleting a label');
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('and no repair notice comes after a reload', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
+}
+
+// --- the Drivers tab: done ---
+check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
+await drvCtx.close();
+
 // --- every colour is a token, and the paper is never dark ---
 // style.css writes colours only in custom properties, the scripts only the
 // label colours they are allowed, and no dark block names a paper token.

@@ -2190,7 +2190,9 @@ document.addEventListener('click', (e) => {
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
-      if (kind === 'label') [...state.cars, ...state.positions].forEach((x) => { if (x.labelId === id) x.labelId = ''; });
+      // Drivers too: a tag left pointing at nothing lit no chip, then came
+      // back as a repair notice on the next load.
+      if (kind === 'label') [...state.cars, ...state.positions, ...state.drivers].forEach((x) => { if (x.labelId === id) x.labelId = ''; });
       // A deleted driver leaves every group, but the day plan keeps the name
       // typed into it: that text is the plan, not a reference to the roster.
       if (kind === 'driver') state.driverGroups.forEach((g) => { g.driverIds = g.driverIds.filter((x) => x !== id); });
