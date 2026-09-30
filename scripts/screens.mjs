@@ -33,6 +33,11 @@ await page.evaluate(() => { localStorage.clear(); });
 await page.reload({ waitUntil: 'networkidle' });
 
 console.log('first run');
+// The one notice a first-ever open shows is the hint about the ⓘ buttons.
+if ((await page.locator('#notices .notice').count()) !== 1 || !(await page.locator('#notices .notice').innerText()).includes('New here? Click any \u24d8')) {
+  console.log('\na first-ever open did not show the ⓘ hint alone');
+  process.exit(1);
+}
 await shot('01-first-run');
 
 // --- build a fleet, the way you would on day one: paste the lot in at once
@@ -198,6 +203,16 @@ if ((await page.locator('#tab-plan .tpl').count()) !== 1) {
   process.exit(1);
 }
 await shot('03-day-plan-with-warnings');
+
+// An ⓘ's bubble, open beside it on the day plan.
+console.log('an info bubble');
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.click('#tab-plan .info-btn[data-info="plan-drivers"]');
+await page.waitForSelector('#infoBubble:not([hidden])');
+await page.waitForTimeout(150);
+await page.screenshot({ path: `${OUT}/33-info-bubble.png` });
+console.log(`  ${OUT}/33-info-bubble.png`);
+await page.keyboard.press('Escape');
 
 // The week under the route list, Monday's crew lit: at the exe's default
 // width, and on a phone, where it scrolls sideways in its own box.

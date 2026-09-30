@@ -2335,7 +2335,11 @@ async function dataAction(act, b, fromKeyboard = false) {
       downloadText(entry.kind === 'rescue' ? `car-coordinator-unreadable-${String(entry.t).slice(0, 10)}.json` : `car-coordinator-before-${entry.to}.json`, entry.text);
       return;
     }
-    case 'dismiss': notices.splice(Number(b.dataset.index), 1); break;
+    case 'dismiss': {
+      const [gone] = notices.splice(Number(b.dataset.index), 1);
+      if (gone && gone === infoHint) { Store.setPref('infoHint', 'done'); infoHint = null; }
+      break;
+    }
     default: return;
   }
   render();
@@ -2523,6 +2527,22 @@ function raiseUpdateNote({ link, recovered, copy }) {
   if (show) note('update', updateNoteText(copy, recovered), null, updateNoteLines(show));
 }
 
+
+/* The first-open hint: one line, raised when there is reason to think this
+   is someone's first look (a first-ever open with nothing saved and nothing
+   read from a save file, not by a share link, no warning up, no save file
+   linked), and only while this browser has never put it away. Its ✕ puts it
+   away for good, in a per-browser pref, never on the plan. Kept, so that ✕
+   and no other notice's is the one that does. */
+let infoHint = null;
+function offerInfoHint(link) {
+  if (!firstRun || link || typeof HELP === 'undefined' || typeof Store.pref !== 'function') return;
+  if (notices.some((n) => n.kind === 'warn') || (Store.file && Store.file.handle)) return;
+  // null is "never put away"; undefined is storage that could not be read,
+  // which is no reason to show it.
+  if (Store.pref('infoHint') !== null) return;
+  infoHint = note('info', 'New here? Click any \u24d8 to see what that part does.');
+}
 
 /* The confirmation for the only destructive action a click from the day plan.
    It is a notice rather than a dialog because there is room here to say what
@@ -3953,6 +3973,8 @@ async function start() {
   // would not fit) goes up before the note, so the note stays last.
   drainStoreNotices();
   try { raiseUpdateNote({ link, recovered, copy }); } catch (e) { console.warn('update note skipped', e); }
+  // After the note, which is what works out whether this is a first run.
+  try { offerInfoHint(link); } catch (e) { console.warn('first-open hint skipped', e); }
   render();
 
   const fromLink = Share.readHash();
