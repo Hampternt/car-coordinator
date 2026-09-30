@@ -3225,8 +3225,11 @@ document.addEventListener('click', (e) => {
 });
 
 // Hovering an entry focuses it, as a keyboard user's arrows would, but never a
-// destructive one: a key pressed next must not be able to arm it.
-$('#ctxMenu').addEventListener('mouseover', (e) => {
+// destructive one: a key pressed next must not be able to arm it. Only a
+// pointer that moved: the browser also reports one when a menu is drawn under
+// a pointer resting where it was, and that took a keyboard user's place.
+$('#ctxMenu').addEventListener('mousemove', (e) => {
+  if (!e.movementX && !e.movementY) return;
   const entry = e.target.closest('[role="menuitem"]');
   if (!entry || entry.dataset.arm || entry.hasAttribute('aria-disabled') || entry === document.activeElement) return;
   entry.focus({ preventScroll: true });
