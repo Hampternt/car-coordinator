@@ -96,7 +96,23 @@ if ((await page.locator('#tab-drivers tbody tr.away').count()) !== 1) {
   console.log(`\nexpected one driver left out of Monday, got ${await page.locator('#tab-drivers tbody tr.away').count()}`);
   process.exit(1);
 }
+// Usual days, a tag and a note, through the row itself.
+const driverRow = (name) => page.locator('#tab-drivers tbody tr', { has: page.locator(`[data-field="name"][value="${name}"]`) });
+const usual = (name, day) => driverRow(name).locator(`[data-act="crew-day"][data-day="${day}"]`).click();
+await usual('Ana Ruiz', 2);                 // makes a Tuesday group
+await usual('Bo Lind', 2);
+await usual('Cai Mensah', 3);               // and a Wednesday one
+await driverRow('Hana Sol').locator('.chip', { hasText: 'Unavailable' }).click();
+await driverRow('Bo Lind').locator('[data-field="note"]').fill('Back from leave Monday');
+if ((await page.locator('#tab-drivers tbody tr.away').count()) !== 1
+  || (await page.evaluate(() => state.driverGroups.map((g) => `${g.name}:${g.driverIds.length}`).join()))  !== 'Monday:8,Tuesday:2,Wednesday:1') {
+  console.log(`\nthe usual days did not make the groups expected: ${await page.evaluate(() => state.driverGroups.map((g) => `${g.name}:${g.driverIds.length}`).join())}`);
+  process.exit(1);
+}
 await shot('02-drivers');
+await page.setViewportSize({ width: 900, height: 700 });
+await shot('28-drivers-at-900');
+await page.setViewportSize({ width: 1360, height: 940 });
 
 // --- the day plan, including deliberate mistakes
 console.log('day plan, with mistakes left in on purpose');
