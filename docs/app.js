@@ -1036,6 +1036,8 @@ function renderDrivers() {
       <td>${on ? `<span class="assign yes">Route ${routeNames(on)}</span>` : '<span class="assign none">Not on a route</span>'}</td>
       <td>${actBtn('toggle', 'driver', d.id, d.available ? 'In today' : 'Away', d.available ? 'on' : '', 'data-field="available" title="Whether they show in the day plan\'s rail"')}</td>
       <td>${usualDays(d, byDay)}</td>
+      <td class="driver-tags">${labelChips('driver', d)}</td>
+      <td>${field('driver', d.id, 'note', d.note, 'placeholder="Note (e.g. back Monday)"')}</td>
       <td class="btns">${moveDel('driver', d.id)}</td></tr>`;
   }).join('');
   $('#tab-drivers').innerHTML = `
@@ -1046,7 +1048,7 @@ function renderDrivers() {
       <button class="btn" data-act="add-driver">+ Add driver</button>
     </div>
     ${state.drivers.length
-      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th>Usual days</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ? `<table class="grid"><thead><tr><th>Name</th><th>Today</th><th>In or away</th><th>Usual days</th><th>Tag</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
       : '<p class="empty">Nobody on the roster yet. Add the names you plan with \u2014 they become suggestions in the day plan and a list you can group by day.</p>'}
     ${driverGroups()}`;
 }

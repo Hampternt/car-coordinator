@@ -4723,6 +4723,29 @@ const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[
     && (await dv.locator('#notices .notice', { hasText: 'Thursday has nobody in it yet' }).count()) === 1);
 }
 
+// A Tag and a Note on each driver: only that driver's two fields change, a
+// tag never sets anyone away, and both survive a reload and go in Export.
+{
+  await dvOpen(devPlan);
+  const others = () => dv.evaluate(() => JSON.stringify(state.drivers.filter((d) => d.id !== 'drv-camilla')));
+  const othersWas = await others();
+  await dvRow('Camilla').locator('.chip', { hasText: 'Holiday' }).click();
+  await dvRow('Camilla').locator('[data-field="note"]').fill('Back Thursday');
+  const cam = await dv.evaluate(() => state.drivers.find((d) => d.id === 'drv-camilla'));
+  check("a driver's tag and note are set, and they stay in", cam.labelId === 'lbl-holiday' && cam.note === 'Back Thursday' && cam.available === true, JSON.stringify(cam));
+  check('and no other driver changes', (await others()) === othersWas);
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check('the rail still has her in', await dv.evaluate(() => !document.querySelector('#tab-plan [data-panel="drivers"] .rail-row[data-id="drv-camilla"]').classList.contains('away')));
+  await dv.reload({ waitUntil: 'networkidle' });
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  check('both survive a reload', (await dvRow('Camilla').locator('.chip.on').innerText()) === 'Holiday'
+    && (await dvRow('Camilla').locator('[data-field="note"]').inputValue()) === 'Back Thursday');
+  await dv.click('[data-act="tab"][data-tab="data"]');
+  const [dl] = await Promise.all([dv.waitForEvent('download'), dv.click('[data-act="export"]')]);
+  const exp = JSON.parse(await readFile(await dl.path(), 'utf8')).drivers.find((d) => d.id === 'drv-camilla');
+  check('and both go in Export', exp.labelId === 'lbl-holiday' && exp.note === 'Back Thursday');
+}
+
 // --- the Drivers tab: done ---
 check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
 await drvCtx.close();
