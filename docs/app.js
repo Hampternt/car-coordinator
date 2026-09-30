@@ -672,6 +672,14 @@ function ctxRoutes(on, field) {
   return on.map(({ r }) => ctxGo(`Go to route ${r.name.trim() || '-'}`, 'plan', 'route', r.id, field));
 }
 
+/* Take off route 7: that one field emptied on that one route, only while the
+   route still holds the item (data-was); no confirm and no backup, like the
+   car grid's No car. Kept apart from Go to, and not offered past two. */
+function ctxTakeOff(on, take, was) {
+  if (on.length > 2) return [];
+  return on.map(({ r }) => ({ act: 'take-off', data: { kind: 'route', id: r.id, take, was }, text: `Take off route ${r.name.trim() || '-'}` }));
+}
+
 // "route 7", "2 routes": the routes half of a cost line.
 const ctxRouteCount = (on) => (on.length === 1 ? `route ${on[0].r.name.trim() || '-'}` : `${on.length} routes`);
 
@@ -685,7 +693,7 @@ function ctxDriver(d, surface) {
     { act: 'toggle', data: { ...d0, field: 'available' }, text: d.available ? 'Set away' : 'Bring back in' },
     // The tag menu opens at the rail row's tag button, so only there.
     surface === 'rail' && { act: 'tag', data: d0, text: 'Tag\u2026' },
-  ].filter(Boolean), ctxRoutes(on, 'driver'), [
+  ].filter(Boolean), ctxRoutes(on, 'driver'), ctxTakeOff(on, 'driver', d.name), [
     { act: 'del', data: d0, arm: `del:${d.id}`, text: 'Delete driver',
       cost: `${groups ? `Taken out of ${plural(groups, 'day group')}` : 'In no day group'}. Routes keep the name.` },
   ]];
@@ -703,6 +711,7 @@ function ctxCar(c, surface) {
     surface === 'rail' ? [{ act: 'tag', data: c0, text: 'Tag\u2026' }] : [],
     // Its note and status can only be changed on the Cars tab.
     [...ctxRoutes(on, 'carId'), surface === 'rail' && ctxGo(`Go to ${c.reg} on the Cars tab`, 'cars', 'car', c.id, 'reg')].filter(Boolean),
+    ctxTakeOff(on, 'carId', c.id),
     [{ act: 'del', data: c0, arm: `del:${c.id}`, text: 'Delete car', cost }],
   ];
 }
@@ -2468,6 +2477,20 @@ document.addEventListener('click', (e) => {
       r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false;
       break;
     }
+    // Only while the route still holds what the entry was drawn for: the
+    // car or position by id, the driver by the name as the roster matches it.
+    // Away from the Day plan the change cannot be seen, so a notice says it.
+    case 'take-off': {
+      const r = list[i];
+      const f = b.dataset.take, was = b.dataset.was || '';
+      const holds = f === 'driver' ? !!fold(was) && fold(r.driver) === fold(was)
+        : (f === 'carId' || f === 'positionId') && !!was && r[f] === was;
+      if (!holds) { render(); return; }
+      const what = f === 'driver' ? r.driver.trim() : f === 'carId' ? byId(state.cars, was)?.reg : byId(state.positions, was)?.name;
+      r[f] = '';
+      if (tab !== 'plan') note('info', `Took ${what || 'it'} off route ${r.name.trim() || '-'}.`);
+      break;
+    }
     case 'add-route': {
       const nums = state.routes.map((r) => parseInt(r.name, 10)).filter(Number.isFinite);
       state.routes.push(newRoute(String(nums.length ? Math.max(...nums) + 1 : 1)));
@@ -3180,7 +3203,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The acts that act on one item out of a list, and so need to find it first.
-const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route']);
+const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
 
 /* The top bar sticks, and anything the browser scrolls into view — a field

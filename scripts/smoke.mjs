@@ -5154,7 +5154,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cmOpen();
   const cmRail = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"]`);
   await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
-  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag…', 'Go to route 1', 'Delete driver']);
+  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag…', 'Go to route 1', 'Take off route 1', 'Delete driver']);
   same('its delete says what it costs', await cmMenu.locator('[data-act="del"] small').textContent(),
     await cm.evaluate(() => { const n = state.driverGroups.filter((g) => g.driverIds.includes('drv-anders')).length; return `${n ? `Taken out of ${n} day group${n === 1 ? '' : 's'}` : 'In no day group'}. Routes keep the name.`; }));
   await cm.keyboard.press('Escape');
@@ -5197,7 +5197,7 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   });
   await cmRight(cmRail('car', 'car-07').locator('.assign'));
   const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
-  same('a rail car\'s menu', await cmEntries(), ['Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Delete car']);
+  same('a rail car\'s menu', await cmEntries(), ['Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Take off route 7', 'Delete car']);
   same('and its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), cost);
   await cm.keyboard.press('Escape');
 
@@ -5209,8 +5209,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.evaluate(() => { state.routes.find((x) => x.id === 'rt-14').carId = 'car-01'; save(); render(); });
   await cmRight(cmRail('car', 'car-01').locator('.assign'));
   const three = cmMenu.locator('[role="menuitem"][aria-disabled]', { hasText: 'On 3 routes' });
-  check('a car on 3 routes shows one disabled "On 3 routes" line and no Go to route', (await three.count()) === 1
-    && !(await cmEntries()).some((t) => t.startsWith('Go to route')));
+  check('a car on 3 routes shows one disabled "On 3 routes" line and no Go to or Take off route', (await three.count()) === 1
+    && !(await cmEntries()).some((t) => t.startsWith('Go to route') || t.startsWith('Take off')));
   await cm.keyboard.press('Escape');
 
   // With the drivers list scrolled, one click on Delete driver stays on Sure?.
@@ -5223,6 +5223,34 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   check('with the drivers list scrolled, one click on Delete driver leaves the menu open on Sure?', await cmMenu.isVisible()
     && (await cmMenu.locator('[data-act="del"] span').textContent()) === 'Sure? Click again');
   await cm.keyboard.press('Escape');
+}
+
+// Take off route N: one field on one route, only while it still holds the item.
+{
+  await cmOpen();
+  const cmRoutes = () => cm.evaluate(() => JSON.parse(JSON.stringify(state.routes)));
+  const cmRail8 = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"] .assign`);
+  const was = await cmRoutes();
+  await cmRight(cmRail8('car', 'car-07'));
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 7' }).click();
+  const now = await cmRoutes();
+  check('Take off route 7 on a rail car empties route 7\'s car', now.find((r) => r.id === 'rt-07').carId === '' && await cmMenu.isHidden());
+  same('and changes nothing else', now.map((r) => (r.id === 'rt-07' ? { ...r, carId: 'car-07' } : r)), was);
+  check('with no notice, on the Day plan', (await cm.locator('#notices .notice', { hasText: 'Took ' }).count()) === 0);
+
+  // A driver: only the route the entry names, though another is written
+  // with the same name in other letters.
+  await cm.evaluate(() => { state.routes.find((r) => r.id === 'rt-14').driver = 'ANDERS'; save(); render(); });
+  await cmRight(cmRail8('driver', 'drv-anders'));
+  same('a driver written on two routes gets a Take off for each', (await cmEntries()).filter((t) => t.startsWith('Take off')), ['Take off route 1', 'Take off route 14']);
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 1' }).first().click();
+  same('Take off route 1 clears only route 1\'s driver', await cm.evaluate(() => ['rt-01', 'rt-14'].map((id) => state.routes.find((r) => r.id === id).driver)), ['', 'ANDERS']);
+
+  // An entry left open while its route changed changes nothing.
+  await cmRight(cmRail8('car', 'car-01'));
+  await cm.evaluate(() => { state.routes.find((r) => r.id === 'rt-12').carId = 'car-05'; });
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 12' }).click();
+  check('an entry left open while its route changed changes nothing', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-12').carId)) === 'car-05');
 }
 
 // --- right-click menus: done ---
