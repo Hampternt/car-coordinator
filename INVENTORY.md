@@ -43,6 +43,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - 🚧 **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start. `manifests/2026-09-28-update-note.md`.
+- 🚧 **A first-use tour** — a first-ever open offers "Show me around", a short walk through cars, spots, drivers, a route, warnings, printing, sending the list, the save file and backups, reopened any time from a Tour button in the top bar. It only points; it never changes the plan. `manifests/2026-09-28-tour.md`.
 
 ## Packaging
 - ✅ **GitHub Pages** — the primary delivery; `docs/` is the published folder.
@@ -90,4 +91,3 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
-- 💭 **A first-use tour** for a new user.

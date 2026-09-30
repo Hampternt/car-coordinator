@@ -76,3 +76,4 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
 - **Part 7 done** (drivers tab, 0.9.0): start 6fe387c; items 1, 3-11 at 9a3173f, 4fdb69c, **5b8a877 ⚠️**, 16b990e, d6bbad0, 973094d, d40c6c6, 3225022, e021dc9, 44db090 (item 2 dropped). `check.sh` per item.
 - **Part 8 start.** Base e6f7656 (0.9.0). `update-note` and `origin/dev` had not moved.
 - **Part 8 done** (right-click menus, 0.10.0): start af3e402; items 1-14 at b644c6b, 7d1cd8b, **4abe7ec ⚠️**, c4f7317, **ffd08e9 ⚠️**, 4ce9386, d3bd956, 12c7f21, fb73d8b, 0f69c96, 6505b03, **9309dde ⚠️**, 1037e42, 7f3b541. `check.sh` per item.
+- **Part 9 start.** Base 48b5535 (0.10.0). `update-note` and `origin/dev` had not moved.
