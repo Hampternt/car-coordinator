@@ -183,6 +183,22 @@ if ((await page.locator('#tab-plan .tpl').count()) !== 1) {
 }
 await shot('03-day-plan-with-warnings');
 
+// The week under the route list, Monday's crew lit: at the exe's default
+// width, and on a phone, where it scrolls sideways in its own box.
+if ((await page.locator('#planWeek .week-col[data-day="1"] .week-load.lit').count()) !== 1) {
+  console.log("\nthe week does not show Monday's crew as the one in");
+  process.exit(1);
+}
+for (const [width, height, name] of [[1280, 850, '25-week-at-1280'], [390, 844, '26-week-on-a-phone']]) {
+  await page.setViewportSize({ width, height });
+  await page.locator('#planWeek').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  await page.locator('#planWeek').screenshot({ path: `${OUT}/${name}.png` });
+  console.log(`  ${OUT}/${name}.png`);
+}
+await page.setViewportSize({ width: 1360, height: 940 });
+await page.evaluate(() => window.scrollTo(0, 0));
+
 // The question that guards the one destructive button on the main screen. It
 // is dismissed rather than answered: the plan below it is the day being built.
 await page.click('#tab-plan .tpl [data-act="ask-template"]');
