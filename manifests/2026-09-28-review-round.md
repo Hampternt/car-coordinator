@@ -223,7 +223,7 @@ Decided by the owner in the review threads:
 <details>
 <summary><b>7. Drivers tab</b></summary>
 
-- Seven day toggles on each driver's row. A toggle adds the driver to, or removes them from, that weekday's crew, and ticking a day with no crew creates one. No shape change: the weekday comes from the crew's name (`docs/app.js:45`).
+- Five day toggles, Monday to Friday, on each driver's row (owner, 2026-09-29; weekend groups stay editable on their cards). A toggle adds the driver to, or removes them from, that weekday's crew, and ticking a day with no crew creates one. No shape change: the weekday comes from the crew's name (`docs/app.js:45`).
 - Tag and Note columns, as on the Cars tab. Decided by the owner: one tag per driver, from the one shared list, so any tag can go on anyone, and both stay until removed. Drivers have had `labelId` and `note` since schema v4.
 
 **Decided:** a tag is only a label and never sets Away; the crew cards stay; driver tags and notes stay on this PC and are not sent in share codes.
@@ -267,7 +267,7 @@ Full plan: `manifests/2026-09-28-tour.md` (8 items).
 - **Found while planning pack 8** (each worth an item of its own; details in that manifest's Out of scope):
   - Dragging a name onto a route probably fails in the Windows app. `dragDropEnabled` is left at its default in `src-tauri/tauri.conf.json`, and Tauri says it must be off for HTML drag and drop on Windows. Unverified on Windows; the fix is one line.
   - Restore picks its backup by list position (`docs/app.js:1390`). A backup taken between the two clicks would restore the neighbouring entry.
-  - Deleting a label clears it from cars and positions but not from drivers, so the next load shows a repair notice.
+  - Deleting a label clears it from cars and positions but not from drivers, so the next load shows a repair notice. *(Fixed in pack 7, item 1.)*
   - "Use for today" on an empty day group sends everyone away. *(Fixed in pack 5, item 8, owner 2026-09-29.)*
   - Saving a template under an existing name overwrites the first match, and imported templates can share a name.
 
