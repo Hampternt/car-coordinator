@@ -511,6 +511,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .parking-entry { grid-area: entry; text-align: center; color: var(--muted); font-size: 12px; }
 /* Parked front to back: taller than the column is wide. */
 .parking-spot1, .parking-spot2, .parking-spot3, .parking-spot5 { min-height: 170px; }
+/* Spot 4 parks in its bay with room round it: clear of the room above, as
+   the spots are clear of the rooms across the lane, and 80% of its column
+   wide, so it does not touch the lane (owner, 2026-09-30). */
+.parking-spot4 { width: 80%; justify-self: start; margin-top: 24px; }
 .parking-hatch { min-height: 48px; background: repeating-linear-gradient(45deg, var(--hatch) 0 2px, transparent 2px 10px); }
 .parking-lane { min-height: 48px; border: 1px dashed var(--dash); }
 .parking-entrance { padding: 2px 4px; }

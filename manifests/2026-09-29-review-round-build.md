@@ -92,3 +92,4 @@ The owner's rule: the full suite and the multi-agent reviews wait until the run 
     - The lane runs to the top.
     - Checks: `check.sh` OK and `node scripts/map.mjs` "map checks passed". A screenshot with the example data shows Spot 1 at 150×170.
     - It rides in 0.11.0 with no patch cut, because 0.11.0 hasn't shipped (as 64fdcde did in 0.5.0). 0.8.0's note still reads true.
+  - **Spot 4 given room, on `dev`** (owner): "in between the spot 4 and the hatched out area above it can you add a bit of space … make spot 4 … 80% as wide". Spot 4 now has 24px clear of the room above and is 80% of its column wide, standing at the left. `check.sh` OK; screenshot with the example data. It rides in 0.11.0, as the map fix above does.
