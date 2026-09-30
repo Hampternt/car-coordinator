@@ -701,6 +701,9 @@ const Store = (() => {
     save(state) { writeLocal(state); queueFileWrite(state); },
     // This browser only, leaving the file as it is until the next real change.
     saveLocal(state) { writeLocal(state); },
+    // The save file only, through the same checks as every write to it: Keep
+    // puts a date back in the file when only the file had the moved one.
+    saveFile(state) { queueFileWrite(state); },
     flush, snapshot, dailySnapshot, backups, restore, archives, archive,
     file, persistence, fileSupported, linkFile, openFile, reconnect, release, unlink,
     download, parseImport, takeNotices, migrate,

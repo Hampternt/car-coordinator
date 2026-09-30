@@ -211,7 +211,37 @@ window.addEventListener('storage', (e) => {
 let armed = null;
 let notices = [];
 
-const save = () => Store.save(state);
+/* A passed date moved on open (step 6 of the start-up). It is in memory until
+   the next real change: `saved` is set once a save has written the moved date
+   to this browser, `inFile` once Reconnect or Choose save file… wrote it to
+   the file. Keep puts the old date back wherever the moved one went, and
+   nowhere else. It lasts until the plan or its date is replaced, or its
+   notice is put away. */
+let dateMove = null;
+const save = () => {
+  if (dateMove && state === dateMove.plan) dateMove.saved = true;
+  Store.save(state);
+};
+const isKeep = (n) => !!(n.offer && n.offer.act === 'keep-date');
+const dropKeep = () => { dateMove = null; notices = notices.filter((n) => !isKeep(n)); };
+
+/* Step 6 of the start-up: a saved date that has passed moves to the next
+   working day, on screen only. Nothing is written; the Keep notice offers the
+   old date back. The date is assigned last, so a failure before it leaves
+   the plan as it was saved. */
+function moveDateOnOpen() {
+  const from = state.date;
+  const d = parseDay(from);
+  if (!d || from >= today()) return;
+  const to = nextWorkingDay();
+  const text = `${dayLabel(from)} has passed, so this plan is now dated ${dayLabel(to)}, the next working day. This browser saves the new date with your next change.`;
+  // Raised without taking the scroll: a file hold or the spot question keeps it.
+  const raised = offerRaised;
+  note('info', text, { act: 'keep-date', kind: '', id: '', text: `Keep ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}` });
+  offerRaised = raised;
+  state.date = to;
+  dateMove = { from, to, plan: state, saved: false, inFile: false };
+}
 
 const listFor = (kind) => ({ route: state.routes, car: state.cars, position: state.positions, label: state.labels, driver: state.drivers, driverGroup: state.driverGroups, template: state.templates })[kind];
 
@@ -1310,6 +1340,9 @@ function render() {
   // on screen with everything else. It goes through note(), so a save failing
   // on every keystroke leaves one notice rather than a hundred.
   drainStoreNotices();
+  // Keep goes once the plan or its date has been replaced (Import, Restore, a
+  // share code, a typed date), or its notice has been put away.
+  if (dateMove && (state !== dateMove.plan || state.date !== dateMove.to || !notices.some(isKeep))) dropKeep();
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
@@ -1580,8 +1613,15 @@ function downloadText(name, text) {
    the synchronous switch below. */
 async function dataAction(act, b, fromKeyboard = false) {
   switch (act) {
-    case 'link-file': await Store.linkFile(state, defaults); break;
-    case 'reconnect-file': await Store.reconnect(state, defaults); break;
+    case 'link-file':
+    case 'reconnect-file': {
+      // Either can write the screen, moved date and all, to the file: Keep
+      // then has to put the old date back there too.
+      const was = Store.file.lastSaved;
+      await (act === 'link-file' ? Store.linkFile(state, defaults) : Store.reconnect(state, defaults));
+      if (dateMove && state === dateMove.plan && Store.file.lastSaved !== was) dateMove.inFile = true;
+      break;
+    }
     // The answers to the hold Reconnect puts up. Whatever is given up goes
     // into Backups first, and if that cannot be done nothing happens at all.
     case 'file-keep-file': {
@@ -1684,7 +1724,8 @@ const note = (kind, text, offer = null, lines = [], link = null) => {
 
 /* One live offer at a time: asking about Tuesday takes Monday's question away
    rather than leaving two questions on screen that answer each other. */
-const dropOffers = () => { notices = notices.filter((n) => !n.offer); };
+// Keep stays: it is about the date, not the question being put away.
+const dropOffers = () => { notices = notices.filter((n) => !n.offer || isKeep(n)); };
 
 /* ---------- the update note: who sees what ----------
    Pure, so every rule can be driven by a test with a list made by hand.
@@ -2015,6 +2056,21 @@ document.addEventListener('click', (e) => {
     // browser could not read, on the very click (the Data tab) the warning
     // sends you to.
     case 'tab': tab = b.dataset.tab; render(); return;
+    // Keep: the old date back wherever the moved one went. On its own path,
+    // because the shared save below would see the date change and write this
+    // browser even when the move never reached it.
+    case 'keep-date': {
+      const m = dateMove;
+      dropKeep();
+      if (!m || state !== m.plan || state.date !== m.to) { render(); return; }
+      state.date = m.from;
+      note('info', `Kept ${dayLabel(m.from)}. That day has passed, so the date moves again the next time the app is opened.`);
+      offerPlanDayTemplate({ quiet: true });
+      if (m.saved) save();
+      else if (m.inFile && typeof Store.saveFile === 'function') Store.saveFile(state);
+      render();
+      return;
+    }
     // The colours belong to this browser, never to the plan: a pref, and like
     // switching tabs it saves nothing. Follow the computer removes the pref.
     case 'theme': {
@@ -2080,6 +2136,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'set-tomorrow':
       state.date = nextWorkingDay();
+      dropKeep();
       offerPlanDayTemplate({ quiet: true });
       if (e.detail === 0) refocus = '#date';
       break;
@@ -2088,6 +2145,10 @@ document.addEventListener('click', (e) => {
       Store.snapshot(state, 'Clearing the day');
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = nextWorkingDay();
+      // The same plan object and the moved date again, so Keep would not see
+      // it is stale: it goes explicitly, or it could write a passed date
+      // over the day just cleared.
+      dropKeep();
       offerPlanDayTemplate({ quiet: true });
       break;
     case 'add-route': {
@@ -2739,6 +2800,10 @@ async function start() {
   noteFileHold();
   notices = notices.concat(Store.takeNotices());
   Store.dailySnapshot(state);
+  // Step 6: a passed date moves to the next working day, in memory. In a try
+  // of its own: whatever goes wrong, the plan is drawn as it was saved.
+  const savedDate = state.date;
+  try { moveDateOnOpen(); } catch (e) { state.date = savedDate; dropKeep(); console.warn('date move skipped', e); }
   // Offers, never applications: these only ever add a notice with a button in
   // it. The spot names come first because they are about the data itself
   // rather than about today, and because the question scrolled into view

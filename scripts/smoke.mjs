@@ -3903,6 +3903,135 @@ for (const [at, date, what] of [
   await pg.close();
 }
 
+// Item 7: a passed date moves on open, in memory, with Keep.
+{
+  const TUE = '2026-09-29T09:00:00+02:00';
+  const mon = plan4('2026-09-28');
+  const look = (pg) => pg.evaluate(() => ({
+    date: state.date,
+    saved: localStorage.getItem('carcoord:v1'),
+    keep: document.querySelectorAll('#notices [data-act="keep-date"]').length,
+    keepText: document.querySelector('#notices [data-act="keep-date"]')?.closest('.notice')?.innerText.replace(/\s+/g, ' ') || '',
+  }));
+  const keepAnyway = (pg) => pg.evaluate(() => { const b = document.createElement('button'); b.dataset.act = 'keep-date'; document.body.append(b); b.click(); b.remove(); });
+
+  // The move itself, and nothing written.
+  let pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': mon });
+  let got = await look(pg);
+  check('a Tuesday open of a Monday plan dates it Wednesday, with Keep', got.date === '2026-09-30' && got.keep === 1
+    && got.keepText.includes('Monday 28/09 has passed, so this plan is now dated Wednesday 30/09, the next working day.'), JSON.stringify(got).slice(0, 300));
+  check('and nothing is written at open', got.saved === mon);
+  check('the Start of day backup holds the date as saved', await pg.evaluate(() => JSON.parse(Store.backups().find((b) => b.label === 'Start of day').json).date === '2026-09-28'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  got = await look(pg);
+  check('a reload moves it again and offers Keep again, still writing nothing', got.date === '2026-09-30' && got.keep === 1 && got.saved === mon);
+  // Keep before any change: the old date back, and still nothing written.
+  await pg.click('#notices [data-act="keep-date"]');
+  got = await look(pg);
+  check('Keep before any change puts the old date back and writes nothing', got.date === '2026-09-28' && got.keep === 0 && got.saved === mon, JSON.stringify(got).slice(0, 200));
+  check('and the line under the Date warns', await pg.evaluate(() => document.getElementById('dateLine').classList.contains('off')));
+  // Keep after a real change: the old date back, and saved.
+  await pg.reload({ waitUntil: 'networkidle' });
+  await pg.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Bea');
+  check('a real change saves the moved date', JSON.parse(await pg.evaluate(() => localStorage.getItem('carcoord:v1'))).date === '2026-09-30');
+  await pg.click('#notices [data-act="keep-date"]');
+  check('Keep after a real change puts the old date back, saved', JSON.parse(await pg.evaluate(() => localStorage.getItem('carcoord:v1'))).date === '2026-09-28');
+  // Replaced plans and dates: Keep goes, and a keep-date sent anyway does nothing.
+  for (const [what, act] of [
+    ['a typed date', async () => { await pg.fill('#date', '2026-10-02'); await pg.click('[data-act="tab"][data-tab="plan"]'); }],
+    ['Set to tomorrow', () => pg.click('[data-act="set-tomorrow"]')],
+    ['Clear the day', async () => { await pg.click('[data-act="clear-day"]'); await pg.click('[data-act="clear-day"]'); }],
+    ['an import', async () => {
+      await pg.click('[data-act="tab"][data-tab="data"]');
+      await pg.setInputFiles('#importFile', { name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(plan4('2026-09-30', { routes: [] })) });
+      await pg.waitForFunction(() => state.routes.length === 0);
+      await pg.click('[data-act="tab"][data-tab="plan"]');
+    }],
+  ]) {
+    await pg.evaluate((t) => { localStorage.setItem('carcoord:v1', t); }, mon);
+    await pg.reload({ waitUntil: 'networkidle' });
+    await act();
+    const was = await look(pg);
+    await keepAnyway(pg);
+    const after = await look(pg);
+    check(`after ${what}, Keep has gone and a keep-date sent anyway changes nothing`, was.keep === 0 && after.date === was.date && after.saved === was.saved, JSON.stringify({ was: was.date, after: after.date }));
+  }
+  await pg.close();
+
+  // Friday, Saturday and Sunday opens of a Thursday plan all give Monday.
+  for (const at of ['2026-10-02T09:00:00+02:00', '2026-10-03T09:00:00+02:00', '2026-10-04T09:00:00+02:00']) {
+    pg = await calOpen(at, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-10-01') });
+    check(`an open at ${at.slice(0, 10)} of a Thursday plan shows Monday`, (await pg.evaluate(() => state.date)) === '2026-10-05');
+    await pg.close();
+  }
+  // No move: today, the next working day, not a real day, unreadable, first run.
+  for (const [what, items, date] of [
+    ['a plan dated today', { 'carcoord:v1': plan4('2026-09-29') }, '2026-09-29'],
+    ['a plan for the next working day', { 'carcoord:v1': plan4('2026-09-30') }, '2026-09-30'],
+    ['a date that is not a real day', { 'carcoord:v1': plan4('2026-13-45') }, '2026-13-45'],
+    ['an unreadable save', { 'carcoord:v1': '{not json' }, '2026-09-30'],
+    ['a first run', {}, '2026-09-30'],
+  ]) {
+    pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', ...items });
+    got = await look(pg);
+    check(`${what} is not moved and has no Keep`, got.date === date && got.keep === 0, JSON.stringify(got).slice(0, 160));
+    await pg.close();
+  }
+  // A save from a newer version: moved in memory, its warning stays, Keep writes nothing.
+  const newerMon = JSON.stringify({ ...JSON.parse(mon), schemaVersion: 99 });
+  pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': newerMon });
+  got = await look(pg);
+  check('a newer-version save is moved in memory, its warning kept, nothing written', got.date === '2026-09-30' && got.keep === 1 && got.saved === newerMon
+    && (await pg.locator('#notices .notice.warn', { hasText: 'newer version' }).count()) === 1);
+  await pg.click('#notices [data-act="keep-date"]');
+  check('and Keep on it writes nothing', (await look(pg)).saved === newerMon);
+  await pg.close();
+  // The update note stays last, below Keep.
+  pg = await calOpen(TUE, { 'carcoord:v1': mon });
+  check('Keep comes before the update note, which stays last', await pg.evaluate(() => {
+    const all = [...document.querySelectorAll('#notices .notice')];
+    const k = all.findIndex((n) => n.querySelector('[data-act="keep-date"]'));
+    const u = all.findIndex((n) => n.classList.contains('update'));
+    return k >= 0 && u === all.length - 1 && k < u;
+  }));
+  await pg.setViewportSize({ width: 390, height: 844 });
+  check('the Keep notice fits a phone screen', await pg.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+  await pg.close();
+  // The save file: Reconnect with no marker writes the moved date to the
+  // file; Keep then puts the old one back there, and writes nothing here.
+  pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': mon });
+  await linkStandIn(pg, mon);
+  await pg.evaluate(() => { tab = 'data'; render(); });
+  await pg.click('[data-act="reconnect-file"]');
+  await pg.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
+  check('Reconnect wrote the moved date to the file', JSON.parse(await pg.evaluate(() => window.__disk.text)).date === '2026-09-30');
+  await pg.click('#notices [data-act="keep-date"]');
+  await pg.evaluate(() => Store.flush());
+  const fileNow = await pg.evaluate(() => ({ file: JSON.parse(window.__disk.text).date, saved: localStorage.getItem('carcoord:v1') }));
+  check('Keep puts the old date back in the file, and writes nothing here', fileNow.file === '2026-09-28' && fileNow.saved === mon, JSON.stringify(fileNow).slice(0, 120));
+  await pg.close();
+}
+// A move that throws: the plan is drawn as saved, and everything after it runs.
+{
+  const ctxThrow = await browser.newContext({ timezoneId: 'Europe/Oslo' });
+  await ctxThrow.route('**/app.js*', async (route) => {
+    const res = await route.fetch();
+    route.fulfill({ response: res, body: (await res.text()).replace('function moveDateOnOpen() {', 'function moveDateOnOpen() {\n  throw new Error(\'date move broken on purpose\');') });
+  });
+  const pg = await ctxThrow.newPage();
+  const errs = [], warns = [];
+  pg.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); if (m.type() === 'warning') warns.push(m.text()); });
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.clock.setFixedTime(new Date('2026-09-29T09:00:00+02:00'));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  await pg.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:v1', t); }, plan4('2026-09-28'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  const got = await pg.evaluate(() => ({ date: state.date, keep: document.querySelectorAll('[data-act="keep-date"]').length, note: document.querySelectorAll('#notices .notice.update').length, rows: document.querySelectorAll('#tab-plan tbody tr').length }));
+  check('a move that throws leaves the saved date, no Keep, and the note and the plan drawn', got.date === '2026-09-28' && got.keep === 0 && got.note === 1 && got.rows === 1, JSON.stringify(got));
+  check('and logs only a warning', !errs.length && warns.some((w) => w.includes('date move skipped')), errs.join(' | '));
+  await ctxThrow.close();
+}
+
 // --- the calendar: done ---
 check('the calendar cases log no console errors', calErrors.length === 0, calErrors.join(' | '));
 await calCtx.close();
