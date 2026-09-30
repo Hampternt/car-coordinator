@@ -1,6 +1,6 @@
 # Pack: Drivers tab
 
-**Status:** 🚧 building, since 2026-09-30, as part 7 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (Monday to Friday; item 2 dropped, since part 5's item 8 fixed it).
+**Status:** 🚧 items 1 and 3-11 built on `review-round` (combined pack, part 7; item 2 dropped), cut at 0.9.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 4 individually) and the walkthrough.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `drivers-tab`, from `dev` after pack 6 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -356,7 +356,7 @@ Record the row height at 900 in the ledger.
   - its "Found while planning pack 8" list, where :264 and :265 are marked fixed in pack 7;
   - pack 8's manifest :182 and :378, because deleting a label now clears drivers.
       *Done when:* the README, the container and pack 8's manifest all describe the row as shipped, and neither fixed bug is still listed as open.
-- [ ] **11. Announce Drivers tab and cut 0.9.0.** Pack 1's Design H, in one commit:
+- [x] **11. Announce Drivers tab and cut 0.9.0.** Pack 1's Design H, in one commit:
   - the entry below goes at the top of `docs/updates.js`;
   - the six version places move to 0.9.0, the next minor after `APP_VERSION` at go;
   - the `?v=` tags follow;
@@ -451,3 +451,5 @@ Record the row height at 900 in the ledger.
 - Item 8 done, d40c6c6. `.day-tick` on tokens (off: `--line` and `--field`; on: `--steel-fill` with `--on-fill`), levers 1-3 (name box 150px, compact one-line days, wrapping tag chips with a 120px cell, a 120px note box), **and lever 4 applied up front** (`#tab-drivers { overflow-x: auto }`), because the batched rule means the widths can only be measured at the end: without it, a row that overflows at 900 would scroll the whole page. The smoke check is therefore Design E's lever-4 form (no page scroll and a 120px note at 900 and 1024), and it prints the table's overhang and the row height at each width, to be recorded here from the end-of-run suite. The phone fixture gains a tagged driver, a noted one and a group, and checks five days on one line and a note box wider than zero. Gate: `check.sh` OK.
 - Item 9 done, 3225022. The planned ticks, tag and note, through the row; the script fails unless the groups read "Monday:8,Tuesday:2,Wednesday:1" and exactly one row is away. Shots: 02-drivers (retaken) and 28-drivers-at-900. Runs at the end. Gate: `check.sh` OK.
 - Item 10 done, e021dc9. README's Drivers bullet; the container's pack 7 text records Monday to Friday, and its "Found while planning pack 8" label entry is marked fixed here (the Use for today entry was marked fixed in part 5). Pack 8's manifest: the cost-line cell and the found-issues line no longer work around the label bug. Gate: `check.sh` OK.
+- Item 11 done, 44db090. **Entry changed from the draft:** "Use for today on an empty group now changes nothing" is gone from `changed` (0.7.0 already announced it, and item 2 is dropped), and "The In today button now reads In." is there instead; `affects` names "the week under the route list" (part 5's screen words) and says "Share codes are unchanged: they send day groups, never drivers' tags or notes", because `versions.mjs` requires `affects` to say whether share codes change (the draft's "Copy everything sends ticks as Day groups" failed it). `must: false`. `versions.mjs`: "8 entries, newest first, newest 0.9.0, must set where required". `upgrade.mjs` already reads the note's versions from `updates.js`. Gate: `check.sh` OK.
+- **Part 7 closed (0.9.0), under the batched rule.** Its smoke cases and screens run at the end of part 9, and the upgrade check only from v0.2.4. Then the combined review (item 4 individually) and the walkthrough. **Pack close is left for the manager:** INVENTORY's ✅ entry and the container's status line. **To record from the end-of-run suite:** the Drivers table's overhang and row height at 900 and 1024 (item 8).
