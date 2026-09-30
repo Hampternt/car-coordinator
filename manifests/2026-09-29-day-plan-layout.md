@@ -556,7 +556,7 @@ Kept and re-run as they are:
   - Keep screens.mjs's rail and route counts (:158-167, :186).
 
   *Done when:* `npm run screens` writes the new shots with no console errors, and its counts (9 roster rows with 1 away, 15 routes, 4 flagged rows) are unchanged.
-- [ ] **11. The README says where things are.**
+- [x] **11. The README says where things are.**
   - README.md:21-23:
     - the Day plan bullet names the templates and the week's columns with Load under the route list;
     - the Drivers bullet says Monday-to-Friday crews are columns and the other crews are buttons in the Drivers panel.
@@ -653,3 +653,4 @@ Kept and re-run as they are:
 - Item 8 done, 83a1c0a (owner question 2: yes). The guard is the first thing in `apply-group`: `crewIds(g).size === 0` redraws and returns, with the notice only when pressed outside `#tab-plan`. Smoke (layout context): "Use for today" on an empty group, on a plan of this version and on a schemaVersion 99 save, leaves everyone in, counts no `Store.save` or `carcoord:v1` `setItem`, leaves `carcoord:v1` byte for byte, and shows the notice. Part 7 drops its duplicate of this fix. Gate: `check.sh` OK.
 - Item 9 done, 37e519f. Design G: `<div id="planMap" class="plan-map">${mapSlot(use)}</div>` right after `renderWeek()` (with no whitespace inside, so `:empty` holds), `.plan-map:empty { display: none }`, and `mapSlot(use)` with its try/catch and `console.warn`. The contract is in the container's pack 6 section (start commit). Smoke (layout context): the slot after `#planWeek` with no height; a stand-in map drawn, surviving a tab trip, with `state` and every `carcoord:*` key unchanged and no `setItem`; a throwing one leaving the plan drawn and a warning. The stand-in is swapped in without `new Function()`, which the page's CSP forbids. Gate: `check.sh` OK.
 - Item 10 done, 443f23f. Shot 03 is retaken by the same step (full page: routes, templates, the week with Monday lit), and the run now fails unless Monday's Load is lit. New: 25-week-at-1280 and 26-week-on-a-phone, element shots of `#planWeek`. The rail and route counts are untouched. Runs at the end. Gate: `check.sh` OK.
+- Item 11 done, fa81461. README's Day plan bullet names the templates and the week (columns, Load) under the route list; the Drivers bullet says weekday crews are columns and All, weekend crews and other groups are buttons in the Drivers panel. HANDOFF.md never mentioned the row. Gate: `check.sh` OK.
