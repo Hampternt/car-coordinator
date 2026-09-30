@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.7.0',
+    must: false,
+    title: 'Templates and the week under the route list',
+    changed: 'Templates sit straight under the route list, then a column per weekday listing its crew, with Load on top. These replace the Mon–Sun buttons.',
+    affects: 'Day plan: All and weekend crews are buttons in its Drivers panel. Drivers tab: an empty group\'s Use for today changes nobody. Printed sheet and share codes unchanged.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.6.0',
     must: true,
     title: 'The day plan is for the next working day',
