@@ -114,5 +114,50 @@ const ParkingMap = (() => {
     return { boxes, others };
   }
 
-  return { GATE_NAMES, model };
+  /* ---------- markup ----------
+     Plain boxes in the yard's grid. Every class starts with parking, the
+     only data attribute is data-position (on a matched box), and nothing can
+     be clicked or focused: the Day plan's tests and handlers count rows,
+     acts and fields across the whole tab, and the map must never be one of
+     them. The only style written is a label's colour, checked first. */
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const dot = (color) => `<span class="parking-dot"${/^#[0-9a-f]{6}$/i.test(String(color)) ? ` style="--c:${color}"` : ''}></span>`;
+  const parts = (x) => [
+    x.status ? `<div class="parking-status">${dot(x.status.color)}${esc(x.status.text)}</div>` : '',
+    x.multi ? '<div class="parking-caption">Many cars</div>' : '',
+    x.twin ? `<div class="parking-twin">${esc(x.twin)}</div>` : '',
+    x.also ? `<div class="parking-twin">${esc(x.also)}</div>` : '',
+    ...x.groups.map((g) => [
+      g.heading ? `<div class="parking-round">${esc(g.heading)}</div>` : '',
+      g.tag ? `<div class="parking-tag">${esc(g.tag)}</div>` : '',
+      ...g.lines.map((l) => `<div class="parking-line${l.clash ? ' parking-clash' : ''}">${esc(l.text)}</div>`),
+    ].join('')),
+  ].join('');
+  const hatch = (area) => `<div class="parking-hatch parking-${area}" role="img" aria-label="Not parking"></div>`;
+
+  function drawing(m) {
+    const boxes = m.boxes.map((b) => {
+      const cls = ['parking-box', `parking-${b.key}`, b.red && 'parking-red', !b.position && 'parking-none'].filter(Boolean).join(' ');
+      return `<div class="${cls}"${b.position ? ` data-position="${esc(b.position.id)}"` : ''}>
+        <div class="parking-title">${esc(b.title)}</div>${b.gate ? '<div class="parking-caption">Gate</div>' : ''}
+        ${b.position ? parts(b) : `<div class="parking-empty-text">No position named ${esc(b.looksFor)}</div>`}
+        ${b.free ? '<div class="parking-free">Free</div>' : ''}
+      </div>`;
+    }).join('');
+    return `<div class="parking-yard">
+      ${hatch('room-a')}${hatch('room-b')}${hatch('dock')}
+      <div class="parking-lane"><span class="parking-entrance">Entrance 1</span></div>
+      ${boxes}
+    </div>`;
+  }
+
+  // The Not on the map list, or nothing at all when every position is drawn.
+  function others(m) {
+    if (!m.others.length) return '';
+    return `<div class="parking-others"><div class="parking-others-head">Not on the map</div>
+      <ul class="parking-list">${m.others.map((o) => `<li class="parking-item${o.red ? ' parking-red' : ''}">
+        <div class="parking-title">${esc(o.title)}</div>${parts(o)}</li>`).join('')}</ul></div>`;
+  }
+
+  return { GATE_NAMES, model, drawing, others };
 })();

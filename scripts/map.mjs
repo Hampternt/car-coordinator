@@ -98,6 +98,30 @@ const R = (name, positionId, round = '', carId = '') => ({ name, positionId, rou
   check('ids of __proto__ work', m.boxes[0].position?.id === '__proto__' && m.boxes[0].groups.length === 1);
 }
 
+// --- the markup ---
+{
+  const m = ParkingMap.model(handOver(dev));
+  const html = ParkingMap.drawing(m) + ParkingMap.others(m);
+  same('the six boxes are always drawn, in order', [...html.matchAll(/class="parking-box parking-(spot\d|gate)/g)].map((x) => x[1]), ['spot1', 'spot2', 'spot3', 'spot4', 'spot5', 'gate']);
+  const matched = m.boxes.filter((b) => b.position).length;
+  check('data-position sits only on matched boxes', (html.match(/data-position=/g) || []).length === matched + 0);
+  check('a red box carries its tag as words, not only a class', /parking-red[\s\S]*Taken by 2 routes in round 2/.test(html));
+  check('the hatched areas carry no text', /aria-label="Not parking"><\/div>/.test(html));
+  const hostile = ParkingMap.model(handOver(plan(
+    [P('"><img src=x onerror=alert(1)>', 'Spot 1', { labelId: 'L9' }), P('b', '<b>x</b>')],
+    [], { labels: [{ id: 'L9', name: '"><img src=x>', color: 'red;position:fixed' }] })));
+  const out = ParkingMap.drawing(hostile) + ParkingMap.others(hostile);
+  check('names, labels and ids come out escaped', !/<img|<b>x/.test(out) && out.includes('&lt;b&gt;x&lt;/b&gt;') && out.includes('&quot;&gt;&lt;img'));
+  const styles = [...out.matchAll(/style="([^"]*)"/g), ...html.matchAll(/style="([^"]*)"/g)].map((x) => x[1]);
+  check('every style is a colour and nothing else, and a bad colour falls back', styles.every((s) => /^--c:#[0-9a-f]{6}$/i.test(s)) && !out.includes('position:fixed'), styles.join(' | '));
+  const all = html + out;
+  const tags = all.match(/<(table|thead|tbody|tr|img)\b|data-(kind|id|field|panel|route|act|drag|drop)=/g) || [];
+  const classes = [...all.matchAll(/class="([^"]*)"/g)].flatMap((x) => x[1].split(/\s+/)).filter(Boolean);
+  const taken = classes.filter((c) => !c.startsWith('parking') || /^(grid|problems|pool|chip|plan-table|empty)$|^(rail|day|tpl)/.test(c));
+  check('none of the markup the Day plan reserves, and every class starts with parking', !tags.length && !taken.length, [...tags, ...taken].join(' '));
+  check('others() is empty when nothing is listed', ParkingMap.others(ParkingMap.model(handOver(plan([P('a', 'Spot 1')])))) === '');
+}
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);
