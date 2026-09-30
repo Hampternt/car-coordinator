@@ -4254,6 +4254,56 @@ await loadWeek();
   await lp.setViewportSize({ width: 1680, height: 940 });
 }
 
+// The week at narrow widths: one row of five, never wrapped, and nothing
+// moving under the pointer when a Load changes who is in.
+{
+  const weekGroupsAll = [0, 1, 2, 3, 4].map((i) => ({ id: `w${i + 1}`, name: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][i], driverIds: [`d${i}`, `d${(i + 1) % 5}`] }));
+  await layPlan({ drivers: weekDrivers, driverGroups: [...weekGroupsAll, { id: 'gx', name: 'Sunday', driverIds: [] }] });
+  const cols = () => lp.evaluate(() => {
+    const box = document.querySelector('#planWeek .week-cols');
+    const cs = [...box.children].map((c) => c.getBoundingClientRect());
+    return { tops: new Set(cs.map((r) => Math.round(r.top))).size, minWidth: Math.min(...cs.map((r) => r.width)), scrolls: box.scrollWidth > box.clientWidth + 1, right: box.getBoundingClientRect().right };
+  });
+  const loads = () => lp.evaluate(() => [...document.querySelectorAll('#planWeek [data-act="apply-group"]')].map((b) => { const r = b.getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; }).join(' '));
+  for (const width of [1280, 1181, 1100, 900]) {
+    await lp.setViewportSize({ width, height: 850 });
+    await lp.reload({ waitUntil: 'networkidle' });
+    const c = await cols();
+    check(`at ${width}, the five columns sit on one row, each at least 140px, with no sideways scroll`, c.tops === 1 && c.minWidth >= 140 && !c.scrolls, JSON.stringify(c));
+    if (width === 1181 || width === 900) {
+      let moved = '';
+      for (let i = 0; i < 5; i++) {
+        await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+        const before = await loads();
+        await lp.locator('#planWeek [data-act="apply-group"]').nth(i).click();
+        const after = await loads();
+        if (after !== before) moved += ` Load ${i + 1}: ${before} -> ${after}`;
+      }
+      check(`at ${width}, each Load leaves every Load where it was`, !moved, moved);
+    }
+    if (width === 1100) {
+      // The rail sits above the week here: with its question open, a Load
+      // still leaves the next column's Load under the pointer.
+      await lp.locator('#tab-plan .day-bar [data-act="day-missing"], #tab-plan .rail-groups [data-act="group-empty"]').first().click();
+      await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+      const at = await lp.evaluate(() => { const r = document.querySelectorAll('#planWeek [data-act="apply-group"]')[1].getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; });
+      await lp.locator('#planWeek [data-act="apply-group"]').first().click();
+      const now = await lp.evaluate(() => { const r = document.querySelectorAll('#planWeek [data-act="apply-group"]')[1].getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; });
+      check('at 1100, with the rail above and its question open, the next Load stays under the pointer', now === at, `${at} -> ${now}`);
+    }
+  }
+  // A phone: the week scrolls in its own box, and keeps its place across a Load.
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.reload({ waitUntil: 'networkidle' });
+  const phone = await cols();
+  check('at 390, the week box stays inside the window, its columns at least 140px', phone.right <= 391 && phone.minWidth >= 140 && phone.scrolls, JSON.stringify(phone));
+  await lp.evaluate(() => { const b = document.querySelector('#planWeek .week-cols'); b.scrollLeft = 300; b.dispatchEvent(new Event('scroll')); });
+  const left = await lp.evaluate(() => document.querySelector('#planWeek .week-cols').scrollLeft);
+  await lp.locator('#planWeek [data-act="apply-group"]').nth(3).click();
+  check('and keeps its sideways place across a Load', left > 0 && (await lp.evaluate(() => document.querySelector('#planWeek .week-cols').scrollLeft)) === left);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
 // --- under the route list: done ---
 check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
 await layCtx.close();

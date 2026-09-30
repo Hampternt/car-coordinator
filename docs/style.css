@@ -392,7 +392,10 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
    nothing. A day with no crew is dashed and quiet. */
 .week { margin-top: 22px; background: var(--panel); padding: 12px; }
 .week h3 { font: 600 17px var(--head); margin: 0 0 6px; }
-.week-cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+/* One row of five, never wrapped: in a wrapped week, saving Wednesday would
+   move Thursday and Friday down, under the next tap. Narrower than five
+   140px columns, the row scrolls sideways in its own box, like the routes. */
+.week-cols { display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)); gap: 8px; overflow-x: auto; }
 .week-col { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px; background: var(--field); border: 1px solid var(--line); }
 .week-col.quiet { background: none; border-style: dashed; border-color: var(--dash); color: var(--quiet); }
 .week-day { font: 700 14px var(--head); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 2px; }
