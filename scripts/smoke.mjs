@@ -4488,7 +4488,8 @@ await loadWeek();
     boxes: [...document.querySelectorAll('#planMap .parking-box')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()),
     listed: [...document.querySelectorAll('#planMap .parking-item > .parking-title')].map((t) => t.textContent),
     banner: document.querySelector('#tab-plan .problems')?.innerText || '',
-    notes: document.querySelectorAll('#notices .notice').length,
+    // The tour's offer is a first open's one notice; any other counts.
+    notes: [...document.querySelectorAll('#notices .notice')].filter((n) => !n.querySelector('[data-act="tour"]')).length,
   }));
   const openWith = async (text) => {
     await lp.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
@@ -4529,11 +4530,12 @@ await loadWeek();
   v = await mapView();
   check('a Many cars spot with two routes in one round is not red, and lists both', !v.banner && !v.red.length
     && ['route 1', 'route 2', 'Many cars'].every((t) => v.boxes[1].includes(t)), v.boxes[1]);
-  // A first run: no notices, five Free spots, and the gate looking for its name.
+  // A first run: no notices but the tour's offer, five Free spots, and the
+  // gate looking for its name.
   await lp.evaluate(() => localStorage.clear());
   await lp.reload({ waitUntil: 'networkidle' });
   v = await mapView();
-  check(`a first run: no notices, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
+  check(`a first run: no notices but the tour's offer, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
     v.notes === 0 && v.boxes.slice(0, 5).every((t) => t.endsWith('Free')) && v.boxes[5].includes(`No position named ${GATE_NAME}`), JSON.stringify(v));
   // A spot renamed on the Positions tab moves to the list, as its hint says.
   await lp.click('[data-act="tab"][data-tab="positions"]');
