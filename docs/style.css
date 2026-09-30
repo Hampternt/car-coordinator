@@ -276,6 +276,9 @@ table.grid { border-collapse: collapse; width: 100%; background: var(--panel); }
 .notice .say { flex: 1 1 16em; min-width: 0; }
 .notice .say ul { margin: 6px 0 0; padding-left: 20px; }
 .notice .say li { margin: 2px 0; }
+.notice .tpl-parts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0; }
+.notice .tpl-parts label { white-space: nowrap; }
+.notice .tpl-says { margin: 4px 0 0; }
 
 /* data tab */
 .card { background: var(--panel); padding: 14px 16px; margin-bottom: 16px; }
