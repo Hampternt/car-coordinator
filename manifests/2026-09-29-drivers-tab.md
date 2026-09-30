@@ -1,6 +1,6 @@
 # Pack: Drivers tab
 
-**Status:** 💭 planned — item list awaiting the owner's approval; nothing built.
+**Status:** 🚧 building, since 2026-09-30, as part 7 of the combined pack (`manifests/2026-09-29-review-round-build.md`). Item list and both owner questions approved (Monday to Friday; item 2 dropped, since part 5's item 8 fixed it).
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `drivers-tab`, from `dev` after pack 6 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
@@ -440,3 +440,5 @@ Record the row height at 900 in the ledger.
 - **At pack close:** INVENTORY's 🚧 pointer becomes ✅ under Day plan, and the container's status line moves on.
 
 ## Ledger
+
+- **2026-09-30, start (combined pack, part 7).** Built on `review-round`, base 980c016 (0.8.0). **At go:** `APP_VERSION` is 0.8.0, so this part cuts 0.9.0. Part 5's Load is `apply-group`, and its item 8 already guards an empty group ("⟨name⟩ has nobody in it yet. Tick names into it first; nobody was changed."), so item 2 stays dropped. `scripts/upgrade.mjs` reads the note's versions from `docs/updates.js`, so item 11 has nothing to change there; under the owner's batched rule it runs once, from v0.2.4, at the end. Part 5 added `WORK_WEEK` and already reworded the group badges and the Day groups hint; part 2 already made the Labels hint name drivers. INVENTORY's two 💭 lines are one 🚧 pointer under Day plan; Working hours stays under Considered.

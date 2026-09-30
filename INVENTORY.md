@@ -14,6 +14,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Warnings, not blocks** — a car on two routes, a spot taken twice **in the same round**, or a marked-up car still in use are listed in an amber box and stripe the row, but never prevent the choice. The same spot in different rounds is not a clash.
 - ✅ **Left rail** — drivers and cars in two compact panels beside the plan, each showing status and where it is assigned. Stacks above the table on a narrow screen.
 - ✅ **Driver roster** — an editable list of drivers, offered to the day plan's driver box as suggestions while it stays free text. Starts empty.
+- 🚧 **Drivers tab: usual days, tags and notes** — tick the weekdays (Monday to Friday) a driver usually works, which puts them in that day's group, plus one tag from the shared list and a free note per driver. `manifests/2026-09-29-drivers-tab.md`.
 - ✅ **Driver day groups** — named crews ("Monday") put in with one click, setting who is in.
 - ✅ **Day templates** — save the plan as it stands under a name, and click it to load it back. Loading asks first, naming what it replaces, and takes a backup. A template can offer itself when the plan is for its weekday, but that is off unless you turn it on, and even then it only asks.
 - 🚧 **Parking map** — a plain drawing of the yard under the week: Spot 1 to Spot 5 and the Gate, each with its routes by round, red when taken twice in one round; other positions listed under it. `manifests/2026-09-29-parking-map.md`.
@@ -87,8 +88,6 @@ stays where it is and stays the source of truth for the printed page.
 Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
-- 💭 **Days on each driver's row** of the Drivers tab — tick the weekdays a driver usually works.
-- 💭 **Tags and notes on the Drivers tab** — your own tags ("Sick", "Late in") and a free note per driver, as the Cars tab has. One tag per driver from the one shared list, so any tag fits anyone; both stay until removed.
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
 - 💭 **Right-click menus** across the page.
 - 💭 **A first-use tour** for a new user.
