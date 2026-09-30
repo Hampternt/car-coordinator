@@ -4929,6 +4929,8 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   // so the press rule is not what shuts it).
   await cm.mouse.move(20, 300);
   await cm.mouse.wheel(0, 120);
+  // mouse.wheel returns before the page has handled the event.
+  await cmMenu.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
   check('a wheel over the page shuts it', await cmMenu.isHidden());
   await cmRight(mark);
   await cm.locator('[data-act="tab"][data-tab="cars"]').dispatchEvent('click');
