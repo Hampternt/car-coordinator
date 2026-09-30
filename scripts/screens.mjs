@@ -275,6 +275,36 @@ if ((await page.locator('#list [data-key="carcoord:v1"]').count()) !== 1) {
 }
 await shot('15-recovery-page');
 
+// --- dark: the same app with Dark picked on the Data tab. The sheet stays paper.
+console.log('dark');
+await page.goto(server.base, { waitUntil: 'networkidle' });
+await tab('data');
+await page.click('#tab-data [data-act="theme"][data-colours="dark"]');
+if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark') {
+  console.log('\nthe Colours switch did not turn the page dark');
+  process.exit(1);
+}
+await tab('plan');
+// the picker on route 4, whose car is also on route 1: a picked choice and its clash note
+await routes.nth(3).locator('[data-field="carId"]').click();
+await page.waitForSelector('#picker:not([hidden]) .pick.on');
+await shot('16-dark-day-plan-and-picker');
+await page.keyboard.press('Escape');
+await tab('cars');
+await shot('17-dark-cars');
+await tab('data');
+await shot('18-dark-data');
+await page.evaluate(() => localStorage.removeItem('carcoord:pref:seenUpdate'));
+await page.reload({ waitUntil: 'networkidle' });
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.waitForSelector('#notices .notice.update');
+await shot('19-dark-update-note');
+await tab('preview');
+await page.waitForSelector('#sheet table');
+await shot('20-dark-print-preview');
+await page.pdf({ path: `${OUT}/21-printed-sheet-while-dark.pdf`, format: 'A4', printBackground: true });
+console.log(`  ${OUT}/21-printed-sheet-while-dark.pdf`);
+
 await browser.close();
 server.close();
 
