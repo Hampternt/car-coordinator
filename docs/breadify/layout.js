@@ -431,6 +431,10 @@ const Sheet = (() => {
       row.appendChild(boxes);
     } else {
       row.appendChild(productName('bf-product', line.product));
+      // A quantity in words takes room a number never does: its line wraps
+      // the name, as a line of a shared block does, rather than push the M
+      // box off the paper (review, 2026-10-01).
+      if (typeof line.quantityText === 'string') row.classList.add('bf-row-wrap');
       // A leader of full stops, clipped to whatever room the name left. A name
       // long enough to leave none simply has no field — nothing wraps (F8).
       // A line of a shared block departs from that: its name wraps when the

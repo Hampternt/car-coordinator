@@ -197,6 +197,11 @@
   function go(step) {
     // A tick's update still waiting lands while its preview can be laid out.
     if (state.step === 'print') flush();
+    // Leaving the Print step forgets its sheets: Configure can change what
+    // they would say (crates, order ids, Pay attention), and a print from
+    // there must never carry the old ones (review, 2026-10-01). Coming back
+    // lays them out afresh, as it always has.
+    if (state.step === 'print' && step !== 'print') forgetSheets();
     state.step = step;
     state.reached.add(step);
     for (const name of STEPS) {
@@ -687,6 +692,12 @@
 
   /** The Print button and Ctrl+P alike: a waiting update first, then the dialog. */
   function printNow() {
+    // Off the Print step, the Print step first: the sheets are laid out from
+    // the settings as they are now, and the warning is checked again.
+    if (state.step !== 'print') {
+      if (!state.rows) return;
+      go('print');
+    }
     flush();
     if (held()) {
       // Held: the warning says why, and its button is the way on. Ctrl+P on
@@ -706,6 +717,19 @@
   // stopped, a held one prints nothing.
   window.addEventListener('beforeprint', () => {
     flush();
+    if (!held() && built.length === 0) {
+      // A print from the browser's menu with nothing laid out (off the Print
+      // step): one page saying where the sheets are, not a blank one.
+      const note = document.createElement('div');
+      note.className = 'held-print';
+      const head = document.createElement('h1');
+      head.textContent = 'Nothing laid out to print';
+      const how = document.createElement('p');
+      how.textContent = 'Open the Print step in Breadify, then print from there.';
+      note.append(head, how);
+      $('sheets').replaceChildren(note);
+      return;
+    }
     if (held()) {
       // The browser's own Print menu cannot be stopped, so the paper says
       // why it carries no sheets, rather than coming out blank.
@@ -797,7 +821,15 @@
 
     $('print').onclick = printNow;
     $('printAnyway').onclick = () => {
+      // Released for the routes the warning named when it was pressed, and
+      // no others: a route ticked in the pause before, short too, is named
+      // first and needs its own press (review, 2026-10-01).
+      const named = new Set(short.map(([route]) => route.nickname));
       flush();
+      if (short.some(([route]) => !named.has(route.nickname))) {
+        $('shortfall').scrollIntoView({ block: 'nearest' });
+        return;
+      }
       released = true;
       $('print').disabled = built.length === 0;
       printNow();

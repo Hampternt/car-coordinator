@@ -1924,37 +1924,63 @@ await page.evaluate(() => {
 const breadLaidOut = await page.locator('#preview .bf-sheet').count();
 await page.setInputFiles('#file', `scripts/fixtures/${FREEZER}`);
 await page.waitForFunction(() => document.getElementById('mode').dataset.kind === 'freezer');
-await page.keyboard.press('Control+p');
-const afterOpen = await page.evaluate(() => ({
+// Ctrl+P off the Print step goes to it first and prints what is laid out
+// there, afresh (review, 2026-10-01): the freezer file's sheets, never the
+// bread file's.
+const freshPrint = () => page.evaluate(() => ({
   printed: window.printedRoutes,
-  preview: document.querySelectorAll('#preview .bf-sheet').length,
-  printDisabled: document.getElementById('print').disabled,
+  laidOut: Array.from(document.querySelectorAll('#preview .bf-sheet'), (s) => s.dataset.route),
+  onPrint: !document.getElementById('step-print').hidden,
+  kind: document.getElementById('mode').dataset.kind,
 }));
-await page.click('#advance');
-await page.click('#advance');
-await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0);
-const freezerLaidOut = await page.locator('#preview .bf-sheet').count();
+await page.keyboard.press('Control+p');
+const afterOpen = await freshPrint();
+const freezerLaidOut = afterOpen.laidOut.length;
 await page.click('#steps [data-step="check"]');
 await page.click('#mode [data-kind="bread"]');
 await page.evaluate(() => {
   window.printedRoutes = null;
 });
 await page.keyboard.press('Control+p');
-const afterFlip = await page.evaluate(() => ({
-  printed: window.printedRoutes,
-  preview: document.querySelectorAll('#preview .bf-sheet').length,
-}));
+const afterFlip = await freshPrint();
 await page.evaluate(() => {
   window.print = window.realPrint;
 });
 check('the bread day was laid out before the freezer file was opened', breadLaidOut === sheets.length, String(breadLaidOut));
-same('Ctrl+P after opening another file prints none of the old file’s sheets', afterOpen, {
-  printed: [],
-  preview: 0,
-  printDisabled: true,
-});
+check('Ctrl+P after opening another file goes to Print and prints that file’s sheets, laid out afresh',
+  afterOpen.onPrint && afterOpen.kind === 'freezer' && afterOpen.printed.length > 0
+  && JSON.stringify(afterOpen.printed) === JSON.stringify(afterOpen.laidOut) && afterOpen.printed.length !== breadLaidOut,
+  JSON.stringify({ ...afterOpen, breadLaidOut }));
 check('the freezer day was laid out before its kind was switched', freezerLaidOut > 0, String(freezerLaidOut));
-same('nor after switching between bread and freezer on Check', afterFlip, { printed: [], preview: 0 });
+check('and after switching between bread and freezer on Check, the sheets of the kind chosen',
+  afterFlip.onPrint && afterFlip.kind === 'bread' && afterFlip.printed.length > 0
+  && JSON.stringify(afterFlip.printed) === JSON.stringify(afterFlip.laidOut) && afterFlip.printed.length !== freezerLaidOut,
+  JSON.stringify(afterFlip));
+
+// A setting changed on Configure after the Print step: Ctrl+P there lays the
+// sheets out again with it, and the browser's own menu, with nothing laid out,
+// prints one page saying where to go (review, 2026-10-01).
+{
+  await page.click('#steps [data-step="configure"]');
+  const marked = await page.locator('#attentionList .attention input').first();
+  await marked.check();
+  await page.evaluate(() => { window.printedMarks = null; window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    window.printedMarks = document.querySelectorAll('#sheets .bf-attn').length;
+    window.dispatchEvent(new Event('afterprint'));
+  }; });
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+  const menuOffPrint = await page.evaluate(() => document.getElementById('sheets').innerText.replace(/\s+/g, ' ').trim());
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  check('a print from the menu on Configure, with nothing laid out, says where the sheets are',
+    menuOffPrint.startsWith('Nothing laid out to print'), menuOffPrint);
+  await page.keyboard.press('Control+p');
+  check('Ctrl+P on Configure after marking a bread prints the sheets with the mark on them',
+    await page.evaluate(() => window.printedMarks > 0 && !document.getElementById('step-print').hidden));
+  await page.click('#steps [data-step="configure"]');
+  await page.locator('#attentionList .attention input').first().uncheck();
+  await page.evaluate(() => localStorage.removeItem('breadify:attention:v1'));
+}
 
 // ── The freezer list ───────────────────────────────────────────────────────
 
@@ -2907,6 +2933,52 @@ same('a quantity that is not a number reads as written, and counts as the number
 same('it prints as written on a pick line, cut to 20 characters', textQuantities.printed.bread,
   ['', '#N/A', '3 stk', '3,5', cut].sort());
 same('and on a check line', textQuantities.printed.freezer, ['', '#N/A', '3 stk', '3,5', cut].sort());
+
+// A quantity in words on a check line whose name already fills it: the name
+// wraps and the M box stays on the paper (review, 2026-10-01). Every line of
+// the bread sample, laid out as freezer check lines with a long name and a
+// 20-character quantity in words.
+const wordsOnCheck = await page.evaluate(async (bytes) => {
+  const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+  const sheet = await book.sheet('Data');
+  const header = Math.min(...sheet.rows.map((row) => row.number));
+  for (const row of sheet.rows) {
+    if (row.number === header) continue;
+    row.cells.set(Model.COLUMN.quantity, { kind: 'text', value: 'ca. 12 stk, se notat' });
+    row.cells.set(Model.COLUMN.productName, { kind: 'text', value: 'Holdbart Havrebrød Skåret 750g Bakehuset (har Vært Fryst)' });
+  }
+  const routes = Model.group(Model.fold(Model.readRows(sheet)));
+  const ruler = document.createElement('div');
+  ruler.style.cssText = 'width:100mm;position:absolute;visibility:hidden';
+  document.body.append(ruler);
+  const perPx = 100 / ruler.getBoundingClientRect().width;
+  ruler.remove();
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  let over = -Infinity;
+  let words = 0;
+  try {
+    for (const route of routes) {
+      const pages = Sheet.paginate(route, { kind: Model.FREEZER, showOrderId: true, crates: Model.defaultCrateRules() },
+        { dates: null, source: 'words', routeStops: route.stops.length, routeLines: Model.lineCount(route) }, { host });
+      for (const page of pages) host.appendChild(page);
+      for (const page of pages) {
+        const edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+        for (const node of page.querySelectorAll('.bf-row > *, .bf-row .bf-tick')) {
+          over = Math.max(over, (node.getBoundingClientRect().right - edge) * perPx);
+        }
+      }
+      words += host.querySelectorAll('.bf-qty-text').length;
+      host.replaceChildren();
+    }
+  } finally {
+    host.remove();
+  }
+  return { over: Math.round(over * 10) / 10, words };
+}, breadBytes);
+check('a check line with a quantity in words and a long name keeps its M box on the paper',
+  wordsOnCheck.words > 300 && wordsOnCheck.over <= 0.5, JSON.stringify(wordsOnCheck));
 inspected('a pick line with a quantity in words', textQuantities.seen.bread);
 inspected('a check line with a quantity in words', textQuantities.seen.freezer);
 check('the crates and the route total count it as 3, 3, 0, 0 and 0', textQuantities.sameFigures);
