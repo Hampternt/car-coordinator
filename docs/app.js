@@ -262,6 +262,19 @@ function drawDateLine() {
   else if (!l.off && btn) btn.remove();
   else if (btn) btn.title = `Set the date to ${dayLabel(nextWorkingDay())}`;
 }
+// A press under way (pointer down, not yet up): a redraw that would move what
+// is under the pointer waits for the release, and runs just after its click.
+let pressing = false;
+let lineAfterPress = false;
+document.addEventListener('pointerdown', () => { pressing = true; }, true);
+const released = () => {
+  setTimeout(() => {
+    pressing = false;
+    if (lineAfterPress) { lineAfterPress = false; drawDateLine(); }
+  }, 0);
+};
+document.addEventListener('pointerup', released, true);
+document.addEventListener('pointercancel', released, true);
 // A window left open overnight does not vouch for yesterday's "tomorrow".
 window.addEventListener('focus', drawDateLine);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') drawDateLine(); });
@@ -4176,8 +4189,11 @@ document.addEventListener('change', async (e) => {
   if (e.target.name === 'shareMode') { pending.mode = e.target.value; renderShareDialog(); return; }
   if (e.target.id === 'shareAdd') { pending.addMissing = e.target.checked; renderShareDialog(); return; }
   // Leaving the Date box tidies what was typed ("1.10.2026") into dd/mm/yyyy,
-  // and a date left half typed goes back to the day the plan kept.
-  if (e.target.id === 'date') { e.target.value = dmyOf(state.date); drawDateLine(); return; }
+  // and a date left half typed goes back to the day the plan kept. The line
+  // under it waits for a press under way to be released: leaving the box by
+  // pressing Set to tomorrow changed the line's words between the press and
+  // the release, the button moved along, and the click went nowhere.
+  if (e.target.id === 'date') { e.target.value = dmyOf(state.date); if (pressing) lineAfterPress = true; else drawDateLine(); return; }
   // A day picked from the calendar goes in as if typed, so it takes exactly
   // the path a typed date does.
   if (e.target.id === 'datePick') {
