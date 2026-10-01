@@ -3473,9 +3473,12 @@ await s5.evaluate((json) => {
 }, v4Text);
 await s5.reload({ waitUntil: 'networkidle' });
 await s5.click('[data-act="tab"][data-tab="data"]');
+// The backup's Restore by its key (its time and place among equal times),
+// as the Data tab draws it.
 const at4 = await s5.evaluate(() => Store.backups().findIndex((b) => b.label === 'A v4 copy'));
-await s5.click(`[data-act="restore"][data-id="${at4}"]`);
-await s5.click(`[data-act="restore"][data-id="${at4}"]`);
+const key4 = await s5.evaluate((i) => backupKeys(Store.backups())[i], at4);
+await s5.click(`[data-act="restore"][data-id="${key4}"]`);
+await s5.click(`[data-act="restore"][data-id="${key4}"]`);
 const d5 = await loaded5();
 check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify(d5.ticks) === '[false,false]' && JSON.parse(d5.saved).schemaVersion === 6, `${at4} ${JSON.stringify(d5.ticks)}`);
 
