@@ -10,6 +10,13 @@
  * customer name (D19), the crates joined the right-hand group (D20), and a
  * crate run too wide for its line compresses to `×N` rather than wrapping
  * (D24).
+ *
+ * Where the web port departs from the log, at the owner's request
+ * (2026-09-29), the rule says so: a customer's orders at one stop share a
+ * block (against D16), each order's crates, marker and id sit on its own
+ * first line rather than in one column per block (against D20), and a block
+ * of several departments divides them with quiet sub-headings rather than
+ * one boxed label (against D19).
  */
 
 /* ── The faces ───────────────────────────────────────────────────────────
@@ -220,12 +227,6 @@
   white-space: nowrap;
 }
 
-.bf-note em {
-  color: var(--ink);
-  font-weight: 500;
-  font-style: normal;
-}
-
 /* ── Legend strip ────────────────────────────────────────────────────── */
 
 /* `nowrap` on the band meant the supplier key could only ever run off the
@@ -364,6 +365,24 @@
   white-space: nowrap;
 }
 
+/* Beside the name, not at the far end: the marker and the id keep the
+ * right-hand end of a heading, as on every other block. */
+.bf-name + .bf-block-part {
+  margin-left: 0;
+  padding-left: 0;
+  align-self: center;
+}
+
+/* An order cut across pages, opening its next part: says its first lines are
+ * on the page before, so the lines here are not taken for all it has. As
+ * quiet as the part tag it goes with. */
+.bf-order-cont {
+  font: 400 8.6pt/1 'IBM Plex Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--note);
+}
+
 /* D24: a run that will not fit whole on one line is set as `×N` beside a
  * single glyph, never wrapped onto a second row of squares. */
 .bf-crates-compact {
@@ -383,17 +402,13 @@
 
 /* ── A stop block ────────────────────────────────────────────────────── */
 
-/* One block = one order = one stop = one crate label (D16). */
+/* One block = one stop. D16 also makes it one order and one crate label;
+ * the web port gives a customer's several orders at one stop one block
+ * between them, and each department of theirs one crate label and one crate
+ * count (the owner, 2026-09-29). */
 .bf-block {
   border-top: 1.25pt solid var(--ink);
   padding: 1.7mm 0 1.2mm;
-}
-
-/* The loud half of the asymmetric substitute marker, when the treatment asks
- * for the bar as well as the words (D21 makes the words alone the default). */
-.bf-block-barred {
-  border-left: 5pt solid var(--ink);
-  padding-left: 2.3mm;
 }
 
 /* Explicit margins rather than a flex `gap`, because the heading's two gaps
@@ -428,7 +443,9 @@
 }
 
 /* The department sits under the customer name, not beside it: a heading is
- * one crate label in two parts, and side by side they read as equals (D19). */
+ * one crate label in two parts, and side by side they read as equals (D19).
+ * A block of several orders keeps it there when they all share it; when they
+ * do not, each department is a quiet sub-heading instead (.bf-dpt-sub). */
 .bf-dpt {
   flex: none;
   max-width: 100%;
@@ -462,8 +479,36 @@
   overflow-wrap: anywhere;
 }
 
+/* A department dividing a block of several orders — a departure from D19's
+ * one boxed label, which cannot carry several departments. The same box,
+ * quieter: thinner, greyer and smaller, because it divides a block rather
+ * than heading one. The lines under it are that department's, down to the
+ * next; orders with no department come first, above any of these. */
+.bf-dpt-sub {
+  margin-top: 1.4mm;
+}
+
+.bf-dpt-quiet {
+  border-width: 0.75pt;
+  border-color: var(--ink-quiet);
+  color: var(--ink-quiet);
+  padding: 0.25mm 1.1mm;
+}
+
+.bf-dpt-quiet .bf-dpt-tag {
+  font-size: 6.8pt;
+  border-right: 0.75pt solid var(--ink-quiet);
+}
+
+.bf-dpt-quiet .bf-dpt-name {
+  font: 500 9.2pt/1.2 'Space Grotesk', sans-serif;
+  letter-spacing: 0;
+}
+
 /* The crates, the marker and the order id form one column the eye finds once
- * per block, at the right-hand end of the heading (D20). */
+ * per block, at the right-hand end of the heading (D20). A block of several
+ * orders departs from that: it has one such group per order, on the order's
+ * first line (.bf-row-stamp). */
 .bf-stamp {
   flex: none;
   margin-left: auto;
@@ -479,30 +524,72 @@
   margin-left: 2.3mm;
 }
 
+/* One look for both answers, where D8/D21 print false loud in Archivo
+ * capitals: the same quiet type every time, and only the word false in bold.
+ * Same face, size and ink, so the weight alone carries it. */
 .bf-marker {
   font: 500 9.2pt/1 'IBM Plex Mono', monospace;
   color: var(--ink-quiet);
 }
 
-.bf-marker-loud {
-  font: 800 10.4pt/1 Archivo, sans-serif;
-  letter-spacing: -0.02em;
-  color: var(--ink);
+.bf-marker b {
+  font-weight: 700;
 }
 
-.bf-marker-badge {
-  background: var(--ink);
-  color: #fff;
-  padding: 0.7mm 1.6mm;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-}
-
-/* Deliberately the quietest thing on the page, but never below ~8 pt: it is
- * the only mark telling apart several no-department orders at one address. */
+/* Deliberately the quietest thing on the page, but never below ~8 pt. In a
+ * block of several orders it is on every line, and it is what tells one
+ * order's lines from another's — the owner asked for it seen, not standing
+ * out (2026-09-29). */
 .bf-order-id {
   font: 400 8.3pt/1 'IBM Plex Mono', monospace;
   color: var(--faintest);
+}
+
+/* A line in a block of several orders: its order's id at the right, and on
+ * the order's first line its marker too, left of the id. Right
+ * before the tick boxes, so the ids stand in one column down the block. */
+.bf-row-stamp {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 2.3mm;
+  white-space: nowrap;
+}
+
+/* The name keeps room to be read. A first line that cannot leave it this much
+ * sends its marker onto a line of its own — and only a name that measures can
+ * make that call. */
+.bf-row-shared .bf-product,
+.bf-row-shared .bf-product-cell {
+  min-width: 30mm;
+}
+
+/* The bread name keeps the room it always had; only this cell knows about
+ * the dotted field sharing it. */
+.bf-row-shared .bf-product-cell .bf-product {
+  min-width: 0;
+}
+
+/* A check line's name does not wrap (F8) — except on a line of a block of
+ * several orders whose marker and id beside it would push the line off the
+ * paper. That wrap is a departure from F8, which says nothing wraps: the only
+ * other choice was ink past the edge. */
+.bf-row-check.bf-row-wrap .bf-product {
+  flex: 1 1 auto;
+  white-space: normal;
+}
+
+/* An order's marker when its first line had no room for it.
+ * Held off the right-hand end by what the order's lines keep there — the
+ * M and F boxes (2 × 4.6 mm, 1.5 mm apart) and the line's 3.6 mm gap — so
+ * its id stands in the same column as theirs. A check line keeps the M box
+ * alone. */
+.bf-order-extra {
+  padding: 0.3mm 14.3mm 0.5mm 0;
+}
+
+.bf-order-extra-check {
+  padding-right: 8.2mm;
 }
 
 /* ── A bread line ────────────────────────────────────────────────────── */
@@ -522,7 +609,8 @@
 }
 
 /* Every second line in a block, restarting at each heading so the stripe
- * never straddles one. */
+ * never straddles one. In a block of several orders it runs on across orders
+ * and restarts under each department sub-heading. */
 .bf-row-zebra {
   background: var(--zebra);
   -webkit-print-color-adjust: exact;
@@ -541,6 +629,17 @@
   padding-right: 1mm;
   text-align: right;
   font: 600 13.1pt/1 'IBM Plex Mono', monospace;
+}
+
+/* A quantity in words (at most 20 characters, model.js) wraps within its own
+ * slot rather than run the line long: a slot of about 24 mm, broken between
+ * words first (the owner, 2026-10-01; review). */
+.bf-qty-text {
+  max-width: 24mm;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 10pt;
+  line-height: 1.15;
 }
 
 /* The code, not the name: dropping the repeated bakery name off every row is
@@ -573,7 +672,8 @@
  * The field is the flexible part of a check line and the name is not, which
  * is the opposite of the bread line: the name is set at its natural width and
  * the leader takes whatever is left, so a name long enough to leave no room
- * simply has no field. Nothing wraps. */
+ * simply has no field. Nothing wraps — bar the one departure above, on a line
+ * of a shared block (.bf-row-wrap). */
 .bf-row-check .bf-product {
   flex: none;
   white-space: nowrap;
@@ -587,6 +687,30 @@
   font: 400 11pt/1 'IBM Plex Mono', monospace;
   color: var(--rule-sub);
   margin: 0 3.4mm;
+}
+
+/* The bread line's field (the owner, 2026-09-30; a departure from F8, which
+ * gives the field to the check line alone). The name and the field share the
+ * cell the name used to fill on its own: the name is sized exactly as before
+ * — its natural width, wrapping at the cell's edge — and the field, sized
+ * from nothing, grows into whatever is left. It carries no margin or padding,
+ * which would have taken room from the name; its gap from the name is an
+ * indent inside it, clipped away with the dots when there is no room. */
+.bf-product-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+}
+
+.bf-product-cell .bf-product {
+  flex: 0 1 auto;
+}
+
+.bf-product-cell .bf-note-field {
+  flex: 1 1 0;
+  margin: 0;
+  text-indent: 3.4mm;
 }
 
 /* ── The unsequenced flag ────────────────────────────────────────────── */
@@ -720,6 +844,23 @@
 /* D23: the names wrap inside their column. Before that they were set from
  * the left edge with nothing bounding the right, and the longest freezer name
  * ran to 214 mm on a 210 mm page. */
+/* A bread marked "pay attention" on Configure (the owner, 2026-10-01): a
+ * warning triangle before its name, and the name in bold, wherever it prints.
+ * Black on any printer. */
+.bf-product.bf-attn,
+.bf-total-product.bf-attn {
+  font-weight: 700;
+}
+
+.bf-attn-mark {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.12em;
+  margin-right: 0.3em;
+  vertical-align: -0.16em;
+  color: #000;
+}
+
 /* `anywhere` broke "Sandnes" into "Sandn" and "es". `break-word` wraps
  * between words first and only splits one that could not fit a line by
  * itself, which is how a person would have set it. */
@@ -751,6 +892,33 @@
 .bf-total-dots-compact {
   font: 600 7.7pt/1 'IBM Plex Mono', monospace;
   color: var(--ink);
+}
+
+/* ── Notes in the dead space ─────────────────────────────────────────── */
+
+/* A quiet heading and dotted write-on lines below a page's last block, in
+ * room that was already empty (the owner, 2026-09-30; not in the Rust app's
+ * print spec). Each line is 7.5 mm tall — a handwriting pitch — with its dots
+ * at the foot, the same leader as the note field. */
+.bf-notes {
+  margin-top: 4mm;
+}
+
+.bf-notes-title {
+  font: 400 8pt/1.3 'IBM Plex Mono', monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--note);
+}
+
+.bf-notes-line {
+  height: 7.5mm;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  white-space: nowrap;
+  font: 400 11pt/1 'IBM Plex Mono', monospace;
+  color: var(--rule-sub);
 }
 
 /* ── Footer ──────────────────────────────────────────────────────────── */

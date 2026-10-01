@@ -17,18 +17,41 @@ They share the routes and nothing else: no data passes between them, and each st
 
 Breadify is a web port of the [Rust desktop app](https://github.com/Hampternt/Breadify), which still ships its own `.exe` and is still the source of truth for the printed page. The port follows that repo's `docs/print-spec.md` and the decision log `D1`–`D25` / `F1`–`F10`; `scripts/breadify.mjs` checks the output against the figures those documents state.
 
+The port departs from that log in three places, each at the owner's request, and the code says so wherever the D-number is cited. The Rust app is unchanged.
+
+- **The substitute marker has one look** (D8, D21). Every order prints `want substitute: true` or `want substitute: false` in the same quiet type, with only the word **false** in bold. The Rust app prints false in loud capitals.
+- **One block per customer at a stop** (D16). A customer's several orders at one stop print in one block, grouped by department and kept apart by order. No order's lines are added to another's: every line carries its order id, and each order keeps its own marker on its first line. Six more departures follow from this:
+  - A department no longer prints as a block of its own. It shares its customer's block, still named, under the customer's heading (D7).
+  - Crates are counted per customer and department at a stop, not per order (D16). The owner decided this on 2026-09-29, because the warehouse packs that group's bread together whatever orders it came in. The group's lines are added up and rounded up once, so two orders can share a crate. The count prints at the right of the group's heading: the customer's name, or its department. The Rust app counts crates per order.
+  - Each order has its own marker and id, and each department its own crates, not one column per block (D20).
+  - Ties in the delivery order are broken by the customer before the department, so a customer's orders sit together (D2).
+  - A block whose orders have different departments divides them with quiet sub-headings instead of one boxed label under the name (D19).
+  - On the freezer sheet, a check line in such a block wraps its bread name when the marker and id beside it would push the line off the paper. The freezer log says nothing on a check line wraps (F8).
+- **A block taller than a page is cut rather than run off the paper** (D9). The cut falls between whole orders first, and inside an order only when that order is taller than a page by itself. One more case is cut on purpose. The first unsequenced block sits right under the "no position assigned" flag, and the flag must never end a page alone. If that block fits a page but not the room left beside the flag, it is cut too.
+
+One more change has no D-number, because the log never set a line order. The Rust app prints an order's lines in the order the file lists them. The port sorts them within each order, at the owner's request: Sandnes Bakeri (SB) first, then Bakehuset (BH), then any other supplier A to Z by its code. Within a supplier the breads run A to Z in the Norwegian alphabet, so æ, ø and å come last. Two orders' lines are never mixed. Each order's marker stays on its first line, and a stop's crates are counted per customer and department, on that group's heading line.
+
+Three more come from the owner on 2026-10-01. A quantity the file gives in words ("3 stk") prints as written, cut to 20 characters, and counts as the whole number it starts with for crates and the route total (none counts as 0); Check names such lines, without blocking. A bread can be marked Pay attention on Configure, and then prints with a warning triangle and in bold wherever it appears. And when a ticked route's pages do not carry every line the file gives it, a red warning holds Print until Print anyway is pressed; a print from the browser's own menu while it holds comes out as one page saying why. The Rust app does none of these.
+
+The printed page also leaves room to write, at the owner's request: a dotted field after each bread name where the line has space, a D (Delivered) box after C on every freezer line, and dotted Notes lines in the empty space at the end of a page. The Notes lines are added only after the pages are laid out, so they never move a page break.
+
+The freezer sample prints on 21 sheets, the figure `docs/freezer-list.md` states, but for a different reason. The merged blocks would fit route 13's Customer 012 on one sheet, but the D box narrows every freezer line, so more names wrap and that block moves whole onto a second sheet.
+
+The bread sample prints on 28 sheets, not 26. Route 13's Customer 037 is one block kept whole, and route 14's Customer 012 is one block cut into two page-sized parts. A block never starts partway down a page to fill it, so the sheet before each is left short. That is the chosen behaviour: the owner decided on 2026-09-29 that 28 sheets is fine and blocks stay whole.
+
 ## Features
-- **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A working rail beside the table holds the roster and the fleet: **add, rename, tag and delete** there, **drag a name or a registration straight onto the route it is driving**, and drag within the rail to reorder it. Everything in it is saved as you do it, and the Drivers and Cars tabs are still the full editors.
-- **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Drivers carry a status label of their own, from the same list cars and positions use. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in for today.
-- **Day templates**: open one on the shelf to read the day it holds — route by route, with the driver, car and packing each was saved with. Save the plan as it stands — drivers, cars, positions, rounds and marks, but never the date — and put it back another day. Loading one asks first, saying how many routes it replaces, and takes a backup before it writes, so the Data tab can undo it. A template can offer itself when you open the app on its day: that is off until you pick a day for it, and even then it only offers.
+- **ⓘ on every tab**: a small ⓘ beside each part of the app opens a short note next to it saying what that part is and how to use it. A first-ever open shows one line pointing at them, until its ✕ is pressed.
+- **Day plan**: route name, driver, car, packing position (spot / garage / port) and the round it is packed in. Pink "Mark" highlight and "Gap" (blank line above, e.g. before HAU routes). A working rail beside the table holds the roster and the fleet: **add, rename, tag and delete** there, **drag a name or a registration straight onto the route it is driving**, and drag within the rail to reorder it. Everything in it is saved as you do it, and the Drivers and Cars tabs are still the full editors. Under the route list sit the day templates, then **the week**: a column for each day from Monday to Friday listing that day's crew, with **Load** at the top to make that crew the ones in and everyone else away.
+- **Drivers**: a roster of the people who might drive, offered to the day plan as suggestions — the driver box still takes anything you type. Each driver's row has **Usual days** (Monday to Friday: a tick puts them in that day's group), a **Tag** from the driver tags (Sick, Holiday, Vacation, Course, Special situation and your own), a list apart from the car labels, and a **Note**; a tag never sets anyone away. Share codes send drivers' names and who is in, never their tags or notes. Day groups are named crews (a Monday crew, a weekend crew): one click puts exactly those drivers in. A Monday-to-Friday crew is that day's column under the route list; **All**, Saturday's and Sunday's crews and any other group are buttons in the Drivers panel beside the day plan.
+- **Parking map**: under the week, a plain drawing of the yard with Spot 1 to Spot 5 and the Gate, each listing its routes by round. A spot the warnings call taken twice in one round is red and says so. Spots are found by name, so a position the map doesn't know is listed under it; the Garage is left off.
+- **Day templates**: Monday to Friday are on the shelf from the start, empty ("Not saved yet") until **Update from plan** fills one with the plan as it stands — drivers, cars, positions, rounds and marks, but never the date. **Save as template** makes one of any other name. Open one on the shelf to read the day it holds — route by route, with the driver, car and packing each was saved with. Loading one asks which parts to take — Routes, Drivers, Cars, Positions and rounds — and says exactly what that does before a button does it; it takes a backup before it writes, so the Data tab can undo it. An empty template cannot be loaded. A template can offer itself when the plan is for its day: that is off until you pick a day for it, and even then it only offers.
 - **Cars / Positions**: add, rename, reorder, delete. One-click status buttons (OK, Out of service, Unavailable, Workshop, your own) plus a note.
-- **Warnings, not blocks**: a car on two routes, a spot taken twice **in the same round**, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it.
+- **Warnings, not blocks**: a car on two routes, a spot taken twice **in the same round**, or a car you marked Workshop still being used — the day plan lists each one and flags the row, but lets you do it. Sometimes you mean it. Warnings are for before printing, so the printed sheet carries none.
 - "Many cars" positions (Garage) can be shared by several routes, and any spot can be used again in a later round.
-- **Labels**: create custom status labels with colours.
+- **Labels**: two sections. **Car and position labels**: custom status labels with colours; tick **Show on printout** on a label to list its parked cars under Cars not available on the printed sheet. **Driver tags**: the drivers' own tags, with colours.
 - **Share a finished list**: turns the day plan into a short code (or a link) to paste into a chat or an email. The other PC pastes it back and sees a preview before anything is replaced. Cars and positions are matched by registration and name, so it works between PCs that have never talked to each other. The code *is* the list — there is no server in the middle.
-- **QR on the sheet** (browser version): the printed sheet carries a link to the day plan as a QR in the corner, so a phone can read the list off the paper on the pillar. Turn it off on the Data tab to keep the sheet bare.
-- **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists unavailable cars/positions and free cars.
-- **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day.
+- **Print / save PDF**: native print dialog. Choose "Microsoft Print to PDF" for a file. The sheet also lists free cars, and parked cars whose label has Show on printout ticked.
+- **Data**: saved in the browser as you type, plus an optional auto-saved file. Pick a file once (OneDrive, network drive, memory stick) and every change is written to it — by your browser, on your PC, with no upload. Export/Import JSON works in any browser. Automatic backups are taken before anything is cleared or deleted, and once at the start of each day. The first time an update is opened, the whole plan and setup is copied unchanged into **Archives** on the Data tab first, and a note says what changed; **What's new** there keeps every note.
 
 ## Use it
 Open the Pages URL for this repo in Edge or Chrome. Nothing to install.
@@ -37,24 +60,32 @@ Optional Windows app — grab the latest from **Releases**:
 - `car-coordinator.exe` (portable, no install)
 - `Car Coordinator_x.y.z_x64-setup.exe` (installer)
 
-Every push to `main` runs the tests and then builds and publishes the release. Bump `version` in `src-tauri/tauri.conf.json` to create a new release instead of updating the current one.
+**If the app ever won't start**, open [`recover.html`](docs/recover.html) beside it: on Pages that is `<the Pages URL>/recover.html`, and an empty page links to it too, in the Windows app as well. It shares no code with the app, changes nothing, lists everything this browser holds for Car Coordinator and downloads each piece exactly as stored, ready for **Import a copy…** on the Data tab.
+
+Updating the Windows app: run the new installer over the old one. If it offers to uninstall the old version first, **never tick "Delete the application data"**: that folder is where the app keeps your plan, templates, drivers, cars and labels. The web version needs nothing: an update keeps everything saved in your browser.
+
+Every push to `main` runs the tests and then builds and publishes the release `v<version>`, so every change that reaches `main` carries a version of its own: see **Releasing a change** below.
 
 ## Run it from a checkout
 ```
 npm run dev        # serves docs/ on http://localhost:5173 — no npm install needed
 npm run tauri:dev  # the Windows desktop shell instead; needs the Rust toolchain
 ```
+A fresh checkout starts empty. For a full plan to work against, open the Data tab, press Import and pick `scripts/fixtures/dev-data.json`: 20 drivers, 17 cars, 8 positions, 5 crews and 2 templates (and the empty Monday to Friday every plan gets), with one of each warning (a car on two routes, a spot twice in a round, a Workshop car in use) and some of each status. The names and registrations are made up.
 
 ## Tests
 ```
 npm install
-npm test               # both suites
+npm test               # every suite below but the screenshots and the upgrade check
 npm run test:car       # headless Chromium: drives the UI, checks the printed sheet, fails on console errors
+npm run test:map       # the parking map's matching and markup, in node, without a browser
 npm run test:breadify  # drives Breadify with both real exports and checks the sheets against the spec's figures
 python3 scripts/make_edge_fixtures.py   # regenerates scripts/fixtures/edge/, only needed if you change those shapes
 npm run screens        # drives the whole app the way a leader would and writes a screenshot of every tab
+npm run upgrade -- <old checkout>   # opens an older build, then this one, in one browser profile: nothing saved lost, the copy in Archives, the note right
 ```
-`test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's 21 sheets, and ≥ 10 mm of clearance above every footer.
+For the upgrade check, make the old checkout with `git worktree add --detach <dir> v0.2.4` (or the build live on `main`). It serves both builds on port 5199, one after the other, because saved data belongs to an address.
+`test:breadify` reads the two anonymised sample exports in `scripts/fixtures/` and asserts the numbers the Breadify repo's docs state: the route 8 worked example, Customer 012's thirteen crates, Kneippbrød's four tray dots, the freezer day's sheet count, and ≥ 10 mm of clearance above every footer. The sheet count is 21, as `docs/freezer-list.md` states, though for the reason given above; the bread day is pinned at 28.
 
 It then drives the awkward exports in `scripts/fixtures/edge/` and `scripts/fixtures/shape/` (regenerate either with `python3 scripts/make_edge_fixtures.py` / `make_shape_fixtures.py`). `edge/` is about scale and length — twelve bakeries on one route, an order with 300 product lines, a school kitchen taking 400 of one bread; `shape/` is about the file itself — a column added, a header renamed, a quantity that is zero, negative, fractional or four figures.
 
@@ -63,6 +94,20 @@ What it asserts of them is what a reader of the paper would: no ink leaves the s
 A change to the file's own shape must be either refused with a message naming the problem, or read correctly. It is never printed wrong.
 
 One thing cannot be driven headlessly and needs a human in Edge or Chrome: the file picker for auto-save to a file.
+
+## Releasing a change
+Work is combined on `dev`, and `main` only ever receives `dev`. The rule, written the same way in the header of `docs/updates.js` and in the review-round container's Gates:
+
+Announce and cut. Every change to shipped files under docs/ outside docs/breadify/ ends with "Announce ⟨what⟩ and cut ⟨version⟩": one commit that
+
+- adds an entry at the top of docs/updates.js, with must set by the wording rules;
+- moves six places to that version: package.json, package-lock.json (twice), src-tauri/Cargo.toml, src-tauri/tauri.conf.json and APP_VERSION in docs/app.js.
+
+The ?v= on every local tag in docs/index.html and docs/recover.html follows APP_VERSION, and scripts/versions.mjs fails the item gate when any of it disagrees.
+
+A pack takes the next minor version; any other shipped change takes at least the next patch. A change to Markdown or manifests alone cuts nothing.
+
+Entries are never removed or renumbered. The walkthrough re-reads the entry against what shipped. Merging dev into main publishes Pages and builds release v⟨version⟩.
 
 ## Build locally (Windows)
 Needs Rust, Node 20 and Python with Pillow.

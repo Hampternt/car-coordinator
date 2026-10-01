@@ -1,6 +1,6 @@
 # Pack: Day templates — save a plan, load it back
 
-**Status:** 🚧 all items committed, pack gate green — awaiting the browser walkthrough and item 3's review
+**Status:** ✅ SHIPPED on `main` (0.2.x). The walkthrough was the owner's daily use since; item 3's separate review was never recorded. The weekday offer it added was removed in 0.14.1 (owner, 2026-10-01).
 **Date:** 2026-09-18
 **Branch:** `day-templates`, cut from `day-plan-rail-and-round` (which is unmerged)
 

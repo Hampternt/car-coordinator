@@ -13,6 +13,12 @@
 // never left as the last thing on a page; and at least 10 mm of clearance
 // between the last content and the footer, below which a printer with
 // slightly different metrics silently clips a row.
+//
+// D9 gives way in one place, a departure of the web port's own: a block
+// taller than a page is cut rather than run off the paper — between orders
+// first, and inside an order only when that order alone is taller than a
+// page (see stopPieces()). The Rust app's blocks are one order each; the
+// port's can be a customer's several orders at one stop.
 
 'use strict';
 
@@ -57,6 +63,40 @@ const Sheet = (() => {
   function append(parent, ...children) {
     for (const child of children) if (child) parent.appendChild(child);
     return parent;
+  }
+
+  /**
+   * A bread marked "pay attention" on Configure (the owner, 2026-10-01): one
+   * the pickers often get wrong — a name close to another's, say. Wherever
+   * its name prints, on the pick line, the check line and the route total, it
+   * carries a warning triangle and is set in bold. The triangle is drawn, not
+   * a character, so no printer falls back to a face without it. The ids come
+   * from the settings each route is laid out with (paginate).
+   */
+  let marked = new Set();
+  const SVG = 'http://www.w3.org/2000/svg';
+  function attentionMark() {
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('class', 'bf-attn-mark');
+    svg.setAttribute('viewBox', '0 0 20 18');
+    svg.setAttribute('aria-label', 'Pay attention');
+    svg.setAttribute('role', 'img');
+    const sign = document.createElementNS(SVG, 'path');
+    sign.setAttribute('d', 'M10 0.6 19.6 17.4H0.4Z');
+    sign.setAttribute('fill', 'currentColor');
+    const bang = document.createElementNS(SVG, 'path');
+    bang.setAttribute('d', 'M8.9 5.6h2.2l-0.4 6.6h-1.4ZM8.8 13.6h2.4v2.2H8.8Z');
+    bang.setAttribute('fill', '#fff');
+    svg.append(sign, bang);
+    return svg;
+  }
+  function productName(className, product) {
+    const span = element('span', className, product.name);
+    if (marked.has(product.id)) {
+      span.classList.add('bf-attn');
+      span.prepend(attentionMark());
+    }
+    return span;
   }
 
   // ── Measuring ──────────────────────────────────────────────────────────
@@ -106,11 +146,14 @@ const Sheet = (() => {
         host.removeChild(node);
         return height;
       },
-      /** Whether a nowrap row has more in it than it has room for. */
-      overflows(node) {
-        host.appendChild(node);
+      /**
+       * Whether a nowrap row has more in it than it has room for — or, given
+       * `outer`, whether `node` inside it does, laid out where it will sit.
+       */
+      overflows(node, outer = node) {
+        host.appendChild(outer);
         const over = node.scrollWidth > node.clientWidth + 1;
-        host.removeChild(node);
+        host.removeChild(outer);
         return over;
       },
       destroy() {
@@ -163,33 +206,54 @@ const Sheet = (() => {
   // ── The substitute marker (D8, D21) ───────────────────────────────────
 
   /**
-   * Quiet when substitutes are fine, loud when they are not. The words print
-   * in Archivo ExtraBold caps under every treatment; the badge and the bar
-   * down the block are the non-default extras.
+   * One look for both answers: `want substitute: true` or
+   * `want substitute: false`, in the same quiet type, with only the word
+   * false in bold.
+   *
+   * A deliberate departure from D8 and D21, which the Rust app still prints:
+   * quiet for true, and loud Archivo capitals for false. The owner asked for
+   * one look every time (2026-09-29), and every order states its own value,
+   * so nothing relies on the loud form standing out.
+   *
+   * Anything but a real true or false throws rather than printing. A stop
+   * handed in where an order belongs has no answer of its own, and must never
+   * come out as "false".
    */
-  function marker(stop, settings) {
-    if (stop.acceptAlternatives) {
-      return element('span', 'bf-marker', 'want substitute: true');
+  function marker(order) {
+    const answer = order.acceptAlternatives;
+    if (answer === true) return element('span', 'bf-marker', 'want substitute: true');
+    if (answer === false) {
+      const node = element('span', 'bf-marker', 'want substitute: ');
+      node.appendChild(element('b', null, 'false'));
+      return node;
     }
-    const badge = settings.marker === 'inverted-badge';
-    return element(
-      'span',
-      `bf-marker-loud${badge ? ' bf-marker-badge' : ''}`,
-      'WANT SUBSTITUTE: FALSE',
+    throw new Error(
+      `an order's substitute answer reads "${String(answer)}", which is neither true nor false`,
     );
   }
 
-  /**
-   * The marker and the order id, set as one thing: the id is only ever a way
-   * of telling two otherwise identical stops apart, so it belongs beside the
-   * mark rather than adrift on its own line.
-   */
-  function stamp(stop, settings) {
-    const group = element('span', 'bf-stamp');
-    group.appendChild(marker(stop, settings));
-    if (settings.showOrderId) {
-      group.appendChild(element('span', 'bf-order-id', stop.id));
+  /** An order id, or a throw: a stop has no id of its own to print. */
+  function orderId(order) {
+    if (!Number.isFinite(order.id)) {
+      throw new Error(`an order id reads "${String(order.id)}", which is not a number`);
     }
+    return element('span', 'bf-order-id', order.id);
+  }
+
+  /**
+   * The marker and the order id, set as one thing at the right of a one-order
+   * block's heading: the id is only ever a way of telling two otherwise
+   * identical stops apart, so it belongs beside the mark rather than adrift
+   * on its own line. "Show the order ID" decides whether it prints.
+   *
+   * A block of several orders has no stamp in its heading, a departure from
+   * D20's one column per block: each order carries its marker on its first
+   * line and its id on every line, whatever the setting (see orderRows()).
+   */
+  function stamp(order, settings) {
+    const group = element('span', 'bf-stamp');
+    group.appendChild(marker(order));
+    if (settings.showOrderId) group.appendChild(orderId(order));
     return group;
   }
 
@@ -207,7 +271,59 @@ const Sheet = (() => {
   // ── A stop block ───────────────────────────────────────────────────────
 
   /**
-   * The heading, placed the way the Rust layout places it.
+   * Puts a mark on a line and keeps it only if the line still fits.
+   *
+   * The line is measured detached, which is why it can be handed straight to
+   * the measuring column and taken back again.
+   */
+  function place(line, node, before, measure) {
+    line.insertBefore(node, before || null);
+    if (!measure.overflows(line)) return true;
+    line.removeChild(node);
+    return false;
+  }
+
+  /**
+   * An order's crates on a line, left of `before`: full glyphs first, then
+   * the compact form (D24). False when neither fits, and the line is as it
+   * was.
+   */
+  function placeCrates(line, count, before, measure) {
+    const total = count.large + count.small;
+    if (crateRunWidth(total) <= 194 && place(line, crateRun(count), before, measure)) {
+      return true;
+    }
+    return place(line, crateCompact(count), before, measure);
+  }
+
+  /** The customer's name, on the line every heading starts with. */
+  function nameLine(customer) {
+    return append(element('div', 'bf-head-line'), element('div', 'bf-name', customer));
+  }
+
+  /**
+   * A heading's lines before any marks: the name, with a cut block's
+   * `part N of M` beside it where that fits and on a line of its own where it
+   * does not, then the boxed department when there is one.
+   *
+   * The tag goes in first and is measured, because a long name can leave it
+   * no room — added afterwards, it used to be set past whatever the marks had
+   * already been measured into.
+   */
+  function headLines(customer, department, tag, measure) {
+    const lines = [nameLine(customer)];
+    if (tag && !place(lines[0], element('span', 'bf-block-part', tag), null, measure)) {
+      lines.push(append(element('div', 'bf-head-line'), element('span', 'bf-block-part', tag)));
+    }
+    if (department) {
+      lines.push(append(element('div', 'bf-head-line'), departmentBox(department)));
+    }
+    return lines;
+  }
+
+  /**
+   * The heading of a one-order block, placed the way the Rust layout places
+   * it.
    *
    * Nothing here is positioned by assuming it will fit. The name can be
    * 127 mm of a 194 mm column, the order id ten digits, and the crate count is
@@ -215,54 +331,37 @@ const Sheet = (() => {
    * mark is offered the name's line, then the department's, then a line of its
    * own, and takes the first that measures. The marker and the id travel
    * together; the crates may travel without them.
+   *
+   * A block of several orders carries only crates in its heading lines — one
+   * count per department group — and each order's marker on the order's own
+   * first line (see sharedBlock() and orderRows()).
    */
-  function heading(stop, settings, count, measure) {
-    const nameLine = append(
-      element('div', 'bf-head-line'),
-      element('div', 'bf-name', stop.customer),
-    );
-    const departmentLine = stop.department
-      ? append(element('div', 'bf-head-line'), departmentBox(stop.department))
-      : null;
-    const lines = departmentLine ? [nameLine, departmentLine] : [nameLine];
+  function heading(order, settings, count, measure, tag) {
+    const lines = headLines(order.customer, order.department, tag, measure);
 
     const total = count.large + count.small;
     let cratesWanted = total > 0;
     let stampWanted = true;
 
-    /**
-     * Puts a mark on a line and keeps it only if the line still fits.
-     *
-     * The line is measured detached, which is why it can be handed straight to
-     * the measuring column and taken back again.
-     */
-    const place = (line, node, before) => {
-      line.insertBefore(node, before || null);
-      if (!measure.overflows(line)) return true;
-      line.removeChild(node);
-      return false;
-    };
-
-    /** Full glyphs first, then the compact form (D24), then give up here. */
-    const placeCrates = (line) => {
-      const before = line.querySelector('.bf-stamp');
-      if (crateRunWidth(total) <= 194 && place(line, crateRun(count), before)) return true;
-      return place(line, crateCompact(count), before);
-    };
-
     for (const line of lines) {
-      if (stampWanted && place(line, stamp(stop, settings))) stampWanted = false;
+      if (stampWanted && place(line, stamp(order, settings), null, measure)) stampWanted = false;
       // The crates sit immediately left of the marker (D20), so they only go
       // on a line whose stamp is already settled.
-      if (cratesWanted && !stampWanted && placeCrates(line)) cratesWanted = false;
+      if (
+        cratesWanted &&
+        !stampWanted &&
+        placeCrates(line, count, line.querySelector('.bf-stamp'), measure)
+      ) {
+        cratesWanted = false;
+      }
       if (!stampWanted && !cratesWanted) break;
     }
 
     // A line of their own, for whatever is left over.
     if (stampWanted || cratesWanted) {
       const spare = element('div', 'bf-head-line');
-      if (stampWanted) spare.appendChild(stamp(stop, settings));
-      if (cratesWanted) placeCrates(spare);
+      if (stampWanted) spare.appendChild(stamp(order, settings));
+      if (cratesWanted) placeCrates(spare, count, spare.querySelector('.bf-stamp'), measure);
       lines.push(spare);
     }
 
@@ -274,12 +373,27 @@ const Sheet = (() => {
   }
 
   /**
+   * The order line each printed row draws, so coverage() can say which of a
+   * route's lines made it onto the paper. Kept off the page, so the sheets
+   * print exactly as they did.
+   */
+  const drawing = new WeakMap();
+
+  /**
    * One product line, with every second one tinted.
    *
    * The bread list writes a pick line: `P` box, quantity, code, name, then the
    * missing and fixed boxes at the right. The freezer list writes a check line
-   * (F8): a *checked* box on the left, a dotted field for a note in the slack
-   * after the name, and only the *missing* box on the right.
+   * (F8): a *checked* box on the left — and beside it a *delivered* box, which
+   * F8 does not have (the owner, 2026-09-30) — a dotted field for a note in
+   * the slack after the name, and only the *missing* box on the right.
+   *
+   * The bread line has the dotted field too, a departure from F8, which gives
+   * it to the check line alone (the owner, 2026-09-30: "a neat place to write
+   * if something should be written"). It shares one cell with the name, in
+   * the place the name alone used to have, and takes only what the name
+   * leaves: the name is set exactly where and how it was — it still wraps
+   * where it wrapped — and a name that fills its room leaves no field at all.
    */
   function breadLine(line, settings, tinted) {
     const bread = settings.kind === Model.BREAD;
@@ -287,22 +401,44 @@ const Sheet = (() => {
       'div',
       `bf-row${bread ? '' : ' bf-row-check'}${tinted ? ' bf-row-zebra' : ''}`,
     );
+    drawing.set(row, line);
 
     append(
       row,
       tickBox(bread ? 'P' : 'C'),
-      element('span', 'bf-qty', line.quantity),
+      // The freezer line's second box, D for delivered, beside C (the owner,
+      // 2026-09-30; a departure from F8, which has C alone at the left).
+      bread ? null : tickBox('D'),
+      // A quantity the file gave as text prints as it says, cut to 20
+      // characters (Model.quantityText; the owner, 2026-10-01). A departure
+      // from the Rust app, whose quantity is always a number.
+      typeof line.quantityText === 'string'
+        ? element('span', 'bf-qty bf-qty-text', line.quantityText)
+        : element('span', 'bf-qty', line.quantity),
       element('span', 'bf-code', Model.supplierCode(line.product.supplier)),
-      element('span', 'bf-product', line.product.name),
     );
 
     if (bread) {
+      row.appendChild(
+        append(
+          element('span', 'bf-product-cell'),
+          productName('bf-product', line.product),
+          element('span', 'bf-note-field', '.'.repeat(120)),
+        ),
+      );
       const boxes = element('span', 'bf-ticks');
       append(boxes, tickBox('M'), tickBox('F'));
       row.appendChild(boxes);
     } else {
+      row.appendChild(productName('bf-product', line.product));
+      // A quantity in words takes room a number never does: its line wraps
+      // the name, as a line of a shared block does, rather than push the M
+      // box off the paper (review, 2026-10-01).
+      if (typeof line.quantityText === 'string') row.classList.add('bf-row-wrap');
       // A leader of full stops, clipped to whatever room the name left. A name
-      // long enough to leave none simply has no field — nothing wraps.
+      // long enough to leave none simply has no field — nothing wraps (F8).
+      // A line of a shared block departs from that: its name wraps when the
+      // marker and id beside it would push the line off the paper (orderRows).
       row.appendChild(element('span', 'bf-note-field', '.'.repeat(120)));
       row.appendChild(tickBox('M'));
     }
@@ -310,92 +446,413 @@ const Sheet = (() => {
   }
 
   /**
-   * The same block again, carrying only some of its lines — the last resort
-   * for a stop that cannot fit a page whole.
+   * An order's lines in a block of several orders (the owner, 2026-09-29).
    *
-   * The heading is repeated so the continuation is still addressed to a
-   * customer, and marked, so nobody reads it as a second delivery to the same
-   * place. D16's "one order, one block" is kept wherever it can be: this only
-   * ever runs when the alternative is ink off the edge of the paper.
+   * Every line carries the order's id, small and quiet at its right, because
+   * the id is what tells two orders' lines apart — printed whatever "Show the
+   * order ID" says. The order's first line also carries its marker, left of
+   * the id, so one order's answer is never read as another's. Its crates are
+   * not here: a customer-department's orders are packed together, so their
+   * one crate count sits on that group's heading line (see sharedBlock()).
+   *
+   * `segment` is the run of the order's lines this block carries. An order
+   * cut across pages opens its next part with a quiet "continued", its marker
+   * and its id, so the lines above it on the page before are not taken for
+   * all it has.
+   *
+   * The first line is measured, never assumed to fit, the bread name's own
+   * box included: on a check line, whose name does not otherwise wrap, the
+   * name wraps first; only then does the marker take a line of its own under
+   * it. Any other check line whose name will not fit beside its id wraps the
+   * name too.
    */
-  function stopSlice(stop, lines, settings, measure, part, parts) {
-    const slice = { ...stop, lines };
-    const block = stopBlock(slice, settings, measure);
-    if (parts > 1) {
-      const tag = element('span', 'bf-block-part', `part ${part} of ${parts}`);
-      const first = block.querySelector('.bf-head-line');
-      if (first) first.appendChild(tag);
-      else block.insertBefore(tag, block.firstChild);
+  function orderRows(order, settings, measure, segment, from = 0) {
+    const bread = settings.kind === Model.BREAD;
+    const continued = segment.from > 0;
+    const cue = () => (continued ? element('span', 'bf-order-cont', 'continued') : null);
+
+    return order.lines.slice(segment.from, segment.to).map((line, index) => {
+      const row = breadLine(line, settings, (from + index) % 2 === 1);
+      row.classList.add('bf-row-shared');
+      const stamp = element('span', 'bf-row-stamp');
+      stamp.appendChild(orderId(order));
+      // Before the tick boxes at the right-hand end, so the ids stand in one
+      // column down the block.
+      row.insertBefore(stamp, row.lastElementChild);
+      if (index > 0) {
+        if (!bread && measure.overflows(row)) row.classList.add('bf-row-wrap');
+        return [row];
+      }
+
+      const mark = marker(order);
+      const lead = cue();
+      stamp.insertBefore(mark, stamp.firstChild);
+      if (lead) stamp.insertBefore(lead, stamp.firstChild);
+      // The line fitting is not enough: the name keeps a 30 mm box, and a
+      // word longer than the box spills out of it onto the marker beside it
+      // without the line overflowing at all.
+      const name = row.querySelector('.bf-product');
+      const fits = () => !measure.overflows(row) && !measure.overflows(name, row);
+      if (fits()) return [row];
+      if (!bread) {
+        row.classList.add('bf-row-wrap');
+        if (fits()) return [row];
+      }
+
+      // A line of their own, under the first, with the id too: a marker on a
+      // line of its own must still say whose it is.
+      stamp.removeChild(mark);
+      if (lead) stamp.removeChild(lead);
+      const extra = element(
+        'div',
+        `bf-head-line bf-order-extra${bread ? '' : ' bf-order-extra-check'}`,
+      );
+      extra.appendChild(append(element('span', 'bf-stamp'), cue(), marker(order), orderId(order)));
+      return [row, extra];
+    }).flat();
+  }
+
+  /** All of an order's lines: the segment every uncut block carries. */
+  function whole(order) {
+    return { order, from: 0, to: order.lines.length };
+  }
+
+  /**
+   * A department inside a block whose orders have different departments: the
+   * lines below it are that department's, down to the next.
+   *
+   * A departure from D19, which boxes the department under the name as half
+   * of one crate label. A block of several departments cannot put all of them
+   * there, so each divides the block instead, quietly (the owner,
+   * 2026-09-29). The orders with no department sort first and sit straight
+   * under the name, before any of these.
+   */
+  function departmentSubHeading(department) {
+    const box = departmentBox(department);
+    box.classList.add('bf-dpt-quiet');
+    return append(element('div', 'bf-head-line bf-dpt-sub'), box);
+  }
+
+  /**
+   * A heading line with a group's crates at its right-hand end: full glyphs,
+   * then the compact form (D24), then a line of their own under it. The
+   * crates are never dropped — if even the compact form will not fit there,
+   * it prints anyway, and the overflow shows, rather than a group going out
+   * with no crate count.
+   *
+   * Done before the line joins its block: measuring a line lifts it into the
+   * measuring column.
+   */
+  function withCrates(line, count, measure) {
+    if (!count || placeCrates(line, count, null, measure)) return [line];
+    const spare = element('div', 'bf-head-line');
+    if (!placeCrates(spare, count, null, measure)) spare.appendChild(crateCompact(count));
+    return [line, spare];
+  }
+
+  /**
+   * A stop of several orders: one customer at one street and one position in
+   * the route, in one block.
+   *
+   * A departure from D16's "one order, one block", at the owner's request
+   * (2026-09-29): the orders share the block, grouped by department and kept
+   * apart by order id. The heading is the name, and the boxed department too
+   * when every order shares one; otherwise each department is a quiet
+   * sub-heading. The zebra restarts under each.
+   *
+   * Crates are counted per department group — the crate label is the
+   * customer and the department, and the warehouse packs a group's bread
+   * together whatever orders it came in (the owner, 2026-09-29; D16 counts
+   * them per order). Each group's one count sits at the right of its heading
+   * line: the name line for the orders with no department, the boxed
+   * department's line when every order shares it, or the group's
+   * sub-heading. A block cut across pages prints a group's crates once, on
+   * the part where its first order starts.
+   *
+   * `segments` are the runs of the orders' lines this block carries: every
+   * order whole, or one part's share of a block cut across pages. A part that
+   * starts inside a department opens with that department's sub-heading
+   * again, so its lines never read as the department above them, or as none.
+   */
+  function sharedBlock(stop, segments, settings, measure, tag) {
+    const block = element('article', 'bf-block');
+    const groups = Model.departmentGroups(stop.orders);
+    const shared = groups.length === 1 ? groups[0].department : null;
+
+    /** A group's crates, or null: none on a freezer sheet, none but where it starts. */
+    const cratesOf = (group) => {
+      if (!group || settings.kind !== Model.BREAD) return null;
+      const starts = segments.some((segment) => segment.order === group.orders[0] && segment.from === 0);
+      if (!starts) return null;
+      const count = Model.packedCrateCount(group.orders, settings.crates);
+      return count.large + count.small > 0 ? count : null;
+    };
+
+    // The heading's own group: the one department every order shares, boxed
+    // on the last heading line; or the orders with no department, on the
+    // name line. A block whose orders all have departments of their own
+    // keeps its crates on the sub-headings.
+    const heads = headLines(stop.customer, shared, tag, measure);
+    const headGroup = shared || groups[0].department === null ? groups[0] : null;
+    const target = shared ? heads.length - 1 : 0;
+    heads.forEach((line, index) => {
+      const count = index === target ? cratesOf(headGroup) : null;
+      for (const node of withCrates(line, count, measure)) block.appendChild(node);
+    });
+
+    let lines = null;
+    let department;
+    let from = 0;
+    for (const segment of segments) {
+      if (lines === null || segment.order.department !== department) {
+        department = segment.order.department;
+        // Lines with no department after a sub-heading would read as that
+        // department's. The sort never allows it; this says so if it ever did.
+        if (!department && block.querySelector('.bf-dpt-sub')) {
+          throw new Error(
+            `order ${segment.order.id} has no department but would print under another one`,
+          );
+        }
+        if (department && !shared) {
+          const group = groups.find((candidate) => candidate.department === department);
+          for (const node of withCrates(departmentSubHeading(department), cratesOf(group), measure)) {
+            block.appendChild(node);
+          }
+        }
+        lines = block.appendChild(element('div', 'bf-lines'));
+        from = 0;
+      }
+      for (const node of orderRows(segment.order, settings, measure, segment, from)) {
+        lines.appendChild(node);
+      }
+      from += segment.to - segment.from;
     }
     return block;
   }
 
   /**
-   * A stop's block, split across as few pages as it takes.
+   * One order in a block of its own: the crate label, then the lines
+   * `segment` carries.
    *
-   * Measured after the fact rather than predicted: the heading's own height
-   * depends on how many lines its marks needed, so the only honest way to
-   * know how many product lines fit is to build a slice and measure it. The
-   * search halves the slice until one fits, then keeps going from there.
+   * D16 makes every order its own block. The web port keeps that only for a
+   * customer with one order at a stop; several share one (see sharedBlock()).
    *
-   * Returns one piece when the block fits, which is every real stop in both
-   * sample exports — this costs nothing until a file needs it.
+   * A part of an order cut across pages repeats the heading, the marker and
+   * the id (when shown), so it is still addressed to a customer, and its
+   * `part N of M` says nobody should read it as a second delivery. Its crates
+   * print once, on the part where it starts: each part used to count only
+   * its own lines, and the parts could add up to more crates than the order
+   * packs into.
    */
-  function stopPieces(stop, settings, measure, limit) {
-    const whole = stopBlock(stop, settings, measure);
-    const height = measure.height(whole);
-    if (height <= limit || stop.lines.length < 2) {
-      return [{ node: whole, height, keepWithNext: false, over: height > limit }];
-    }
-
-    // How many lines fit, found once and reused: every slice carries the same
-    // heading, so the answer does not change between them.
-    let fits = stop.lines.length;
-    while (fits > 1) {
-      const trial = stopSlice(stop, stop.lines.slice(0, fits), settings, measure, 1, 2);
-      if (measure.height(trial) <= limit) break;
-      fits = Math.floor(fits / 2);
-    }
-    for (let more = fits + 1; more <= stop.lines.length; more += 1) {
-      const trial = stopSlice(stop, stop.lines.slice(0, more), settings, measure, 1, 2);
-      if (measure.height(trial) > limit) break;
-      fits = more;
-    }
-
-    const parts = Math.ceil(stop.lines.length / fits);
-    const pieces = [];
-    for (let index = 0; index < parts; index += 1) {
-      const node = stopSlice(
-        stop,
-        stop.lines.slice(index * fits, (index + 1) * fits),
-        settings,
-        measure,
-        index + 1,
-        parts,
-      );
-      pieces.push({ node, height: measure.height(node), keepWithNext: false });
-    }
-    return pieces;
-  }
-
-  /** One order — one stop, one block, one crate label (D16). */
-  function stopBlock(stop, settings, measure) {
-    const barred = !stop.acceptAlternatives && settings.marker !== 'word-only';
-    const block = element('article', `bf-block${barred ? ' bf-block-barred' : ''}`);
+  function orderBlock(order, settings, measure, segment = whole(order), tag = null) {
+    const block = element('article', 'bf-block');
 
     const count =
-      settings.kind === Model.BREAD
-        ? Model.crateCount(stop, settings.crates)
+      settings.kind === Model.BREAD && segment.from === 0
+        ? Model.crateCount(order, settings.crates)
         : { large: 0, small: 0 };
 
-    for (const line of heading(stop, settings, count, measure)) block.appendChild(line);
+    for (const line of heading(order, settings, count, measure, tag)) block.appendChild(line);
 
     const lines = element('div', 'bf-lines');
-    stop.lines.forEach((line, index) => {
+    order.lines.slice(segment.from, segment.to).forEach((line, index) => {
       lines.appendChild(breadLine(line, settings, index % 2 === 1));
     });
     block.appendChild(lines);
     return block;
+  }
+
+  /**
+   * A stop's block — its one order's, or the block its orders share — or,
+   * given `segments`, one part of it.
+   */
+  function stopBlock(stop, settings, measure, segments = stop.orders.map(whole), tag = null) {
+    return stop.orders.length === 1
+      ? orderBlock(stop.orders[0], settings, measure, segments[0], tag)
+      : sharedBlock(stop, segments, settings, measure, tag);
+  }
+
+  /**
+   * The most lines, up to `left`, that `fit` accepts — 0 if not even one.
+   *
+   * Adding a line never makes a part shorter, so one count that fits and one
+   * that does not bracket the answer, and halving the gap between them finds
+   * it. The bracket is found from `guess` — the take of the part before,
+   * which is about what a page of this stop holds — by doubling up until a
+   * count fails, or halving down until one fits. Starting from everything
+   * still left instead built parts of hundreds of lines for every page of a
+   * long order.
+   */
+  function mostLines(left, fit, guess = left) {
+    if (left <= 0) return 0;
+    let low = 0; // fits: nothing added
+    let high = left + 1; // does not: past the end
+    let probe = Math.min(Math.max(guess, 1), left);
+    if (fit(probe)) {
+      low = probe;
+      while (low < left) {
+        probe = Math.min(low * 2, left);
+        if (!fit(probe)) {
+          high = probe;
+          break;
+        }
+        low = probe;
+      }
+    } else {
+      high = probe;
+      while (high > 1) {
+        probe = Math.floor(high / 2);
+        if (fit(probe)) {
+          low = probe;
+          break;
+        }
+        high = probe;
+      }
+    }
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2);
+      if (fit(middle)) low = middle;
+      else high = middle;
+    }
+    return low;
+  }
+
+  /**
+   * A stop's block, cut across as few pages as it takes. That happens when the
+   * alternative is ink off the bottom of the paper — and in one other case,
+   * kept on purpose: the first stop under the unsequenced flag must share a
+   * page with the flag, so a block that fits a page but not the room beside
+   * the flag is cut too (see `first` below).
+   *
+   * D9 says a stop block never splits. The Rust app can keep that, because
+   * its blocks are one order each; the web port's can be a customer's whole
+   * morning, so it departs from D9 for a block taller than a page:
+   *
+   * - whole orders go first: each part takes as many as fit;
+   * - only an order taller than a part of its own is cut between its lines,
+   *   and its first lines take whatever room is left where it starts;
+   * - every part is built exactly as it will print and measured before it is
+   *   accepted, because parts differ — only the part a group starts on
+   *   carries its crates. Its tag is a stand-in as wide as the stop could
+   *   ever need: no stop has more parts than lines, so `part N of N` for N
+   *   lines is never outgrown.
+   *
+   * The parts are then built again with their real tags and measured once
+   * more. One that comes out over its page after all is not a reason to
+   * print nothing: it and every part after it are cut again, measured with
+   * the real tags, until each part fits (see recut()). Only a single line
+   * that cannot fit on an empty part throws — there is no cut that helps.
+   *
+   * Returns one piece when the block fits, which is every real stop in both
+   * sample exports — this costs nothing until a file needs it.
+   *
+   * `first` is the room on the part that opens the stop: less than `limit`
+   * right under the unsequenced flag, which must never end a page alone.
+   * `standIn` replaces the trial tag; only the test suite sets it, to force
+   * a real tag wider than the one the parts were cut against.
+   */
+  function stopPieces(stop, settings, measure, limit, first = limit, standIn = null) {
+    const node = stopBlock(stop, settings, measure);
+    const height = measure.height(node);
+    const lines = stop.orders.reduce((sum, order) => sum + order.lines.length, 0);
+    if (height <= first || lines < 2) {
+      return [{ node, height, keepWithNext: false, over: height > limit }];
+    }
+
+    const capOf = (at) => (at === 0 ? first : limit);
+    const build = (segments, tag) => stopBlock(stop, settings, measure, segments, tag);
+    const trialTag = standIn === null ? `part ${lines} of ${lines}` : standIn;
+    let parts = cut(stop.orders.map(whole), () => trialTag, 0);
+
+    // Built with their real tags. The part count is known now, so each part
+    // can be measured exactly as it will print. A count that moves in a
+    // re-cut changes every tag, so every part is measured again; tags only
+    // widen as the count grows and narrow as it shrinks, so the count moves
+    // one way until it settles, and never past the line count.
+    for (let round = 0; round <= lines; round += 1) {
+      const count = parts.length;
+      const tagOf = (at) => `part ${at + 1} of ${count}`;
+      const built = parts.map((segments, at) => {
+        const part = build(segments, tagOf(at));
+        return { node: part, height: measure.height(part), at };
+      });
+      const over = built.find((piece) => piece.height > capOf(piece.at));
+      if (!over) {
+        return built.map((piece) => ({ node: piece.node, height: piece.height, keepWithNext: false }));
+      }
+      parts = [...parts.slice(0, over.at), ...recut(parts.slice(over.at), tagOf, over.at)];
+    }
+    throw new Error(`the block for ${stop.customer} could not be cut to fit its pages`);
+
+    /**
+     * Cuts `queue` — runs of the stop's lines, in order — into parts from
+     * part `start` on, measuring each part with `tagOf(its index)`.
+     */
+    function cut(queue, tagOf, start) {
+      const done = [];
+      let current = [];
+      let lastTake = lines;
+      const at = () => start + done.length;
+      const close = () => {
+        done.push(current);
+        current = [];
+      };
+      const fits = (segments, index) =>
+        measure.height(build(segments, tagOf(index))) <= capOf(index);
+
+      for (const segment of queue) {
+        if (fits([...current, segment], at())) {
+          current.push(segment);
+          continue;
+        }
+        if (current.length > 0 && fits([segment], at() + 1)) {
+          close();
+          current.push(segment);
+          continue;
+        }
+        // Taller than a part of its own: cut between its lines.
+        let from = segment.from;
+        while (from < segment.to) {
+          const index = at();
+          const take = mostLines(
+            segment.to - from,
+            (n) => fits([...current, { order: segment.order, from, to: from + n }], index),
+            lastTake,
+          );
+          if (take === 0 && current.length > 0) {
+            close();
+            continue;
+          }
+          if (take === 0) {
+            throw new Error(
+              `a line for ${stop.customer} does not fit on a page even on its own, ` +
+                'so no cut can print it',
+            );
+          }
+          lastTake = take;
+          current.push({ order: segment.order, from, to: from + take });
+          from += take;
+          if (from < segment.to) close();
+        }
+      }
+      if (current.length > 0) close();
+      return done;
+    }
+
+    /**
+     * The parts from one that came out over its page, cut again with the
+     * real tags. Runs of one order split across those parts are joined first,
+     * so the order is treated as whole wherever it now fits whole.
+     */
+    function recut(rest, tagOf, start) {
+      const queue = [];
+      for (const segment of rest.flat()) {
+        const last = queue[queue.length - 1];
+        if (last && last.order === segment.order && last.to === segment.from) last.to = segment.to;
+        else queue.push({ ...segment });
+      }
+      return cut(queue, tagOf, start);
+    }
   }
 
   /**
@@ -434,7 +891,7 @@ const Sheet = (() => {
     append(
       row,
       element('span', 'bf-total-qty', line.units),
-      element('span', 'bf-total-product', line.product.name),
+      productName('bf-total-product', line.product),
       withDots ? tenDots(line.fullTens) : null,
     );
     return row;
@@ -658,8 +1115,12 @@ const Sheet = (() => {
   }
 
   /**
-   * One sentence of context on the left, the substitute convention on the
-   * right.
+   * One sentence of context: the route, its stops, and the pallet call.
+   *
+   * The right half used to explain the loud capitals — "want substitute:
+   * true unless marked FALSE". Every order now states its own answer in one
+   * look (see marker()), so the explanation went and the pallet call has the
+   * line to itself.
    *
    * The pallet call is made once for the whole route, so it lives here on
    * every sheet rather than in the total that closes it (D25) — and the line
@@ -671,9 +1132,7 @@ const Sheet = (() => {
     const bread = settings.kind === Model.BREAD;
     const note = element('div', 'bf-note');
     const left = element('div');
-    const right = element('div');
-    right.innerHTML = '<em>want substitute: true</em> unless marked FALSE';
-    append(note, left, right);
+    note.appendChild(left);
 
     const unsequenced = Model.unsequencedStops(route).length;
     const what = bread ? 'in full' : 'check list';
@@ -718,6 +1177,9 @@ const Sheet = (() => {
         ]
       : [
           ['C', 'Checked'],
+          // Not in F7/F8, which have C and M alone: the owner asked for a box
+          // for delivered beside the checked one (2026-09-30).
+          ['D', 'Delivered'],
           ['M', 'Missing'],
         ];
 
@@ -784,7 +1246,7 @@ const Sheet = (() => {
   function supplierKey(route, settings, spelled) {
     const used = Array.from(
       new Set(
-        route.stops.flatMap((stop) => stop.lines).map((line) => line.product.supplier),
+        route.orders.flatMap((order) => order.lines).map((line) => line.product.supplier),
       ),
     );
     const house = settings.kind === Model.BREAD ? Model.KNOWN_SUPPLIERS.map(([name]) => name) : [];
@@ -820,6 +1282,37 @@ const Sheet = (() => {
       element('div', null, `${context.source} · Matvare Expressen`),
     );
     return bar;
+  }
+
+  // ── Notes in a page's dead space ──────────────────────────────────────
+
+  /** The distance between write-on lines: a comfortable handwriting pitch. */
+  const NOTES_PITCH = 7.5;
+
+  /** Fewer write-on lines than this is not worth a heading. */
+  const NOTES_MIN_LINES = 2;
+
+  /**
+   * A quiet "Notes" heading and dotted write-on lines, for the empty space
+   * below a page's last block (the owner, 2026-09-30: "use dead space … as a
+   * impromptu comment field"). Not in the Rust app's print spec.
+   *
+   * It is added after the page's contents are settled and fills only room
+   * `room` millimetres tall that is already empty, so it can never move a
+   * page break, change a sheet count or put anything on another page. As many
+   * lines as measure into the room, and nothing at all if fewer than two do.
+   */
+  function notesBlock(room, measure) {
+    if (!(room > 0)) return null;
+    for (let count = Math.floor(room / NOTES_PITCH); count >= NOTES_MIN_LINES; count -= 1) {
+      const notes = element('section', 'bf-notes');
+      notes.appendChild(element('div', 'bf-notes-title', 'Notes'));
+      for (let line = 0; line < count; line += 1) {
+        notes.appendChild(element('div', 'bf-notes-line', '.'.repeat(120)));
+      }
+      if (measure.height(notes) <= room) return notes;
+    }
+    return null;
   }
 
   // ── Sharing the pieces out between sheets ─────────────────────────────
@@ -881,9 +1374,12 @@ const Sheet = (() => {
    *
    * `options.wordmark` is the path to the Matvare Expressen mark, and
    * `options.host` an element to measure inside (the measuring column is
-   * removed again before this returns).
+   * removed again before this returns). `options.partTagStandIn` is for the
+   * test suite alone: the tag a block cut across pages is first measured
+   * with, set narrower than the real one to prove the re-cut.
    */
   function paginate(route, settings, context, options) {
+    marked = new Set(settings.attention || []);
     const wordmark = (options && options.wordmark) || 'assets/matvare-expressen.svg';
     const measure = measuringHost(options && options.host);
 
@@ -920,25 +1416,35 @@ const Sheet = (() => {
       // pages, each still spilling, and said nothing about it. A floor makes
       // the last sheet overfull instead — visibly wrong on one page rather
       // than invisibly wrong across hundreds.
-      const limit = Math.max(
-        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE,
-        MIN_BODY_HEIGHT,
-      );
+      const budget =
+        CONTENT_HEIGHT - furnitureHeight - footerHeight - bodyMargin - FOOTER_CLEARANCE;
+      const limit = Math.max(budget, MIN_BODY_HEIGHT);
 
       // Every piece the route puts on paper, in order: its stops, the flag
       // above the unsequenced ones, and the total that closes it. The limit is
       // worked out first because a stop with more lines than a page can hold
       // has to be cut against it — 300 lines on one order used to print 45 and
       // send the other 255 off the bottom of the paper without a word.
+      //
+      // The stop right under the flag is packed against the page less the
+      // flag, because the two must share a page: a stop that fitted a page
+      // but not the room beside the flag used to push the flag onto a page of
+      // its own.
       const pieces = [];
       let flagged = false;
+      // Only the test suite sets this: see stopPieces().
+      const standIn =
+        options && typeof options.partTagStandIn === 'string' ? options.partTagStandIn : null;
       for (const stop of route.stops) {
+        let first = limit;
         if (!Model.isSequenced(stop) && !flagged) {
           flagged = true;
           const flag = unsequencedFlag();
-          pieces.push({ node: flag, height: measure.height(flag), keepWithNext: true });
+          const flagHeight = measure.height(flag);
+          pieces.push({ node: flag, height: flagHeight, keepWithNext: true });
+          first = limit - flagHeight;
         }
-        pieces.push(...stopPieces(stop, settings, measure, limit));
+        pieces.push(...stopPieces(stop, settings, measure, limit, first, standIn));
       }
       pieces.push(...totalPieces(route, settings, measure, limit));
 
@@ -951,7 +1457,16 @@ const Sheet = (() => {
         sheet.dataset.of = String(pages.length);
 
         const body = element('div', 'bf-body');
-        for (const piece of indices) body.appendChild(pieces[piece].node);
+        for (const piece of indices) {
+          body.appendChild(pieces[piece].node);
+          if (pieces[piece].over) taller.add(pieces[piece].node);
+        }
+        // The page is shared out; now its dead space, if any, gets Notes lines.
+        // Only the real budget counts — never the floor that lets furniture
+        // overfill a page — so the 10 mm above the footer is never touched.
+        const used = indices.reduce((sum, piece) => sum + pieces[piece].height, 0);
+        const notes = notesBlock(budget - used, measure);
+        if (notes) body.appendChild(notes);
 
         append(
           sheet,
@@ -987,12 +1502,83 @@ const Sheet = (() => {
     );
   }
 
+  // ── Whether the paper carries every line ──────────────────────────────
+
+  /**
+   * Pieces taller than a page that nothing could cut (stopPieces(),
+   * totalPieces()). The sheet's `overflow: hidden` clips them without a
+   * word, so whatever they hold counts as not drawn.
+   */
+  const taller = new WeakSet();
+
+  /** Sub-pixel rounding between boxes, not real overlap. */
+  const SLACK = 0.5;
+
+  /**
+   * How many of a route's lines its sheets carry on the paper (the owner,
+   * 2026-10-01: "can it give a severe warning if the list does not print all
+   * the bread?").
+   *
+   * A line is drawn when its row lies within its sheet and above the
+   * footer, and not inside a piece taller than a page. Anything else is
+   * hidden by the sheet's `overflow: hidden` without a word. The sheets must
+   * be laid out in the document, unzoomed, as they print.
+   *
+   * Returns the route's lines and units, and those missing with the first
+   * missing bread in printing order. Returns null when the sheets have no
+   * size, because nothing can be said then. A row with the right count is
+   * not enough: each of the file's lines must be the one a drawn row
+   * carries.
+   */
+  function coverage(route, sheets) {
+    const drawn = new Set();
+    for (const sheet of sheets) {
+      const paper = sheet.getBoundingClientRect();
+      if (!(paper.height > 0)) return null;
+      const footer = sheet.querySelector('.bf-footer');
+      const floor = footer ? Math.min(paper.bottom, footer.getBoundingClientRect().top) : paper.bottom;
+      for (const row of sheet.querySelectorAll('.bf-row')) {
+        const line = drawing.get(row);
+        if (!line || insideTaller(row, sheet)) continue;
+        const box = row.getBoundingClientRect();
+        if (
+          box.top >= paper.top - SLACK &&
+          box.bottom <= floor + SLACK &&
+          box.left >= paper.left - SLACK &&
+          box.right <= paper.right + SLACK
+        ) {
+          drawn.add(line);
+        }
+      }
+    }
+    const lines = route.orders.flatMap((order) => order.lines);
+    const missing = lines.filter((line) => !drawn.has(line));
+    const units = (some) => some.reduce((sum, line) => sum + line.quantity, 0);
+    return {
+      lines: lines.length,
+      units: units(lines),
+      missing: {
+        lines: missing.length,
+        units: units(missing),
+        first: missing.length > 0 ? missing[0].product.name : null,
+      },
+    };
+  }
+
+  function insideTaller(row, sheet) {
+    for (let node = row.parentElement; node && node !== sheet; node = node.parentElement) {
+      if (taller.has(node)) return true;
+    }
+    return false;
+  }
+
   return {
     PAGE_HEIGHT,
     CONTENT_HEIGHT,
     FOOTER_CLEARANCE,
     paginate,
     day,
+    coverage,
     stopBlock,
     routeTotalBlock,
     checkTotalBlock,

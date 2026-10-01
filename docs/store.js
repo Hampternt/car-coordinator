@@ -6,12 +6,53 @@ const Store = (() => {
   const KEY = 'carcoord:v1';
   const BACKUP_KEY = 'carcoord:backups';
   const MAX_BACKUPS = 12;
-  const SCHEMA = 4;
+  const SCHEMA = 6;
   const FILE_DEBOUNCE = 800;
 
   const uid = () => Math.random().toString(36).slice(2, 10);
   const str = (v, fallback = '') => (typeof v === 'string' ? v : fallback);
   const bool = (v) => v === true;
+  const hex = (v) => (/^#[0-9a-f]{6}$/i.test(str(v)) ? v : '#c62828');
+
+  // The driver tags every plan starts with: a new install's, and the ones the
+  // move-over to schema 6 adds. A new install's get fresh ids; see normalise
+  // for the move-over's.
+  const READY_TAGS = [['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']];
+  const readyTags = (id = uid) => READY_TAGS.map(([name, color]) => ({ id: id(name), name, color }));
+  // Two tag names are the same tag when they differ only in case and spacing.
+  const sameName = (a, b) => a.replace(/\s+/g, ' ').trim().toLowerCase() === b.replace(/\s+/g, ' ').trim().toLowerCase();
+
+  // The templates every plan's shelf starts with: Monday to Friday, empty
+  // until Update from plan fills them, and never offered on their day. The
+  // ids are fixed, so a plan given them twice (every load before the first
+  // save) comes out the same both times.
+  const WEEKDAY_TEMPLATES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const weekdayTemplates = () => WEEKDAY_TEMPLATES.map((name, i) => ({ id: `tpl-weekday-${i + 1}`, name, weekday: '', routes: [] }));
+
+  /* Which weekday a name reads as, 0 (Sunday) to 6, or -1: the way the week
+     reads a day group's name, so a template called "Mandag" or "Monday crew"
+     is Monday's. A copy of DAY_NAMES and groupWeekday in app.js, because
+     store.js cannot call app.js; the two must be kept in step, and the smoke
+     test checks they agree. */
+  const DAY_NAMES = [
+    ['SUNDAY', 'SUN', 'SØNDAG', 'SONDAG', 'SØN'],
+    ['MONDAY', 'MON', 'MANDAG', 'MAN'],
+    ['TUESDAY', 'TUE', 'TUES', 'TIRSDAG', 'TIR'],
+    ['WEDNESDAY', 'WED', 'WEDS', 'ONSDAG', 'ONS'],
+    ['THURSDAY', 'THU', 'THUR', 'THURS', 'TORSDAG'],
+    ['FRIDAY', 'FRI', 'FREDAG', 'FRE'],
+    ['SATURDAY', 'SAT', 'LØRDAG', 'LORDAG', 'LØR'],
+  ];
+  function weekdayOf(name) {
+    let n = String(name || '').trim().toUpperCase()
+      .replace(/[.!]+$/, '')
+      .replace(/['’]S\b/, '')
+      .replace(/[\s.-]+(CREWS?|GROUPS?|GANG|TEAM|GJENG|LAG|MANNSKAP)$/, '')
+      .replace(/DAYS$/, 'DAY').replace(/DAGER$/, 'DAG');
+    const joined = n.match(/^(MANDAG|TIRSDAG|ONSDAG|TORSDAG|FREDAG|L[ØO]RDAG|S[ØO]NDAG)S?(GJENGEN|GJENG|LAGET|LAG|TEAM|VAKTA|VAKTEN|VAKT|MANNSKAPET|MANNSKAP)$/);
+    if (joined) n = joined[1];
+    return DAY_NAMES.findIndex((names) => names.includes(n));
+  }
 
   /* ---------- validation ----------
      localStorage can hold anything: a half-written blob, data from an older
@@ -36,7 +77,7 @@ const Store = (() => {
 
     const labels = arr(raw.labels, 'labels')
       .filter((l) => l && typeof l === 'object')
-      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: /^#[0-9a-f]{6}$/i.test(str(l.color)) ? l.color : '#c62828' }));
+      .map((l) => ({ id: str(l.id) || uid(), name: str(l.name, 'Label'), color: hex(l.color), onSheet: bool(l.onSheet) }));
 
     const cars = arr(raw.cars, 'cars')
       .filter((c) => c && typeof c === 'object')
@@ -56,21 +97,52 @@ const Store = (() => {
         highlight: bool(r.highlight), gapBefore: bool(r.gapBefore),
       }));
 
+    // A driver's tags are a list of their own: Sick and Holiday mean nothing
+    // on a car, Workshop nothing on a driver. Up to schema 5 drivers wore the
+    // car labels, so a plan without the list gets the move-over, once: each
+    // label a driver wears becomes a driver tag of the same name and colour,
+    // in the Labels tab's order, then the ready-made tags whose names are not
+    // there yet. A plan that has the list is left as it is, so a ready-made
+    // tag its owner deleted stays deleted.
+    // The move-over's ids come from what each tag is made from, not uid():
+    // until the first change the plan is moved over again on every load, and
+    // the same saved text must read as the same plan each time (an import
+    // weighed against the screen, a backup against the one before it).
+    const moved = !Array.isArray(raw.driverTags);
+    const tagFor = new Map();   // label id -> the driver tag the move-over made from it
+    let driverTags;
+    if (moved) {
+      const worn = new Set((Array.isArray(raw.drivers) ? raw.drivers : [])
+        .filter((d) => d && typeof d === 'object').map((d) => str(d.labelId)).filter(Boolean));
+      // Once per label id: two labels sharing one would otherwise make two
+      // tags sharing one.
+      driverTags = labels.filter((l, i) => worn.has(l.id) && labels.findIndex((x) => x.id === l.id) === i).map((l) => {
+        const t = { id: `from-${l.id}`, name: l.name, color: l.color };
+        tagFor.set(l.id, t.id);
+        return t;
+      });
+      for (const t of readyTags((name) => `ready-${name.toLowerCase().replace(/\s+/g, '-')}`)) if (!driverTags.some((x) => sameName(x.name, t.name))) driverTags.push(t);
+    } else {
+      driverTags = raw.driverTags
+        .filter((t) => t && typeof t === 'object')
+        .map((t) => ({ id: str(t.id) || uid(), name: str(t.name, 'Tag'), color: hex(t.color) }));
+    }
+
     // The roster: who drives, kept apart from the day plan because it outlives
     // any one day. `available` is who is in today, so a driver saved before
     // that field existed counts as available rather than silently vanishing
     // from the rail.
     const drivers = arr(raw.drivers, 'drivers')
       .filter((d) => d && typeof d === 'object')
-      .map((d) => ({
-        id: str(d.id) || uid(), name: str(d.name),
-        available: d.available === undefined ? true : bool(d.available),
-        // A driver carries a status the same way a car does — on holiday, on
-        // a course, new and not yet cleared for the long routes. The labels
-        // are the same list, because a warehouse has one vocabulary for
-        // "why is this not usable today" and it should not fork by kind.
-        labelId: str(d.labelId), note: str(d.note),
-      }))
+      .map((d) => {
+        const driver = {
+          id: str(d.id) || uid(), name: str(d.name),
+          available: d.available === undefined ? true : bool(d.available),
+          tagId: moved ? tagFor.get(str(d.labelId)) || '' : str(d.tagId), note: str(d.note),
+        };
+        if (moved && str(d.labelId) && !driver.tagId && driver.name) repaired.push(`${driver.name} pointed at a missing label`);
+        return driver;
+      })
       .filter((d) => d.name);
 
     // A group is a named set of drivers ("Monday"), nothing more: it holds
@@ -105,12 +177,28 @@ const Store = (() => {
       }))
       .filter((t) => t.name);
 
+    // The weekday templates, added once: a plan without the weekdayTemplates
+    // mark gets an empty Monday to Friday after its own templates, skipping a
+    // day a template's name already reads as, and skipping one whose id is
+    // already there (a default renamed, back from an older build that dropped
+    // the mark). The mark is then always set, so a weekday template its owner
+    // deleted is never added again. A plan that already carries any default
+    // weekday template has been through this before, an older build having
+    // only dropped the mark: none is added then, so one its owner deleted
+    // stays deleted (review, 2026-10-01).
+    if (raw.weekdayTemplates !== true && !templates.some((x) => /^tpl-weekday-[1-5]$/.test(x.id))) {
+      for (const t of weekdayTemplates()) {
+        const day = WEEKDAY_TEMPLATES.indexOf(t.name) + 1;
+        if (!templates.some((x) => x.id === t.id || weekdayOf(x.name) === day)) templates.push(t);
+      }
+    }
+
     // Drop references to things that no longer exist, so the UI never has to
     // guess what a dangling id meant.
     const has = (list, id) => !id || list.some((x) => x.id === id);
     for (const c of cars) if (!has(labels, c.labelId)) { c.labelId = ''; repaired.push(`${c.reg} pointed at a missing label`); }
     for (const p of positions) if (!has(labels, p.labelId)) { p.labelId = ''; repaired.push(`${p.name} pointed at a missing label`); }
-    for (const d of drivers) if (!has(labels, d.labelId)) { d.labelId = ''; repaired.push(`${d.name} pointed at a missing label`); }
+    for (const d of drivers) if (!has(driverTags, d.tagId)) { d.tagId = ''; repaired.push(`${d.name} pointed at a missing driver tag`); }
     for (const r of routes) {
       if (!has(cars, r.carId)) { r.carId = ''; repaired.push(`route ${r.name} pointed at a missing car`); }
       if (!has(positions, r.positionId)) { r.positionId = ''; repaired.push(`route ${r.name} pointed at a missing position`); }
@@ -136,9 +224,12 @@ const Store = (() => {
 
     const date = /^\d{4}-\d{2}-\d{2}$/.test(str(raw.date)) ? raw.date : defaults().date;
     if (date !== raw.date && raw.date !== undefined) repaired.push('date was not a valid day');
-    const qrOnSheet = raw.qrOnSheet === undefined ? true : bool(raw.qrOnSheet);
+    // The QR code is gone from the sheet, but the field stays, fixed off:
+    // every build from v0.1.0 to 0.3.0 reads a missing qrOnSheet as on, so
+    // dropping it would turn the QR back on in every older copy.
+    const qrOnSheet = false;
 
-    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverGroups, templates }, repaired, usable: true };
+    return { state: { schemaVersion: SCHEMA, date, qrOnSheet, positions, labels, cars, routes, drivers, driverTags, driverGroups, templates, weekdayTemplates: true }, repaired, usable: true };
   }
 
   /* ---------- versioning ---------- */
@@ -165,20 +256,69 @@ const Store = (() => {
     // v4 is a driver's own status and note, and it is the same argument: a
     // build without them meeting a roster that has them would drop what the
     // other manager typed without a word.
+    //
+    // v5 is a label's Show on printout tick (onSheet). A build without the
+    // tick meeting data that has it would drop it without a word, and
+    // qrOnSheet is fixed off so older builds keep the QR off.
+    //
+    // v6 is the driver tags: driverTags, and a driver's tagId in place of its
+    // labelId. Loading needs no bump, since normalise moves any plan without
+    // the list over. The bump is for an older build meeting a v6 plan: it
+    // knows no tagId, so its drivers show no tag and lose it on its next save,
+    // and the v > SCHEMA branch above says so first.
     return normalise(raw, defaults);
+  }
+
+  /* ---------- per-browser preferences ----------
+     What belongs to this browser rather than to the plan: which update note
+     it has shown, whether the save file has to be read before it is written.
+     Kept under carcoord:pref:, never on the plan, so none of it travels into
+     Export, the save file, backups or share codes. Every access is wrapped,
+     so a browser that refuses storage still starts. */
+  const PREF = 'carcoord:pref:';
+  // undefined when storage cannot be read at all, which is not the same as
+  // never set (null): a caller that must fail closed can tell them apart.
+  function pref(name) {
+    try { return localStorage.getItem(PREF + name); } catch { return undefined; }
+  }
+  // null removes it. Returns whether storage took the change.
+  function setPref(name, value) {
+    try {
+      if (value === null || value === undefined) localStorage.removeItem(PREF + name);
+      else localStorage.setItem(PREF + name, String(value));
+      return true;
+    } catch { return false; }
   }
 
   /* ---------- localStorage ---------- */
   let localUsable = false;
+  // The saved text exactly as this load found it, so the update archive can
+  // keep it byte for byte, and whether this load was one the update note must
+  // wait out: unreadable, or written by a newer version. Both describe the
+  // load only; an import later on changes neither.
+  let localText = null;
+  let trouble = false;
+  let appVersion = null;
 
   function readLocal(defaults) {
     let raw = null;
+    let text = null;
     let unreadable = false;
-    try { raw = JSON.parse(localStorage.getItem(KEY)); } catch { unreadable = true; }
+    try { text = localStorage.getItem(KEY); raw = JSON.parse(text); } catch { unreadable = true; }
+    localText = text;
     const { state, repaired, usable } = migrate(raw, defaults);
     localUsable = usable;
-    if (unreadable || (!usable && localStorage.getItem(KEY) !== null)) {
-      notices.push({ kind: 'warn', text: 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
+    trouble = !!raw && typeof raw === 'object' && (Number(raw.schemaVersion) || 0) > SCHEMA;
+    if (unreadable || (!usable && text !== null)) {
+      trouble = true;
+      // Copied now, before any change can overwrite it. Only when that fails
+      // does the warning still say the first change will.
+      // The recovery page downloads the unreadable text as it stands, which
+      // matters most when the copy could not be made.
+      const kept = text !== null ? rescue(text) : { ok: false, dropped: 0 };
+      notices.push({ kind: 'warn', link: { href: 'recover.html', text: 'Open the recovery page' }, text: kept.ok
+        ? ['The data saved in this browser could not be read, so the plan on screen started empty. An untouched copy is kept in Archives on the Data tab; check Backups there too before relying on what is on screen.', madeRoom(kept.dropped)].filter(Boolean).join(' ')
+        : 'The data saved in this browser could not be read, so the plan on screen started empty. Check Backups below, or your save file, before typing anything \u2014 the first change you make will overwrite it.' });
     } else if (repaired.length) {
       notices.push({ kind: 'info', text: `Repaired saved data: ${repaired.slice(0, 3).join('; ')}${repaired.length > 3 ? `; and ${repaired.length - 3} more` : ''}.` });
     }
@@ -207,11 +347,15 @@ const Store = (() => {
     } catch { return []; }
   }
 
+  // Returns whether the plan is now in Backups: true when it was written, and
+  // true when it was skipped because the newest entry already holds exactly
+  // it; false only when storage is full and nothing could be stored. A caller
+  // about to overwrite something checks this before it goes ahead.
   function snapshot(state, label) {
     const list = backups();
     const entry = { t: new Date().toISOString(), label, json: JSON.stringify(state) };
     // Skip a snapshot identical to the newest one (nothing actually changed).
-    if (list[0] && list[0].json === entry.json) return;
+    if (list[0] && list[0].json === entry.json) return true;
     list.unshift(entry);
     while (list.length > MAX_BACKUPS) list.pop();
     // Storage can be full, and dropping the oldest entries is worth nothing
@@ -220,14 +364,20 @@ const Store = (() => {
     // quietly turns that promise into a lie: trim until it fits, and if it
     // never does, leave the backups already stored alone and say so.
     while (list.length) {
-      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return; } catch { list.pop(); }
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(list)); return true; } catch { list.pop(); }
     }
     notices.push({ kind: 'warn', text: `Could not take a backup before "${label}" \u2014 this browser's storage is full. Export a copy from the Data tab before you go any further.` });
+    return false;
   }
 
+  /* One Start of day backup per day on the leader's own calendar, not UTC's:
+     just after midnight in Oslo is still yesterday in UTC. The stored t stays
+     an ISO string; only the day it counts for is read locally. */
+  const localDay = (d) => (Number.isNaN(d.getTime()) ? ''
+    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   function dailySnapshot(state) {
-    const today = new Date().toISOString().slice(0, 10);
-    if (backups().some((b) => b.t.slice(0, 10) === today && b.label === 'Start of day')) return;
+    const today = localDay(new Date());
+    if (backups().some((b) => b.label === 'Start of day' && localDay(new Date(String(b.t))) === today)) return;
     snapshot(state, 'Start of day');
   }
 
@@ -241,6 +391,74 @@ const Store = (() => {
       return null;
     }
   }
+
+  /* ---------- archives ----------
+     A copy of the saved text exactly as it stood, kept apart from the rolling
+     Backups so that a week of deletes and template loads can never push it
+     out. Two kinds: an 'update' copy, taken the first time a new version
+     opens, and a 'rescue' of saved text that could not be read, taken the
+     moment it is found. Newest first:
+       [{ kind: 'update' | 'rescue', from, to, t, text }]
+     A rescue has from and to null, and `during`: the version that found the
+     text unreadable. The plan typed after that loss is not a plan from
+     before an update, so that version's update note points at the rescue
+     instead of copying the new plan. The text is never normalised, so a bug in
+     reading it cannot reach the copy. */
+  const ARCHIVE_KEY = 'carcoord:archives';
+  const MAX_UPDATE_ARCHIVES = 3;
+
+  function archives() {
+    try {
+      const list = JSON.parse(localStorage.getItem(ARCHIVE_KEY));
+      return Array.isArray(list) ? list.filter((a) => a && typeof a === 'object') : [];
+    } catch { return []; }
+  }
+
+  /* Stores the entry whole, or leaves the list exactly as it was. Kept: the
+     three newest update copies and the newest rescue. When storage is full,
+     the oldest update copies make room one at a time; the new entry and the
+     rescue never do, and neither do the plan or the Backups, which are not
+     touched here at all. Returns { ok, dropped }: whether the entry is now
+     stored, and how many update copies were removed to make room for it.
+     That count is said on screen; the usual trimming to three, and a new
+     rescue replacing the old one, are not in it. */
+  function archive(entry) {
+    const old = archives();
+    const list = [entry];
+    let updates = entry.kind === 'update' ? 1 : 0;
+    let rescued = entry.kind === 'rescue';
+    for (const a of old) {
+      if (a.kind === 'update') { if (updates < MAX_UPDATE_ARCHIVES) { list.push(a); updates++; } }
+      else if (a.kind === 'rescue') { if (!rescued) { list.push(a); rescued = true; } }
+      else list.push(a);   // a kind a later version added: not ours to drop
+    }
+    let dropped = 0;
+    for (;;) {
+      try {
+        localStorage.setItem(ARCHIVE_KEY, JSON.stringify(list));
+        return { ok: true, dropped };
+      } catch { /* full: make room below, or give up */ }
+      let i = list.length - 1;
+      while (i > 0 && list[i].kind !== 'update') i--;
+      if (i === 0) return { ok: false, dropped: 0 };
+      list.splice(i, 1);
+      dropped++;
+    }
+  }
+
+  // Once per text and version: reloading on the same unreadable save keeps
+  // one copy. Returns archive()'s { ok, dropped }.
+  function rescue(text) {
+    const kept = archives().find((a) => a.kind === 'rescue');
+    const same = !!kept && kept.text === text;
+    if (same && kept.during === appVersion) return { ok: true, dropped: 0 };
+    const made = archive({ kind: 'rescue', from: null, to: null, during: appVersion, t: new Date().toISOString(), text });
+    // Found again by a newer version with no room to say so: the text itself
+    // is still kept, under the version that first found it.
+    return made.ok || !same ? made : { ok: true, dropped: 0 };
+  }
+  // Said wherever a copy took the place of older ones.
+  const madeRoom = (n) => (n > 0 ? `To make room, ${n === 1 ? '1 older copy in Archives was' : `${n} older copies in Archives were`} removed.` : '');
 
   /* ---------- IndexedDB (one key: the save-file handle) ---------- */
   /* Every path out of here has to resolve. init() awaits this before the first
@@ -277,7 +495,34 @@ const Store = (() => {
   /* ---------- auto-saved file (File System Access API) ---------- */
   const fileSupported = () => typeof window.showSaveFilePicker === 'function';
 
-  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '' };
+  // `hold` stops every write to the file until the leader has answered for
+  // it: { kind: 'differs', state, raw, modified, differ } when the file holds
+  // a different plan from the screen, { kind: 'unreadable' } when it could not
+  // be read, { kind: 'notPlan' } when it holds something that is not a plan.
+  const file = { handle: null, name: '', permission: 'unsupported', lastSaved: null, error: '', hold: null };
+
+  /* Whether the file has to be read before anything is written to it. Set on
+     every load that finds no usable plan of this browser's own, because then
+     the file may be the only good copy, and kept in storage rather than for
+     this load only: typing a few names after a loss saves a small plan that
+     the next load would otherwise take for this browser's own. Cleared only
+     when the file and the screen have been brought together: a question
+     answered, a file found empty or holding the same plan, a plan recovered
+     from it, or a file linked, opened or let go. If it cannot be stored it
+     holds in memory, which errs towards asking, and storage that cannot be
+     read counts as set. A per-browser pref: carcoord:pref:fileNeedsCheck. */
+  const CHECK = 'fileNeedsCheck';
+  let checkThisSession = false;
+  const needsCheck = () => {
+    if (checkThisSession) return true;
+    const v = pref(CHECK);
+    return v === undefined || v === '1';
+  };
+  const markCheck = () => { if (!setPref(CHECK, '1')) checkThisSession = true; };
+  const clearCheck = () => {
+    checkThisSession = false;
+    setPref(CHECK, null);   // a removal that fails leaves it set, which still asks
+  };
   let pending = null;
   let timer = null;
   let onChange = () => {};
@@ -293,9 +538,11 @@ const Store = (() => {
   }
 
   async function writeFile(state) {
-    if (!file.handle || file.permission !== 'granted') return;
+    if (!file.handle || file.permission !== 'granted' || file.hold) return;
     try {
       const w = await file.handle.createWritable();
+      // A hold raised while the file was being opened wins over this write.
+      if (file.hold) { try { await w.abort(); } catch { /* nothing was written */ } return; }
       await w.write(JSON.stringify(state, null, 2));
       await w.close();
       file.lastSaved = new Date();
@@ -316,16 +563,17 @@ const Store = (() => {
     timer = setTimeout(() => { timer = null; const s = pending; pending = null; writeFile(s); }, FILE_DEBOUNCE);
   }
 
+  // Returns the write, so a caller that says "written" can wait for it.
   function flush() {
-    if (!timer) return;
+    if (!timer) return Promise.resolve();
     clearTimeout(timer);
     timer = null;
     const s = pending;
     pending = null;
-    if (s) writeFile(s);
+    return s ? writeFile(s) : Promise.resolve();
   }
 
-  async function linkFile(state) {
+  async function linkFile(state, defaults) {
     if (!fileSupported()) return false;
     try {
       const handle = await window.showSaveFilePicker({
@@ -334,9 +582,14 @@ const Store = (() => {
       });
       file.handle = handle;
       file.name = handle.name;
+      file.hold = null;
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
-      await writeFile(state);
+      // The picker also offers files that already exist, and choosing one
+      // replaces it: after a loss, that can be the only good copy. So it is
+      // read first, as Reconnect reads, and a different plan in it raises the
+      // same question. A new or empty file is simply written.
+      if (file.permission === 'granted' && await reconcile(state, defaults, true)) await writeFile(state);
       return true;
     } catch { return false; } // user cancelled the picker
   }
@@ -350,17 +603,59 @@ const Store = (() => {
       const text = await (await handle.getFile()).text();
       file.handle = handle;
       file.name = handle.name;
+      file.hold = null;
+      clearCheck();
       file.permission = await permissionFor(handle, true);
       await putHandle(handle);
       return text;
     } catch { return null; }
   }
 
-  async function reconnect(state) {
-    file.permission = await permissionFor(file.handle, true);
-    if (file.permission === 'granted') await writeFile(state);
+  /* Reconnect writes what is on screen to the file, because this browser's
+     own plan is the one being kept up to date. When the check marker is set,
+     the file may be the only good copy, and the person most likely to press
+     Reconnect is the one whose plan has gone missing: so the file is read
+     first, and nothing is written unless it is empty or already holds the
+     plan on screen. Otherwise a hold goes up and the Data tab asks. The
+     permission is only recorded once that is settled, and anything queued
+     from before is dropped (the screen is still in this browser), so no
+     write can slip in while the file is being read. */
+  async function reconnect(state, defaults) {
+    clearTimeout(timer);
+    timer = null;
+    pending = null;
+    // Held from the start, not cleared: an edit typed while the file is
+    // being read must not reach it before the answer is known (Try again
+    // runs this with the permission already granted).
+    file.hold = { kind: 'checking' };
+    const permission = await permissionFor(file.handle, true);
+    const write = permission === 'granted' ? await reconcile(state, defaults) : false;
+    if (permission !== 'granted') file.hold = null;
+    file.permission = permission;
+    if (write) await writeFile(state);
     onChange();
-    return file.permission === 'granted';
+    return permission === 'granted';
+  }
+
+  // Whether the screen may now be written to the file; raises a hold when not.
+  // A 'checking' hold covers the read itself, so nothing is written to the
+  // file while its contents are still unknown.
+  async function reconcile(state, defaults, always = false) {
+    if (!always && !needsCheck()) { file.hold = null; return true; }
+    file.hold = { kind: 'checking' };
+    const found = await readFileState(defaults);
+    if (found.empty) { file.hold = null; clearCheck(); return true; }
+    if (found.kind) { file.hold = { kind: found.kind }; return false; }
+    const onScreen = migrate(JSON.parse(JSON.stringify(state)), defaults).state;
+    if (samePlan(found.state, onScreen)) { file.hold = null; clearCheck(); return false; }
+    file.hold = { kind: 'differs', ...found, differ: routesDiffering(found.state, onScreen) };
+    return false;
+  }
+
+  // The leader has answered the hold: the file and the screen are one again.
+  function release() {
+    file.hold = null;
+    clearCheck();
   }
 
   async function unlink() {
@@ -369,6 +664,8 @@ const Store = (() => {
     file.permission = fileSupported() ? 'none' : 'unsupported';
     file.lastSaved = null;
     file.error = '';
+    file.hold = null;
+    clearCheck();
     await clearHandle();
     onChange();
   }
@@ -406,9 +703,13 @@ const Store = (() => {
   }
 
   /* ---------- startup ---------- */
-  async function init(defaults, changed) {
+  // `version` is the running APP_VERSION, passed in rather than read from
+  // app.js, so the Store never depends on which app.js it was paired with.
+  async function init(defaults, changed, version) {
     onChange = changed || (() => {});
+    appVersion = typeof version === 'string' ? version : null;
     const state = readLocal(defaults);
+    if (!localUsable) markCheck();
     askPersist();
 
     const handle = await getHandle();
@@ -424,28 +725,81 @@ const Store = (() => {
   }
 
   /* Read the linked file when this browser has nothing of its own — a new PC,
-     a cleared profile, a different Windows user. */
+     a cleared profile, a different Windows user. A file that cannot be read
+     is held, not written over: the plan on screen is only the defaults. */
   async function recoverFromFile(defaults) {
     if (!file.handle || file.permission !== 'granted') return null;
+    file.hold = { kind: 'checking' };   // nothing typed meanwhile reaches it
+    const found = await readFileState(defaults);
+    file.hold = found.kind ? { kind: found.kind } : null;
+    if (found.state || !found.kind) clearCheck();
+    return found.state || null;
+  }
+
+  // At start-up, when this browser has a plan again but the marker says the
+  // file was never checked against it, and the file can already be written:
+  // check it now, before the first save reaches it.
+  async function checkFileAtStart(state, defaults) {
+    if (!file.handle || file.permission !== 'granted' || !needsCheck()) return;
+    await reconcile(state, defaults);
+    onChange();
+  }
+
+  /* What the linked file holds. Three answers, because they call for three
+     different things: { empty: true } has nothing to lose; { kind:
+     'unreadable' } or { kind: 'notPlan' } cannot be looked at, so must not
+     be written over unasked; { state, raw, modified } is a plan, and raw
+     keeps whatever a newer version put in it for the backup. */
+  async function readFileState(defaults) {
+    let f, text;
     try {
-      const text = await (await file.handle.getFile()).text();
-      if (!text.trim()) return null;
-      const { state } = parseImport(text, defaults);
-      return state || null;
-    } catch { return null; }
+      f = await file.handle.getFile();
+      text = await f.text();
+    } catch { return { kind: 'unreadable' }; }
+    if (!text.trim()) return { empty: true };
+    let raw, state;
+    try { raw = JSON.parse(text); ({ state } = parseImport(text, defaults)); } catch { return { kind: 'notPlan' }; }
+    return state ? { state, raw, modified: f.lastModified } : { kind: 'notPlan' };
+  }
+
+  /* Two plans are the same when they read the same. Ids are random per PC and
+     per fresh start, so every id is swapped for the name it stands for and
+     the things' own ids are left out. Generic on purpose: a field a later
+     version adds is compared without anyone having to list it here. */
+  function readable(s) {
+    const names = new Map();
+    for (const [list, key] of [['cars', 'reg'], ['positions', 'name'], ['labels', 'name'], ['drivers', 'name'], ['driverTags', 'name']]) {
+      for (const x of s[list] || []) names.set(x.id, `${list}:${x[key]}`);
+    }
+    return (v) => JSON.stringify(v, (k, x) => (k === 'id' ? undefined : typeof x === 'string' && names.has(x) ? names.get(x) : x));
+  }
+  const samePlan = (a, b) => readable(a)(a) === readable(b)(b);
+  function routesDiffering(a, b) {
+    const ra = readable(a), rb = readable(b);
+    let n = 0;
+    for (let i = 0; i < Math.max(a.routes.length, b.routes.length); i++) if (ra(a.routes[i]) !== rb(b.routes[i])) n++;
+    return n;
   }
 
   // Only usable data should stop us reading the linked save file back.
   const hasUsableLocalData = () => localUsable;
+  const savedText = () => localText;
+  const loadTrouble = () => trouble;
 
   window.addEventListener('pagehide', flush);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
 
   return {
-    SCHEMA, init, recoverFromFile, hasUsableLocalData,
+    SCHEMA, readyTags, weekdayTemplates, weekdayOf, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
+    pref, setPref,
     save(state) { writeLocal(state); queueFileWrite(state); },
-    flush, snapshot, dailySnapshot, backups, restore,
-    file, persistence, fileSupported, linkFile, openFile, reconnect, unlink,
+    // This browser only, leaving the file as it is until the next real change.
+    saveLocal(state) { writeLocal(state); },
+    // The save file only, through the same checks as every write to it: Keep
+    // puts a date back in the file when only the file had the moved one.
+    saveFile(state) { queueFileWrite(state); },
+    flush, snapshot, dailySnapshot, backups, restore, archives, archive,
+    file, persistence, fileSupported, linkFile, openFile, reconnect, release, unlink,
     download, parseImport, takeNotices, migrate,
   };
 })();

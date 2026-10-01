@@ -8,11 +8,11 @@ Tool for the warehouse team leader to plan the daily route sheet (route, driver,
 ## Current state (all on `main`)
 - Plain HTML/CSS/JS in `src/` (no framework, no build step). Tauri 2 shell in `src-tauri/` (only adds a `print_page` command; UI falls back to `window.print()`).
 - Tabs: Day plan, Cars, Positions, Labels, Print preview.
-  - Day plan: per route driver text, car select, position select, "Mark" (pink), "Gap" (blank line above), reorder, delete (two-click confirm). Clashes are warned about, never blocked: every car/position stays pickable and carries what it costs in its own option label, the day plan lists each clash in an amber box, the row is striped, and the printed sheet repeats them under "Check before posting". Pools of free / unavailable cars below.
+  - Day plan: per route driver text, car select, position select, "Mark" (pink), "Gap" (blank line above), reorder, delete (two-click confirm). Clashes are warned about, never blocked: every car/position stays pickable and carries what it costs in its own option label, the day plan lists each clash in an amber box and the row is striped. The printed sheet carries no warnings (0.4.0). Pools of free / unavailable cars below.
   - Cars: reg, "Assigned to" badges (route, driver, position) or "Not assigned", counts bar, one-click status label chips, note.
   - Positions: name, "Many cars" flag (Garage), status labels, note.
   - Labels: custom status labels with colour.
-  - Printout also lists unavailable cars/positions and free cars.
+  - Printout also lists free cars, and parked cars whose label has Show on printout ticked (0.4.0).
 - State: one object in `localStorage` key `carcoord:v1`:
   `{ date, positions:[{id,name,multi,labelId,note}], labels:[{id,name,color}], cars:[{id,reg,labelId,note}], routes:[{id,name,driver,carId,positionId,highlight,gapBefore}] }`
   IDs are random per install, so they are NOT stable across PCs.

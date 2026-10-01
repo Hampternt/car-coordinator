@@ -21,14 +21,16 @@ const TYPES = {
   '.txt': 'text/plain',
 };
 
-export async function startServer(port = 0) {
+// `root` serves another checkout's docs/ instead: the upgrade check serves an
+// old build and this one on the same port, one after the other.
+export async function startServer(port = 0, root = ROOT) {
   const server = createServer(async (req, res) => {
     try {
       // decodeURIComponent throws on a malformed escape like '/%'. Inside the
       // try that is a 404; outside it, it rejects with nobody listening and
       // Node tears the whole test run down.
       const path = normalize(decodeURIComponent(req.url.split('?')[0])).replace(/^(\.\.[/\\])+/, '');
-      const file = join(ROOT, path.endsWith('/') ? path + 'index.html' : path);
+      const file = join(root, path.endsWith('/') ? path + 'index.html' : path);
       const body = await readFile(file);
       res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
       res.end(body);
@@ -39,7 +41,8 @@ export async function startServer(port = 0) {
   await new Promise((r) => server.listen(port, r));
   return {
     base: `http://localhost:${server.address().port}/`,
-    close: () => server.close(),
+    // Resolves once the port is free again, for a server started after it.
+    close: () => new Promise((r) => { server.close(r); server.closeAllConnections(); }),
   };
 }
 

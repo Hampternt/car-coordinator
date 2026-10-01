@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 import { startServer } from './serve.mjs';
+import { colourGuard } from './colour-guard.mjs';
 
 const server = await startServer();
 const base = server.base;
@@ -43,11 +44,32 @@ page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(base, { waitUntil: 'networkidle' });
+// The day a plan opened now is for. Fixtures that are not about dates are
+// dated this day, so a passed date never moves under them and raises Keep.
+const PLAN_DAY = await page.evaluate(() => nextWorkingDay());
+const PLAN_DMY = PLAN_DAY.split('-').reverse().join('/');
 
 // --- first run ---
 // The tab's own empty message, not the template shelf's further down it.
 check('loads with an empty car list', await page.locator('#tab-plan > .empty').isVisible());
-check('a first run shows no warnings', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+// One notice, and it is the line about the ⓘ buttons: no warning, and no
+// update note.
+check('a first run shows one notice, the line about the \u24d8 buttons, and no warnings', (await page.locator('#notices .notice').count()) === 1
+  && (await page.locator('#notices .notice.info').innerText()).includes('New here? Click any \u24d8 to see what that part does.')
+  && (await page.locator('#notices .notice.warn').count()) === 0,
+  await page.locator('#notices').innerText());
+check('and it has no button but its \u2715', (await page.locator('#notices .notice button').count()) === 1);
+// Put away, as a leader who does not want it would: the rest of this page's
+// cases count notices from none.
+await page.locator('#notices .notice [data-act="dismiss"]').click();
+check('its \u2715 puts it away in this browser for good', await page.evaluate(() => localStorage.getItem('carcoord:pref:infoHint') === 'done'));
+await page.reload({ waitUntil: 'networkidle' });
+check('so it is not there after a reload', (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
+check('after a normal start, the static line pointing at the recovery page is gone', (await page.locator('#notices .boot-line').count()) === 0);
+check('a first run is no load trouble, and has no saved text', await page.evaluate(() => Store.loadTrouble() === false && Store.savedText() === null));
+check('the release notes load, newest first at the running version', await page.evaluate(() =>
+  typeof UPDATES !== 'undefined' && Array.isArray(UPDATES) && UPDATES[0].version === APP_VERSION),
+  await page.evaluate(() => `${typeof UPDATES === 'undefined' ? 'no UPDATES' : UPDATES[0] && UPDATES[0].version} / ${APP_VERSION}`));
 
 // An unescaped quote in an inline data: URI silently dumps the rest of the
 // attribute into the document as text, which nothing else here would catch.
@@ -60,6 +82,22 @@ const leaked = await page.evaluate(() => {
 // Report what is actually first, not the text walk: a leaked attribute
 // becomes an element, so leaked.text is empty even when this fails.
 check('no markup leaked into the page', leaked.ok, leaked.ok ? '' : `body starts with <${leaked.first}> ${leaked.text}`);
+
+// A first run's Labels tab: the car and position labels, then the five
+// ready-made driver tags in a section of their own.
+await page.click('[data-act="tab"][data-tab="labels"]');
+// A heading's ⓘ is part of its text; the words are what count here.
+same("a first run's Labels tab has two sections", (await page.locator('#tab-labels h2').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')), ['Car and position labels', 'Driver tags']);
+same('and the ready-made driver tags under Driver tags',
+  await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
+  ['Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
+same('with the car labels as before', await page.locator('#labelList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)),
+  ['Out of service', 'Unavailable', 'Workshop']);
+
+// A first run's shelf: Monday to Friday, empty, never offered on a day.
+same("a first run's shelf holds Monday to Friday, empty and offered on no day",
+  await page.evaluate(() => state.weekdayTemplates === true && state.templates.map((t) => `${t.id}:${t.name}:${t.weekday}:${t.routes.length}`)),
+  ['tpl-weekday-1:Monday::0', 'tpl-weekday-2:Tuesday::0', 'tpl-weekday-3:Wednesday::0', 'tpl-weekday-4:Thursday::0', 'tpl-weekday-5:Friday::0']);
 
 // --- add cars, assign one, mark another ---
 await page.click('[data-act="tab"][data-tab="cars"]');
@@ -174,7 +212,7 @@ check('a group holds the drivers ticked into it', (await group('Monday').locator
 await group('Monday').locator('[data-act="apply-group"]').click();
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('applying a group sets who is in today', (await crew()) === '2 in · 1 away', await crew());
-check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in today, 1 away'),
+check('and says how the day now stands', (await page.locator('#notices .notice').last().innerText()).includes('Monday: 2 drivers in, 1 away'),
   await page.locator('#notices .notice').last().innerText());
 
 // The one that matters: applying a second group must take the first group's
@@ -254,12 +292,49 @@ await page.click('[data-act="tab"][data-tab="plan"]');
 check('restore brings the driver back', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
 check('restore brings the round back', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
 
+// Restore goes by the backup's time, as Archives' does: a backup taken between
+// the two clicks (another tab) shifts the rows, and the second click still
+// restores the one first clicked (review, 2026-10-01).
+await page.click('[data-act="tab"][data-tab="data"]');
+const armedAt = await page.locator('[data-act="restore"]').first().getAttribute('data-id');
+await page.locator('[data-act="restore"]').first().click();
+await page.evaluate(() => {
+  const other = JSON.parse(JSON.stringify(state));
+  other.routes[0].driver = 'Another Tab';
+  Store.snapshot(other, 'Another tab');
+  render();
+});
+await page.locator(`[data-act="restore"][data-id="${armedAt}"]`).click();
+check('Restore restores the backup first clicked, though another was taken between the clicks',
+  await page.evaluate((key) => notices.some((n) => n.text === `Restored the backup from ${when(key.split('#')[0])}.`) && state.routes[0].driver !== 'Another Tab', armedAt));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// With the browser's storage full the backup a delete promises cannot be
+// stored, so nothing is thrown away, and the warning says why (review,
+// 2026-10-01).
+await page.evaluate(() => {
+  window.realSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === 'carcoord:backups') throw new DOMException('full', 'QuotaExceededError');
+    return window.realSetItem.call(this, key, value);
+  };
+});
+const routesBefore = await page.evaluate(() => state.routes.length);
+const lastDel = page.locator('#tab-plan tr[data-route]').last().locator('[data-act="del"]');
+await lastDel.click();
+await lastDel.click();
+check('a delete with no room for its backup deletes nothing, and says so',
+  (await page.evaluate(() => state.routes.length)) === routesBefore
+  && (await page.locator('#notices').innerText()).includes('Could not take a backup'),
+  await page.locator('#notices').innerText());
+await page.evaluate(() => { Storage.prototype.setItem = window.realSetItem; notices = []; render(); });
+
 // --- export / import round trip ---
 await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
 const exported = await readFile(await download.path(), 'utf8');
 const parsed = JSON.parse(exported);
-check('export is valid Car Coordinator JSON', parsed.schemaVersion === 4 && parsed.cars.length === 3);
+check('export is valid Car Coordinator JSON', parsed.schemaVersion === 6 && parsed.cars.length === 3);
 
 parsed.cars[0].reg = 'ZZ99999';
 await page.setInputFiles('#importFile', { name: 'day.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(parsed)) });
@@ -270,6 +345,8 @@ check('import replaces the data', (await page.locator('#tab-cars tbody tr').firs
 await page.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
 await page.reload({ waitUntil: 'networkidle' });
 check('survives corrupt saved data', await page.locator('#notices .notice.warn').isVisible());
+check('an unreadable save is load trouble, and its text is kept byte for byte',
+  await page.evaluate(() => Store.loadTrouble() === true && Store.savedText() === '{not json at all'));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   schemaVersion: 1, date: 'not-a-date', labels: 'nope', cars: [{ id: 'c1', reg: 'DD44444' }],
@@ -279,12 +356,13 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
 await page.reload({ waitUntil: 'networkidle' });
 check('repairs a dangling car reference', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').inputValue()) === '');
 check('keeps the good fields while repairing', (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Kept');
+check('a repaired but usable save is no load trouble', await page.evaluate(() => Store.loadTrouble() === false));
 
 // --- data saved by the previous version (no round, no roster) ---
 // The fields v1 never wrote must arrive at their defaults, quietly: a leader
 // opening the new build on Monday should see nothing at all happen.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1' }],
 })));
@@ -298,20 +376,20 @@ check('v1 data gains round, drivers and driver groups', await page.evaluate(() =
 // Same story one version on: the plan a leader already has must open with an
 // empty template shelf and nothing to read about it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 2, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Kept', carId: 'c1', positionId: 'p1', round: '2' }],
   drivers: [{ id: 'd1', name: 'Kept', available: true }], driverGroups: [],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-check('v2 data loads with an empty template list and no repair notice',
-  (await page.evaluate(() => Array.isArray(state.templates) && state.templates.length === 0))
+check('v2 data loads with only the empty Monday to Friday templates, and no repair notice',
+  (await page.evaluate(() => state.templates.map((t) => `${t.name}:${t.routes.length}`).join() === 'Monday:0,Tuesday:0,Wednesday:0,Thursday:0,Friday:0'))
   && (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
 
 // A template is stored state like any other, so it goes through the same
 // repair: a car deleted since it was saved must not come back as a ghost id.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 2, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 2, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1' }],
   templates: [{ id: 't1', name: 'Monday', weekday: 'whenever', routes: [
@@ -333,6 +411,7 @@ check('a weekday that is not a day is no weekday at all', await page.evaluate(()
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [], positions: [], labels: [], routes: [] })));
 await page.reload({ waitUntil: 'networkidle' });
 check('warns about data from a newer version', (await page.locator('#notices .notice.warn').innerText()).includes('newer version'));
+check('and a save from a newer version is load trouble', await page.evaluate(() => Store.loadTrouble() === true));
 
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
@@ -406,7 +485,7 @@ check('and its own routes are left alone, rather than being given a round out of
 // baked into the spot name, two of those names meaning one spot, and a round
 // already typed onto one route by hand.
 const oldNames = {
-  schemaVersion: 3, date: '2026-09-18', qrOnSheet: false,
+  schemaVersion: 3, date: PLAN_DAY, qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Out of service', color: '#c62828' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }],
   positions: [
@@ -502,7 +581,7 @@ check('restoring the backup brings the old names, and the routes, back', await p
 // Seed a plan on "PC A", copy the code, and load it on a fresh profile that
 // has its own ids for everything: the payload must survive that.
 const planA = {
-  schemaVersion: 2, date: '2026-09-18',
+  schemaVersion: 2, date: PLAN_DAY,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
   drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: false }],
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
@@ -556,53 +635,16 @@ const oldRead = await page.evaluate(async (code) => {
 check('a code from before rounds existed still loads, with a blank round',
   oldRead.round === '' && oldRead.driver === 'Ana' && oldRead.routes === 1, oldRead.error || JSON.stringify(oldRead));
 
-// --- the QR on the printed sheet ---
-// 30mm at 300dpi is ~354px, so decoding at that size is the question that
-// actually matters: will it scan off the paper?
+// --- no QR anywhere ---
+// planA has no qrOnSheet, which every build up to 0.3.0 read as "on". The QR
+// is gone for good: nothing on the sheet, no switch, no encoder, no tag.
 await page.click('[data-act="tab"][data-tab="preview"]');
-await page.waitForSelector('#sheet .qr svg', { timeout: 5000 }).catch(() => {});
-check('the sheet carries a QR code', (await page.locator('#sheet .qr svg').count()) === 1);
-
-// jsQR is a test-only dependency: the app writes QR codes but never reads
-// them, so the decoder does not ship. Serve it from the page's own origin
-// rather than inlining it: the app ships a CSP of script-src 'self', and a
-// test that had to be let through it would be testing a different page.
-await page.route('**/jsqr-test-only.js', async (r) =>
-  r.fulfill({ contentType: 'text/javascript', body: await readFile('node_modules/jsqr/dist/jsQR.js', 'utf8') }));
-await page.addScriptTag({ url: 'jsqr-test-only.js' });
-const qrRead = await page.evaluate(async () => {
-  const svg = document.querySelector('#sheet .qr svg');
-  if (!svg) return { error: 'no qr on the sheet' };
-  const markup = new XMLSerializer().serializeToString(svg);
-  const decodeAt = (px) => new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = px; c.height = px;
-      const ctx = c.getContext('2d', { willReadFrequently: true });
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
-      ctx.drawImage(img, 0, 0, px, px);
-      const d = ctx.getImageData(0, 0, px, px);
-      const r = window.jsQR(d.data, px, px, { inversionAttempts: 'dontInvert' });
-      resolve(r ? r.data : null);
-    };
-    img.onerror = () => resolve(null);
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(markup)));
-  });
-  return { at354: await decodeAt(354), at200: await decodeAt(200) };
-});
-check('the printed-size QR decodes (30mm at 300dpi)', typeof qrRead.at354 === 'string' && qrRead.at354.length > 0, qrRead.error || '');
-check('it still decodes at a rougher 200px scan', typeof qrRead.at200 === 'string');
-
-if (typeof qrRead.at354 === 'string') {
-  const round = await page.evaluate(async (scanned) => {
-    const m = /#d=(.+)$/.exec(scanned);
-    const { share, error } = await Share.decode(m ? decodeURIComponent(m[1]) : scanned);
-    return error ? { error } : { routes: share.r.length, date: share.d, driver: share.r[0][1] };
-  }, qrRead.at354);
-  check('the QR carries the whole day plan', round.routes === 2 && round.date === '2026-09-18' && round.driver === 'Ana', round.error || JSON.stringify(round));
-}
+await page.waitForSelector('#sheet table');
+check('the printed sheet carries no QR code', (await page.locator('#sheet .qr').count()) === 0);
 await page.click('[data-act="tab"][data-tab="data"]');
+check('the Data tab has no QR switch', (await page.locator('[data-field="qrOnSheet"]').count()) === 0);
+check('no QR encoder is loaded', await page.evaluate(() => typeof QR === 'undefined'));
+check('no qr.js script tag', await page.evaluate(() => ![...document.scripts].some((t) => /(^|\/)qr\.js/.test(t.getAttribute('src') || ''))));
 
 // "PC B": different ids, one car in common, one it has never seen.
 const pcB = await browser.newContext();
@@ -612,7 +654,7 @@ b.on('console', (m) => m.type() === 'error' && bErrors.push(m.text()));
 b.on('pageerror', (e) => bErrors.push(String(e)));
 await b.goto(base, { waitUntil: 'networkidle' });
 await b.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-01-01', labels: [], routes: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], routes: [],
   cars: [{ id: 'zzz', reg: 'aa11111', labelId: '', note: '' }],        // same car, different id AND case
   positions: [{ id: 'yyy', name: 'Spot 1', multi: false, labelId: '', note: '' }],
   drivers: [{ id: 'dl', name: 'Local Only', available: true }], driverGroups: [],
@@ -621,7 +663,7 @@ await b.reload({ waitUntil: 'networkidle' });
 await b.click('[data-act="tab"][data-tab="data"]');
 await readCode(b, dayCode);
 const preview = await b.locator('#shareDlg').innerText();
-check('preview names the date and route count', preview.includes('18/09/2026') && preview.includes('2 routes'));
+check('preview names the date and route count', preview.includes(PLAN_DMY) && preview.includes('2 routes'));
 check('preview flags what PC B is missing', preview.includes('BB22222') && preview.includes('Garage'));
 await b.click('[data-act="share-apply"]');
 
@@ -639,7 +681,7 @@ check('added the car it did not have', (await rowsB.nth(1).locator('[data-field=
 await b.click('[data-act="tab"][data-tab="preview"]');
 const sheetB = await b.locator('#sheet').innerText();
 check('the pink row and the gap survived', (await b.locator('#sheet tr.hl').count()) === 1 && (await b.locator('#sheet tr.spacer').count()) === 1);
-check('sheet on PC B shows the shared date', sheetB.includes('18/09/2026'));
+check('sheet on PC B shows the shared date', sheetB.includes(PLAN_DMY));
 check('the printed sheet on PC B carries the round', sheetB.includes('Spot 1/2'));
 await b.click('[data-act="tab"][data-tab="drivers"]');
 check('a day plan leaves the roster where it was', (await b.locator('#tab-drivers tbody tr').count()) === 1);
@@ -694,7 +736,7 @@ await pcC.close();
 // what the offer warns about, and it is worth failing here on purpose so the
 // warning cannot quietly stop being true.
 const oldNamesB = {
-  schemaVersion: 3, date: '2026-01-01', qrOnSheet: false, labels: [],
+  schemaVersion: 3, date: PLAN_DAY, qrOnSheet: false, labels: [],
   cars: [{ id: 'bc1', reg: 'AA11111', labelId: '', note: '' }],
   positions: [
     { id: 'b1', name: 'Spot 1/1', multi: false, labelId: '', note: '' },
@@ -757,7 +799,7 @@ await page.reload({ waitUntil: 'networkidle' });
 // Duplicate route ids come from imported files; identifying rows by id made
 // the banner count clashes that no row was flagged for.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18',
+  schemaVersion: 1, date: nextWorkingDay(),
   labels: [{ id: 'L1', name: '', color: '#6a1b9a' }],
   cars: [{ id: 'c1', reg: 'AA11111', labelId: 'L1' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
@@ -782,7 +824,7 @@ check('on a route + free + parked equals the fleet', counts[0] + counts[1] + cou
 
 // --- a shared position survives a day-plan-only share ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Garage', multi: true }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
@@ -799,7 +841,7 @@ const d = await pcD.newPage();
 d.on('pageerror', (e) => bErrors.push(String(e)));
 await d.goto(base, { waitUntil: 'networkidle' });
 await d.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-01-01', labels: [], cars: [], positions: [], routes: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], cars: [], positions: [], routes: [],
 })));
 await d.reload({ waitUntil: 'networkidle' });
 await d.click('[data-act="tab"][data-tab="data"]');
@@ -823,7 +865,7 @@ for (const bad of ['42', '"hello"', 'true', 'null', '[]', '{oops']) {
 
 // --- a hostile imported file cannot execute or brick the app ---
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], positions: [{ id: 'p1', name: 'Spot 1' }],
   cars: [{ id: '"><img src=x onerror="window.__pwned=1">', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '"><img src=x onerror="window.__pwned=1">', positionId: 'p1' }],
 })));
@@ -832,40 +874,105 @@ const injected = await page.evaluate(() => ({ pwned: !!window.__pwned, imgs: doc
 check('an id from an imported file cannot inject markup', !injected.pwned && injected.imgs === 0, JSON.stringify(injected));
 
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [], positions: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [], positions: [],
   cars: [{ id: '__proto__', reg: 'AA11111' }],
   routes: [{ id: 'r1', name: '1', carId: '__proto__' }],
 })));
 await page.reload({ waitUntil: 'networkidle' });
 check('a car id of __proto__ does not brick the app', (await page.locator('#tab-plan tbody tr').count()) === 1);
 
-// --- the printed sheet carries the clashes it is showing on screen ---
+// --- the screen warns, the paper does not ---
+// Warnings belong before printing. The printed sheet shows the plan, its pink
+// row and its gap, and the lists under it, and nothing that argues with it.
+// c3 and p3 raise no screen warning: a marked position only warns when a route
+// uses it.
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', qrOnSheet: false,
+  schemaVersion: 1, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }],
-  cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }],
-  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }],
+  cars: [{ id: 'c1', reg: 'AA11111', labelId: '' }, { id: 'c2', reg: 'BB22222', labelId: 'L1' }, { id: 'c3', reg: 'CC33333', labelId: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false }, { id: 'p2', name: 'Garage', multi: true }, { id: 'p3', name: 'Spot 9', labelId: 'L1' }],
   routes: [
     { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1' },
-    { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1' },
-    { id: 'r3', name: '3', driver: 'Cai', carId: 'c2', positionId: 'p2' },
+    { id: 'r2', name: '2', driver: 'Bo', carId: 'c1', positionId: 'p1', gapBefore: true },
+    { id: 'r3', name: '3', driver: 'Cai', carId: 'c2', positionId: 'p2', highlight: true },
   ],
 })));
 await page.reload({ waitUntil: 'networkidle' });
+const clashScreen = await page.locator('#tab-plan .problems').innerText().catch(() => '');
+check('the day plan names the doubled car', clashScreen.includes('AA11111 is on 2 routes'), clashScreen);
+check('the day plan names the doubled spot', clashScreen.includes('Spot 1 is taken by 2 routes'), clashScreen);
+check('the day plan names the car that should be in the workshop', clashScreen.includes('BB22222 is marked Workshop'), clashScreen);
+check('the day plan stripes the rows involved', (await page.locator('#tab-plan tbody tr.warn').count()) === 3);
+check('a shared Garage is not called a clash', !clashScreen.includes('Garage is taken'));
 await page.click('[data-act="tab"][data-tab="preview"]');
 const clashSheet = await page.locator('#sheet').innerText();
-check('the sheet names the doubled car', clashSheet.includes('AA11111 is on 2 routes'));
-check('the sheet names the doubled spot', clashSheet.includes('Spot 1 is taken by 2 routes'));
-check('the sheet names the car that should be in the workshop', clashSheet.includes('BB22222 is marked Workshop'));
-check('the sheet marks the rows involved', (await page.locator('#sheet tr.warn').count()) === 3);
-check('a shared Garage is not called a clash', !clashSheet.includes('Garage is taken'));
+check('the sheet does not name the doubled car', !clashSheet.includes('is on 2 routes'), clashSheet);
+check('the sheet does not name the doubled spot', !clashSheet.includes('is taken by'), clashSheet);
+check('the sheet does not name the workshop car as a clash', !clashSheet.includes('is marked Workshop'), clashSheet);
+check('the sheet has no Check before posting', !clashSheet.includes('Check before posting'));
+check('the sheet has no Positions not available', !clashSheet.includes('Positions not available') && !clashSheet.includes('Spot 9'), clashSheet);
+check('the sheet has no warning marks', !clashSheet.includes('!') && (await page.locator('#sheet tr.warn').count()) === 0 && (await page.locator('#sheet .mark').count()) === 0);
+check('the sheet keeps its pink row and its gap', (await page.locator('#sheet tr.hl').count()) === 1 && (await page.locator('#sheet tr.spacer').count()) === 1);
+check('the sheet lists the free car', /Free cars\s*CC33333/.test(clashSheet), clashSheet);
+
+// --- Cars not available: parked cars whose label has Show on printout ticked ---
+await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: false }, { id: 'L2', name: 'No fuel card', color: '#1565c0', onSheet: false }],
+  cars: [
+    { id: 'c1', reg: 'PK11111', labelId: 'L1', note: 'Brakes' },   // parked, its label about to be ticked
+    { id: 'c2', reg: 'PK22222', labelId: 'L2' },                   // parked, its label left unticked
+    { id: 'c3', reg: 'PK33333', labelId: '' },                     // parked, no label
+    { id: 'c4', reg: 'PK44444', labelId: 'L1' },                   // on a route, its label ticked
+  ],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: 'c4', positionId: 'p1' }],
+})));
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="labels"]');
+check('the Labels tab has a Printout column, unticked', (await page.locator('#tab-labels thead th', { hasText: 'Printout' }).count()) === 1
+  && (await page.locator('#tab-labels [data-field="onSheet"]:checked').count()) === 0);
+await page.locator('#tab-labels [data-kind="label"][data-id="L1"][data-field="onSheet"]').check();
+await page.reload({ waitUntil: 'networkidle' });
+await page.click('[data-act="tab"][data-tab="labels"]');
+check('the tick survives a reload', await page.locator('#tab-labels [data-id="L1"][data-field="onSheet"]').isChecked()
+  && !(await page.locator('#tab-labels [data-id="L2"][data-field="onSheet"]').isChecked()));
+// From the keyboard: Space ticks it and the focus stays, so Tab goes on to
+// the same row's buttons rather than back to the top of the tab.
+await page.locator('#tab-labels [data-id="L1"][data-field="onSheet"]').focus();
+await page.keyboard.press('Space');
+const afterSpace = await page.evaluate(() => ({
+  on: document.activeElement?.matches('[data-kind="label"][data-id="L1"][data-field="onSheet"]'),
+  ticked: state.labels.find((l) => l.id === 'L1').onSheet,
+}));
+await page.keyboard.press('Tab');
+const afterTab = await page.evaluate(() => {
+  const a = document.activeElement;
+  return { button: a?.tagName === 'BUTTON', row: a?.closest('tr')?.querySelector('[data-field="onSheet"]')?.dataset.id };
+});
+check('Space on a tick keeps the focus on it', afterSpace.on && afterSpace.ticked === false, JSON.stringify(afterSpace));
+check('and Tab goes on to that label\'s buttons', afterTab.button && afterTab.row === 'L1', JSON.stringify(afterTab));
+await page.keyboard.press('Shift+Tab');
+await page.keyboard.press('Space');
+check('Space again ticks it back', await page.evaluate(() => state.labels.find((l) => l.id === 'L1').onSheet === true));
+await page.click('[data-act="tab"][data-tab="preview"]');
+const lists = await page.evaluate(() => ({
+  sheet: document.querySelector('#sheet').innerText,
+  extra: document.querySelector('#sheet .extra').innerText,
+  route: document.querySelector('#sheet tbody').innerText,
+}));
+check('a parked car with a ticked label is under Cars not available', /Cars not available\s*PK11111: Workshop \(Brakes\)/.test(lists.extra), lists.extra);
+check('a parked car whose label is unticked is on neither list', !lists.sheet.includes('PK22222'), lists.extra);
+check('a car with no label stays under Free cars', /Free cars\s*PK33333$/.test(lists.extra.trim()), lists.extra);
+check('a ticked car on a route shows only on its route row', lists.route.includes('PK44444') && !lists.extra.includes('PK44444'), lists.extra);
+await page.click('[data-act="tab"][data-tab="plan"]');
 
 // --- the clash rule is per round, not per spot ---
 // The headline feature. Two routes in one spot are a clash only when they are
 // packed in the same round; in different rounds that is exactly what rounds
 // are for, and warning about it would train the leader to ignore the box.
 const spotPlan = (routes) => ({
-  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [], cars: [],
+  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [], cars: [],
   positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Garage', multi: true }],
   routes: routes.map(([name, round, positionId], i) => ({ id: `r${i + 1}`, name, driver: '', round, positionId: positionId || 'p1' })),
 });
@@ -886,7 +993,7 @@ await loadPlan(spotPlan([['1', '2'], ['2', '2']]));
 check('the same spot in the same round still warns', (await problemText()).includes('Spot 1 in round 2 is taken by 2 routes (1, 2)'), await problemText());
 check('and both rows are flagged', (await warnRows()) === 2);
 await page.click('[data-act="tab"][data-tab="preview"]');
-check('the printed sheet says so too', (await page.locator('#sheet').innerText()).includes('Spot 1 in round 2 is taken by 2 routes'));
+check('the printed sheet does not', !(await page.locator('#sheet').innerText()).includes('is taken by'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 await loadPlan(spotPlan([['1', ''], ['2', '']]));
@@ -918,8 +1025,10 @@ check('so typing simply carries on', (await clashRound.inputValue()) === '2XY');
 // --- day templates: saving the plan that gets made again ---
 // A template is the route list as it stands minus the date. Saving is not
 // destructive; saving over a name already used is, so that one is snapshotted.
+// Marked as having had its weekday templates, so the shelf holds only what
+// these cases put on it.
 const templatePlan = {
-  schemaVersion: 2, date: '2026-09-18', qrOnSheet: false, labels: [],
+  schemaVersion: 2, date: PLAN_DAY, qrOnSheet: false, labels: [], weekdayTemplates: true,
   cars: [{ id: 'c1', reg: 'AA11111' }, { id: 'c2', reg: 'BB22222' }],
   positions: [{ id: 'p1', name: 'Spot 1' }, { id: 'p2', name: 'Spot 2' }],
   routes: [
@@ -933,7 +1042,8 @@ const shelf = page.locator('#tab-plan .tpl');
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
 check('saving puts a template on the shelf under the plan',
-  (await shelf.count()) === 1 && (await shelf.innerText()).replace(/\s+/g, ' ').includes('Monday 3 routes'),
+  (await shelf.count()) === 1 && (await shelf.locator('.tpl-name').innerText()) === 'Monday'
+  && (await shelf.locator('[data-act="peek-template"]').innerText()) === '3 routes',
   await shelf.innerText());
 check('and says what it saved', (await page.locator('#notices .notice').last().innerText()).includes('Saved Monday: a template of 3 routes'),
   await page.locator('#notices .notice').last().innerText());
@@ -947,7 +1057,8 @@ check('a template carries every route field the plan does, and no date', await p
 }));
 
 await page.reload({ waitUntil: 'networkidle' });
-check('a saved template survives a reload', (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Monday');
+check('a saved template survives a reload', (await shelf.filter({ has: page.locator('[data-act="ask-template"]') }).locator('.tpl-name').innerText()) === 'Monday'
+  && (await shelf.locator('[data-act="ask-template"]').innerText()) === 'Load');
 
 // Saving a name that is already used replaces it: the second Monday is a
 // correction of the first, not a second Monday to choose between.
@@ -961,6 +1072,9 @@ check('and keeps the name it was given rather than the capitals just typed',
 check('and says so', (await page.locator('#notices .notice').last().innerText()).includes('Replaced the Monday template'),
   await page.locator('#notices .notice').last().innerText());
 await page.click('[data-act="tab"][data-tab="data"]');
+// The damaged saves above left a rescue in Archives. The first table on this
+// tab must still be Backups: the cards above it are rows, not tables.
+check('a rescue is in Archives while the Backups table is read', await page.evaluate(() => Store.archives().some((a) => a.kind === 'rescue')));
 check('the template it replaced is in the backups', (await page.locator('#tab-data table tbody').first().innerText()).includes('Replacing the Monday template'));
 
 await page.click('[data-act="tab"][data-tab="plan"]');
@@ -1006,7 +1120,7 @@ const before = await backupCount();
 
 await page.click('#tab-plan .tpl [data-act="ask-template"]');
 check('clicking a template asks before it does anything',
-  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+  (await page.locator('#notices .notice.warn').innerText()).includes("Replaces your 1 route with Monday's 3, with their drivers, cars, positions and rounds."),
   await page.locator('#notices .notice.warn').innerText());
 check('and the plan is untouched while the question stands',
   JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
@@ -1030,7 +1144,7 @@ check('loading replaces every route field the template carries', await page.eval
 }));
 check('the day plan on screen is the template', (await page.locator('#tab-plan tbody tr').count()) === 3
   && (await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').inputValue()) === 'Weekday One');
-check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === '2026-09-18');
+check('a template has no date of its own to bring', (await page.evaluate(() => state.date)) === PLAN_DAY);
 check('and the question is answered rather than left on screen',
   (await page.locator('#notices .notice.warn').count()) === 0
   && (await page.locator('#notices .notice.info').innerText()).includes('Loaded the Monday template: 3 routes'));
@@ -1056,61 +1170,44 @@ check('a template that brings back a car in the workshop warns, and still loads'
   && (await page.locator('#tab-plan tbody tr').count()) === 3,
   await page.locator('#tab-plan .problems').innerText());
 
-// --- the weekday offer: off by default, and an offer even when it is on ---
-// The rule the pack exists for. A template never applies itself: the most it
-// ever does is raise the same question the shelf raises.
+// --- no offers: a template never raises itself (owner, 2026-10-01) ---
+// Templates used to offer themselves on a weekday chosen under them. That is
+// gone: the shelf's Load is the only way in. A plan saved with a day on a
+// template keeps it, unused, so an older copy still reads what it wrote.
 await loadPlan(withMonday);
-check('a template is set for no day when it is saved', await page.evaluate(() => state.templates[0].weekday === ''));
-check('so opening the app raises nothing, whatever day it is',
+check('a template is saved with no day', await page.evaluate(() => state.templates[0].weekday === ''));
+check('and the shelf has no day box to set one', (await page.locator('#tab-plan .tpl select').count()) === 0);
+const dayNow = await page.evaluate(() => planWeekday());
+await loadPlan({ ...withMonday, templates: withMonday.templates.map((t) => ({ ...t, weekday: String(dayNow) })) });
+check("a template saved set for the plan's day by an older copy raises nothing",
   (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-const weekday = page.locator('#tab-plan .tpl select[data-field="weekday"]');
-const dayNow = new Date().getDay();
-await weekday.selectOption(String((dayNow + 1) % 7));
-await page.reload({ waitUntil: 'networkidle' });
-check('a weekday sticks to the template it was set on',
-  (await page.evaluate(() => state.templates[0].weekday)) === String((dayNow + 1) % 7));
-check('and a template set for another day says nothing today',
-  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-await weekday.selectOption(String(dayNow));
-await page.reload({ waitUntil: 'networkidle' });
-check('a template set for today offers itself on the way in',
-  (await page.locator('#notices .notice [data-act="ask-template"]').innerText()) === 'Use Monday',
-  await page.locator('#notices').innerText());
-check('and has loaded nothing while it waits to be asked',
-  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
-
-await page.click('#notices [data-act="ask-template"]');
-check('taking the offer asks the same question the shelf asks',
-  (await page.locator('#notices .notice.warn').innerText()).includes("replaces the 1 route there now with the template's 3"),
+check('and keeps that day in the plan, unused', await page.evaluate((d) => state.templates[0].weekday === String(d), dayNow));
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check("the shelf's Load asks the question",
+  (await page.locator('#notices .notice.warn').innerText()).includes("Replaces your 1 route with Monday's 3, with their drivers, cars, positions and rounds."),
   await page.locator('#notices .notice.warn').innerText());
+check('and has loaded nothing while it waits to be answered',
+  JSON.stringify(await planDrivers()) === '["Typed This Morning"]');
 await page.click('#notices [data-act="load-template"]');
-check('and only then is anything replaced, with the same backup taken first',
+check('and only then is anything replaced, with a backup taken first',
   (await page.evaluate(() => state.routes.length)) === 3
   && (await page.evaluate(() => Store.backups()[0].label)) === 'Loading the Monday template',
   await page.evaluate(() => Store.backups()[0].label));
 
-// Back to no day, and the offer goes with it.
-await weekday.selectOption('');
-await page.reload({ waitUntil: 'networkidle' });
-check('turning the weekday off again stops the offer',
-  (await page.locator('#notices .notice').count()) === 0, await page.locator('#notices').innerText());
-
-// A repair notice and the offer, on screen together: exactly what a template
-// that lost a car, on its own weekday, produces. Dismiss buttons carry the
-// notice's index, so the wrong one going away would be quiet and wrong.
+// A repair notice and the question, on screen together: exactly what loading
+// a template that lost a car produces. Dismiss buttons carry the notice's
+// index, so the wrong one going away would be quiet and wrong.
 await loadPlan({
   ...withMonday,
   templates: [{
-    id: 't1', name: 'Monday', weekday: String(dayNow),
+    id: 't1', name: 'Monday', weekday: '',
     routes: [{ name: '1', driver: 'Weekday One', carId: 'gone' }, ...mondayRoutes.slice(1)],
   }],
 });
-check('a repair notice and an offer sit side by side', (await page.locator('#notices .notice').count()) === 2,
+check('a repair notice stands alone', (await page.locator('#notices .notice').count()) === 1,
   await page.locator('#notices').innerText());
-await page.click('#notices [data-act="ask-template"]');
-check('and the question joins them rather than piling up',
+await page.click('#tab-plan .tpl [data-act="ask-template"]');
+check('and the question joins it rather than piling up',
   (await page.locator('#notices .notice').count()) === 2 && (await page.locator('#notices .notice.warn').count()) === 1,
   await page.locator('#notices').innerText());
 await page.click('#notices .notice.warn [data-act="dismiss"]');
@@ -1119,6 +1216,127 @@ check('dismissing the question takes the question, not the notice beside it',
   && (await page.locator('#notices .notice').innerText()).includes('Repaired saved data')
   && JSON.stringify(await planDrivers()) === '["Typed This Morning"]',
   await page.locator('#notices').innerText());
+
+// --- the weekday templates: on every shelf once, empty until filled ---
+// A plan from before them, with a template already named for Monday the way
+// the week reads crews: only Tuesday to Friday are added, after it.
+{
+  const mandagText = JSON.stringify({ ...templatePlan, weekdayTemplates: undefined, templates: [{ id: 'tm', name: 'Mandag', weekday: '', routes: mondayRoutes }] });
+  await page.evaluate((t) => localStorage.setItem('carcoord:v1', t), mandagText);
+  await page.reload({ waitUntil: 'networkidle' });
+  same('a plan with a Mandag template gains Tuesday to Friday only, after it',
+    await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+  check('with no repair notice, and nothing written until a change',
+    (await page.locator('#notices .notice').count()) === 0 && (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === mandagText);
+  const names = ['Monday', 'mon', 'Mondays', 'Monday crew', "Monday's crew", 'Mandag', ' tirsdag ', 'Weds', 'Onsdagsgjengen', 'THURSDAYS', 'Torsdag',
+    'Fredagsvakta', 'fri.', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri', 'Standard weekday'];
+  same("store.js reads a template's day exactly as the week reads a crew's",
+    await page.evaluate((ns) => ns.filter((n) => Store.weekdayOf(n) !== groupWeekday(n)), names), []);
+
+  // An empty card: its name and what fills it, and nothing to load.
+  const tue = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-2"]') });
+  check('an empty template reads "Not saved yet", above its Save', (await tue.locator('.tpl-empty').innerText()) === 'Not saved yet'
+    && (await tue.locator('[data-act="resave-template"]').count()) === 1);
+  check('and has no Load and no contents to show',
+    (await tue.locator('[data-act="ask-template"]').count()) === 0 && (await tue.locator('[data-act="peek-template"]').count()) === 0);
+  await page.evaluate(() => { askTemplate(state.templates[1]); render(); });
+  check('asked to load anyway, it says it is not saved yet, and offers no Load',
+    (await page.locator('#notices [data-act="load-template"]').count()) === 0
+    && (await page.locator('#notices').innerText()).includes('The Tuesday template is not saved yet'));
+
+  // Save fills it: two clicks, a backup, the name and day kept.
+  const update = tue.locator('[data-act="resave-template"]');
+  await update.click();
+  check('one click on Save only arms it', (await update.innerText()) === 'Sure?'
+    && (await page.evaluate(() => state.templates[1].routes.length)) === 0);
+  await update.click();
+  same('two clicks fill it with the plan\'s routes, keeping its id, name and day',
+    await page.evaluate(() => { const t = state.templates[1]; return [t.id, t.name, t.weekday, t.routes.map((r) => r.driver).join()]; }),
+    ['tpl-weekday-2', 'Tuesday', '', 'Weekday One,Weekday Two,']);
+  check('after an "Updating the Tuesday template from the plan" backup', (await page.evaluate(() => Store.backups()[0].label)) === 'Updating the Tuesday template from the plan');
+  check('and now it can be loaded', (await tue.locator('[data-act="ask-template"]').innerText()) === 'Load'
+    && (await tue.locator('.tpl-name').innerText()) === 'Tuesday');
+
+  // A weekday template deleted stays deleted.
+  const wed = page.locator('#tab-plan .tpl', { has: page.locator('[data-act="resave-template"][data-id="tpl-weekday-3"]') }).locator('[data-act="del"]');
+  await wed.click();
+  await wed.click();
+  await page.reload({ waitUntil: 'networkidle' });
+  same('a deleted Wednesday template does not come back', await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Thursday', 'Friday']);
+  // Nor after an older build saves the plan, dropping the mark (review,
+  // 2026-10-01): a plan already carrying a default weekday template gains none.
+  await page.evaluate(() => { const raw = JSON.parse(localStorage.getItem('carcoord:v1')); delete raw.weekdayTemplates; localStorage.setItem('carcoord:v1', JSON.stringify(raw)); });
+  await page.reload({ waitUntil: 'networkidle' });
+  same('nor after an older build saved the plan without the mark', await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Thursday', 'Friday']);
+}
+
+// --- loading a template in parts ---
+// The plan has routes 1 and 9; Monday has 1, 2 and 3. Every combination does
+// what its sentence says, and a tick writes nothing.
+{
+  const partsPlan = { ...templatePlan, routes: [
+    { id: 'm1', name: '1', driver: 'Mine One', carId: 'c2', positionId: 'p2', round: '9' },
+    { id: 'm9', name: '9', driver: 'Mine Nine', carId: 'c1', positionId: 'p1', round: '4' },
+  ], templates: [{ id: 't1', name: 'Monday', weekday: '', routes: mondayRoutes }] };
+  const question = page.locator('#notices .notice.warn');
+  const says = () => question.locator('.tpl-says').innerText();
+  const button = question.locator('[data-act="load-template"]');
+  const tick = (part) => question.locator(`[data-act="tpl-part"][data-part="${part}"]`);
+  const routesNow = () => page.evaluate(() => state.routes.map((r) => [r.name, r.driver, r.carId, r.positionId, r.round].join('|')));
+  const ask = async (untick = []) => {
+    await loadPlan(partsPlan);
+    await page.click('#tab-plan .tpl [data-act="ask-template"]');
+    for (const part of untick) await tick(part).click();
+  };
+
+  await ask();
+  check('the load question has four ticks, all on', (await question.locator('[data-act="tpl-part"]:checked').count()) === 4
+    && (await question.locator('.tpl-parts').innerText()).replace(/\s+/g, ' ').trim() === 'Routes Drivers Cars Positions and rounds');
+  same('all on: it says it replaces the routes, with everything on them', await says(),
+    "Replaces your 2 routes with Monday's 3, with their drivers, cars, positions and rounds. A backup is taken first, so Backups can undo it.");
+  same('and the button says the same in short', await button.innerText(), 'Load Monday: routes, drivers, cars, positions');
+  const stored = await page.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await tick('drivers').click();
+  check('a tick changes the question, never the plan', (await page.evaluate(() => localStorage.getItem('carcoord:v1'))) === stored
+    && JSON.stringify(await routesNow()) === JSON.stringify(['1|Mine One|c2|p2|9', '9|Mine Nine|c1|p1|4']));
+  same('Routes on, Drivers off: the drivers come from the plan\'s route of the same name', await says(),
+    "Replaces your 2 routes with Monday's 3, with their cars, positions and rounds. Their drivers come from your route of the same name, where there is one: 1 of 3 have one, and the other 2 start blank. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), 'Load Monday: routes, cars, positions');
+  await button.click();
+  same('and it does that', await routesNow(), ['1|Mine One|c1|p1|1', '2||c2|p2|2', '3||||']);
+  check('marks and gaps come with the routes', await page.evaluate(() => state.routes[0].highlight === true && state.routes[1].gapBefore === true));
+  check('after a backup of the plan as it was', await page.evaluate(() => Store.backups()[0].label === 'Loading the Monday template'
+    && JSON.parse(Store.backups()[0].json).routes.map((r) => r.driver).join() === 'Mine One,Mine Nine'));
+
+  await ask(['routes']);
+  same('Routes off: it keeps the routes and puts in the ticked parts by name', await says(),
+    "Keeps your 2 routes and puts in Monday's drivers, cars, positions and rounds, by route name; 1 of your routes is not in Monday and keeps its. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), "Put in Monday's drivers, cars and positions");
+  await tick('cars').click();
+  await tick('positions').click();
+  same('Drivers only', await says(),
+    "Keeps your 2 routes and puts in Monday's drivers, by route name; 1 of your routes is not in Monday and keeps its. A backup is taken first, so Backups can undo it.");
+  same('its button', await button.innerText(), "Put in Monday's drivers");
+  await button.click();
+  same('and it does that: route 1 gets Monday\'s driver, route 9 keeps its own', await routesNow(), ['1|Weekday One|c2|p2|9', '9|Mine Nine|c1|p1|4']);
+  same('the routes are the same routes', await page.evaluate(() => state.routes.map((r) => r.id)), ['m1', 'm9']);
+  check('and it says what it did', (await page.locator('#notices .notice.info').last().innerText()).includes("Put in the Monday template's drivers on 1 route."));
+
+  await ask(['routes', 'drivers', 'cars']);
+  same('Positions and rounds only: its button', await button.innerText(), "Put in Monday's positions");
+  await button.click();
+  same('position and round go together', await routesNow(), ['1|Mine One|c2|p1|1', '9|Mine Nine|c1|p1|4']);
+
+  await ask(['routes', 'drivers', 'cars', 'positions']);
+  same('nothing ticked: it asks for a tick', await says(), 'Tick what to take from Monday.');
+  check('and there is no button', (await button.count()) === 0);
+
+  // Space on a tick from the keyboard: the focus stays on that tick.
+  await tick('drivers').focus();
+  await page.keyboard.press('Space');
+  check('a tick pressed with Space keeps the focus on it', await page.evaluate(() => document.activeElement?.dataset.part === 'drivers' && document.activeElement.checked));
+  await page.click('#notices .notice.warn [data-act="dismiss"]');
+}
 
 // --- templates are private to this PC, and travel in the JSON file ---
 // The decisions table's call, asserted in both directions: a share code
@@ -1180,8 +1398,13 @@ same('and nothing in it is pushed off the edge', await page.evaluate(() => {
 }), []);
 
 // Carrying a name onto the route it drives.
+// A hand moves a few pixels before it travels, and that is where Chrome starts
+// the drag. One jump straight across missed the start whenever the page above
+// was laid out a little differently (a one-line notice instead of the tour's).
 const carry = async (from, to) => {
   await from.hover(); await page.mouse.down();
+  const b = await from.boundingBox();
+  await page.mouse.move(b.x + b.width / 2 + 6, b.y + b.height / 2, { steps: 3 });
   await to.hover(); await to.hover(); await page.mouse.up();
 };
 const planRow = (n) => page.locator('#tab-plan tbody tr').nth(n);
@@ -1214,39 +1437,100 @@ await page.click('[data-act="add-tag"]');
 check('a tag made in the rail is applied to the row it was made on',
   (await page.locator('#tab-plan [data-panel="cars"] li').first().getAttribute('title')).includes('No fuel card'));
 await page.click('[data-act="tab"][data-tab="labels"]');
-check('and joins the labels every other list uses',
-  (await page.locator('#tab-labels tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value)))
-    .includes('No fuel card'));
+check('and joins the car and position labels, not the driver tags',
+  (await page.locator('#labelList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value))).includes('No fuel card')
+  && !(await page.locator('#driverTagList tbody tr [data-field="name"]').evaluateAll((n) => n.map((x) => x.value))).includes('No fuel card'));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
-// Drivers carry a tag of their own now, which they did not before.
+// Drivers carry a tag of their own, from the driver tags: never a car label.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
-await page.locator('.tag-menu .tag-choice', { hasText: 'Workshop' }).click();
+same("a driver's tag menu offers the driver tags only",
+  await page.locator('.tag-menu .tag-choice').allInnerTexts().then((t) => t.map((x) => x.trim())),
+  ['No tag', 'Sick', 'Holiday', 'Vacation', 'Course', 'Special situation']);
+await page.locator('.tag-menu .tag-choice', { hasText: 'Holiday' }).click();
 check('a driver can be tagged too',
-  (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+  (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Holiday'));
+await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('[data-act="tag"]').click();
+await page.fill('#newTagName', 'Nights');
+await page.click('[data-act="add-tag"]');
+check("a tag made in a driver's menu is a driver tag, and no label",
+  await page.evaluate(() => state.driverTags.some((t) => t.name === 'Nights') && !state.labels.some((l) => l.name === 'Nights')
+    && state.drivers[1].tagId === state.driverTags.find((t) => t.name === 'Nights').id));
+await page.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="tag"]').click();
+check("and a car's tag menu offers the labels only",
+  !(await page.locator('.tag-menu .tag-choice').allInnerTexts()).some((t) => /Holiday|Nights|Sick/.test(t))
+  && (await page.locator('.tag-menu .tag-choice', { hasText: 'Workshop' }).count()) === 1);
+await page.keyboard.press('Escape');
 
 await page.reload({ waitUntil: 'networkidle' });
 same('none of it disappears on a reload', await railNames('drivers'), orderNow);
-check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Workshop'));
+check('including the tags', (await page.locator('#tab-plan [data-panel="drivers"] li').first().getAttribute('title')).includes('Holiday'));
 
 // A template says what is in it, not only what it is called.
 await page.fill('#newTemplate', 'Monday');
 await page.click('[data-act="save-template"]');
-check('a template is closed on the shelf to begin with', (await page.locator('.tpl-body').count()) === 0);
-await page.locator('[data-act="peek-template"]').first().click();
-check('opening one lists the routes it would put on the plan',
-  (await page.locator('.tpl-body tbody tr').count()) === 15);
+check('a template\'s contents are not on show to begin with', (await page.locator('.tpl-body').count()) === 0);
+// Laid out as the week under it is (owner, 2026-10-01): Monday to Friday in
+// five columns on one row, in day order, and every other template after.
+// Where each card sits in the shelf, measured from the shelf, so a scroll
+// between two looks does not read as a card moving.
+const tplCards = () => page.evaluate(() => {
+  const shelf = document.querySelector('#planTemplates .shelf').getBoundingClientRect();
+  return [...document.querySelectorAll('#planTemplates .tpl-head, #planTemplates .tpl-none')].map((c) => {
+    const r = c.getBoundingClientRect();
+    return { name: c.querySelector('.tpl-name').textContent.trim(), at: `${Math.round(r.left - shelf.left)},${Math.round(r.top - shelf.top)}` };
+  });
+});
+const cardsBefore = await tplCards();
+same('the shelf puts Monday to Friday first, in day order', cardsBefore.slice(0, 5).map((c) => c.name), ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+check('side by side on one row, as the week\'s columns are', new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[1])).size === 1
+  && new Set(cardsBefore.slice(0, 5).map((c) => c.at.split(',')[0])).size === 5, JSON.stringify(cardsBefore));
+// Resting the mouse on a card shows what it holds beside it, as a submenu
+// opens beside its menu (owner, 2026-10-01); leaving lets it go.
+const peek = page.locator('#tplPeek');
+const filled = page.locator('#planTemplates .tpl-head[data-filled]').first();
+await filled.hover();
+await page.waitForTimeout(600);
+check('resting the mouse on a card shows the routes it would put on the plan, beside it',
+  await peek.isVisible() && (await peek.locator('.tpl-body tbody tr').count()) === 15 && await page.evaluate(() => {
+    const l = document.getElementById('tplPeek').getBoundingClientRect(), c = document.querySelector('#planTemplates .tpl-head.shown').getBoundingClientRect();
+    return l.left >= c.right || l.right <= c.left;
+  }));
+same('and moves no card', (await tplCards()).map((c) => c.at), cardsBefore.map((c) => c.at));
 check('with the driver and car each route was saved with',
-  (await page.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
-  await page.locator('.tpl-body tbody tr').nth(2).innerText());
-await page.locator('[data-act="peek-template"]').first().click();
-check('and it closes again', (await page.locator('.tpl-body').count()) === 0);
+  (await peek.locator('.tpl-body tbody tr').nth(2).innerText()).includes('Ana Novak'),
+  await peek.locator('.tpl-body tbody tr').nth(2).innerText());
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('moving away lets it go', await peek.isHidden() && (await page.locator('.tpl-body').count()) === 0);
+// The route count pins it, for a click, a finger or the keyboard.
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#planWeek h3').hover();
+await page.waitForTimeout(500);
+check('a click on its route count keeps it open when the mouse leaves', await peek.isVisible()
+  && (await page.locator('#planTemplates [data-act="peek-template"]').first().getAttribute('aria-expanded')) === 'true');
+await page.keyboard.press('Escape');
+check('and Esc shuts it', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek [data-act="peek-template"]').click();
+check('so does its ✕', await peek.isHidden());
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.mouse.click(5, 300);
+check('and a click anywhere else', await peek.isHidden());
+// From the keyboard the focus goes into it, and back to the count when it shuts.
+await page.locator('#planTemplates [data-act="peek-template"]').first().focus();
+await page.keyboard.press('Enter');
+check('Enter on the route count pins it and puts the focus on its ✕', await peek.isVisible()
+  && await page.evaluate(() => !!document.activeElement?.closest('#tplPeek')));
+await page.keyboard.press('Enter');
+check('and Enter there shuts it, handing the focus back to the count', await peek.isHidden()
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'peek-template' && !!document.activeElement.closest('#planTemplates')));
 
 // --- the tag menu is never cut off ---
 // It was drawn inside its row, and the rows sit in a list that scrolls, so the
 // list cut it off after its first choice: the rest was there only by
 // scrolling. On a roster of two, which is where it was reported.
-const cutOff = (sel) => page.locator(sel).evaluate((box) => {
+const cutOff = (sel, pg = page) => pg.locator(sel).evaluate((box) => {
   const m = box.getBoundingClientRect();
   const out = [];
   if (m.top < 0 || m.left < 0 || m.bottom > innerHeight + 0.5 || m.right > document.documentElement.clientWidth + 0.5) out.push('the screen');
@@ -1258,14 +1542,17 @@ const cutOff = (sel) => page.locator(sel).evaluate((box) => {
   }
   return out;
 });
-const railFixture = (drivers, labels) => page.evaluate(([drivers, labels]) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false,
-  labels: labels.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+// The drivers' menu lists the driver tags, so the tags go there, and in the
+// labels too for the car.
+const railFixture = (drivers, tags) => page.evaluate(([drivers, tags]) => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false,
+  labels: tags.map((name, i) => ({ id: `L${i}`, name, color: '#1565c0' })),
+  driverTags: tags.map((name, i) => ({ id: `T${i}`, name, color: '#1565c0' })),
   cars: [{ id: 'c1', reg: 'AA11111', labelId: '', note: '' }], positions: [],
   routes: [{ id: 'r1', name: '1', driver: drivers[0], carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
-  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
+  drivers: drivers.map((name, i) => ({ id: `d${i}`, name, available: true, tagId: '', note: '' })),
   driverGroups: [], templates: [],
-})), [drivers, labels]);
+})), [drivers, tags]);
 const tagButton = (n) => page.locator('#tab-plan [data-panel="drivers"] li').nth(n).locator('[data-act="tag"]');
 
 await page.setViewportSize({ width: 1600, height: 940 });
@@ -1331,16 +1618,21 @@ await page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]'
 same('the driver grid fits a short screen rather than running off it', await cutOff('#picker'), []);
 await page.keyboard.press('Escape');
 
-// --- the week, as a row of days beside the plan ---
-// All, then Monday to Sunday. A group named for a day is that day's button,
-// however it was written; a group that is not a day keeps a button of its own.
+// --- the week under the route list, and the Drivers panel's chip line ---
+// A group named for a weekday is that day's column under the route list,
+// however it was written; every other group — Saturday's and Sunday's, a day
+// named twice, a group that is no day — is a chip in the Drivers panel, after
+// All. (The row of Mon–Sun buttons beside the plan went in 0.7.0. Its checks
+// were re-proved against the columns and the chip line: here, and in the
+// layout cases near the end. The two that were retired say why where they
+// stood.)
 same('a group is matched to its day the way people write them',
   await page.evaluate(() => ['Monday', 'mon', 'Mondays', 'Monday crew', 'Mandag', ' tirsdag ', 'Weds', 'LØRDAG', 'søndag', 'Tor', 'Weekend', 'Mon-Fri']
     .map((n) => groupWeekday(n))),
   [1, 1, 1, 1, 1, 2, 3, 6, 0, -1, -1, -1]);
 await page.setViewportSize({ width: 1600, height: 940 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false, labels: [], cars: [], positions: [], routes: [],
   drivers: ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, labelId: '', note: '' })),
   driverGroups: [
     { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
@@ -1351,38 +1643,44 @@ await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
   templates: [],
 })));
 await page.reload({ waitUntil: 'networkidle' });
-const week = () => page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.map((b) =>
-  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('none') ? '-' : '')));
-const dayBtn = (text) => page.locator('#tab-plan .day-bar .day', { hasText: text });
-same('the drivers panel shows the week: All, then Monday to Sunday, the days with no crew quiet',
-  await week(), ['All*', 'Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-check("today's day is marked", await page.evaluate(() =>
-  document.querySelector('#tab-plan .day-bar .day.today')?.textContent.trim() === ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]));
-same('a group that is not a day, or is a day twice over, keeps a button of its own',
-  await page.locator('#tab-plan .rail-groups .btn').allInnerTexts(), ['Weekend crew', 'Mon']);
+const chips = () => page.locator('#tab-plan .rail-groups .btn').evaluateAll((bs) => bs.map((b) =>
+  b.textContent.trim() + (b.classList.contains('on') ? '*' : '') + (b.classList.contains('quiet') ? '-' : '')));
+const cols = () => page.locator('#planWeek .week-col').evaluateAll((cs) => cs.map((c) =>
+  c.querySelector('.week-day').textContent.slice(0, 3) + (c.querySelector('.week-load.lit') ? '*' : '') + (c.classList.contains('quiet') ? '-' : '')));
+const loadDay = (day) => page.click(`#planWeek .week-col[data-day="${day}"] [data-act="apply-group"]`);
+same('the week: Monday to Friday, the days with no crew quiet', await cols(), ['Mon', 'Tue', 'Wed-', 'Thu-', 'Fri-']);
+same('the chip line: All, then every group with no column', await chips(), ['All*', 'Weekend crew', 'Mon']);
+check("the plan's day is marked in the week", await page.evaluate(() => {
+  const c = document.querySelector('#planWeek .week-col[aria-current="date"]');
+  const d = planWeekday();
+  return d >= 1 && d <= 5 ? Number(c?.dataset.day) === d : !c;
+}));
 
-await dayBtn('Mon').click();
-same('Mon makes exactly the Monday crew the ones in', await inToday(), ['Ana', 'Bo']);
-same('and is lit, with All no longer lit', await week(), ['All', 'Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-await dayBtn('Tue').click();
-same('Tue then replaces them rather than adding to them', await inToday(), ['Cai']);
-await dayBtn('All').click();
+await loadDay(1);
+same("Monday's Load makes exactly the Monday crew the ones in", await inToday(), ['Ana', 'Bo']);
+same('and lights Monday, with All no longer lit', [...await cols(), ...await chips()], ['Mon*', 'Tue', 'Wed-', 'Thu-', 'Fri-', 'All', 'Weekend crew', 'Mon']);
+await loadDay(2);
+same("Tuesday's then replaces them rather than adding to them", await inToday(), ['Cai']);
+await page.click('#tab-plan .rail-groups [data-act="all-in"]');
 same('All puts everyone in', await inToday(), ['Ana', 'Bo', 'Cai', 'Dee', 'Efe']);
 
-await dayBtn('Mon').click();
-await dayBtn('Wed').click();
-check('a day with no crew yet only asks', (await page.evaluate(() => state.driverGroups.length)) === 4
-  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').innerText()) === 'Save as Wednesday');
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('and saving makes a Wednesday group of who is in',
+await loadDay(1);
+await page.click('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]');
+check("Wednesday's column saves who is in as Wednesday's crew",
   await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Wednesday' && g.driverIds.join() === 'd0,d1')));
-same('which is the Wed button from then on, lit because it is in force', await week(), ['All', 'Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
+same('which is its column from then on, lit because it is in force', await cols(), ['Mon*', 'Tue', 'Wed*', 'Thu-', 'Fri-']);
 
 await page.click('[data-act="tab"][data-tab="drivers"]');
-check('the Drivers tab says which button each group is',
-  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon button'
+check('the Drivers tab says where each group is on the day plan',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').innerText()) === 'Mon column'
+  && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Monday"]') }).locator('.day-badge').getAttribute('title')) === 'This group is the Monday column under the route list'
   && (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Mon"]') }).locator('.day-badge').innerText()) === 'Monday twice');
-same('and offers the days that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri', 'Sat', 'Sun']);
+same('and offers the weekdays that have no crew yet', await page.locator('#tab-drivers .day-add .btn').allInnerTexts(), ['Thu', 'Fri']);
+check("its hint names the column under the route list", (await page.locator('#tab-drivers .hint', { hasText: 'column under the route list' }).count()) === 1);
+await page.evaluate(() => { state.driverGroups.push({ id: 'gs', name: 'Lørdag', driverIds: ['d0'] }); render(); });
+check('a Saturday crew is badged as its own button in the Drivers panel',
+  (await page.locator('#tab-drivers .group', { has: page.locator('[data-field="name"][value="Lørdag"]') }).locator('.day-badge').innerText()) === 'Sat · own button');
+await page.evaluate(() => { state.driverGroups = state.driverGroups.filter((g) => g.id !== 'gs'); render(); });
 await page.locator('#tab-drivers .day-add .btn', { hasText: 'Fri' }).click();
 check('one click makes that day its group', await page.evaluate(() => state.driverGroups.some((g) => g.name === 'Friday' && g.driverIds.length === 0)));
 await page.click('[data-act="tab"][data-tab="plan"]');
@@ -1392,7 +1690,7 @@ same('more of the ways a day gets written are read as that day',
   await page.evaluate(() => ['Mondays.', "Monday's crew", 'Monday team', 'Monday-crew', 'Mandager', 'Søndager'].map((n) => groupWeekday(n))),
   [1, 1, 1, 1, 1, 0]);
 const weekFixture = (extra = {}) => page.evaluate((extra) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-24', qrOnSheet: false, labels: [], cars: [], positions: [],
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false, labels: [], cars: [], positions: [],
   routes: Array.from({ length: 40 }, (_, i) => ({ id: `r${i}`, name: String(i + 1), driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
   drivers: Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, name: `Driver ${String(i + 1).padStart(2, '0')}`, available: true, labelId: '', note: '' })),
   driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1', 'd2'] }],
@@ -1403,28 +1701,30 @@ const railList = (panel) => page.locator(`#tab-plan [data-panel="${panel}"] .rai
 await page.setViewportSize({ width: 1600, height: 940 });
 await weekFixture({ driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] }, { id: 'g2', name: 'Thursday', driverIds: [] }] });
 await page.reload({ waitUntil: 'networkidle' });
-same('an empty crew is as quiet as a missing one, and not lit', await week(), ['All*', 'Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-', 'Sat-', 'Sun-']);
-await dayBtn('Thu').click();
-check('pressing it asks rather than sending everyone away',
-  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+same('an empty crew is as quiet as a missing one, with no Load', await cols(), ['Mon', 'Tue-', 'Wed-', 'Thu-', 'Fri-']);
+check('it offers to save who is in, and sends nobody away',
+  (await page.evaluate(() => state.drivers.every((d) => d.available))) && (await page.locator('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]').count()) === 1);
 await page.evaluate(() => { state.drivers[5].available = false; render(); });
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('the offer counts who is in when it is pressed, and fills the empty crew rather than making a second',
+await page.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+check('the Save counts who is in when it is pressed, and fills the empty crew rather than making a second',
   await page.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1
     && state.driverGroups.find((g) => g.id === 'g2').driverIds.length === 29));
 
-await page.evaluate(() => { note('warn', 'A question about the data', { act: 'split-rounds', kind: '', id: '', text: 'Answer it' }); render(); });
-await dayBtn('Sat').click();
-check('a question about a day leaves every other question up',
-  (await page.locator('#notices [data-act="split-rounds"]').count()) === 1 && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 1);
+// Retired: "a question about a day leaves every other question up". There is
+// no day question any more: a weekday's column saves in place, and a Saturday
+// or Sunday crew is now made on the Drivers tab (Add a crew for Sat, then
+// tick names).
 await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
 
-const rowWas = await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top);
-await dayBtn('Mon').click();
-check('pressing a day adds no notice, so the row stays under the pointer',
+// The week sits under 40 routes, below the fold: brought into view first, as
+// the leader would scroll to it, so the click itself scrolls nothing.
+await page.locator('#planWeek .week-col[data-day="1"] [data-act="apply-group"]').scrollIntoViewIfNeeded();
+const weekTopWas = await page.locator('#planWeek').evaluate((b) => b.getBoundingClientRect().top);
+await loadDay(1);
+check('a Load adds no notice, so the week stays under the pointer',
   (await page.locator('#notices .notice').count()) === 0
-  && Math.abs((await page.locator('#tab-plan .day-bar').evaluate((b) => b.getBoundingClientRect().top)) - rowWas) < 1);
-await dayBtn('All').click();
+  && Math.abs((await page.locator('#planWeek').evaluate((b) => b.getBoundingClientRect().top)) - weekTopWas) < 1);
+await page.click('#tab-plan .rail-groups [data-act="all-in"]');
 
 await railList('drivers').evaluate((l) => { l.scrollTop = 400; });
 await page.waitForTimeout(50);
@@ -1432,52 +1732,48 @@ await page.click('[data-act="tab"][data-tab="drivers"]');
 await page.click('[data-act="tab"][data-tab="plan"]');
 check('a trip to another tab leaves the rail lists where they were', (await railList('drivers').evaluate((l) => l.scrollTop)) === 400,
   String(await railList('drivers').evaluate((l) => l.scrollTop)));
-await dayBtn('Mon').click();
-check('but pressing a day shows the crew it brought in, at the top', (await railList('drivers').evaluate((l) => l.scrollTop)) === 0);
+await loadDay(1);
+check('but a Load shows the crew it brought in, at the top', (await railList('drivers').evaluate((l) => l.scrollTop)) === 0);
 
-await dayBtn('Tue').focus();
+await page.focus('#planWeek .week-col[data-day="2"] [data-act="save-day-crew"]');
 await page.keyboard.press('Enter');
-await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').waitFor();
-check('a day with no crew pressed from the keyboard takes the focus to its question',
-  await page.evaluate(() => document.activeElement?.dataset.act === 'save-day-crew'));
-await dayBtn('Mon').focus();
+check("an empty day's Save pressed from the keyboard takes the focus to its new Load",
+  await page.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="2"] [data-act="apply-group"]')));
+await page.focus('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
 await page.keyboard.press('Enter');
-check('and a day pressed from the keyboard keeps the focus on itself',
-  await page.evaluate(() => document.activeElement?.closest('.day-bar') && document.activeElement.textContent.trim() === 'Mon'));
+check('and a Load pressed from the keyboard keeps the focus on itself',
+  await page.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="1"] [data-act="apply-group"]')));
 await page.evaluate(() => { notices = []; render(); });
 
-// The offer is in view, not under the top bar, even from the bottom of a long plan.
-await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-await dayBtn('Fri').click();
-check('the question a day raises is in view, clear of the top bar',
-  await page.evaluate(() => {
-    const b = document.querySelector('#tab-plan .day-ask [data-act="save-day-crew"]').getBoundingClientRect();
-    return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.dataset.act === 'save-day-crew';
-  }));
-await page.evaluate(() => { notices = []; render(); window.scrollTo(0, 0); });
+// Retired: "the question a day raises is in view, clear of the top bar". A
+// column's Save sits where it was pressed and asks nothing anywhere else.
+await page.evaluate(() => { window.scrollTo(0, 0); });
 
-// A click into a box while a tag menu is open lands in the box.
+// A click into a box while a tag menu is open lands in the box. The click
+// is at the box's middle, so the caret can land inside the name rather than
+// after it, depending on how wide the rail draws: the X only has to arrive.
 await page.locator('#tab-plan [data-panel="drivers"] li').first().locator('[data-act="tag"]').click();
 await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').click();
 await page.keyboard.type('X');
 check('a click into a text box with a tag menu open is not lost',
-  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).endsWith('X'));
+  await page.locator('#tagMenu').isHidden() && (await page.locator('#tab-plan [data-panel="drivers"] li').nth(1).locator('.rail-name').inputValue()).includes('X'));
 
 // Templates: each keeps its own place in its list.
 await weekFixture({ templates: ['Monday', 'Friday'].map((name, t) => ({ id: `t${t}`, name, weekday: '',
   routes: Array.from({ length: 30 }, (_, i) => ({ name: String(i + 1), driver: `${name} ${i}`, carId: '', positionId: '', round: '', highlight: false, gapBefore: false })) })) });
 await page.reload({ waitUntil: 'networkidle' });
-await page.locator('[data-act="peek-template"]').first().click();
-await page.locator('.tpl-body').evaluate((b) => { b.scrollTop = 300; });
+await page.locator('#planTemplates [data-act="peek-template"]').first().click();
+await page.locator('#tplPeek .tpl-body').evaluate((b) => { b.scrollTop = 300; });
 await page.waitForTimeout(50);
-await page.locator('[data-act="peek-template"]').nth(1).click();
-check('a second template opens at its own top, not where the first was left', (await page.locator('.tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.locator('#planTemplates [data-act="peek-template"]').nth(1).click();
+check('a second template opens at its own top, not where the first was left', (await page.locator('#tplPeek .tpl-body').evaluate((b) => b.scrollTop)) === 0);
+await page.keyboard.press('Escape');
 
 // A group renamed into a day is badged as it is typed.
 await page.click('[data-act="tab"][data-tab="drivers"]');
 await page.locator('#tab-drivers .group [data-field="name"]').first().fill('Thursday');
 check('renaming a group into a day changes its badge there and then',
-  (await page.locator('#tab-drivers .group').first().locator('.day-badge').innerText()) === 'Thu button');
+  (await page.locator('#tab-drivers .group').first().locator('.day-badge').innerText()) === 'Thu column');
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 // On a stacked screen, a tag menu whose row scrolls up under the top bar goes with it.
@@ -1488,18 +1784,15 @@ await page.evaluate(() => window.scrollTo(0, 600));
 await page.waitForTimeout(100);
 check('a tag menu whose row scrolls up under the top bar shuts', await page.locator('#tagMenu').isHidden());
 
-// A phone: the whole week on screen, and a question that can be read.
+// A phone: the group question can be read. (Every weekday on screen is now
+// the week box's own check at 390, in the layout cases.)
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => window.scrollTo(0, 0));
-check('on a phone every day of the week is on screen',
-  await page.locator('#tab-plan .day-bar .day').evaluateAll((bs) => bs.length === 8 && bs.every((b) => {
-    const r = b.getBoundingClientRect();
-    return r.left >= 0 && r.right <= document.documentElement.clientWidth;
-  })));
-await dayBtn('Sat').click();
-check("and a day's question reads as a sentence, not a word per line",
+await page.evaluate(() => { state.driverGroups.push({ id: 'gq', name: 'Reserves', driverIds: [] }); render(); });
+await page.click('#tab-plan .rail-groups [data-act="group-empty"]');
+check("an empty group's question reads as a sentence, not a word per line",
   (await page.locator('#tab-plan .day-ask span').first().evaluate((s) => s.getBoundingClientRect().width)) > 200);
-await page.evaluate(() => { notices = []; render(); });
+await page.evaluate(() => { dayAsk = null; state.driverGroups = state.driverGroups.filter((g) => g.id !== 'gq'); notices = []; render(); });
 
 // --- what a second check of those fixes found ---
 same('Norwegian writes the crew into the day, and has its own short forms',
@@ -1517,25 +1810,23 @@ await page.keyboard.type('Nights');
 await page.keyboard.press('Enter');
 check('Enter in the new-tag box adds the tag and the menu stays shut, with the focus back on its button',
   await page.locator('#tagMenu').isHidden()
-  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].labelId === state.labels.find((l) => l.name === 'Nights')?.id));
+  && await page.evaluate(() => document.activeElement?.dataset.act === 'tag' && state.drivers[3].tagId === state.driverTags.find((t) => t.name === 'Nights')?.id));
 
 await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
-check('an empty group under the week sends nobody away, and says why',
+check('an empty group in the chip line sends nobody away, and says why',
   await page.evaluate(() => state.drivers.every((d) => d.available))
   && (await page.locator('#tab-plan .day-ask').innerText()).includes('Weekend has nobody in it yet'));
 
 // (The tag just made raised a notice of its own; clear it, so what follows
 // counts only what setting up the week adds.)
 await page.evaluate(() => { notices = []; render(); });
-await dayBtn('Tue').click();
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-await dayBtn('Wed').click();
+await page.click('#planWeek .week-col[data-day="2"] [data-act="save-day-crew"]');
 await page.evaluate(() => { state.drivers.slice(10).forEach((d) => { d.available = false; }); render(); });
-check('the question counts who is in as it stands', (await page.locator('#tab-plan .day-ask').innerText()).includes('Save the 10 in now'));
-await page.click('#tab-plan .day-ask [data-act="save-day-crew"]');
-check('setting up the week from the row piles nothing up above the plan: one line, the latest answer',
-  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#tab-plan .day-ask').count()) === 1
-  && (await page.locator('#tab-plan .day-ask').innerText()).startsWith("Saved: Wednesday's crew is the 10"));
+check("an empty day's Save counts who is in as it stands",
+  (await page.locator('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]').innerText()).includes('Save the 10 in'));
+await page.click('#planWeek .week-col[data-day="3"] [data-act="save-day-crew"]');
+check('setting up the week from its columns piles nothing up above the plan',
+  (await page.locator('#notices .notice').count()) === 0 && (await page.locator('#planWeek .week-col[data-day="3"] .week-load.lit').count()) === 1);
 await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
 
 // A list emptied and filled again starts at its top, not at a place the old
@@ -1558,11 +1849,14 @@ await page.evaluate(() => { notices = []; render(); });
 // Phone.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => window.scrollTo(0, 0));
-const tueAt = await dayBtn('Tue').evaluate((b) => { const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
-await dayBtn('Thu').click();
-check('on a phone a quiet day asks under the week, and nothing moves under the next tap',
-  await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.textContent.trim() === 'Tue', tueAt));
-await page.click('#tab-plan .day-ask [data-act="day-ask-close"]');
+// On a phone, across two Loads, the chip line keeps its height and each chip
+// its width, so nothing under the next tap moves.
+const chipLine = () => page.locator('#tab-plan .rail-groups').evaluate((p) =>
+  [Math.round(p.getBoundingClientRect().height), ...[...p.children].map((b) => Math.round(b.getBoundingClientRect().width))].join());
+const chipsWas = await chipLine();
+await loadDay(2);
+await loadDay(3);
+check('on a phone, across two Loads, the chip line keeps its height and every chip its width', (await chipLine()) === chipsWas, `${chipsWas} -> ${await chipLine()}`);
 
 const tableBox = page.locator('#tab-plan .plan-table');
 await tableBox.evaluate((b) => { b.scrollLeft = 300; });
@@ -1596,11 +1890,8 @@ check('a delete confirmed from the keyboard deletes', (await page.evaluate(() =>
 // --- and what a third check found ---
 await weekFixture({ driverGroups: [{ id: 'g1', name: 'Weekend', driverIds: [] }] });
 await page.reload({ waitUntil: 'networkidle' });
-await dayBtn('Wed').click();
-await page.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d3', 'd4'] }); render(); });
-check('a question overtaken on the Drivers tab turns into the answer, with no Save left in it',
-  (await page.locator('#tab-plan .day-ask').innerText()).includes('Wednesday has a crew now')
-  && (await page.locator('#tab-plan .day-ask [data-act="save-day-crew"]').count()) === 0);
+// "A question overtaken on the Drivers tab turns into the answer" is now a
+// column: a crew added meanwhile shows with Load and no Save (layout cases).
 await page.locator('#tab-plan .rail-groups .btn', { hasText: 'Weekend' }).click();
 await page.evaluate(() => { state.driverGroups.find((g) => g.id === 'g1').driverIds.push('d5'); render(); });
 check('and a line about an empty crew goes once names are ticked into it', (await page.locator('#tab-plan .day-ask').count()) === 0);
@@ -1686,6 +1977,9 @@ check('a mouse press on a button half under the top bar lands', await page.evalu
 await page.evaluate(() => window.scrollTo(0, 0));
 await planRowN(3).locator('[data-act="del"]').focus();
 await page.keyboard.press('Enter');
+// The press's own focus check runs a frame later (clearing the top bar);
+// a scroll made inside that frame raced it. A person scrolls later than that.
+await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 await page.evaluate(() => window.scrollTo(0, 900));
 await page.waitForTimeout(3300);
 check('a disarm leaves the page where the user scrolled it', (await page.evaluate(() => scrollY)) === 900, String(await page.evaluate(() => scrollY)));
@@ -1781,14 +2075,18 @@ check('a malformed URL is a 404, not a crash', malformed === 404, String(malform
 check('the server is still alive after it', (await fetch(base).then((r) => r.status, () => 0)) === 200);
 
 // --- the page a phone opens must not scroll sideways ---
-// The QR on the printed sheet exists so a phone can open this page, so phone
-// width is a real use, not a courtesy.
+// Share links open this page on a phone, so phone width is a real use, not a
+// courtesy.
 await page.setViewportSize({ width: 390, height: 844 });
 await page.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 1, date: '2026-09-18', labels: [],
+  schemaVersion: 1, date: nextWorkingDay(), labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
   cars: [{ id: 'c1', reg: 'AA11111' }],
   positions: [{ id: 'p1', name: 'Spot 1' }],
   routes: [{ id: 'r1', name: '1', driver: 'Ana Ruiz', carId: 'c1', positionId: 'p1' }],
+  // Two drivers, one tagged and one with a note, and a group: the widest the
+  // Drivers tab's row gets.
+  drivers: [{ id: 'd1', name: 'Ana Ruiz', available: true, labelId: 'L1', note: '' }, { id: 'd2', name: 'Bo Lind', available: true, labelId: '', note: 'Back Monday' }],
+  driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
   // A saved template too: the shelf card is the widest row the day plan can
   // grow — name button, route count, weekday select and delete, side by side.
   templates: [{ id: 't1', name: 'Monday', weekday: '1',
@@ -1800,6 +2098,11 @@ for (const name of ['plan', 'drivers', 'cars', 'positions', 'labels', 'data']) {
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   check(`the ${name} tab fits a phone screen`, !wide);
 }
+await page.click('[data-act="tab"][data-tab="drivers"]');
+check("on a phone, a driver's five usual days sit on one line, and the note box has room", await page.evaluate(() => {
+  const tops = new Set([...document.querySelectorAll('#tab-drivers tbody tr:first-child .day-tick')].map((b) => Math.round(b.getBoundingClientRect().top)));
+  return tops.size === 1 && document.querySelector('#tab-drivers tbody tr:first-child [data-field="note"]').getBoundingClientRect().width > 0;
+}));
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.evaluate(() => localStorage.clear());
 await page.reload({ waitUntil: 'networkidle' });
@@ -1830,7 +2133,10 @@ check('a code with a row missing is reported, not thrown',
 const hostile = 'red;position:fixed;inset:0;z-index:99';
 await readCode(h, rawCode({
   v: 1, d: '2026-09-18', r: [], m: [],
-  l: [['Workshop', hostile]], c: [['AA11111', 'Workshop', '']], p: [], dr: [], dg: [],
+  l: [['Workshop', hostile]], c: [['AA11111', 'Workshop', ''], ['BB22222', '', '']], p: [],
+  // A crew and an untagged car and driver: the app's own colours for these
+  // live in the stylesheet, so nothing but a label colour is written inline.
+  dr: [['Ana', 1], ['Bo', 1]], dg: [['Monday', ['Ana', 'Bo']]],
 }));
 await h.waitForSelector('#shareDlg[open]');
 await h.check('#shareDlg input[value="all"]');
@@ -1843,6 +2149,17 @@ check('a colour out of a share code cannot smuggle CSS into the page',
   styles.slice(0, 4).join(' | '));
 check('and nothing it sent is laid over the page',
   (await h.evaluate(() => [...document.querySelectorAll('*')].every((el) => getComputedStyle(el).position !== 'fixed'))));
+check('a crew and an untagged car and driver are part of that page',
+  await h.evaluate(() => document.querySelectorAll('#tab-drivers .chip').length >= 2 && state.cars.some((c) => !c.labelId) && state.drivers.some((d) => !d.tagId)));
+await h.click('[data-act="tab"][data-tab="plan"]');
+const untagged = await h.evaluate(() => state.cars.find((c) => !c.labelId).id);
+check("the rail's No tag dot writes no colour of its own",
+  await h.evaluate((id) => document.querySelector(`#tab-plan [data-act="tag"][data-kind="car"][data-id="${id}"]`).closest('li').querySelector('.dot').getAttribute('style') === null, untagged));
+await h.click(`#tab-plan [data-act="tag"][data-kind="car"][data-id="${untagged}"]`);
+await h.waitForSelector('#tagMenu:not([hidden])');
+check("and neither does the tag menu's first choice, No tag",
+  await h.evaluate(() => document.querySelector('#tagMenu .tag-choice .dot').getAttribute('style') === null));
+await h.keyboard.press('Escape');
 
 // A date that is not a date printed as "//" across the top of the sheet.
 const dateBefore = await h.evaluate(() => state.date);
@@ -1914,7 +2231,7 @@ await pcFull.close();
 const pickNames = ['Zara Moe', 'Bo Lind', 'Hana Sol', 'Ana Ruiz', 'Ida Ngo', 'Cai Mensah', 'Efe Yilmaz',
   'Dee Okafor', 'Gus Hald', 'Fia Berg', 'Jon Kvam', 'Kai Lund', 'Liv Dahl'];
 await page.evaluate((names) => localStorage.setItem('carcoord:v1', JSON.stringify({
-  schemaVersion: 4, date: '2026-09-23', qrOnSheet: false,
+  schemaVersion: 4, date: nextWorkingDay(), qrOnSheet: false,
   labels: [{ id: 'L1', name: 'Workshop', color: '#c62828' }],
   cars: [['c1', 'EL10002'], ['c2', 'AB12345'], ['c3', 'CD55555'], ['c4', 'AA11111']]
     .map(([id, reg]) => ({ id, reg, labelId: id === 'c3' ? 'L1' : '', note: '' })),
@@ -1984,6 +2301,3881 @@ await pickRow.locator('[data-field="carId"]').click();
 await page.click('#tab-plan thead');
 check('and so does a click anywhere else', await picker.isHidden());
 
+// --- the save file is never written over unread ---
+// The save file's handle lives in IndexedDB, which cannot hold a stand-in with
+// methods, so each case puts one straight onto Store.file: the state init()
+// leaves after a restart, a handle whose permission is back to "prompt". What
+// decides the answer is what the page started from, and whether the "check the
+// file first" marker survived, which the reloads before each case set up.
+const devPlan = await readFile(new URL('./fixtures/dev-data.json', import.meta.url), 'utf8');
+const pcFile = await browser.newContext();
+const fp = await pcFile.newPage();
+const fpErrors = [];
+fp.on('console', (m) => m.type() === 'error' && fpErrors.push(m.text()));
+fp.on('pageerror', (e) => fpErrors.push(String(e)));
+const linkStandIn = (pg, text, opts = {}) => pg.evaluate(([text, opts]) => {
+  const disk = window.__disk = { text, writes: 0, throwRead: !!opts.throwRead, lastModified: Date.parse('2026-09-27T15:00:00') };
+  if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+  let perm = opts.perm || 'prompt';
+  Store.file.handle = {
+    name: 'car-coordinator.json',
+    queryPermission: async () => perm,
+    requestPermission: async () => (perm = 'granted'),
+    getFile: async () => {
+      if (opts.delay) await new Promise((r) => setTimeout(r, opts.delay));
+      if (disk.throwRead) throw new DOMException('offline placeholder', 'NotReadableError');
+      return new File([disk.text], 'car-coordinator.json', { lastModified: disk.lastModified });
+    },
+    createWritable: async () => {
+      let out = '';
+      return { write: async (t) => { out += t; }, close: async () => { disk.text = out; disk.writes++; }, abort: async () => {} };
+    },
+  };
+  Store.file.name = 'car-coordinator.json';
+  Store.file.permission = perm;
+  Store.file.hold = null;
+  render();
+}, [text, opts]);
+const onData = (pg) => pg.evaluate(() => { tab = 'data'; render(); });
+const reconnect = async (pg) => {
+  await onData(pg);
+  await pg.click('[data-act="reconnect-file"]');
+  await pg.waitForFunction(() => Store.file.permission === 'granted');
+};
+const disk = (pg) => pg.evaluate(() => ({ ...window.__disk, backups: Store.backups(), hold: Store.file.hold && Store.file.hold.kind,
+  marker: localStorage.getItem('carcoord:pref:fileNeedsCheck') }));
+const settle = (pg) => pg.evaluate(async () => { save(); await Store.flush(); });
+const fresh = async (pg) => { await pg.evaluate(() => localStorage.clear()); await pg.reload({ waitUntil: 'networkidle' }); };
+
+// 1. A browser with nothing of its own: the file is the only copy.
+await fp.goto(base, { waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+check('Reconnect on an empty browser asks instead of writing',
+  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await disk(fp)).writes === 0);
+const ask = await fp.locator('#tab-data .card').first().innerText();
+check('and says what the file and the screen each hold', ask.includes('17 cars') && ask.includes('0 cars'), ask.replace(/\s+/g, ' '));
+await fp.evaluate(() => { state.routes[0].driver = 'Typed while asking'; });
+await settle(fp);
+check('nothing reaches the file while the question is up', (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-keep-file"]');
+const loaded = await disk(fp);
+check('Load the file brings its plan back', await fp.evaluate(() => state.cars.length === 17 && state.routes[0].driver === 'Anders'));
+check('and leaves the file exactly as it was', loaded.text === devPlan && loaded.writes === 0);
+const screenCopy = loaded.backups.find((b) => b.label === 'Before loading the save file');
+check('and what was on screen went into Backups first', screenCopy && JSON.parse(screenCopy.json).routes[0].driver === 'Typed while asking',
+  loaded.backups.map((b) => b.label).join(' | '));
+check('and the file counts as checked from then on', loaded.marker === null && loaded.hold === null);
+
+// 2. The loss the first version of this fix let through: typing after an
+// unreadable save, then a reload, used to count as a plan of this browser's own.
+await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await fp.reload({ waitUntil: 'networkidle' });
+await fp.evaluate(() => { state.routes[0].driver = 'Typed after the warning'; save(); });
+await fp.reload({ waitUntil: 'networkidle' });
+check('a plan typed after an unreadable save still reads as usable on reload', await fp.evaluate(() => Store.hasUsableLocalData()));
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+check('but Reconnect still asks, one reload later', (await fp.locator('[data-act="file-keep-screen"]').isVisible()) && (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-keep-screen"]');
+const written = await disk(fp);
+check('Write this screen puts the screen in the file', written.writes === 1 && JSON.parse(written.text).routes[0].driver === 'Typed after the warning');
+const overwritten = written.backups.find((b) => b.label === 'The save file, before it was written over');
+check('and what the file held went into Backups first', overwritten && JSON.parse(overwritten.json).routes[0].driver === 'Anders',
+  written.backups.map((b) => b.label).join(' | '));
+
+// 3. A file that cannot be read is held, not treated as empty.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { throwRead: true });
+await reconnect(fp);
+const unread = await disk(fp);
+check('a file that cannot be read is held, not written over', unread.hold === 'unreadable' && unread.writes === 0,
+  (await fp.locator('#tab-data .card').first().innerText()).replace(/\s+/g, ' '));
+await fp.evaluate(() => { window.__disk.throwRead = false; });
+await fp.click('[data-act="reconnect-file"]');
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind === 'differs', null, { timeout: 3000 }).catch(() => {});
+check('and Try again reads it and asks', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+await fp.click('[data-act="unlink-file"]');
+const unlinked = await disk(fp);
+check('Stop using this file lets it go with nothing written', unlinked.writes === 0 && unlinked.hold === null && unlinked.marker === null
+  && await fp.evaluate(() => Store.file.handle === null));
+
+// 4. Something that is not a plan (a half-synced copy) is held too, and only
+// two deliberate clicks write over it.
+await fresh(fp);
+await linkStandIn(fp, devPlan.slice(0, -200));
+await reconnect(fp);
+check('a file that is not a plan is held', (await disk(fp)).hold === 'notPlan' && (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-overwrite"]');
+check('one click on Write this screen over it writes nothing', (await disk(fp)).writes === 0);
+await fp.click('[data-act="file-overwrite"]');
+check('the second one does', (await disk(fp)).writes === 1 && (await disk(fp)).hold === null);
+
+// 5. No copy in Backups, no overwrite.
+await fresh(fp);
+await linkStandIn(fp, devPlan);
+await reconnect(fp);
+await fp.evaluate(() => {
+  const real = Storage.prototype.setItem;
+  window.__realSetItem = real;
+  Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:backups') throw new DOMException('full', 'QuotaExceededError'); return real.call(this, k, v); };
+});
+await fp.click('[data-act="file-keep-screen"]');
+const full = await disk(fp);
+await fp.evaluate(() => { Storage.prototype.setItem = window.__realSetItem; });
+check('with Backups full, Write this screen writes nothing and keeps asking', full.writes === 0 && full.hold === 'differs');
+check('and says why', (await fp.locator('#notices').innerText()).includes('storage is full'));
+
+// 6. A file that already holds the plan on screen is left alone, even when
+// every id in it is different (another PC, or a fresh start, mints its own).
+await fresh(fp);
+await fp.evaluate((text) => { state = Store.parseImport(text, defaults).state; render(); }, devPlan);
+const renamed = devPlan.replace(/"((?:lbl|pos|car|drv|grp|rt|tpl)-[a-z0-9]+)"/g, '"x-$1"');
+await linkStandIn(fp, renamed);
+await reconnect(fp);
+const alike = await disk(fp);
+check('a file holding the same plan under other ids: no question, no write', alike.hold === null && alike.writes === 0 && alike.marker === null);
+
+// 7. An edit queued just before Reconnect cannot reach the file while it is read.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { delay: 1200 });
+await onData(fp);
+await fp.evaluate(() => { state.routes[0].driver = 'Queued before Reconnect'; save(); });
+await fp.click('[data-act="reconnect-file"]');
+await fp.waitForFunction(() => Store.file.permission === 'granted', null, { timeout: 5000 });
+await fp.waitForTimeout(200);
+const queued = await disk(fp);
+check('a write queued just before Reconnect does not slip in while the file is read', queued.writes === 0 && queued.hold === 'differs');
+
+// 8. Start-up recovery reads the same three ways.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+const rec = await fp.evaluate(async () => { const s = await Store.recoverFromFile(defaults); return { cars: s && s.cars.length, marker: localStorage.getItem('carcoord:pref:fileNeedsCheck') }; });
+check('recovery at start-up reads the plan back and counts the file as checked', rec.cars === 17 && rec.marker === null);
+await fresh(fp);
+await linkStandIn(fp, devPlan.slice(0, -200), { perm: 'granted' });
+check('recovery from a file that is not a plan holds it', await fp.evaluate(async () => (await Store.recoverFromFile(defaults)) === null && Store.file.hold.kind === 'notPlan'));
+await settle(fp);
+check('and the first save does not reach it', (await disk(fp)).writes === 0);
+
+// 9. A plan recovered from the file descends from it: edits made since are
+// written without asking, as they always were.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(async () => { state = await Store.recoverFromFile(defaults); state.routes[0].driver = 'Edited after recovery'; Store.file.permission = 'prompt'; save(); render(); });
+await reconnect(fp);
+await settle(fp);
+const recovered = await disk(fp);
+check('a plan recovered from the file and then edited reconnects without asking',
+  recovered.hold === null && recovered.writes >= 1 && JSON.parse(recovered.text).routes[0].driver === 'Edited after recovery');
+
+// 10. At start-up, a plan of this browser's own but a file never checked
+// against it, with the file already writable: checked before the first save.
+await fp.evaluate((text) => {
+  const s = Store.parseImport(text, defaults).state;
+  s.routes[0].driver = 'Saved since the loss';
+  localStorage.setItem('carcoord:v1', JSON.stringify(s));
+  localStorage.setItem('carcoord:pref:fileNeedsCheck', '1');
+}, devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(() => Store.checkFileAtStart(state, defaults));
+await settle(fp);
+const atStart = await disk(fp);
+check('an unchecked file writable at start-up is checked before the first save', atStart.hold === 'differs' && atStart.writes === 0);
+
+// 11. Try again reads the file with the permission already granted: an edit
+// typed during that read must still not reach the file.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { throwRead: true });
+await reconnect(fp);
+await fp.evaluate(() => { window.__disk.throwRead = false; });
+await fp.evaluate(() => {   // a slow read from here on, like an online-only OneDrive file
+  const h = Store.file.handle, get = h.getFile;
+  h.getFile = async () => { await new Promise((r) => setTimeout(r, 1500)); return get(); };
+});
+await fp.click('[data-act="reconnect-file"]');
+await fp.evaluate(() => { state.routes[0].driver = 'Typed during Try again'; save(); });
+await fp.waitForTimeout(1100);
+check('an edit typed while Try again reads the file does not reach it', (await disk(fp)).writes === 0);
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind === 'differs', null, { timeout: 4000 }).catch(() => {});
+check('and the question still comes', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+
+// 12. The same during start-up recovery, which reads the file too.
+await fresh(fp);
+await linkStandIn(fp, devPlan, { perm: 'granted', delay: 1500 });
+await fp.evaluate(() => { window.__recovering = Store.recoverFromFile(defaults); state.routes[0].driver = 'Typed during recovery'; save(); });
+await fp.waitForTimeout(1100);
+check('an edit typed while start-up recovery reads the file does not reach it', (await disk(fp)).writes === 0);
+check('and recovery still brings the plan back', await fp.evaluate(async () => (await window.__recovering).cars.length === 17));
+
+// 13. A hold raised at start-up is said on the day plan, not only on the Data tab.
+await fp.evaluate((text) => {
+  const s = Store.parseImport(text, defaults).state;
+  s.routes[0].driver = 'Saved since the loss';
+  localStorage.setItem('carcoord:v1', JSON.stringify(s));
+  localStorage.setItem('carcoord:pref:fileNeedsCheck', '1');
+}, devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, devPlan, { perm: 'granted' });
+await fp.evaluate(async () => { tab = 'plan'; await Store.checkFileAtStart(state, defaults); noteFileHold(); render(); });
+const v1BeforeOffer = await fp.evaluate(() => localStorage.getItem('carcoord:v1'));
+check('a hold raised at start-up is named on the day plan', (await fp.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'));
+await fp.click('#notices [data-act="show-data"]');
+check('and its button opens the question without saving anything',
+  (await fp.locator('[data-act="file-keep-file"]').isVisible()) && (await fp.evaluate(() => localStorage.getItem('carcoord:v1'))) === v1BeforeOffer);
+
+// 14. The unreadable-save warning sends you to Backups on the Data tab; going
+// there must not put the empty screen over the plan it could not read.
+await fp.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await fp.reload({ waitUntil: 'networkidle' });
+await fp.click('[data-act="tab"][data-tab="data"]');
+await fp.click('[data-act="tab"][data-tab="plan"]');
+check('switching tabs after an unreadable save leaves it as it was', (await fp.evaluate(() => localStorage.getItem('carcoord:v1'))) === '{not json at all');
+
+// 15. Choose save file… offers existing files too. Picking the old save file
+// after a loss must not replace it unread; a new, empty file is just written.
+await fresh(fp);
+await linkStandIn(fp, devPlan);
+await fp.evaluate(() => { const h = Store.file.handle; Store.file.handle = null; Store.file.permission = 'none'; window.showSaveFilePicker = async () => h; render(); });
+await onData(fp);
+await fp.click('[data-act="link-file"]');
+await fp.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 3000 }).catch(() => {});
+check('choosing an existing save file that holds another plan asks first', (await disk(fp)).hold === 'differs' && (await disk(fp)).writes === 0);
+await fresh(fp);
+await linkStandIn(fp, '');
+await fp.evaluate(() => { const h = Store.file.handle; Store.file.handle = null; Store.file.permission = 'none'; window.showSaveFilePicker = async () => h; render(); });
+await onData(fp);
+await fp.click('[data-act="link-file"]');
+await fp.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
+check('a new, empty save file is written straight away', (await disk(fp)).writes === 1 && (await disk(fp)).hold === null);
+
+// 16. A browser that started from a plan of its own keeps it up to date, as before.
+await fp.evaluate((text) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify(Store.parseImport(text, defaults).state)); }, devPlan);
+await fp.reload({ waitUntil: 'networkidle' });
+await linkStandIn(fp, JSON.stringify({ schemaVersion: 4, date: '2026-01-01', cars: [], routes: [] }));
+await reconnect(fp);
+const kept = await disk(fp);
+check('with a plan of its own, Reconnect writes it to the file without asking',
+  kept.writes === 1 && JSON.parse(kept.text).cars.length === 17 && kept.hold === null);
+check('the save-file cases log no console errors', fpErrors.length === 0, fpErrors.join(' | '));
+await pcFile.close();
+
+// --- the update note's pieces in the Store ---
+// On a context of its own, so what it stores cannot leak into the cases above.
+const pcNote = await browser.newContext();
+const un = await pcNote.newPage();
+const unErrors = [];
+un.on('console', (m) => m.type() === 'error' && unErrors.push(m.text()));
+un.on('pageerror', (e) => unErrors.push(String(e)));
+await un.goto(base, { waitUntil: 'networkidle' });
+
+// A per-browser pref is stored beside the plan, never in it.
+const prefTrip = await un.evaluate(() => {
+  const stored = Store.setPref('smokeTest', 'a value');
+  const back = Store.pref('smokeTest');
+  const raw = localStorage.getItem('carcoord:pref:smokeTest');
+  Store.setPref('smokeTest', null);
+  return { stored, back, raw, gone: Store.pref('smokeTest'), unset: Store.pref('neverSet') };
+});
+same('a pref round-trips, and null removes it', prefTrip, { stored: true, back: 'a value', raw: 'a value', gone: null, unset: null });
+await un.evaluate(() => { Store.setPref('seenUpdate', '0.0.1'); Store.setPref('fileNeedsCheck', '1'); save(); tab = 'data'; render(); });
+const [prefExport] = await Promise.all([un.waitForEvent('download'), un.click('[data-act="export"]')]);
+const prefExported = await readFile(await prefExport.path(), 'utf8');
+check('an Export carries no pref', !/seenUpdate|fileNeedsCheck|carcoord:pref/.test(prefExported)
+  && !Object.keys(JSON.parse(prefExported)).some((k) => /pref|seen/i.test(k)), Object.keys(JSON.parse(prefExported)).join(','));
+await un.evaluate(() => { localStorage.clear(); });
+await un.reload({ waitUntil: 'networkidle' });
+
+// Load trouble describes the load, not what happens after it.
+await un.setInputFiles('#importFile', { name: 'newer.json', mimeType: 'application/json',
+  buffer: Buffer.from(JSON.stringify({ schemaVersion: 99, date: '2026-01-01', cars: [{ id: 'c1', reg: 'NEW1' }], positions: [], labels: [], routes: [] })) });
+await un.waitForFunction(() => state.cars.length === 1);
+check('importing newer data is not load trouble', await un.evaluate(() => Store.loadTrouble() === false));
+// The saved text, whatever it is, exactly as stored.
+for (const text of ['{not json', '{"schemaVersion":4,"date":"2026-09-29","cars":[],"routes":[]}   ', '[]']) {
+  await un.evaluate((t) => localStorage.setItem('carcoord:v1', t), text);
+  await un.reload({ waitUntil: 'networkidle' });
+  check(`savedText() returns ${JSON.stringify(text)} byte for byte`, (await un.evaluate(() => Store.savedText())) === text);
+}
+await un.evaluate(() => { localStorage.clear(); });
+
+// --- archives: the untouched copy, outside the rolling Backups ---
+// A plan saved with a layout of its own, so a copy normalised on the way
+// through would show.
+const oddText = '{"schemaVersion":4, "date":"2026-09-29","cars":[{"id":"c1","reg":"ARC1","extra":"kept"}],  "routes":[]}';
+await un.evaluate((t) => localStorage.setItem('carcoord:v1', t), oddText);
+await un.reload({ waitUntil: 'networkidle' });
+const byteCopy = await un.evaluate(() => {
+  const r = Store.archive({ kind: 'update', from: 'test', to: 'byte-copy', t: new Date().toISOString(), text: Store.savedText() });
+  const mine = Store.archives().find((a) => a.to === 'byte-copy');
+  return { ok: r.ok, same: !!mine && mine.text === localStorage.getItem('carcoord:v1'),
+    stored: JSON.parse(localStorage.getItem('carcoord:archives')).some((a) => a.to === 'byte-copy' && a.text === localStorage.getItem('carcoord:v1')) };
+});
+check('an update archive holds the saved text byte for byte', byteCopy.ok && byteCopy.same && byteCopy.stored, JSON.stringify(byteCopy));
+
+const arch = (kind, to, text = `{"routes":[],"to":"${to}"}`) => ({ kind, from: kind === 'update' ? 'before' : null, to: kind === 'update' ? to : null, t: `2026-09-2${to === null ? 0 : String(to).slice(-1)}T08:00:00.000Z`, text });
+const fourth = await un.evaluate(([u1, u2, r, u3, u4]) => {
+  localStorage.setItem('carcoord:archives', JSON.stringify([u3, r, u2, u1]));
+  const res = Store.archive(u4);
+  return { res, kept: Store.archives().map((a) => a.kind === 'rescue' ? 'rescue' : a.to) };
+}, [arch('update', 'u1'), arch('update', 'u2'), arch('rescue', null, '{broken'), arch('update', 'u3'), arch('update', 'u4')]);
+same('a fourth update archive drops only the oldest, and the rescue stays; trimming to three is not counted as making room', fourth, { res: { ok: true, dropped: 0 }, kept: ['u4', 'u3', 'rescue', 'u2'] });
+const newRescue = await un.evaluate(([r2]) => { Store.archive(r2); return Store.archives().map((a) => a.kind === 'rescue' ? a.text : a.to); }, [arch('rescue', null, '{broken again')]);
+same('a new rescue replaces the old one and keeps every update archive', newRescue, ['{broken again', 'u4', 'u3', 'u2']);
+
+// An unreadable save is copied the moment it is found, before any change.
+await un.evaluate(() => { localStorage.clear(); localStorage.setItem('carcoord:v1', '{"routes":[{"name":"lost'); });
+await un.reload({ waitUntil: 'networkidle' });
+const rescued = await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text));
+same('an unreadable save is rescued as it loads', rescued, ['{"routes":[{"name":"lost']);
+check('and the warning points at Archives', (await un.locator('#notices .notice.warn').innerText()).includes('An untouched copy is kept in Archives on the Data tab'),
+  await un.locator('#notices').innerText());
+check('and links to the recovery page', (await un.locator('#notices .notice.warn a[href="recover.html"]').count()) === 1);
+const rescueStored = await un.evaluate(() => localStorage.getItem('carcoord:archives'));
+await un.reload({ waitUntil: 'networkidle' });
+check('a reload on the same unreadable save keeps one copy, and leaves Archives byte for byte as they were',
+  (await un.evaluate(() => Store.archives().length)) === 1 && (await un.evaluate(() => localStorage.getItem('carcoord:archives'))) === rescueStored);
+await un.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
+await un.reload({ waitUntil: 'networkidle' });
+same('the first change afterwards leaves the rescue intact',
+  await un.evaluate(() => Store.archives().filter((a) => a.kind === 'rescue').map((a) => a.text)), ['{"routes":[{"name":"lost']);
+
+// The same unreadable text found again by another version is recorded
+// again under this one (with a new time), still as one copy.
+const reRescue = '{"routes":[{"name":"found by an older version';
+await un.evaluate((x) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', x);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'rescue', from: null, to: null, during: '0.0.1', t: '2026-09-01T00:00:00.000Z', text: x }]));
+}, reRescue);
+await un.reload({ waitUntil: 'networkidle' });
+const reRecorded = await un.evaluate(() => ({ v: APP_VERSION, list: Store.archives().map((a) => [a.kind, a.during, a.text, a.t !== '2026-09-01T00:00:00.000Z']) }));
+same('the same unreadable text found by another version is recorded once, under this one',
+  reRecorded.list, [['rescue', reRecorded.v, reRescue, true]]);
+// And with no room even for that, the copy already there still counts:
+// the text is kept, so the warning still says so, and nothing is touched.
+const stillKept = await un.evaluate((x) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', x);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'rescue', during: '0', text: x }]));
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Start of day', json: '{"routes":[]}' }]));
+  try { for (let c = 0; c < 2000; c++) localStorage.setItem(`fill:${c}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 100000; i++) localStorage.setItem(`g${i}`, 'x'.repeat(8)); } catch { /* full to the last few bytes */ }
+  return localStorage.getItem('carcoord:archives');
+}, reRescue);
+await un.reload({ waitUntil: 'networkidle' });
+const stillSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const stillArchives = await un.evaluate(() => localStorage.getItem('carcoord:archives'));
+await un.evaluate(() => {
+  for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  for (let i = 0; i < 100000; i++) localStorage.removeItem(`g${i}`);
+});
+check('with no room to record it again, the copy already kept still counts, untouched',
+  stillArchives === stillKept && stillSaid.includes('An untouched copy is kept in Archives'), `${stillArchives === stillKept} ${stillSaid}`);
+
+// A rescue that only fits once an update copy makes room says so.
+const roomForRescue = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', `{"routes":[${'x'.repeat(100 * 1024)}`);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'a', to: 'b', t: '2026-09-01T00:00:00.000Z', text: 'u'.repeat(200 * 1024) }]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return chunks;
+});
+await un.reload({ waitUntil: 'networkidle' });
+const roomSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const roomKept = await un.evaluate(() => Store.archives().map((a) => a.kind));
+await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+check('a rescue that makes room says which copy went', roomForRescue > 0 && roomSaid.includes('An untouched copy is kept in Archives')
+  && roomSaid.includes('To make room, 1 older copy in Archives was removed.') && JSON.stringify(roomKept) === '["rescue"]', `${JSON.stringify(roomKept)} ${roomSaid}`);
+
+// A rescue that cannot fit even then: nothing is touched, and the warning
+// keeps its old words, because the first change really will overwrite it.
+const noFit = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', `{"routes":[${'y'.repeat(300 * 1024)}`);
+  // Today's start-of-day backup is already there, so the load takes none.
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Start of day', json: '{"routes":[]}' }]));
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'a', to: 'b', t: '2026-09-01T00:00:00.000Z', text: '{"routes":[]}' }]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return { chunks, kept: ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)) };
+});
+await un.reload({ waitUntil: 'networkidle' });
+const noFitAfter = await un.evaluate(() => ['carcoord:v1', 'carcoord:backups', 'carcoord:archives'].map((k) => localStorage.getItem(k)));
+const noFitSaid = await un.locator('#notices .notice.warn', { hasText: 'could not be read' }).innerText();
+const noFitLinks = await un.locator('#notices a[href="recover.html"]').count();
+await un.evaluate(() => { for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`); for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`); });
+same('a rescue that cannot fit leaves the plan, Backups and Archives byte for byte',
+  noFitAfter.map((v, i) => v === noFit.kept[i]), [true, true, true]);
+check('and the warning says the first change will overwrite it, with one link to the recovery page',
+  noFit.chunks > 0 && noFitSaid.includes('the first change you make will overwrite it') && !noFitSaid.includes('An untouched copy is kept') && noFitLinks === 1,
+  `${noFitLinks} links: ${noFitSaid}`);
+
+// Twelve new backups, the whole rolling list, push no archive out.
+const rolled = await un.evaluate(([u1, u2]) => {
+  localStorage.setItem('carcoord:archives', JSON.stringify([u2, JSON.parse(localStorage.getItem('carcoord:archives')).find((a) => a.kind === 'rescue'), u1]));
+  const before = localStorage.getItem('carcoord:archives');
+  for (let i = 0; i < 13; i++) Store.snapshot({ ...state, date: `2026-10-${String(i + 1).padStart(2, '0')}` }, `Roll ${i}`);
+  return { backups: Store.backups().length, same: localStorage.getItem('carcoord:archives') === before };
+}, [arch('update', 'u1'), arch('update', 'u2')]);
+check('twelve new backups leave every archive in place', rolled.backups === 12 && rolled.same, JSON.stringify(rolled));
+
+// With this browser's storage really full, an archive that cannot fit is not
+// written at all, and nothing else is touched to make room.
+const fullArchive = await un.evaluate(() => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 4, date: nextWorkingDay(), cars: [], routes: [] }));
+  localStorage.setItem('carcoord:backups', JSON.stringify([{ t: new Date().toISOString(), label: 'Kept', json: '{"routes":[]}' }]));
+  const big = (c, n) => c.repeat(n * 1024);
+  localStorage.setItem('carcoord:archives', JSON.stringify([
+    { kind: 'update', from: 'b', to: 'B', t: '2026-09-02T00:00:00.000Z', text: big('b', 200) },
+    { kind: 'update', from: 'a', to: 'A', t: '2026-09-01T00:00:00.000Z', text: big('a', 200) },
+    // Last in the list, where a loop that dropped from the end regardless
+    // of kind would take it first.
+    { kind: 'rescue', from: null, to: null, t: '2026-08-31T00:00:00.000Z', text: '{kept' },
+  ]));
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  const keys = ['carcoord:archives', 'carcoord:v1', 'carcoord:backups'];
+  const before = keys.map((k) => localStorage.getItem(k));
+  const tooBig = Store.archive({ kind: 'update', from: 'B', to: 'N', t: new Date().toISOString(), text: big('n', 450) });
+  const untouched = keys.map((k, i) => localStorage.getItem(k) === before[i]);
+  // One that fits once the oldest has made room: the newer one stays.
+  const fits = Store.archive({ kind: 'update', from: 'B', to: 'M', t: new Date().toISOString(), text: big('m', 150) });
+  const after = Store.archives().map((a) => (a.kind === 'rescue' ? a.text : a.to));
+  for (let i = 0; i < chunks; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  return { chunks, tooBig, untouched, fits, after };
+});
+check('the archive test really did fill this browser up', fullArchive.chunks > 0 && fullArchive.chunks < 2000, `${fullArchive.chunks} chunks`);
+same('an archive that does not fit leaves the archives, the plan and the Backups byte for byte',
+  { tooBig: fullArchive.tooBig, untouched: fullArchive.untouched }, { tooBig: { ok: false, dropped: 0 }, untouched: [true, true, true] });
+same('and one that fits once the oldest update copy makes room keeps the newer one, and the rescue', { fits: fullArchive.fits, after: fullArchive.after }, { fits: { ok: true, dropped: 1 }, after: ['M', 'B', '{kept'] });
+await un.evaluate(() => { localStorage.clear(); });
+
+// --- a notice line can carry a heading, and the update note has a style ---
+await un.evaluate(() => {
+  notices = [];   // only the made-up note, whatever the last load raised
+  note('update', 'Updated to <b>9.9.9</b>.', null, [{ head: 'What\'s new in <i>9.9.9</i>:', text: 'Something <b>bold</b>.' }, 'A plain <b>line</b>.']);
+  render();
+});
+const synth = un.locator('#notices .notice.update');
+const synthShape = await synth.evaluate((n) => ({
+  bold: [...n.querySelectorAll('b')].map((b) => b.textContent),
+  italic: n.querySelectorAll('i').length,
+  text: n.querySelector('.say').textContent,
+  buttons: [...n.querySelectorAll('button')].map((b) => b.textContent),
+}));
+same('an update note escapes what it is given, and sets only each line\'s heading in bold', synthShape, {
+  bold: ['What\'s new in <i>9.9.9</i>:'], italic: 0,
+  text: 'Updated to <b>9.9.9</b>.What\'s new in <i>9.9.9</i>: Something <b>bold</b>.A plain <b>line</b>.', buttons: ['\u2715'] });
+check('it looks like the top bar: ink, with a hi-vis edge', await synth.evaluate((n) => {
+  const cs = getComputedStyle(n);
+  return cs.backgroundColor === 'rgb(26, 28, 30)' && cs.borderLeftColor === 'rgb(255, 212, 0)';
+}));
+// The note's white text must not reach its white \u2715 button.
+check('and its \u2715 can be read', await synth.evaluate((n) => {
+  const b = getComputedStyle(n.querySelector('[data-act="dismiss"]'));
+  return b.color !== b.backgroundColor;
+}));
+await synth.locator('[data-act="dismiss"]').click();
+check('and \u2715 takes it away', (await un.locator('#notices .notice.update').count()) === 0);
+
+// --- who sees the note, and who gets an archive: the rules on their own ---
+await un.goto(base, { waitUntil: 'networkidle' });
+const rules = await un.evaluate(() => {
+  const all = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); o[k] = localStorage.getItem(k); } return JSON.stringify(o); };
+  const before = all();
+  const R = (version, must) => ({ version, title: `t${version}`, changed: 'c', affects: 'a', data: 'd', ...(must ? { must: true } : {}) });
+  const list = [R('0.6.0'), R('0.5.0', true), R('0.4.0'), R('0.3.0'), R('0.2.5', true)];
+  const base = { version: '0.6.0', releases: list, seen: null, firstRun: false, trouble: false, link: false };
+  const run = (over) => {
+    const r = updateNoteFor({ ...base, ...over });
+    return { full: r.show && r.show.full.map((e) => e.version), more: r.show && r.show.more, mark: r.mark };
+  };
+  const out = {
+    seenThis: run({ seen: '0.6.0' }),
+    firstRun: run({ firstRun: true }),
+    firstRunByLink: run({ firstRun: true, link: true }),
+    trouble: run({ trouble: true }),
+    troubleAndLink: run({ trouble: true, link: true }),
+    link: run({ link: true }),
+    downgrade: run({ seen: '9.9.9' }),
+    staleList: run({ releases: list.slice(1) }),
+    noList: run({ releases: undefined }),
+    allUnseen: run({}),
+    unknownMarker: run({ seen: '0.1.0' }),
+    fromListed: run({ seen: '0.4.0' }),
+    mustBeyondThree: run({ releases: [R('0.6.0', true), R('0.5.0'), R('0.4.0', true), R('0.3.0', true), R('0.2.5', true)] }),
+    tenAfterNine: run({ version: '0.10.0', releases: [R('0.10.0'), R('0.9.0')], seen: '0.9.0' }),
+    nineIsNotNewer: run({ version: '0.10.0', releases: [R('0.10.0'), R('0.9.0')], seen: '0.10.0' }),
+    tenIsNewerThanNine: run({ version: '0.9.0', releases: [R('0.9.0')], seen: '0.10.0' }),
+  };
+  const A = (over) => archiveNeeded({ version: '0.6.0', from: '0.5.0', usableText: '{"routes":[]}', archives: [], seen: '0.5.0', ...over });
+  out.archive = {
+    returning: A({}),
+    noMarker: A({ seen: null, from: '0.2.4 or earlier' }),
+    downgrade: A({ seen: '9.9.9', from: '9.9.9' }),
+    alreadyShownHere: A({ seen: '0.6.0', from: '0.6.0' }),
+    alreadyArchived: A({ archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
+    backFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'update', from: '0.5.0', to: '0.6.0' }] }),
+    olderArchiveOnly: A({ archives: [{ kind: 'update', from: '0.4.0', to: '0.5.0' }] }),
+    rescueDoesNotCount: A({ archives: [{ kind: 'rescue', to: null }] }),
+    rescueThisVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
+    rescueOlderVersion: A({ archives: [{ kind: 'rescue', to: null, during: '0.5.0' }] }),
+    rescueThisVersionBackFromNewer: A({ seen: '9.9.9', from: '9.9.9', archives: [{ kind: 'rescue', to: null, during: '0.6.0' }] }),
+    nothingUsable: A({ usableText: null }),
+  };
+  out.untouched = all() === before;
+  return out;
+});
+const none = { full: null, more: null, mark: false };
+same('the note: already shown for this version, nothing', rules.seenThis, none);
+same('the note: a first run marks and shows nothing', rules.firstRun, { full: null, more: null, mark: true });
+same('the note: a first open by share link marks too', rules.firstRunByLink, { full: null, more: null, mark: true });
+same('the note: a troubled load waits, marker left alone', rules.trouble, none);
+same('the note: trouble ahead of a link still waits', rules.troubleAndLink, none);
+same('the note: opened by a share link waits', rules.link, none);
+same('the note: a downgrade shows nothing', rules.downgrade, none);
+same('the note: a stale list shows nothing and does not mark', rules.staleList, none);
+same('the note: no list at all shows nothing', rules.noList, none);
+same('the note: every must entry in full, the newest others fill to three', rules.allUnseen, { full: ['0.6.0', '0.5.0', '0.2.5'], more: 2, mark: true });
+same('the note: a marker not in the list counts as nothing seen', rules.unknownMarker, rules.allUnseen);
+same('the note: only what came after the marker', rules.fromListed, { full: ['0.6.0', '0.5.0'], more: 0, mark: true });
+same('the note: must entries beyond three are all in full', rules.mustBeyondThree, { full: ['0.6.0', '0.4.0', '0.3.0', '0.2.5'], more: 1, mark: true });
+same('the note: 0.10.0 comes after 0.9.0', rules.tenAfterNine, { full: ['0.10.0'], more: 0, mark: true });
+same('the note: 0.10.0 already seen is not shown again', rules.nineIsNotNewer, none);
+same('the note: a 0.10.0 marker is newer than 0.9.0', rules.tenIsNewerThanNine, none);
+same('the archive: taken for a returning leader, no marker, a downgrade, and a step back from a newer build; not twice, not after this version ran here, not without a usable plan', rules.archive, {
+  returning: true, noMarker: true, downgrade: true, alreadyShownHere: false, alreadyArchived: false, backFromNewer: true,
+  olderArchiveOnly: true, rescueDoesNotCount: true, rescueThisVersion: false, rescueOlderVersion: true, rescueThisVersionBackFromNewer: true, nothingUsable: false });
+check('deciding stores nothing: localStorage byte for byte the same', rules.untouched);
+
+check('the update note\'s Store cases log no console errors', unErrors.length === 0, unErrors.join(' | '));
+await pcNote.close();
+
+// --- opening after an update: the archive first, the note last ---
+// Every case sets up this browser as an older version would have left it,
+// then opens the app. The version is read from the page, never written here.
+// Written the way no build writes it (keys reordered, spaced out, fields
+// this build does not know), so a boot that rewrote the plan, or an archive
+// that tidied it, would show as a different string.
+const upPlan = `{
+  "routes": [ { "name": "1", "id": "r1", "carId": "c1", "driver": "Returning Leader" } ],
+  "cars": [ { "reg": "UP11111", "id": "c1", "extra": "kept" } ],
+  "date": "2026-09-29",   "schemaVersion": 4,
+  "labels": [], "positions": [], "drivers": [], "driverGroups": [], "templates": [],
+  "extra": "kept as written"
+}`;
+const otherPlan = JSON.stringify({ schemaVersion: 4, date: '2026-09-01', labels: [], positions: [], cars: [], routes: [{ id: 'x', name: 'From the file' }] });
+// A real file in this origin's private file system, linked the way Choose
+// save file links one, so start-up finds it without a stand-in.
+const linkOpfs = (pg, text) => pg.evaluate(async (text) => {
+  const dir = await navigator.storage.getDirectory();
+  const h = await dir.getFileHandle('car-coordinator.json', { create: true });
+  const w = await h.createWritable(); await w.write(text); await w.close();
+  await new Promise((res, rej) => {
+    const r = indexedDB.open('carcoord', 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore('kv'); } catch { /* there */ } };
+    r.onsuccess = () => { const tx = r.result.transaction('kv', 'readwrite'); tx.objectStore('kv').put(h, 'fileHandle'); tx.oncomplete = () => { r.result.close(); res(); }; tx.onerror = () => rej(tx.error); };
+    r.onerror = () => rej(r.error);
+  });
+}, text);
+const opfsText = (pg) => pg.evaluate(async () => (await (await (await navigator.storage.getDirectory()).getFileHandle('car-coordinator.json')).getFile()).text());
+// Playwright 1.63's Chromium 153, the headless shell CI runs and the full
+// build alike, takes the whole browser down when a page reads back a file
+// handle it stored in IndexedDB. That is the very step start-up takes with a
+// linked save file. Chrome 154 does not. So a throwaway browser is asked
+// first, and where it dies the cases that link a real file are skipped, and
+// say so, rather than ending the suite. They run again by themselves once the
+// build is fixed.
+const storedHandlesWork = await (async () => {
+  const probe = await chromium.launch(EXECUTABLE ? { executablePath: EXECUTABLE } : {});
+  try {
+    const pg = await probe.newPage();
+    await pg.goto(`${base}recover.html`, { waitUntil: 'networkidle' });
+    await linkOpfs(pg, '{}');
+    await pg.reload({ waitUntil: 'networkidle' });
+    return await pg.evaluate(() => new Promise((res) => {
+      const r = indexedDB.open('carcoord', 1);
+      r.onsuccess = () => {
+        const q = r.result.transaction('kv').objectStore('kv').get('fileHandle');
+        q.onsuccess = () => res(!!q.result && q.result.name === 'car-coordinator.json');
+        q.onerror = () => res(false);
+      };
+      r.onerror = () => res(false);
+    }));
+  } catch {
+    return false;
+  } finally {
+    await probe.close().catch(() => {});
+  }
+})();
+const skipped = [];
+const skip = (name) => {
+  console.log(' skip  ' + name + ' — this browser crashes reading back a stored file handle');
+  skipped.push(name);
+};
+const leaveAs = (pg, items) => pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v); }, items);
+const opened = (pg) => pg.evaluate(() => ({
+  notes: document.querySelectorAll('#notices .notice.update').length,
+  last: !!document.querySelector('#notices .notice:last-child.update'),
+  text: document.querySelector('#notices .notice.update')?.innerText.replace(/\s+/g, ' ') || '',
+  // The note's own sentences, without the entries listed under them.
+  say: document.querySelector('#notices .notice.update .say')?.firstChild.textContent || '',
+  archives: Store.archives().map((a) => ({ kind: a.kind, from: a.from, to: a.to, sameAsSaved: a.text === localStorage.getItem('carcoord:v1') })),
+  marker: localStorage.getItem('carcoord:pref:seenUpdate'),
+  saved: localStorage.getItem('carcoord:v1'),
+}));
+const newContext = async (setup, options = {}) => {
+  const ctx = await browser.newContext(options);
+  if (setup) await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  return { ctx, pg, errs };
+};
+
+// A picker stub where the browser has none (some headless builds), so the
+// sentence that depends on it reads the same everywhere; the context below
+// without one covers the other sentence.
+const upA = await newContext((ctx) => ctx.addInitScript(() => {
+  if (typeof window.showSaveFilePicker !== 'function') window.showSaveFilePicker = async () => { throw new Error('not in this test'); };
+  // Every key written to storage from the moment the page starts, in order.
+  const set = Storage.prototype.setItem;
+  window.__writes = [];
+  Storage.prototype.setItem = function (k, v) { window.__writes.push(String(k)); return set.call(this, k, v); };
+}));
+const up = upA.pg;
+const V = await up.evaluate(() => APP_VERSION);
+const listed = await up.evaluate(() => UPDATES.map((u) => u.version));
+// What a browser that has seen none of them gets in full, by the rules in
+// updates.js: every must entry, and the newest others up to three.
+const inFull = await up.evaluate(() => {
+  const must = UPDATES.filter((u) => u.must === true);
+  const fill = UPDATES.filter((u) => u.must !== true).slice(0, Math.max(0, 3 - must.length));
+  return UPDATES.filter((u) => must.includes(u) || fill.includes(u)).map((u) => u.version);
+});
+
+// A returning leader: a plan saved by an older version, and no marker.
+await leaveAs(up, { 'carcoord:v1': upPlan });
+await up.reload({ waitUntil: 'networkidle' });
+const back = await opened(up);
+const bootWrites = await up.evaluate(() => window.__writes.filter((k) => k.startsWith('carcoord:')));
+check('the archive is the first thing written at boot, ahead of the backup and the marker, and the plan is never written',
+  bootWrites[0] === 'carcoord:archives' && bootWrites.includes('carcoord:backups') && bootWrites.includes('carcoord:pref:seenUpdate')
+  && !bootWrites.includes('carcoord:v1'), bootWrites.join(', '));
+check('a returning leader gets exactly one update note, last on the page', back.notes === 1 && back.last, JSON.stringify(back).slice(0, 300));
+check(`and it shows ${inFull.join(', ')} in full`,
+  inFull.length >= 2 && inFull.every((v) => back.text.includes(`What's new in ${v}:`))
+  && listed.filter((v) => !inFull.includes(v)).every((v) => !back.text.includes(`What's new in ${v}:`))
+  && back.text.includes('What it affects:') && back.text.includes('Your data:'), back.text.slice(0, 400));
+check('and says the plan and setup were copied into Archives first', back.text.includes('copied unchanged into Archives on the Data tab'));
+check('and, with no file linked, offers Choose save file', back.text.includes('use Choose save file… on the Data tab'));
+same('one update archive, byte for byte the saved plan, from before this version', back.archives, [{ kind: 'update', from: '0.2.4 or earlier', to: V, sameAsSaved: true }]);
+check('the marker is set, and the saved plan is byte for byte as it was', back.marker === V && back.saved === upPlan);
+
+// Nothing on the second open, nor on a first run, nor after a first run's
+// first change: nothing from before an update to tell anyone about.
+await up.reload({ waitUntil: 'networkidle' });
+const again = await opened(up);
+check('a second open: no note, no new archive', again.notes === 0 && again.archives.length === 1, JSON.stringify(again).slice(0, 200));
+await leaveAs(up, {});
+await up.reload({ waitUntil: 'networkidle' });
+const first = await opened(up);
+check('a first run: no note, no archive, marker written', first.notes === 0 && first.archives.length === 0 && first.marker === V, JSON.stringify(first).slice(0, 200));
+await up.evaluate(() => { state.routes[0].driver = 'Typed on day one'; save(); });
+await up.reload({ waitUntil: 'networkidle' });
+const firstThen = await opened(up);
+check('a first run, one change and a reload: still no note, no archive', firstThen.notes === 0 && firstThen.archives.length === 0, JSON.stringify(firstThen).slice(0, 200));
+
+// A downgrade: an older build about to rewrite newer data keeps a copy.
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': '9.9.9' });
+await up.reload({ waitUntil: 'networkidle' });
+const down = await opened(up);
+check('a downgrade: no note, but an archive, and the marker left alone',
+  down.notes === 0 && down.archives.length === 1 && down.archives[0].to === V && down.marker === '9.9.9', JSON.stringify(down).slice(0, 200));
+// Back to this version from a newer build, having run this version before:
+// the copy from that first update is for a different step, and this one
+// needs its own.
+const newerThanV = V.split('.').map((x, i) => (i === 1 ? Number(x) + 1 : i === 2 ? 0 : Number(x))).join('.');
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': newerThanV,
+  'carcoord:archives': JSON.stringify([{ kind: 'update', from: '0.2.4 or earlier', to: V, t: '2026-09-01T06:00:00.000Z', text: '{"routes":[],"cars":[]}' }]) });
+await up.reload({ waitUntil: 'networkidle' });
+const stepBack = await opened(up);
+same(`back to ${V} from ${newerThanV}: a new archive of that step, beside the first update's`,
+  stepBack.archives.map((a) => [a.from, a.to, a.sameAsSaved]), [[newerThanV, V, true], ['0.2.4 or earlier', V, false]]);
+await up.reload({ waitUntil: 'networkidle' });
+check('and a reload takes no third', (await opened(up)).archives.length === 2);
+// A rescue this version took long ago, before the browser moved on to a
+// newer build, is not a copy of this step back.
+await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:seenUpdate': newerThanV,
+  'carcoord:archives': JSON.stringify([{ kind: 'rescue', from: null, to: null, during: V, t: '2026-09-01T06:00:00.000Z', text: '{old' }]) });
+await up.reload({ waitUntil: 'networkidle' });
+same(`back to ${V} from ${newerThanV} with an old ${V} rescue kept: the step is still archived`,
+  (await opened(up)).archives.map((a) => [a.kind, a.from, a.to, a.sameAsSaved]), [['update', newerThanV, V, true], ['rescue', null, null, false]]);
+
+// Held loads wait for the next clean open, and leave the marker alone.
+await leaveAs(up, { 'carcoord:v1': '{not json at all' });
+await up.reload({ waitUntil: 'networkidle' });
+const corrupt = await opened(up);
+same('an unreadable save: a rescue only, no note, no marker',
+  { notes: corrupt.notes, kinds: corrupt.archives.map((a) => a.kind), marker: corrupt.marker }, { notes: 0, kinds: ['rescue'], marker: null });
+await up.evaluate(() => { state.routes[0].driver = 'Typed after the loss'; save(); });
+await up.reload({ waitUntil: 'networkidle' });
+const afterLoss = await opened(up);
+check('once it is overwritten and the page reloaded, the note comes', afterLoss.notes === 1 && afterLoss.marker === V, JSON.stringify(afterLoss).slice(0, 200));
+same('and it copies nothing typed since the loss, pointing at the rescue instead', {
+  kinds: afterLoss.archives.map((a) => a.kind),
+  during: await up.evaluate(() => Store.archives().map((a) => a.during)),
+  rescueSaid: afterLoss.say.includes('What this browser had saved before could not be read; it is kept unchanged in Archives on the Data tab.'),
+  copiedSaid: afterLoss.say.includes('copied unchanged'),
+}, { kinds: ['rescue'], during: [V], rescueSaid: true, copiedSaid: false });
+// Saved text that is valid JSON but not a plan is held the same way.
+for (const odd of ['[]', 'null', '42']) {
+  await leaveAs(up, { 'carcoord:v1': odd });
+  await up.reload({ waitUntil: 'networkidle' });
+  const held = await opened(up);
+  same(`a save of ${odd}: one warning, no update note, no marker, and a rescue of ${odd}`, {
+    warns: await up.locator('#notices .notice.warn').count(), notes: held.notes, marker: held.marker,
+    rescued: await up.evaluate(() => Store.archives().map((a) => [a.kind, a.text])),
+  }, { warns: 1, notes: 0, marker: null, rescued: [['rescue', odd]] });
+}
+const newer = JSON.stringify({ schemaVersion: 99, date: '2026-09-29', cars: [], positions: [], labels: [], routes: [{ id: 'r1', name: 'Newer' }] });
+await leaveAs(up, { 'carcoord:v1': newer });
+await up.reload({ waitUntil: 'networkidle' });
+const fromNewer = await opened(up);
+same('a save from a newer version: an archive, no note, no marker',
+  { notes: fromNewer.notes, archives: fromNewer.archives, marker: fromNewer.marker }, { notes: 0, archives: [{ kind: 'update', from: '0.2.4 or earlier', to: V, sameAsSaved: true }], marker: null });
+
+// A share link: the dialog it opens has the screen, and the note waits.
+const shareCode = await up.evaluate(async () => Share.encode(state, 'day'));
+await leaveAs(up, { 'carcoord:v1': upPlan });
+await up.goto('about:blank');
+await up.goto(`${base}#d=${shareCode}`, { waitUntil: 'networkidle' });
+await up.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+const byLink = await opened(up);
+check('a returning browser opened by a share link: the dialog opens, no note, no marker, but the archive',
+  (await up.locator('#shareDlg[open]').count()) === 1 && byLink.notes === 0 && byLink.marker === null && byLink.archives.length === 1, JSON.stringify(byLink).slice(0, 200));
+await up.click('[data-act="share-cancel"]');
+await leaveAs(up, {});
+await up.goto('about:blank');
+await up.goto(`${base}#d=${shareCode}`, { waitUntil: 'networkidle' });
+await up.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+const firstByLink = await opened(up);
+check('a first open by a share link marks, shows no note, and opens the dialog',
+  (await up.locator('#shareDlg[open]').count()) === 1 && firstByLink.notes === 0 && firstByLink.marker === V && firstByLink.archives.length === 0, JSON.stringify(firstByLink).slice(0, 200));
+await up.click('[data-act="share-cancel"]');
+
+// The save-file sentence, linked: written to, and held.
+if (storedHandlesWork) {
+  await leaveAs(up, { 'carcoord:v1': upPlan });
+  await linkOpfs(up, upPlan);
+  await up.reload({ waitUntil: 'networkidle' });
+  const linked = await opened(up);
+  check('with a save file linked and allowed, the note says changes are written to it',
+    linked.notes === 1 && linked.text.includes('Changes are also written to your save file, car-coordinator.json.'), linked.text.slice(0, 400));
+  await leaveAs(up, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+  await linkOpfs(up, otherPlan);
+  await up.reload({ waitUntil: 'networkidle' });
+  await up.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+  const held = await opened(up);
+  check('while a save-file hold is up, the note leaves the save file out, and the hold is said',
+    held.notes === 1 && !/save file|Export on the Data tab/.test(held.say)
+    && (await up.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'), held.say);
+  check('and nothing was written to the file', (await opfsText(up)) === otherPlan);
+} else {
+  skip('the update note with a save file linked, and while it is held');
+}
+check('opening after an update logs no console errors', upA.errs.length === 0, upA.errs.join(' | '));
+await upA.ctx.close();
+
+// No file picker (Firefox, Safari): the note says Export instead.
+const noPicker = await newContext((ctx) => ctx.addInitScript(() => { delete window.showSaveFilePicker; }));
+await leaveAs(noPicker.pg, { 'carcoord:v1': upPlan });
+await noPicker.pg.reload({ waitUntil: 'networkidle' });
+const plain = await opened(noPicker.pg);
+check('with no file picker, the note says Export', plain.text.includes('To keep a copy outside this browser, use Export on the Data tab.'), plain.text.slice(0, 400));
+check('no console errors without a picker', noPicker.errs.length === 0, noPicker.errs.join(' | '));
+await noPicker.ctx.close();
+
+// The Windows app: no save-file sentence until the owner has checked it there.
+const inTauri = await newContext((ctx) => ctx.addInitScript(() => { window.__TAURI__ = {}; }));
+await leaveAs(inTauri.pg, { 'carcoord:v1': upPlan });
+await inTauri.pg.reload({ waitUntil: 'networkidle' });
+const exe = await opened(inTauri.pg);
+check('in the Windows app, the note leaves the save file out', exe.notes === 1 && !/save file|Export on the Data tab/.test(exe.say), exe.say);
+await inTauri.ctx.close();
+
+// Storage full: the copy is not made, and the note says so.
+const fullUp = await newContext();
+fullUp.pg.removeAllListeners('console');
+fullUp.pg.on('console', (m) => m.type() === 'error' && !m.text().includes('localStorage save failed') && fullUp.errs.push(m.text()));
+// Bigger than the last kilobyte the fill can leave, so the copy cannot fit.
+const bigPlan = JSON.stringify({ ...JSON.parse(upPlan), cars: [{ id: 'c1', reg: 'UP11111', note: 'n'.repeat(4096) }] });
+const filledUp = await fullUp.pg.evaluate((plan) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', plan);
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  return chunks;
+}, bigPlan);
+await fullUp.pg.reload({ waitUntil: 'networkidle' });
+const noRoom = await opened(fullUp.pg);
+check('with storage full, no archive, and the note says storage is full, last, under the backup warning',
+  filledUp > 0 && noRoom.archives.length === 0 && noRoom.last
+  && (await fullUp.pg.locator('#notices').innerText()).includes('Could not take a backup before "Start of day"') && noRoom.say.includes('No copy could be put in Archives, because this browser\'s storage is full. Use Export on the Data tab to keep one.'),
+  `${JSON.stringify(noRoom.archives)} ${noRoom.say}`);
+check('and the saved plan is untouched', noRoom.saved === bigPlan);
+check('no console errors when storage is full', fullUp.errs.length === 0, fullUp.errs.join(' | '));
+await fullUp.ctx.close();
+
+// An update copy that only fits once an older one makes room: the note says so.
+const roomUp = await newContext();
+roomUp.pg.removeAllListeners('console');
+roomUp.pg.on('console', (m) => m.type() === 'error' && !m.text().includes('localStorage save failed') && roomUp.errs.push(m.text()));
+await roomUp.pg.evaluate((plan) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:v1', plan);
+  localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: '0.0.1', to: '0.0.2', t: '2026-09-01T00:00:00.000Z', text: 'u'.repeat(200 * 1024) }]));
+  try { for (let c = 0; c < 2000; c++) localStorage.setItem(`fill:${c}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+}, bigPlan);
+await roomUp.pg.reload({ waitUntil: 'networkidle' });
+const madeRoomNote = await opened(roomUp.pg);
+check('an update copy that makes room says so in the note',
+  madeRoomNote.say.includes('copied unchanged into Archives') && madeRoomNote.say.includes('To make room, 1 older copy in Archives was removed.')
+  && JSON.stringify(madeRoomNote.archives.map((a) => a.to)) === JSON.stringify([V]), `${JSON.stringify(madeRoomNote.archives)} ${madeRoomNote.say}`);
+check('no console errors when a copy makes room', roomUp.errs.length === 0, roomUp.errs.join(' | '));
+await roomUp.ctx.close();
+
+// Isolation: the archive step failing must not switch off 0.2.5's protection.
+if (storedHandlesWork) {
+  const broken = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\nStore.archive = () => { throw new Error('archive broke'); };\n` });
+  }));
+  await leaveAs(broken.pg, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+  await linkOpfs(broken.pg, otherPlan);
+  await broken.pg.reload({ waitUntil: 'networkidle' });
+  await broken.pg.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+  check('with the archive step broken, the save-file hold is still raised at start-up',
+    (await broken.pg.evaluate(() => Store.file.hold && Store.file.hold.kind)) === 'differs'
+    && (await broken.pg.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused'));
+  await broken.pg.evaluate(async () => { state.routes[0].driver = 'Typed after start-up'; save(); await Store.flush(); });
+  check('and nothing is written to the file', (await opfsText(broken.pg)) === otherPlan);
+  const brokenNote = await opened(broken.pg);
+  check('and the note claims no copy it did not make', brokenNote.notes === 1 && !/Archives|save file/.test(brokenNote.say), brokenNote.say);
+  check('no console errors with the archive step broken', broken.errs.length === 0, broken.errs.join(' | '));
+  await broken.ctx.close();
+} else {
+  skip('the save-file hold with the archive step broken');
+}
+
+// The same for the note's own step: it failing must stop nothing after it.
+if (storedHandlesWork) {
+  const noteBroke = await newContext((ctx) => ctx.route('**/store.js*', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\nStore.loadTrouble = () => { throw new Error('note step broke'); };\n` });
+  }));
+  await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan, 'carcoord:pref:fileNeedsCheck': '1' });
+  await linkOpfs(noteBroke.pg, otherPlan);
+  await noteBroke.pg.reload({ waitUntil: 'networkidle' });
+  await noteBroke.pg.waitForFunction(() => Store.file.hold && Store.file.hold.kind !== 'checking', null, { timeout: 4000 }).catch(() => {});
+  check('with the note step broken, the save-file hold is still raised and drawn',
+    (await noteBroke.pg.evaluate(() => Store.file.hold && Store.file.hold.kind)) === 'differs'
+    && (await noteBroke.pg.locator('#notices').innerText()).includes('Saving to car-coordinator.json is paused')
+    && (await noteBroke.pg.locator('#tab-plan tbody tr [data-field="driver"]').first().inputValue()) === 'Returning Leader');
+  await noteBroke.pg.evaluate(async () => { state.routes[0].driver = 'Typed after start-up'; save(); await Store.flush(); });
+  check('and nothing is written to the file, no note is shown and nothing is marked',
+    (await opfsText(noteBroke.pg)) === otherPlan && (await opened(noteBroke.pg)).notes === 0
+    && (await noteBroke.pg.evaluate(() => localStorage.getItem('carcoord:pref:seenUpdate'))) === null);
+  const brokeCode = await noteBroke.pg.evaluate(async () => Share.encode(state, 'day'));
+  await leaveAs(noteBroke.pg, { 'carcoord:v1': upPlan });
+  await noteBroke.pg.goto('about:blank');
+  await noteBroke.pg.goto(`${base}#d=${brokeCode}`, { waitUntil: 'networkidle' });
+  await noteBroke.pg.waitForSelector('#shareDlg[open]', { timeout: 5000 }).catch(() => {});
+  check('and a share link still opens its dialog', (await noteBroke.pg.locator('#shareDlg[open]').count()) === 1);
+  check('no page errors with the note step broken', noteBroke.errs.length === 0, noteBroke.errs.join(' | '));
+  await noteBroke.ctx.close();
+} else {
+  skip('the save-file hold with the note step broken');
+}
+
+// Missing pieces, as after a deploy with some files still cached: no release
+// notes, and a store.js without archives or prefs.
+const partial = await newContext(async (ctx) => {
+  await ctx.route('**/updates.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+  await ctx.route('**/store.js*', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\ndelete Store.archive; delete Store.archives; delete Store.pref; delete Store.setPref;\n` });
+  });
+});
+await leaveAs(partial.pg, { 'carcoord:v1': upPlan });
+await partial.pg.reload({ waitUntil: 'networkidle' });
+check('with pieces missing, the plan is still drawn', (await partial.pg.locator('#tab-plan tbody tr [data-field="driver"]').first().inputValue()) === 'Returning Leader');
+await partial.pg.click('[data-act="tab"][data-tab="data"]');
+check('and the Data tab opens', await partial.pg.locator('#tab-data h2').isVisible());
+check('and nothing is logged as an error', partial.errs.length === 0, partial.errs.join(' | '));
+check('and localStorage holds no archive and no marker', await partial.pg.evaluate(() =>
+  localStorage.getItem('carcoord:archives') === null && localStorage.getItem('carcoord:pref:seenUpdate') === null));
+await partial.ctx.close();
+
+// --- What's new and Archives on the Data tab ---
+const dataUp = await newContext();
+const dt = dataUp.pg;
+const beforePlan = upPlan;   // what the leader had before the update
+const sincePlan = JSON.stringify({ schemaVersion: 4, date: PLAN_DAY, labels: [], positions: [], cars: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'rb', name: 'Changed since' }] });
+const tA = '2026-09-29T06:00:00.000Z', tR = '2026-09-28T06:00:00.000Z';
+const archivesAB = (to) => JSON.stringify([
+  { kind: 'update', from: '0.2.4 or earlier', to, t: tA, text: beforePlan },
+  { kind: 'rescue', from: null, to: null, t: tR, text: '{"routes":[{"name":"half' },
+]);
+await leaveAs(dt, { 'carcoord:v1': sincePlan, 'carcoord:archives': archivesAB(V), 'carcoord:pref:seenUpdate': V });
+await dt.reload({ waitUntil: 'networkidle' });
+await dt.click('[data-act="tab"][data-tab="data"]');
+same('What\'s new and Archives sit above Backups, which is still the last card',
+  (await dt.locator('#tab-data .card h3').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')),
+  ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
+check('This browser links to the recovery page', (await dt.locator('#tab-data .card', { hasText: 'This browser' }).locator('a[href="recover.html"]').count()) === 1);
+check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
+  document.querySelectorAll('#tab-data table').length === 1 && !!document.querySelector('#tab-data .card:last-child table')));
+const news = await dt.locator('#tab-data .card.whatsnew').innerText();
+const newest = await dt.evaluate(() => UPDATES[0]);
+check('What\'s new names the running version and the newest entry\'s four parts',
+  news.includes(`You are running version ${V}.`) && [newest.title, newest.changed, newest.affects, newest.data].every((x) => news.includes(x)), news.slice(0, 300));
+const archRows = dt.locator('#tab-data .arch-row');
+const updRow = archRows.filter({ hasText: `Before ${V}` });
+const rescueRow = archRows.filter({ hasText: 'Could not be read' });
+// Its plan reads as a Restore would load it: from before the weekday
+// templates, so with the five empty ones.
+check('an update row says what it holds before anything is replaced',
+  (await updRow.innerText()).includes(`Before ${V} (from 0.2.4 or earlier)`) && (await updRow.innerText()).includes('1 route, 1 car, 0 drivers, 5 templates, dated 29/09/2026'),
+  await updRow.innerText());
+check('a rescue row offers Download only',
+  (await rescueRow.locator('[data-act="archive-download"]').count()) === 1 && (await rescueRow.locator('[data-act="archive-restore"]').count()) === 0);
+
+// Arming a Backups row and then pressing an Archives row restores nothing.
+const routeNames = () => dt.evaluate(() => state.routes.map((r) => r.name));
+const dtBackupCount = () => dt.evaluate(() => Store.backups().length);
+const nBackups = await dtBackupCount();
+await dt.locator('#tab-data .card:last-child [data-act="restore"]').first().click();
+await updRow.locator('[data-act="archive-restore"]').click();
+check('arming a Backups row, then pressing Restore on an archive, restores nothing',
+  JSON.stringify(await routeNames()) === '["Changed since"]' && (await dtBackupCount()) === nBackups
+  && (await updRow.locator('[data-act="archive-restore"]').innerText()) === 'Sure?');
+await dt.waitForTimeout(3100);   // let the arming lapse
+
+// Restore: two clicks, a backup of the screen first, then the old plan back.
+await dt.evaluate(() => { state.routes[0].driver = 'Typed today'; save(); render(); });
+await updRow.locator('[data-act="archive-restore"]').click();
+check('one click on Restore changes nothing', JSON.stringify(await routeNames()) === '["Changed since"]');
+await updRow.locator('[data-act="archive-restore"]').click();
+const restored = await dt.evaluate(() => ({ routes: state.routes.map((r) => r.name), saved: JSON.parse(localStorage.getItem('carcoord:v1')).routes.map((r) => r.name),
+  backup: Store.backups()[0] && { label: Store.backups()[0].label, drivers: JSON.parse(Store.backups()[0].json).routes.map((r) => r.driver) } }));
+same('the second click puts the archived plan back, after backing up the screen', restored,
+  { routes: ['1'], saved: ['1'], backup: { label: `Restoring the copy from before ${V}`, drivers: ['Typed today'] } });
+
+// Download is the archive's text byte for byte, and imports to the same plan.
+const [archFile] = await Promise.all([dt.waitForEvent('download'), updRow.locator('[data-act="archive-download"]').click()]);
+const archText = await readFile(await archFile.path(), 'utf8');
+check('Download is the archive byte for byte, named for the version', archText === beforePlan && archFile.suggestedFilename() === `car-coordinator-before-${V}.json`, archFile.suggestedFilename());
+await dt.evaluate(() => { state.routes[0].name = 'Changed again'; save(); render(); });
+await dt.setInputFiles('#importFile', { name: archFile.suggestedFilename(), mimeType: 'application/json', buffer: Buffer.from(archText) });
+await dt.waitForFunction(() => state.routes[0].name !== 'Changed again', null, { timeout: 3000 }).catch(() => {});
+check('and it imports to the same plan', await dt.evaluate((t) => JSON.stringify(state) === JSON.stringify(Store.parseImport(t, defaults).state), archText));
+const [rescueFile] = await Promise.all([dt.waitForEvent('download'), rescueRow.locator('[data-act="archive-download"]').click()]);
+check('a rescue downloads byte for byte, named for its day',
+  (await readFile(await rescueFile.path(), 'utf8')) === '{"routes":[{"name":"half' && rescueFile.suggestedFilename() === 'car-coordinator-unreadable-2026-09-28.json', rescueFile.suggestedFilename());
+
+// An update archive that is not a plan offers no Restore.
+await dt.evaluate(() => { localStorage.setItem('carcoord:archives', JSON.stringify([{ kind: 'update', from: 'x', to: 'not-a-plan', t: '2026-09-27T06:00:00.000Z', text: '[]' }])); render(); });
+const notPlanRow = archRows.filter({ hasText: 'Before not-a-plan' });
+check('an update archive holding [] says it could not be read, and offers no Restore',
+  (await notPlanRow.innerText()).includes('Could not be read') && (await notPlanRow.locator('[data-act="archive-restore"]').count()) === 0
+  && (await notPlanRow.locator('[data-act="archive-download"]').count()) === 1);
+
+// With no room for the backup, Restore does nothing, and says why.
+await dt.evaluate(({ a, b }) => { localStorage.setItem('carcoord:archives', a); state = Store.parseImport(b, defaults).state; save(); render(); }, { a: archivesAB(V), b: sincePlan });
+const filledRestore = await dt.evaluate(() => {
+  // No older backups to make way either: the one that could not be taken
+  // has nothing to trim.
+  localStorage.removeItem('carcoord:backups');
+  let chunks = 0;
+  try { for (; chunks < 2000; chunks++) localStorage.setItem(`fill:${chunks}`, 'x'.repeat(64 * 1024)); } catch { /* full */ }
+  try { for (let i = 0; i < 4000; i++) localStorage.setItem(`grain:${i}`, 'x'.repeat(1024)); } catch { /* full */ }
+  // Then crumbs, down to one character: what a 1 KB grain leaves over can
+  // still hold a small plan's backup, and whether it does moved with the plan's size.
+  for (const n of [256, 64, 16, 4, 1]) { try { for (let i = 0; i < 100000; i++) localStorage.setItem(`crumb:${n}:${i}`, 'x'.repeat(n)); } catch { /* full */ } }
+  return chunks;
+});
+await updRow.locator('[data-act="archive-restore"]').click();
+await updRow.locator('[data-act="archive-restore"]').click();
+check('with no room for the backup first, Restore changes nothing and says why',
+  filledRestore > 0 && JSON.stringify(await routeNames()) === '["Changed since"]'
+  && (await dt.locator('#notices').innerText()).includes(`Could not take a backup before "Restoring the copy from before ${V}"`),
+  await dt.locator('#notices').innerText());
+await dt.evaluate(() => {
+  for (let i = 0; i < 2000; i++) localStorage.removeItem(`fill:${i}`);
+  for (let i = 0; i < 4000; i++) localStorage.removeItem(`grain:${i}`);
+  for (const k of Object.keys(localStorage)) if (k.startsWith('crumb:')) localStorage.removeItem(k);
+});
+check('the Data tab\'s new cards log no console errors', dataUp.errs.length === 0, dataUp.errs.join(' | '));
+await dataUp.ctx.close();
+
+// --- the recovery page: works when the app does not, and only reads ---
+// Somewhere far from UTC, so a time shown in UTC would show.
+const rc = await newContext(null, { timezoneId: 'Pacific/Auckland', locale: 'en-GB' });
+const recoverStore = {
+  'carcoord:v1': JSON.stringify({ schemaVersion: 4, date: '2026-09-29', cars: [{ id: 'c1', reg: 'ÆØÅ 12345', note: 'Bremsene — sjekk' }], routes: [{ id: 'r1', name: '1' }] }),
+  'carcoord:backups': JSON.stringify([{ t: '2026-09-29T05:00:00.000Z', label: 'Start of day', json: '{"routes":[{"name":"b1"}],"cars":[]}' }]),
+  'carcoord:archives': JSON.stringify([{ kind: 'update', from: '0.2.4 or earlier', to: '0.3.0', t: '2026-09-29T04:00:00.000Z', text: '{"routes":[{"name":"a1"}],  "cars":[]}' },
+    { kind: 'rescue', from: null, to: null, t: '2026-09-28T04:00:00.000Z', text: '{not json' }]),
+  'carcoord:pref:seenUpdate': '0.3.0',
+};
+await leaveAs(rc.pg, recoverStore);
+const storeBefore = await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))));
+await rc.pg.goto(`${base}recover.html`, { waitUntil: 'networkidle' });
+same('the recovery page lists the plan, archives and backups first', (await rc.pg.locator('#list [data-key]').evaluateAll((bs) => bs.map((b) => b.dataset.key))).slice(0, 3),
+  ['carcoord:v1', 'carcoord:archives', 'carcoord:backups']);
+const fetched = {};
+for (const key of Object.keys(recoverStore)) {
+  const [dl] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.click(`#list [data-key="${key}"]`)]);
+  fetched[key] = await readFile(await dl.path(), 'utf8');
+}
+check('and downloads each byte for byte', Object.keys(recoverStore).every((k) => fetched[k] === recoverStore[k]),
+  Object.keys(recoverStore).filter((k) => fetched[k] !== recoverStore[k]).join(', '));
+const [oneArchive] = await Promise.all([rc.pg.waitForEvent('download'), rc.pg.locator('#list li', { hasText: 'Before 0.3.0' }).locator('button').click()]);
+check('an archive on its own downloads as the plan it holds, ready to import',
+  (await readFile(await oneArchive.path(), 'utf8')) === '{"routes":[{"name":"a1"}],  "cars":[]}' && oneArchive.suggestedFilename() === 'car-coordinator-before-0.3.0.json', oneArchive.suggestedFilename());
+same('times on the recovery page are this computer\'s own, with the date', await rc.pg.locator('#list li').allInnerTexts(), [
+  'Download Before 0.3.0 (from 0.2.4 or earlier), kept 29/09/2026, 17:00',
+  'Download Could not be read, kept 28/09/2026, 17:00',
+  'Download Start of day, 29/09/2026, 18:00',
+]);
+check('and opening it changed nothing stored', (await rc.pg.evaluate(() => JSON.stringify(Object.fromEntries(Object.keys(localStorage).sort().map((k) => [k, localStorage.getItem(k)]))))) === storeBefore);
+check('the recovery page logs no console errors', rc.errs.length === 0, rc.errs.join(' | '));
+await rc.ctx.close();
+
+// An app.js that will not run: the page is not left blank, and the way out works.
+const dead = await newContext(async (ctx) => {
+  await ctx.route('**/app.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'throw new Error("app.js broken on purpose");' }));
+});
+await leaveAs(dead.pg, recoverStore);
+await dead.pg.reload({ waitUntil: 'networkidle' });
+check('with app.js broken, the page still shows the line to the recovery page', await dead.pg.locator('#notices .boot-line a[href="recover.html"]').isVisible());
+dead.errs.length = 0;   // the broken app.js was meant to fail
+await dead.pg.click('#notices .boot-line a');
+await dead.pg.waitForLoadState('networkidle');
+check('and it leads to the recovery page, which still lists the plan',
+  dead.pg.url().endsWith('/recover.html') && (await dead.pg.locator('#list [data-key="carcoord:v1"]').count()) === 1, dead.pg.url());
+check('which logs no console errors', dead.errs.length === 0, dead.errs.join(' | '));
+await dead.ctx.close();
+
+// --- schema v5: the Show on printout tick, and a QR fixed off ---
+// A v4 plan converts in memory. carcoord:v1 keeps its old text, byte for byte,
+// until the leader's first real change, and only then is written, now as v6
+// (the driver tags' schema, so its move-over is part of the change too).
+const sameShape = (a, b) => {
+  const sort = (v) => Array.isArray(v) ? v.map(sort)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort(v[k])])) : v;
+  return JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+};
+const v4Plan = {
+  schemaVersion: 4, date: PLAN_DAY, qrOnSheet: true,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a' }, { id: 'L2', name: 'No fuel card', color: '#1565c0' }],
+  cars: [{ id: 'c1', reg: 'VF11111', labelId: 'L1', note: 'Brakes' }, { id: 'c2', reg: 'VF22222', labelId: '', note: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true, labelId: 'L2', note: '' }], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: false, gapBefore: false }],
+};
+const v4Text = JSON.stringify(v4Plan);
+const sv = await newContext();
+const s5 = sv.pg;
+const loaded5 = async () => s5.evaluate(() => ({
+  schemaVersion: state.schemaVersion, qrOnSheet: state.qrOnSheet,
+  ticks: state.labels.map((l) => l.onSheet),
+  saved: localStorage.getItem('carcoord:v1'),
+  repairs: [...document.querySelectorAll('#notices .notice')].filter((n) => n.innerText.includes('Repaired')).length,
+}));
+
+// (a) a v4 save loads unticked, with the QR off, and is not written at boot.
+await leaveAs(s5, { 'carcoord:v1': v4Text });
+const beforeLoad = await s5.evaluate(() => localStorage.getItem('carcoord:v1'));
+await s5.reload({ waitUntil: 'networkidle' });
+const a5 = await loaded5();
+check('(a) a v4 save loads with every label unticked', a5.ticks.length === 2 && a5.ticks.every((t) => t === false), JSON.stringify(a5.ticks));
+check('(a) with the QR off and schemaVersion 6', a5.qrOnSheet === false && a5.schemaVersion === 6, JSON.stringify(a5).slice(0, 120));
+check('(a) and no repair notice', a5.repairs === 0);
+check('(a) carcoord:v1 is byte for byte the v4 text across the load', beforeLoad === v4Text && a5.saved === v4Text);
+
+// (b) one real change writes v6: every label unticked, the QR off, Ana's
+// label moved over to a driver tag, the rest as it was.
+await s5.click('[data-act="tab"][data-tab="plan"]');
+await s5.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Bea');
+const b5 = JSON.parse(await s5.evaluate(() => localStorage.getItem('carcoord:v1')));
+const want5 = JSON.parse(v4Text);
+want5.schemaVersion = 6; want5.qrOnSheet = false;
+for (const l of want5.labels) l.onSheet = false;
+want5.routes[0].driver = 'Bea';
+want5.driverTags = [['No fuel card', '#1565c0'], ['Sick', '#c62828'], ['Holiday', '#1565c0'], ['Vacation', '#00897b'], ['Course', '#6a1b9a'], ['Special situation', '#ef6c00']]
+  .map(([name, color]) => ({ name, color }));
+want5.drivers[0].tagId = 'No fuel card';
+delete want5.drivers[0].labelId;
+// And 0.13.0's empty Monday to Friday, with the mark that they were added.
+want5.templates = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((name, i) => ({ id: `tpl-weekday-${i + 1}`, name, weekday: '', routes: [] }));
+want5.weekdayTemplates = true;
+// Driver tags by name: their ids are the build's own business.
+const tagsByName = (plan) => {
+  const p = JSON.parse(JSON.stringify(plan));
+  const names = new Map(p.driverTags.map((t) => [t.id, t.name]));
+  for (const d of p.drivers) if (d.tagId) d.tagId = names.get(d.tagId);
+  p.driverTags = p.driverTags.map(({ name, color }) => ({ name, color }));
+  return p;
+};
+check('(b) after one change the saved plan is v6, and otherwise the input plus that change', sameShape(tagsByName(b5), want5), JSON.stringify(b5).slice(0, 300));
+
+// (c) a saved plan with a ticked label keeps the tick through a reload, an Export and a re-Import.
+const ticked = JSON.parse(JSON.stringify(b5));
+ticked.labels[0].onSheet = true;
+await leaveAs(s5, { 'carcoord:v1': JSON.stringify(ticked) });
+await s5.reload({ waitUntil: 'networkidle' });
+check('(c) a ticked label is still ticked after a reload', JSON.stringify((await loaded5()).ticks) === '[true,false]');
+await s5.click('[data-act="tab"][data-tab="data"]');
+const [dl5] = await Promise.all([s5.waitForEvent('download'), s5.click('[data-act="export"]')]);
+const out5 = JSON.parse(await readFile(await dl5.path(), 'utf8'));
+check('(c) the Export carries the tick', out5.schemaVersion === 6 && out5.labels[0].onSheet === true && out5.labels[1].onSheet === false && out5.qrOnSheet === false);
+await s5.evaluate(() => localStorage.clear());
+await s5.reload({ waitUntil: 'networkidle' });
+await s5.click('[data-act="tab"][data-tab="data"]');
+await s5.setInputFiles('#importFile', { name: 'v5.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(out5)) });
+await s5.waitForFunction(() => state.labels.length === 2);
+const c5 = await loaded5();
+check('(c) and a re-Import brings it back, into the saved plan too',
+  JSON.stringify(c5.ticks) === '[true,false]' && JSON.parse(c5.saved).labels[0].onSheet === true, JSON.stringify(c5.ticks));
+
+// (d) restoring a v4 backup turns the tick off.
+await s5.evaluate((json) => {
+  const list = JSON.parse(localStorage.getItem('carcoord:backups') || '[]');
+  list.unshift({ t: new Date().toISOString(), label: 'A v4 copy', json });
+  localStorage.setItem('carcoord:backups', JSON.stringify(list));
+}, v4Text);
+await s5.reload({ waitUntil: 'networkidle' });
+await s5.click('[data-act="tab"][data-tab="data"]');
+// The backup's Restore by its key (its time and place among equal times),
+// as the Data tab draws it.
+const at4 = await s5.evaluate(() => Store.backups().findIndex((b) => b.label === 'A v4 copy'));
+const key4 = await s5.evaluate((i) => backupKeys(Store.backups())[i], at4);
+await s5.click(`[data-act="restore"][data-id="${key4}"]`);
+await s5.click(`[data-act="restore"][data-id="${key4}"]`);
+const d5 = await loaded5();
+check('(d) restoring a v4 backup turns the tick off', at4 >= 0 && JSON.stringify(d5.ticks) === '[false,false]' && JSON.parse(d5.saved).schemaVersion === 6, `${at4} ${JSON.stringify(d5.ticks)}`);
+
+// (e) every way a label is made gives onSheet: false, written out.
+await s5.evaluate(() => localStorage.clear());
+await s5.reload({ waitUntil: 'networkidle' });
+check('(e) a first run starts every label unticked', await s5.evaluate(() => state.labels.length === 3 && state.labels.every((l) => l.onSheet === false)));
+check('(e) and with the QR off', await s5.evaluate(() => state.qrOnSheet === false));
+await s5.click('[data-act="tab"][data-tab="labels"]');
+await s5.fill('#newLabel', 'Spare key');
+await s5.click('[data-act="add-label"]');
+check('(e) Add label makes it unticked', await s5.evaluate(() => state.labels.find((l) => l.name === 'Spare key')?.onSheet === false));
+check('(e) and the first run\'s first save keeps the QR off', await s5.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).qrOnSheet === false));
+await s5.click('[data-act="tab"][data-tab="cars"]');
+await s5.fill('#newCar', 'VE11111');
+await s5.click('#tab-cars [data-act="add-car"]');
+await s5.click('[data-act="tab"][data-tab="plan"]');
+await s5.locator('#tab-plan [data-panel="cars"] li').first().locator('[data-act="tag"]').click();
+await s5.fill('#newTagName', 'Flat tyre');
+await s5.click('[data-act="add-tag"]');
+check('(e) Add tag makes it unticked', await s5.evaluate(() => state.labels.find((l) => l.name === 'Flat tyre')?.onSheet === false));
+const e5 = await s5.evaluate(async () => {
+  const from = JSON.parse(JSON.stringify(state));
+  from.labels.push({ id: 'far', name: 'From afar', color: '#2e7d32', onSheet: true });
+  const { share, error } = await Share.decode(await Share.encode(from, 'all'));
+  if (error) return { error };
+  const { state: next } = Share.apply(state, share, { mode: 'all', addMissing: true });
+  return { onSheet: next.labels.find((l) => l.name === 'From afar')?.onSheet };
+});
+check('(e) an everything code that brings a new label makes it unticked', e5.onSheet === false, JSON.stringify(e5));
+
+// (f) the tick never travels in a share code, and never changes on arrival.
+const sameCodes = await s5.evaluate(async () => {
+  const all = (on) => { const s = JSON.parse(JSON.stringify(state)); s.labels.forEach((l) => { l.onSheet = on; }); return s; };
+  const out = {};
+  for (const mode of ['day', 'all']) out[mode] = (await Share.encode(all(true), mode)) === (await Share.encode(all(false), mode));
+  return out;
+});
+check('(f) a share code is the same with every label ticked and with none', sameCodes.day && sameCodes.all, JSON.stringify(sameCodes));
+const f5 = await s5.evaluate(async () => {
+  const from = JSON.parse(JSON.stringify(state));
+  from.labels.forEach((l) => { l.onSheet = true; });
+  const { share } = await Share.decode(await Share.encode(from, 'all'));
+  const here = JSON.parse(JSON.stringify(state));
+  const w = here.labels.find((l) => l.name === 'Workshop');
+  w.onSheet = true;
+  const src = JSON.parse(JSON.stringify(here));
+  src.labels.forEach((l) => { l.onSheet = false; });
+  src.labels.find((l) => l.name === 'Workshop').color = '#123456';
+  const { share: coloured } = await Share.decode(await Share.encode(src, 'all'));
+  const { state: next } = Share.apply(here, coloured, { mode: 'all', addMissing: true });
+  const after = next.labels.find((l) => l.name === 'Workshop');
+  return { rows: share.l.map((r) => r.length), after, was: w };
+});
+check('(f) every label row in an everything code is [name, colour]', f5.rows.length >= 3 && f5.rows.every((n) => n === 2), JSON.stringify(f5.rows));
+check('(f) a code naming a ticked label keeps it ticked and changes only its colour',
+  f5.after.onSheet === true && f5.after.color === '#123456' && f5.after.id === f5.was.id && f5.after.name === f5.was.name, JSON.stringify(f5.after));
+check('the schema v5 cases log no console errors', sv.errs.length === 0, sv.errs.join(' | '));
+await sv.ctx.close();
+
+// --- the printed sheet is paper, whatever the screen's theme ---
+// White paper, black type and pink marked rows, under a dark computer and
+// under Dark picked here, in print and in Print preview. The page around the
+// preview follows the theme; nothing on the sheet does.
+const paperCtx = await browser.newContext({ colorScheme: 'light' });
+const pp = await paperCtx.newPage();
+const ppErrors = [];
+pp.on('console', (m) => m.type() === 'error' && ppErrors.push(m.text()));
+pp.on('pageerror', (e) => ppErrors.push(String(e)));
+await pp.goto(base, { waitUntil: 'networkidle' });
+await pp.evaluate(() => localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
+  cars: [{ id: 'c1', reg: 'PA11111', labelId: '' }, { id: 'c2', reg: 'PA22222', labelId: 'L1', note: 'Brakes' }, { id: 'c3', reg: 'PA33333', labelId: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1' }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: 'p1', round: '1', highlight: true },
+    { id: 'r2', name: '2', driver: 'Bo', carId: '', positionId: '', gapBefore: true },
+    { id: 'r3', name: 'HAU 1', driver: 'Cai', carId: '', positionId: '', highlight: true },
+  ],
+})));
+await pp.reload({ waitUntil: 'networkidle' });
+await pp.click('[data-act="tab"][data-tab="preview"]');
+const paperLook = (withPage) => pp.evaluate((withPage) => {
+  const props = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'box-shadow', 'text-decoration-color'];
+  const out = [];
+  const walk = (el, path) => {
+    const cs = getComputedStyle(el);
+    out.push(`${path} ${props.map((p) => cs.getPropertyValue(p)).join(' | ')}`);
+    [...el.children].forEach((c, i) => walk(c, `${path}>${c.tagName.toLowerCase()}:${i}`));
+  };
+  walk(document.querySelector('#sheet'), '#sheet');
+  if (withPage) out.push(`html ${getComputedStyle(document.documentElement).backgroundColor}`, `body ${getComputedStyle(document.body).backgroundColor}`);
+  return out;
+}, withPage);
+const inkTokens = () => pp.evaluate(() => ['--ink', '--panel', '--field', '--concrete'].map((t) => `${t}: ${getComputedStyle(document.documentElement).getPropertyValue(t).trim()}`));
+const lookAs = async ({ media, colorScheme, theme }) => {
+  await pp.emulateMedia({ media, colorScheme });
+  await pp.evaluate((t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }, theme || null);
+};
+const firstDiff = (a, b) => { const i = a.findIndex((x, n) => x !== b[n]); return i < 0 ? '' : `${a[i]}  ≠  ${b[i]}`; };
+await lookAs({ media: 'screen', colorScheme: 'light' });
+const lightTokens = await inkTokens();
+const lightPreview = await paperLook(false);
+await lookAs({ media: 'print', colorScheme: 'light' });
+const lightPrint = await paperLook(true);
+check('the paper test has marked rows to look at', (await pp.locator('#sheet tr.hl').count()) === 2 && lightPrint.length > 20);
+for (const [name, how] of [['a dark computer', { colorScheme: 'dark' }], ['Dark picked here', { colorScheme: 'light', theme: 'dark' }]]) {
+  await lookAs({ media: 'print', ...how });
+  const printed = await paperLook(true);
+  check(`printed under ${name}, the sheet and the page behind it are as in light`, printed.join('\n') === lightPrint.join('\n'), firstDiff(printed, lightPrint));
+  const tokens = await inkTokens();
+  check(`printed under ${name}, the screen's colours are their light values`, tokens.join() === lightTokens.join(), tokens.join(', '));
+  await lookAs({ media: 'screen', ...how });
+  const previewed = await paperLook(false);
+  check(`in Print preview under ${name}, the sheet is as in light`, previewed.join('\n') === lightPreview.join('\n'), firstDiff(previewed, lightPreview));
+}
+await lookAs({ media: 'screen', colorScheme: 'dark', theme: 'dark' });
+const darkPdf = await pp.pdf({ format: 'A4', printBackground: true });
+check('a PDF printed while dark is not empty', darkPdf.length > 5000, `${darkPdf.length} bytes`);
+check('the paper cases log no console errors', ppErrors.length === 0, ppErrors.join(' | '));
+await paperCtx.close();
+
+// --- dark: the two dark lists agree, and everything on them can be read ---
+// The same dark tokens whether the computer asks for dark or Dark is picked
+// here, and Light picked here under a dark computer is plain light.
+const tokenNames = [...(await readFile('docs/style.css', 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
+  .match(/:root\s*\{([^}]*)\}/)[1].matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+const darkCtx = await browser.newContext({ colorScheme: 'light' });
+const dk = await darkCtx.newPage();
+const dkErrors = [];
+dk.on('console', (m) => m.type() === 'error' && dkErrors.push(m.text()));
+dk.on('pageerror', (e) => dkErrors.push(String(e)));
+await dk.goto(base, { waitUntil: 'networkidle' });
+const themeAs = async (colorScheme, theme) => {
+  await dk.emulateMedia({ media: 'screen', colorScheme });
+  await dk.evaluate((t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }, theme || null);
+};
+const tokensNow = () => dk.evaluate((names) => names.map((n) => `${n}: ${getComputedStyle(document.documentElement).getPropertyValue(n).trim()}`), tokenNames);
+await themeAs('light'); const plainLight = await tokensNow();
+await themeAs('dark'); const darkComputer = await tokensNow();
+await themeAs('light', 'dark'); const darkPicked = await tokensNow();
+await themeAs('dark', 'light'); const lightPicked = await tokensNow();
+const tokenDiff = (a, b) => a.filter((x, i) => x !== b[i]).slice(0, 3).join(', ');
+check('the two dark lists give the same tokens', tokenNames.length > 30 && darkComputer.join() === darkPicked.join(), tokenDiff(darkComputer, darkPicked));
+check('and dark is not light', darkComputer.join() !== plainLight.join());
+check('Light picked under a dark computer is plain light', lightPicked.join() === plainLight.join(), tokenDiff(lightPicked, plainLight));
+
+// A plan with every state the lists below name: a car on two routes, a pink
+// row, a driver away, a crew for today (lit), a template, a label, and the
+// update note with an info and a warning line beside it.
+// Dated the next working day, so nothing moves, with a crew for its weekday.
+const [dkDay, todayName] = await dk.evaluate(() => { const d = nextWorkingDay(); return [d, WEEKDAYS[parseDay(d).getDay()]]; });
+await dk.evaluate((crew) => { localStorage.clear(); localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: crew[1], qrOnSheet: false,
+  labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: true }],
+  cars: [{ id: 'c1', reg: 'DK11111', labelId: 'L1', note: '' }, { id: 'c2', reg: 'DK22222', labelId: '', note: '' }, { id: 'c3', reg: 'DK33333', labelId: '', note: '' }],
+  positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }],
+  drivers: [{ id: 'd1', name: 'Ana', available: true }, { id: 'd2', name: 'Bo', available: true }, { id: 'd3', name: 'Cai', available: false }],
+  driverGroups: [{ id: 'g1', name: crew[0], driverIds: ['d1', 'd2'] }],
+  templates: [{ id: 't1', name: 'Monday', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: false, gapBefore: false }] }],
+  routes: [
+    { id: 'r1', name: '1', driver: 'Ana', carId: 'c2', positionId: 'p1', round: '1', highlight: true, gapBefore: false },
+    { id: 'r2', name: '2', driver: 'Bo', carId: 'c2', positionId: '', round: '', highlight: false, gapBefore: false },
+    { id: 'r3', name: '3', driver: 'Cai', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false },
+  ],
+})); }, [todayName, dkDay]);
+await themeAs('light');
+await dk.reload({ waitUntil: 'networkidle' });
+await dk.evaluate(() => { note('info', 'An information line.'); note('warn', 'A warning line.'); render(); });
+await dk.click('#planWeek .week-col[aria-current="date"] [data-act="apply-group"]');   // the plan's day's crew, lit
+check("the dark cases have their states: the update note, the plan's day lit, a clash",
+  (await dk.locator('#notices .notice.update').count()) === 1 && (await dk.locator('#planWeek .week-col[aria-current="date"] .week-load.lit').count()) === 1
+  && (await dk.locator('#tab-plan tbody tr.warn').count()) >= 2);
+
+// Colours on screen, as a reader sees them: a colour with transparency is
+// laid over what is behind it, and what is behind is the nearest background.
+const readable = (list) => dk.evaluate((list) => {
+  const parse = (c) => {
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?/.exec(c);
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
+    m = /color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+))?/.exec(c);
+    return m ? [m[1] * 255, m[2] * 255, m[3] * 255, m[4] === undefined ? 1 : +m[4]] : null;
+  };
+  const over = (fg, bg) => fg[3] >= 1 ? fg : [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3])).concat(1);
+  const behind = (el) => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) {
+      const c = parse(getComputedStyle(e).backgroundColor);
+      if (c && c[3] > 0) { layers.push(c); if (c[3] >= 1) break; }
+    }
+    return layers.reduceRight((acc, c) => over(c, acc), [255, 255, 255, 1]);
+  };
+  const lum = (c) => { const [r, g, b] = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  return list.map(([name, sel, prop, min, pseudo]) => {
+    const el = document.querySelector(sel);
+    if (!el) return { name, missing: true };
+    const cs = getComputedStyle(el, pseudo || null);
+    const raw = prop === 'box-shadow' ? cs.boxShadow : cs.getPropertyValue(prop);
+    const bg = prop === 'background-color' ? behind(el.parentElement) : behind(el);
+    const fg = over(parse(raw) || [0, 0, 0, 0], bg);
+    return { name, got: Math.round(ratio(fg, bg) * 100) / 100, min };
+  });
+}, list);
+const TEXT = 4.5, MARK = 3;
+const pairs = [
+  ['page text', 'main', 'color', TEXT],
+  ['a hint', '.hint', 'color', TEXT],
+  ['a table heading', '#tab-plan .grid th', 'color', TEXT],
+  ['a route field', '#tab-plan tbody tr:nth-child(2) [data-field="driver"]', 'color', TEXT],
+  ['a pink row', '#tab-plan .grid tr.hl td', 'color', TEXT],
+  ['the warning box', '#tab-plan .problems', 'color', TEXT],
+  ['the rail count', '.rail-count', 'color', TEXT],
+  ['a route badge', '.rail-list .assign.yes', 'color', TEXT],
+  ['an away driver', '.rail-row.away', 'color', TEXT],
+  ['a rail button', '.rail-list .btn:not(.on)', 'color', TEXT],
+  ['a tab', '.tabs button:not(.active)', 'color', TEXT],
+  ['the tab in use', '.tabs button.active', 'color', TEXT],
+  ['the way to Breadify', '.sibling', 'color', TEXT],
+  ['the print button', 'button.primary', 'color', TEXT],
+  ['a button', '#tab-plan tbody .btn:not(.on)', 'color', TEXT],
+  ['Mark, on', '#tab-plan tbody .btn.on', 'color', TEXT],
+  ['a crew member, in', '#tab-drivers .chip.member.on', 'color', TEXT],
+  ['a label, off', '#tab-cars .chip:not(.on)', 'color', TEXT],
+  ['Not assigned', '#tab-cars .assign.none', 'color', TEXT],
+  ['an information line', '#notices .notice:not(.warn):not(.update) .say', 'color', TEXT],
+  ['a warning line', '#notices .notice.warn .say', 'color', TEXT],
+  ['the update note', '#notices .notice.update .say', 'color', TEXT],
+  ["the update note's headings", '#notices .notice.update .say b', 'color', TEXT],
+  ["the update note's ✕", '#notices .notice.update .btn', 'color', TEXT],
+  ['a template button', '.tpl .btn:not(.primary-ish)', 'color', TEXT],
+  ['a Data tab button', '#tab-data .card .btn', 'color', TEXT],
+  ['the share code box', '#shareIn', 'color', TEXT],
+  ['a chip in the Drivers panel', '#tab-plan .rail-groups .btn:not(.on)', 'color', TEXT],
+  ['the recovery page link', '#tab-data a[href="recover.html"]', 'color', TEXT],
+  ['the pressed Colours button', '#tab-data .colour-choice.lit', 'color', TEXT],
+  ['a name in the week', '#planWeek .week-col li', 'color', TEXT],
+  ["the week's count", '#planWeek .week-count', 'color', TEXT],
+  ['a lit Load', '#planWeek .week-load.lit', 'color', TEXT],
+  ['a quiet day in the week', '#planWeek .week-col.quiet .week-none', 'color', TEXT],
+  ['a spot on the parking map', '#planMap .parking-box .parking-title', 'color', TEXT],
+  ['a spot with no position, on the parking map', '#planMap .parking-empty-text', 'color', TEXT],
+  ['the entrance on the parking map', '#planMap .parking-entrance', 'color', TEXT],
+  ['a clash, striped', '#tab-plan tbody tr.warn td:first-child', 'box-shadow', MARK],
+  ['the No tag dot', '#tab-plan .rail-row .dot:not([style])', 'background-color', MARK],
+  ['a grip', '.grip', 'color', MARK],
+  ["the plan's day in the week", '#planWeek .week-col.plan-day .week-day', 'box-shadow', MARK],
+  ['an information edge', '#notices .notice:not(.warn):not(.update)', 'border-left-color', MARK],
+  ['a warning edge', '#notices .notice.warn', 'border-left-color', MARK],
+  ["the warning box's edge", '#tab-plan .problems', 'border-left-color', MARK],
+  ['a status mark', '#tab-data .status', 'color', MARK, '::before'],
+];
+const pickerPairs = [
+  ['the picker heading', '.picker-head', 'color', TEXT],
+  ['a choice note', '#picker .pick:not(.on):not(.flag) .pick-note', 'color', TEXT],
+  ['a choice with a clash', '#picker .pick.flag:not(.on) .pick-note', 'color', TEXT],
+];
+const menu = [['a tag choice', '#tagMenu .tag-choice:not(.on)', 'color', TEXT]];
+const armedPair = [['an armed button', '#tab-data .btn.armed', 'color', TEXT]];
+const judge = (label, got) => {
+  const missing = got.filter((g) => g.missing).map((g) => g.name);
+  const low = got.filter((g) => !g.missing && g.got < g.min).map((g) => `${g.name} ${g.got}:1`);
+  check(`${label}: every pair on the list is there`, !missing.length, missing.join(', '));
+  check(`${label}: text reaches 4.5:1 and marks 3:1`, !low.length, low.join(', '));
+};
+// The picker on route 2's car, which is also on route 1; the tag menu on a
+// tagged car; an archive's Restore pressed once.
+const openPicker = async () => {
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.locator('#tab-plan tbody tr').nth(1).locator('[data-field="carId"]').click();
+  await dk.waitForSelector('#picker:not([hidden]) .pick.on');
+};
+const openMenu = async () => {
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c1"]');
+  await dk.waitForSelector('#tagMenu:not([hidden])');
+};
+const closeAll = async () => { await dk.keyboard.press('Escape'); await dk.mouse.click(2, 600); };
+for (const [label, scheme, theme] of [['dark computer', 'dark'], ['Dark picked here', 'light', 'dark']]) {
+  await themeAs(scheme, theme);
+  judge(`${label}, the page`, await readable(pairs));
+  await openPicker(); judge(`${label}, the picker`, await readable(pickerPairs)); await closeAll();
+  await openMenu(); judge(`${label}, the tag menu`, await readable(menu)); await closeAll();
+  await dk.click('[data-act="tab"][data-tab="data"]');
+  await dk.click('[data-act="archive-restore"]');
+  judge(`${label}, an armed button`, await readable(armedPair));
+  await dk.waitForFunction(() => !document.querySelector('.btn.armed'), null, { timeout: 6000 });
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  await dk.waitForTimeout(50);
+  // In dark, no field or button is left white.
+  const white = await dk.evaluate(() => [...document.querySelectorAll('input, select, textarea, .btn')]
+    .filter((el) => el.getClientRects().length && /^rgba?\(255, 255, 255(, 1)?\)$/.test(getComputedStyle(el).backgroundColor))
+    .map((el) => el.outerHTML.slice(0, 60)));
+  check(`${label}: no field or button is white`, !white.length, white.slice(0, 3).join(' | '));
+}
+
+// Everything drawn on hi-vis or marker pink reads the same in both themes,
+// and reads: the picker's picked choice, a tag choice, today's crew lit, the
+// tab in use, Mark.
+const brightWalk = () => dk.evaluate(() => {
+  const FILLS = ['rgb(255, 212, 0)', 'rgb(255, 143, 194)'];
+  const parse = (c) => (/rgba?\(([\d.]+), ([\d.]+), ([\d.]+)/.exec(c) || []).slice(1).map(Number);
+  const lum = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const path = (el) => { const p = []; for (let e = el; e && e !== document.body; e = e.parentElement) p.unshift(`${e.tagName}:${[...(e.parentElement?.children || [])].indexOf(e)}`); return p.join('>'); };
+  const out = { looks: {}, low: [] };
+  for (const fill of [...document.querySelectorAll('body *')].filter((el) => el.getClientRects().length && FILLS.includes(getComputedStyle(el).backgroundColor))) {
+    const bg = parse(getComputedStyle(fill).backgroundColor);
+    for (const el of [fill, ...fill.querySelectorAll('*')].filter((e) => e.getClientRects().length)) {
+      const cs = getComputedStyle(el);
+      out.looks[path(el)] = ['color', 'background-color', 'border-top-color', 'border-bottom-color', 'box-shadow'].map((p) => cs.getPropertyValue(p)).join(' | ');
+      const text = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+      if (text && el !== fill && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)' && !FILLS.includes(cs.backgroundColor)) continue;
+      if (text) { const r = ratio(parse(cs.color), bg); if (r < 4.5) out.low.push(`${el.className || el.tagName} "${el.textContent.trim().slice(0, 20)}" ${r.toFixed(2)}:1`); }
+    }
+  }
+  return out;
+});
+const brightIn = async (scheme, theme) => {
+  await themeAs(scheme, theme);
+  const looks = {}, low = [];
+  const take = (w) => { Object.assign(looks, w.looks); low.push(...w.low); };
+  await dk.click('[data-act="tab"][data-tab="plan"]');
+  take(await brightWalk());
+  await openPicker(); take(await brightWalk()); await closeAll();
+  await openMenu(); take(await brightWalk()); await closeAll();
+  return { looks, low };
+};
+const brightLight = await brightIn('light');
+const brightDark = await brightIn('dark');
+const brightPicked = await brightIn('light', 'dark');
+check('on hi-vis and pink, all text reads, in light', Object.keys(brightLight.looks).length >= 8 && !brightLight.low.length, `${Object.keys(brightLight.looks).length} drawn; ${brightLight.low.join(', ')}`);
+check('on hi-vis and pink, all text reads, in dark', !brightDark.low.length && !brightPicked.low.length, [...brightDark.low, ...brightPicked.low].join(', '));
+const brightChanged = Object.keys(brightLight.looks).filter((k) => brightLight.looks[k] !== brightDark.looks[k] || brightLight.looks[k] !== brightPicked.looks[k]);
+check('and it looks the same in dark as in light', !brightChanged.length, brightChanged.slice(0, 2).map((k) => `${k}: ${brightLight.looks[k]} / ${brightDark.looks[k]}`).join(' ; '));
+check('the dark cases log no console errors', dkErrors.length === 0, dkErrors.join(' | '));
+await darkCtx.close();
+
+// --- label colours on a dark screen: lifted to be seen, never changed ---
+// The fixture's five colours, black and navy. In dark a chip's border and a
+// dot are drawn lifted toward the text colour and reach 3:1 on fields and
+// panels; in light, and on hi-vis, they are exactly the colour picked. The
+// colour saved, exported and shared is the same whatever the screen shows.
+const LABEL_COLOURS = ['#c62828', '#ef6c00', '#6a1b9a', '#1565c0', '#2e7d32', '#000000', '#000080'];
+const lcCtx = await browser.newContext({ colorScheme: 'light' });
+const lc = await lcCtx.newPage();
+const lcErrors = [];
+lc.on('console', (m) => m.type() === 'error' && lcErrors.push(m.text()));
+lc.on('pageerror', (e) => lcErrors.push(String(e)));
+await lc.goto(base, { waitUntil: 'networkidle' });
+await lc.evaluate((colours) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', JSON.stringify({
+  schemaVersion: 5, date: nextWorkingDay(), qrOnSheet: false,
+  labels: colours.map((color, i) => ({ id: `L${i}`, name: `Label ${i}`, color, onSheet: false })),
+  cars: colours.map((c, i) => ({ id: `c${i}`, reg: `LC1111${i}`, labelId: `L${i}`, note: '' })),
+  positions: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: '', carId: 'c0', positionId: '', round: '', highlight: false, gapBefore: false }],
+})); }, LABEL_COLOURS);
+await lc.reload({ waitUntil: 'networkidle' });
+const lcAs = async (colorScheme) => { await lc.emulateMedia({ media: 'screen', colorScheme }); };
+// Per label: the off chip's border and the rail dot's fill, as drawn, and
+// the page's field and panel.
+const drawn = () => lc.evaluate((colours) => {
+  const parse = (c) => {
+    let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?/.exec(c);
+    if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
+    m = /color\(srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)(?:\s*\/\s*([\d.]+))?/.exec(c);
+    return m ? [m[1] * 255, m[2] * 255, m[3] * 255, m[4] === undefined ? 1 : +m[4]] : null;
+  };
+  const hex = (c) => '#' + c.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const token = (n) => {
+    const probe = document.createElement('i'); probe.style.color = `var(${n})`; document.body.append(probe);
+    const c = parse(getComputedStyle(probe).color); probe.remove(); return c;
+  };
+  const field = token('--field'), panel = token('--panel');
+  return {
+    field, panel,
+    labels: colours.map((colour, i) => {
+      const chip = document.querySelector(`#tab-cars .chip[data-label="L${i}"]:not(.on)`);
+      const dot = document.querySelector(`#tab-plan [data-panel="cars"] .rail-row[data-id="c${i}"] .dot`);
+      const edge = dot && parse(getComputedStyle(dot).borderTopColor);
+      return { colour, chip: chip && hex(parse(getComputedStyle(chip).borderTopColor)), dot: dot && hex(parse(getComputedStyle(dot).backgroundColor)), edge };
+    }),
+  };
+}, LABEL_COLOURS);
+const lum3 = (h) => { const c = typeof h === 'string' ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : h; const [r, g, b] = c.slice(0, 3).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const ratio3 = (a, b) => { const [x, y] = [lum3(a), lum3(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const blend3 = (fg, bg) => [0, 1, 2].map((i) => fg[i] * fg[3] + bg[i] * (1 - fg[3]));
+
+await lcAs('light');
+const lightLabels = await drawn();
+check('in light, every chip and dot is drawn in exactly the colour picked',
+  lightLabels.labels.every((l) => l.chip === l.colour && l.dot === l.colour), JSON.stringify(lightLabels.labels.filter((l) => l.chip !== l.colour || l.dot !== l.colour)));
+await lcAs('dark');
+const darkLabels = await drawn();
+const faint = darkLabels.labels.flatMap((l) => [['chip', l.chip], ['dot', l.dot]]
+  .filter(([, c]) => !c || ratio3(c, darkLabels.field) < 3 || ratio3(c, darkLabels.panel) < 3)
+  .map(([what, c]) => `${l.colour} ${what} ${c}`));
+check('in dark, every chip border and dot reaches 3:1 on fields and panels', !faint.length, faint.join(', '));
+const black = darkLabels.labels.find((l) => l.colour === '#000000');
+check("in dark, a black label's dot has an edge of 3:1 or more",
+  black.edge && ratio3(blend3(black.edge, darkLabels.panel), darkLabels.panel) >= 3, JSON.stringify(black.edge));
+// On hi-vis, dots look as they do in light: the tag menu's lit choice.
+const litDot = async () => {
+  await lc.click('[data-act="tab"][data-tab="plan"]');
+  await lc.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c5"]');
+  await lc.waitForSelector('#tagMenu:not([hidden]) .tag-choice.on .dot');
+  const got = await lc.evaluate(() => { const d = document.querySelector('#tagMenu .tag-choice.on .dot'); const cs = getComputedStyle(d); return `${cs.backgroundColor} | ${cs.borderTopColor}`; });
+  await lc.keyboard.press('Escape');
+  await lc.mouse.click(2, 600);
+  return got;
+};
+await lcAs('light'); const litLight = await litDot();
+await lcAs('dark'); const litDark = await litDot();
+check('on hi-vis, a dot looks the same in dark as in light', litLight === litDark, `${litLight} / ${litDark}`);
+// What is saved, exported and shared does not depend on the screen.
+const keep = async () => {
+  await lc.click('[data-act="tab"][data-tab="data"]');
+  const [dl] = await Promise.all([lc.waitForEvent('download'), lc.click('[data-act="export"]')]);
+  return {
+    saved: await lc.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('carcoord:v1')).labels)),
+    exported: await readFile(await dl.path(), 'utf8'),
+    code: await lc.evaluate(() => Share.encode(state, 'all')),
+  };
+};
+await lc.click('[data-act="tab"][data-tab="cars"]');
+await lc.locator('#tab-cars .chip[data-label="L1"]').first().click();   // one real change, so the plan is saved
+await lcAs('light'); const keptLight = await keep();
+await lcAs('dark'); const keptDark = await keep();
+check('the saved colours, the Export and the share code are the same made in dark as in light',
+  keptLight.saved === keptDark.saved && keptLight.exported === keptDark.exported && keptLight.code === keptDark.code
+  && LABEL_COLOURS.every((c) => keptDark.saved.includes(`"color":"${c}"`)));
+check('the label colour cases log no console errors', lcErrors.length === 0, lcErrors.join(' | '));
+await lcCtx.close();
+
+// --- a stored Light or Dark is on the page before anything is drawn ---
+// theme.js runs in <head>, so the attribute is there when the top bar is
+// inserted; app.js applies it again for an index.html from before theme.js,
+// and follows a change made in another tab. Only light and dark count.
+const themeProbe = async ({ scheme, stored, setup }) => {
+  const ctx = await browser.newContext({ colorScheme: scheme });
+  await ctx.addInitScript(() => {
+    window.__themeAtBar = 'no bar seen';
+    new MutationObserver((ms, obs) => {
+      if (!document.querySelector('header.topbar')) return;
+      window.__themeAtBar = document.documentElement.dataset.theme || null;
+      obs.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  if (setup) await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  if (stored !== undefined) {
+    await pg.evaluate((v) => { try { localStorage.setItem('carcoord:pref:theme', v); } catch { /* refused */ } }, stored);
+    await pg.reload({ waitUntil: 'networkidle' });
+  }
+  const got = await pg.evaluate(() => ({ atBar: window.__themeAtBar, now: document.documentElement.dataset.theme || null }));
+  return { ctx, pg, errs, got };
+};
+for (const [stored, scheme] of [['dark', 'light'], ['light', 'dark']]) {
+  const t = await themeProbe({ scheme, stored });
+  check(`${stored} kept here, on a ${scheme} computer, is on the page before the top bar`, t.got.atBar === stored && t.got.now === stored, JSON.stringify(t.got));
+  check(`and logs no console errors (${stored})`, !t.errs.length, t.errs.join(' | '));
+  await t.ctx.close();
+}
+const garbage = await themeProbe({ scheme: 'dark', stored: 'purple' });
+check('a stored value that is not light or dark follows the computer', garbage.got.atBar === null && garbage.got.now === null && !garbage.errs.length, JSON.stringify(garbage.got) + garbage.errs.join(' | '));
+await garbage.ctx.close();
+const refused = await themeProbe({ scheme: 'dark', stored: 'dark', setup: (ctx) => ctx.addInitScript(() => {
+  const get = Storage.prototype.getItem;
+  Storage.prototype.getItem = function (k) { if (k === 'carcoord:pref:theme') throw new Error('refused on purpose'); return get.call(this, k); };
+}) });
+check('a browser that refuses to read the choice follows the computer, quietly', refused.got.now === null && !refused.errs.length, JSON.stringify(refused.got) + refused.errs.join(' | '));
+await refused.ctx.close();
+// A second tab follows a change made in the first.
+const tabs = await themeProbe({ scheme: 'light' });
+const other = await tabs.ctx.newPage();
+await other.goto(base, { waitUntil: 'networkidle' });
+await other.evaluate(() => localStorage.setItem('carcoord:pref:theme', 'dark'));
+await tabs.pg.waitForFunction(() => document.documentElement.dataset.theme === 'dark', null, { timeout: 3000 }).catch(() => {});
+const followedDark = await tabs.pg.evaluate(() => document.documentElement.dataset.theme || null);
+await other.evaluate(() => localStorage.removeItem('carcoord:pref:theme'));
+await tabs.pg.waitForFunction(() => !document.documentElement.dataset.theme, null, { timeout: 3000 }).catch(() => {});
+const followedBack = await tabs.pg.evaluate(() => document.documentElement.dataset.theme || null);
+check('another tab follows a change of colours, both ways', followedDark === 'dark' && followedBack === null, `${followedDark} then ${followedBack}`);
+check('and logs no console errors', !tabs.errs.length, tabs.errs.join(' | '));
+await tabs.ctx.close();
+// An index.html cached from before theme.js: app.js applies the choice itself.
+const noThemeJs = await themeProbe({ scheme: 'light', stored: 'dark', setup: (ctx) => ctx.route(/\/(index\.html)?(\?.*)?$/, async (route) => {
+  const res = await route.fetch();
+  route.fulfill({ response: res, body: (await res.text()).replace(/\s*<script src="theme\.js[^"]*"><\/script>/, '') });
+}) });
+check('without theme.js, app.js still applies Dark', noThemeJs.got.now === 'dark'
+  && (await noThemeJs.pg.evaluate(() => ![...document.scripts].some((s) => /theme\.js/.test(s.src)))), JSON.stringify(noThemeJs.got));
+check('and logs no console errors (no theme.js)', !noThemeJs.errs.length, noThemeJs.errs.join(' | '));
+await noThemeJs.ctx.close();
+
+// --- the Colours switch: this browser's choice, and never a save ---
+// Three buttons in the This browser card. Each press sets the page's colours
+// at once; Light and Dark are kept as a pref, Follow the computer removes it.
+// Nothing about the plan is written: not on a lost plan, not to a linked
+// file, not on a plain profile.
+const swCtx = await browser.newContext({ colorScheme: 'light' });
+const sw = await swCtx.newPage();
+const swErrors = [];
+sw.on('console', (m) => m.type() === 'error' && swErrors.push(m.text()));
+sw.on('pageerror', (e) => swErrors.push(String(e)));
+await sw.goto(base, { waitUntil: 'networkidle' });
+const swState = () => sw.evaluate(() => ({
+  attr: document.documentElement.dataset.theme || null,
+  pref: localStorage.getItem('carcoord:pref:theme'),
+  pressed: document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours || null,
+}));
+const press = async (colours, keyboard) => {
+  const sel = `#tab-data [data-act="theme"][data-colours="${colours}"]`;
+  if (keyboard) { await sw.focus(sel); await sw.keyboard.press('Enter'); } else await sw.click(sel);
+};
+check('a plain open writes no colour choice', await sw.evaluate(() => localStorage.getItem('carcoord:pref:theme') === null));
+await sw.click('[data-act="tab"][data-tab="data"]');
+check('the Colours row has three buttons, Follow the computer pressed',
+  (await sw.locator('#tab-data [data-act="theme"]').count()) === 3 && (await swState()).pressed === 'follow');
+await press('dark');
+const swDark = await swState();
+check('Dark sets the page dark and keeps the choice', swDark.attr === 'dark' && swDark.pref === 'dark' && swDark.pressed === 'dark', JSON.stringify(swDark));
+await press('light');
+const swLight = await swState();
+check('Light sets it light and keeps that', swLight.attr === 'light' && swLight.pref === 'light' && swLight.pressed === 'light', JSON.stringify(swLight));
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.click('[data-act="tab"][data-tab="data"]');
+const swReload = await swState();
+check('a reload keeps the choice', swReload.attr === 'light' && swReload.pressed === 'light', JSON.stringify(swReload));
+await press('follow', true);
+const swFollow = await swState();
+check('Follow the computer removes it', swFollow.attr === null && swFollow.pref === null && swFollow.pressed === 'follow', JSON.stringify(swFollow));
+check('and a key press leaves the focus on the pressed button',
+  await sw.evaluate(() => document.activeElement?.matches('[data-act="theme"][data-colours="follow"]')));
+// Another tab follows, pressed button and all.
+const sw2 = await swCtx.newPage();
+await sw2.goto(base, { waitUntil: 'networkidle' });
+await sw2.click('[data-act="tab"][data-tab="data"]');
+await press('dark');
+await sw2.waitForFunction(() => document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours === 'dark', null, { timeout: 3000 }).catch(() => {});
+check('another tab follows, its pressed button too', await sw2.evaluate(() => document.documentElement.dataset.theme === 'dark'
+  && document.querySelector('#tab-data [data-act="theme"][aria-pressed="true"]')?.dataset.colours === 'dark'));
+await sw2.close();
+await press('follow');
+
+// Never saves, on a plan this browser could not read.
+await sw.evaluate(() => localStorage.setItem('carcoord:v1', '{not json at all'));
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.click('[data-act="tab"][data-tab="data"]');
+for (const keyboard of [false, true]) for (const c of ['follow', 'light', 'dark']) await press(c, keyboard);
+check('pressing every colour, by mouse and by key, leaves an unreadable plan exactly as it was',
+  await sw.evaluate(() => localStorage.getItem('carcoord:v1') === '{not json at all'));
+await press('follow');
+
+// Never saves, with a linked save file allowed to write.
+await sw.evaluate(() => localStorage.clear());
+await sw.reload({ waitUntil: 'networkidle' });
+await sw.evaluate((t) => localStorage.setItem('carcoord:v1', t), devPlan);
+await sw.reload({ waitUntil: 'networkidle' });
+await linkStandIn(sw, devPlan, { perm: 'granted' });
+await sw.evaluate(() => { window.__saves = 0; const save = Store.save; Store.save = (...a) => { window.__saves++; return save(...a); }; });
+const keptBefore = await sw.evaluate(() => ({ v1: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups') }));
+await sw.click('[data-act="tab"][data-tab="data"]');
+for (const keyboard of [false, true]) for (const c of ['dark', 'light', 'follow']) await press(c, keyboard);
+await sw.evaluate(() => Store.flush());
+const swWrites = await sw.evaluate(() => ({ disk: window.__disk.writes, saves: window.__saves, v1: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups') }));
+check('with a linked file, no press writes the file or calls a save', swWrites.disk === 0 && swWrites.saves === 0, JSON.stringify({ disk: swWrites.disk, saves: swWrites.saves }));
+check('and the saved plan and Backups are byte for byte as they were', swWrites.v1 === keptBefore.v1 && swWrites.backups === keptBefore.backups);
+// Export and share codes carry no colours.
+await press('dark');
+const [swDl] = await Promise.all([sw.waitForEvent('download'), sw.click('[data-act="export"]')]);
+const swExport = await readFile(await swDl.path(), 'utf8');
+const swCodes = await sw.evaluate(async () => [await Share.encode(state, 'day'), await Share.encode(state, 'all')]);
+await press('follow');
+const swCodesFollow = await sw.evaluate(async () => [await Share.encode(state, 'day'), await Share.encode(state, 'all')]);
+check('an Export made in dark carries no colours', !/theme|colours/i.test(swExport));
+check('and share codes are the same whatever the colours', swCodes.join() === swCodesFollow.join());
+// A browser that will not keep the choice: it still applies, and says so.
+await sw.evaluate(() => {
+  const set = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:pref:theme') throw new Error('refused on purpose'); return set.call(this, k, v); };
+});
+await press('dark');
+check("a browser that refuses to keep it still turns dark, and says it couldn't keep it",
+  (await sw.evaluate(() => document.documentElement.dataset.theme)) === 'dark'
+  && (await sw.locator('#tab-data', { hasText: "couldn't keep the choice" }).count()) === 1);
+// Pack 1's layout: no table in the card, Backups last, no sideways scroll.
+check('the This browser card has no table, and Backups is still the last card',
+  await sw.evaluate(() => {
+    const card = [...document.querySelectorAll('#tab-data .card')].find((c) => c.querySelector('[data-act="theme"]'));
+    return card && !card.querySelector('table') && /Backups/.test(document.querySelector('#tab-data .card:last-child h3')?.textContent || '');
+  }));
+await sw.setViewportSize({ width: 390, height: 844 });
+check('the Data tab fits a phone screen with the switch', await sw.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+check('the Colours switch logs no console errors', swErrors.length === 0, swErrors.join(' | '));
+await swCtx.close();
+
+// --- the calendar: plans are for the next working day, on the local calendar ---
+// A context of its own in Oslo, where the clocks change, and every instant is
+// written with its Oslo offset. The shared page never gets a frozen clock: it
+// would give every backup the same time.
+const calCtx = await browser.newContext({ timezoneId: 'Europe/Oslo' });
+const calErrors = [];
+const calOpen = async (instant, items = null, { install = false } = {}) => {
+  const pg = await calCtx.newPage();
+  pg.on('console', (m) => m.type() === 'error' && calErrors.push(m.text()));
+  pg.on('pageerror', (e) => calErrors.push(String(e)));
+  if (install) await pg.clock.install({ time: new Date(instant) });
+  else await pg.clock.setFixedTime(new Date(instant));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  if (items) {
+    // '@V' stands for this build's version, which only the page knows.
+    await pg.evaluate((items) => { localStorage.clear(); for (const [k, v] of Object.entries(items)) localStorage.setItem(k, v === '@V' ? APP_VERSION : v); }, items);
+    await pg.reload({ waitUntil: 'networkidle' });
+  }
+  // The clock was set before start() ran: today() is the instant's Oslo day.
+  const want = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Oslo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(instant));
+  const got = await pg.evaluate(() => today());
+  check(`the calendar page's clock reads ${want}`, got === want, got);
+  return pg;
+};
+const plan4 = (date, extra = {}) => JSON.stringify({
+  schemaVersion: 5, date, qrOnSheet: false, labels: [], cars: [], positions: [], drivers: [], driverGroups: [], templates: [],
+  routes: [{ id: 'r1', name: '1', driver: 'Ana', carId: '', positionId: '', round: '', highlight: false, gapBefore: false }],
+  ...extra,
+});
+
+// Item 1: the helper at every calendar edge, and the two places that use it.
+{
+  const pg = await calOpen('2026-09-28T09:00:00+02:00');
+  const edges = await pg.evaluate(() => [
+    ['2026-09-28T09:00:00+02:00', '2026-09-29'],
+    ['2026-10-02T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-03T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-04T09:00:00+02:00', '2026-10-05'],
+    ['2026-10-24T23:30:00+02:00', '2026-10-26'],
+    ['2026-10-25T00:30:00+02:00', '2026-10-26'],
+    ['2026-03-27T09:00:00+01:00', '2026-03-30'],
+    ['2026-10-30T09:00:00+01:00', '2026-11-02'],
+    ['2026-12-31T09:00:00+01:00', '2027-01-01'],
+    ['2027-12-31T09:00:00+01:00', '2028-01-03'],
+  ].map(([at, want]) => ({ at, want, got: nextWorkingDay(new Date(at)) })));
+  const wrong = edges.filter((e) => e.got !== e.want);
+  check('the next working day is right at every calendar edge', !wrong.length, JSON.stringify(wrong));
+  const rejected = await pg.evaluate(() => ['2026-13-45', '2026-02-30', '0020-01-01', '', 'x', null].map((s) => parseDay(s)));
+  check('parseDay rejects days that are not real', rejected.every((d) => d === null));
+  check('and reads one that is, at local noon', await pg.evaluate(() => { const d = parseDay('2026-10-25'); return d && d.getHours() === 12 && d.getDate() === 25; }));
+  await pg.close();
+}
+{
+  const pg = await calOpen('2026-10-02T09:00:00+02:00', {});
+  check('a Friday first run dates the plan Monday', (await pg.evaluate(() => state.date)) === '2026-10-05', await pg.evaluate(() => state.date));
+  await pg.evaluate((t) => { localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, plan4('2026-10-01'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  await pg.click('[data-act="clear-day"]');
+  await pg.click('[data-act="clear-day"]');
+  check('and so does a Friday Clear the day', (await pg.evaluate(() => state.date)) === '2026-10-05', await pg.evaluate(() => state.date));
+  await pg.close();
+}
+
+// Item 2: one Start of day backup per local day. 00:30 in Oslo on 09-29 is
+// still 09-28 in UTC.
+for (const [seededAt, wantNew, what] of [
+  ['2026-09-28T23:30:00+02:00', true, "yesterday evening's Start of day backup leads to a new one"],
+  ['2026-09-29T00:10:00+02:00', false, "one taken at ten past midnight counts for today"],
+]) {
+  const seeded = [{ t: new Date(seededAt).toISOString(), label: 'Start of day', json: plan4('2026-09-25') }];
+  const pg = await calOpen('2026-09-29T00:30:00+02:00', {
+    'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30'), 'carcoord:backups': JSON.stringify(seeded),
+  });
+  const list = await pg.evaluate(() => Store.backups().map((b) => ({ t: b.t, label: b.label, json: b.json })));
+  const starts = list.filter((b) => b.label === 'Start of day');
+  check(`a Start of day backup per local day: ${what}`, starts.length === (wantNew ? 2 : 1), JSON.stringify(starts.map((b) => b.t)));
+  check('the seeded backup differs from the plan opened, and every t is still an ISO string',
+    seeded[0].json !== plan4('2026-09-30') && list.every((b) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(b.t)));
+  await pg.close();
+}
+
+// Item 3: the line under the Date says what day the plan is for.
+{
+  const line = (pg) => pg.evaluate(() => {
+    const el = document.getElementById('dateLine');
+    return { text: el?.innerText.replace(/\s+/g, ' ').trim() || '', off: el?.classList.contains('off'), button: !!el?.querySelector('[data-act="set-tomorrow"]') };
+  });
+  // Tuesday 2026-09-29: the next working day is Wednesday 30/09.
+  const pg = await calOpen('2026-09-29T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-09-30') });
+  const quiet = await line(pg);
+  check('the date line is quiet for the next working day', quiet.text === 'Wednesday 30/09, the next working day.' && !quiet.off && !quiet.button, JSON.stringify(quiet));
+  check('the Date box shows the plan\'s day as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
+  const cases = [
+    ['29/09/2026', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
+    ['28/09/2026', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
+    ['01/10/2026', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
+    ['', 'Not a real day yet: type it as dd/mm/yyyy, or click the box for the calendar. The plan keeps'],
+  ];
+  for (const [typed, want] of cases) {
+    await pg.fill('#date', typed);
+    const got = await line(pg);
+    check(`typing ${typed || 'nothing'}: the line warns and offers Set to tomorrow`, got.text.startsWith(want) && got.off && got.button, JSON.stringify(got));
+    check(`and the focus stays in the Date box (${typed || 'nothing'})`, await pg.evaluate(() => document.activeElement?.id === 'date'));
+  }
+  check('typing a date leaves the warnings and stripes as they were', (await pg.locator('#tab-plan tbody tr.warn').count()) === 0);
+  // Above the line, the plan's day large, and how far it is from today
+  // (owner, 2026-10-01). Today here is Tuesday 29/09.
+  const head = () => pg.locator('#dateHead').evaluate((el) => el.innerText.replace(/\s+/g, ' ').trim());
+  for (const [typed, want] of [['30/09/2026', 'Wednesday 30/09/2026 Planning tomorrow'], ['29/09/2026', 'Tuesday 29/09/2026 Planning today'],
+    ['28/09/2026', 'Monday 28/09/2026 Planning yesterday'], ['02/10/2026', 'Friday 02/10/2026 Planning three days ahead'],
+    ['25/09/2026', 'Friday 25/09/2026 Planning four days ago'], ['20/10/2026', 'Tuesday 20/10/2026 Planning 21 days ahead'], ['', 'Not a date yet']]) {
+    await pg.fill('#date', typed);
+    same(`typing ${typed || 'nothing'}, the day above the line reads`, await head(), want);
+  }
+  check('in larger type than the page', await pg.locator('#dateHead .date-big').evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 24));
+  await pg.click('[data-act="set-tomorrow"]');
+  check('Set to tomorrow sets the date and saves it', (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-09-30,2026-09-30');
+  check('and the Date box shows it as dd/mm/yyyy', (await pg.inputValue('#date')) === '30/09/2026', await pg.inputValue('#date'));
+  // The Date box reads dd/mm/yyyy in any browser language, and a few other
+  // ways of writing it; the plan keeps YYYY-MM-DD, as it always has.
+  const typedAs = async (typed) => { await pg.fill('#date', typed); return pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join()); };
+  for (const typed of ['02/10/2026', '2.10.2026', '2-10-2026', '2026-10-02']) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} in the Date box sets and saves 2026-10-02`, got === '2026-10-02,2026-10-02', got);
+  }
+  // Half typed, or not a real day: the plan keeps its day and nothing is
+  // saved; the day above the line and the line itself say so.
+  for (const typed of ['02/10/20', '02/10/202', '31/09/2026', '10/13/2026']) {
+    const got = await typedAs(typed);
+    check(`typing ${typed} keeps the plan's day, 2026-10-02, and saves nothing new`, got === '2026-10-02,2026-10-02'
+      && (await head()) === 'Not a date yet' && (await line(pg)).text.startsWith('Not a real day yet'), got);
+  }
+  await pg.fill('#date', '02/10/20');
+  await pg.evaluate(() => render());
+  check('a redraw meanwhile keeps what was typed in the box', (await pg.inputValue('#date')) === '02/10/20');
+  await pg.fill('#date', '2.10.2026');
+  await pg.locator('#date').blur();
+  check('leaving the Date box writes what was typed as dd/mm/yyyy', (await pg.inputValue('#date')) === '02/10/2026', await pg.inputValue('#date'));
+  await pg.fill('#date', '31/09/2026');
+  await pg.locator('#date').blur();
+  check('and a day left half typed goes back to the day the plan kept', (await pg.inputValue('#date')) === '02/10/2026'
+    && (await head()) === 'Friday 02/10/2026 Planning three days ahead');
+  // « ‹ › »: a month or a day either way, as if typed; the focus stays put.
+  const stepBy = async (unit, by) => { await pg.click(`[data-act="date-step"][data-unit="${unit}"][data-by="${by}"]`); return pg.evaluate(() => [state.date, document.getElementById('date').value].join()); };
+  same('› is a day later', await stepBy('day', 1), '2026-10-03,03/10/2026');
+  same('‹ a day earlier', await stepBy('day', -1), '2026-10-02,02/10/2026');
+  same('» a month later', await stepBy('month', 1), '2026-11-02,02/11/2026');
+  same('« a month earlier', await stepBy('month', -1), '2026-10-02,02/10/2026');
+  check('and the button keeps the focus, for another press', await pg.evaluate(() => document.activeElement?.dataset.unit === 'month'));
+  await pg.fill('#date', '31/01/2027');
+  same('a month on from the 31st is the month\'s last day', await stepBy('month', 1), '2027-02-28,28/02/2027');
+  check('and it is saved', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).date)) === '2027-02-28');
+  check('everything on the Date row is one height', new Set(await pg.locator('#planBar .btn, #date').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)))).size === 1);
+  // A click on the box opens the calendar, set to the plan's day; the keyboard
+  // never does, so typing still works.
+  await pg.evaluate(() => { window.pickerOpened = []; HTMLInputElement.prototype.showPicker = function () { window.pickerOpened.push(this.value); }; });
+  await pg.click('#date');
+  same('a click on the Date box opens the calendar, on the plan\'s day', await pg.evaluate(() => window.pickerOpened), ['2027-02-28']);
+  await pg.focus('[data-act="date-step"][data-unit="day"][data-by="-1"]');
+  await pg.keyboard.press('Tab');
+  check('reaching it with Tab does not', await pg.evaluate(() => document.activeElement?.id === 'date' && window.pickerOpened.length === 1));
+  await pg.fill('#date', '02/10/2026');
+  // The calendar button opens the browser's own picker, on a date field kept
+  // out of sight; a day picked there goes into the box as if typed.
+  check('the calendar button sits beside the Date box, and its field is out of sight',
+    await pg.locator('.date-box [data-act="pick-date"]').isVisible() && (await pg.locator('#datePick').evaluate((i) => getComputedStyle(i).opacity)) === '0');
+  await pg.click('[data-act="pick-date"]');
+  await pg.keyboard.press('Escape');
+  await pg.locator('#datePick').evaluate((i) => { i.value = '2026-10-05'; i.dispatchEvent(new Event('change', { bubbles: true })); });
+  check('a day picked from the calendar is written in the box as dd/mm/yyyy, set and saved',
+    (await pg.inputValue('#date')) === '05/10/2026' && (await pg.evaluate(() => [state.date, JSON.parse(localStorage.getItem('carcoord:v1')).date].join())) === '2026-10-05,2026-10-05');
+  check('and the focus is back in the Date box', await pg.evaluate(() => document.activeElement?.id === 'date'));
+  await pg.click('[data-act="set-tomorrow"]');
+  await pg.fill('#date', '2026-10-01');
+  await pg.focus('[data-act="set-tomorrow"]');
+  await pg.keyboard.press('Enter');
+  check('from the keyboard, Set to tomorrow leaves the focus in the Date box', await pg.evaluate(() => state.date === '2026-09-30' && document.activeElement?.id === 'date'));
+  // A day later, coming back to the window redraws the line.
+  await pg.clock.setFixedTime(new Date('2026-09-30T09:00:00+02:00'));
+  await pg.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  const nextDay = await line(pg);
+  check('coming back to the window the next day redraws the line', nextDay.text.startsWith('This plan is dated today, Wednesday 30/09.') && nextDay.button, JSON.stringify(nextDay));
+  await pg.setViewportSize({ width: 390, height: 844 });
+  check('the warning fits a phone screen', await pg.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+  await pg.close();
+}
+for (const [at, date, what] of [
+  ['2026-10-02T09:00:00+02:00', '2026-10-03', 'a Friday open of a Saturday plan'],
+  ['2026-10-03T09:00:00+02:00', '2026-10-04', 'a Saturday open of a Sunday plan'],
+  ['2026-09-29T09:00:00+02:00', '2026-13-45', 'a date that is not a real day'],
+]) {
+  const pg = await calOpen(at, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4(date) });
+  const got = await pg.evaluate(() => { const el = document.getElementById('dateLine'); return { off: el.classList.contains('off'), button: !!el.querySelector('[data-act="set-tomorrow"]'), date: state.date }; });
+  check(`${what} warns and offers Set to tomorrow`, got.off && got.button && got.date === date, JSON.stringify(got));
+  await pg.close();
+}
+
+// Item 4: the week row follows the plan's day; templates, even ones an older
+// copy set for a weekday, never offer themselves (owner, 2026-10-01).
+{
+  const tpl = (id, name, weekday) => ({ id, name, weekday, routes: [{ name: '1', driver: name, carId: '', positionId: '', round: '', highlight: false, gapBefore: false }] });
+  const offers = (pg) => pg.locator('#notices [data-act="ask-template"]').count();
+  // Friday 2026-10-02, the plan dated Monday 10-05.
+  const pg = await calOpen('2026-10-02T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-10-05', {
+    templates: [tpl('tm', 'Mondays', '1'), tpl('tw', 'Wednesdays', '3'), tpl('tf', 'Fridays', '5')],
+    drivers: [{ id: 'd1', name: 'Ana', available: true }], driverGroups: [{ id: 'g1', name: 'Monday', driverIds: ['d1'] }],
+  }) });
+  check('a Monday plan with a template set for Mondays raises no offer', (await offers(pg)) === 0, await pg.locator('#notices').innerText());
+  check("the week marks the plan's day", (await pg.locator('#planWeek .week-col[aria-current="date"]').getAttribute('data-day')) === '1');
+  check('no word in the rail says today', !/today/i.test(await pg.locator('#tab-plan [data-panel="drivers"]').evaluate((el) => el.outerHTML)));
+  const before = await pg.locator('#notices').innerHTML();
+  await pg.fill('#date', '07/10/2026');
+  check('typing a date leaves the notices alone', (await pg.locator('#notices').innerHTML()) === before);
+  await pg.click('[data-act="tab"][data-tab="plan"]');
+  await pg.click('[data-act="set-tomorrow"]');
+  check('nor does Set to tomorrow raise one', (await offers(pg)) === 0);
+  same('and the templates keep the days they were saved with', await pg.evaluate(() => ['tm', 'tw', 'tf'].map((id) => byId(state.templates, id).weekday)), ['1', '3', '5']);
+  await pg.close();
+}
+
+// The plan's day's crew comes in with the date (owner, 2026-10-01): typing,
+// picking, a day step and Set to tomorrow load that weekday's crew, as the
+// week's Load does; a day with no crew changes nobody.
+{
+  const pg = await calOpen('2026-10-01T09:00:00+02:00', { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': devPlan });
+  const inNow = () => pg.evaluate(() => state.drivers.filter((d) => d.available).map((d) => d.name).sort().join());
+  const crewOf = (name) => pg.evaluate((n) => {
+    const g = state.driverGroups.find((x) => x.name === n);
+    return state.drivers.filter((d) => g.driverIds.includes(d.id)).map((d) => d.name).sort().join();
+  }, name);
+  await pg.fill('#date', '05/10/2026');
+  same('typing a Monday brings Monday\'s crew in and sends the rest away', await inNow(), await crewOf('Monday crew'));
+  check('and saves it', (await pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).drivers.filter((d) => d.available).length))
+    === (await crewOf('Monday crew')).split(',').length);
+  await pg.fill('#date', '02/10/2026');
+  same('a Friday, Friday\'s', await inNow(), await crewOf('Friday'));
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a step to Saturday loads the Saturday crew', await inNow(), await crewOf('Lørdag gjeng'));
+  const sat = await inNow();
+  await pg.click('[data-act="date-step"][data-unit="day"][data-by="1"]');
+  same('a Sunday, which has no crew, changes nobody', await inNow(), sat);
+  check('the rail and the week show it', (await pg.locator('#planWeek .week-load.lit').count()) === 0
+    && (await pg.locator('#tab-plan [data-panel="drivers"] .rail-row.away').count()) > 0);
+  await pg.click('[data-act="set-tomorrow"]');
+  same('Set to tomorrow loads its day\'s crew too', await inNow(), await crewOf('Friday'));
+  check('with the week\'s Friday Load lit', (await pg.locator('#planWeek .week-col[data-day="5"] .week-load.lit').count()) === 1);
+  // Only a real change to a whole date loads a crew (review, 2026-10-01).
+  await pg.evaluate(() => { state.drivers.find((d) => d.name === 'Camilla').available = false; save(); render(); });
+  await pg.fill('#date', '02/10/2026');
+  check('retyping the day the plan has loads nothing: a driver set away by hand stays away',
+    await pg.evaluate(() => !state.drivers.find((d) => d.name === 'Camilla').available));
+  // Editing the day in place, key by key: "05" over "02" passes through
+  // "0/10/2026", and the crew loads once, for the day finally written, with
+  // the focus kept in the box all along.
+  await pg.locator('#date').focus();
+  await pg.keyboard.press('Home');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.press('Shift+ArrowRight');
+  await pg.keyboard.type('05');
+  same('editing the day in place loads the crew of the day written', await inNow(), await crewOf('Monday crew'));
+  check('and keeps the focus in the Date box, reading 05/10/2026', await pg.evaluate(() => document.activeElement?.id === 'date' && document.activeElement.value === '05/10/2026'));
+  // Emptying the box to retype the same day keeps the day, saves nothing, and
+  // so loads no crew over availability set by hand (review, 2026-10-01).
+  await pg.evaluate(() => { state.drivers.find((d) => d.name === 'Camilla').available = true; save(); render(); });
+  await pg.locator('#date').focus();
+  await pg.keyboard.press('Control+a');
+  await pg.keyboard.press('Backspace');
+  check('an emptied Date box keeps the plan\'s day and saves no blank date', await pg.evaluate(() =>
+    state.date === '2026-10-05' && JSON.parse(localStorage.getItem('carcoord:v1')).date === '2026-10-05'));
+  await pg.keyboard.type('05/10/2026');
+  check('and typing the same day back loads no crew: Camilla, set in by hand, stays in',
+    await pg.evaluate(() => state.drivers.find((d) => d.name === 'Camilla').available));
+  await pg.fill('#date', '');
+  await pg.locator('#date').blur();
+  check('leaving it empty puts the plan\'s day back in the box', (await pg.inputValue('#date')) === '05/10/2026');
+  // A date written with dots, as Norway writes it, loads its crew too.
+  await pg.fill('#date', '02.10.2026');
+  same('a date typed with dots loads that day\'s crew', await inNow(), await crewOf('Friday'));
+  await pg.close();
+}
+
+// Wide screens (owner, 2026-10-01): from 2200 the map sits beside the route
+// table, from 2400 the templates and the week side by side; below 1900
+// nothing moves, and the other tabs keep their width, centred.
+{
+  const ctxW = await browser.newContext();
+  const pw = await ctxW.newPage();
+  await pw.goto(base, { waitUntil: 'networkidle' });
+  await pw.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:pref:infoHint', 'done'); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  const boxes = () => pw.evaluate(() => Object.fromEntries(['.plan-table', '#planMap', '#planTemplates', '#planWeek', 'main'].map((sel) => {
+    const b = document.querySelector(sel).getBoundingClientRect();
+    return [sel, { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top + scrollY), bottom: Math.round(b.bottom + scrollY) }];
+  })));
+  for (const [w, beside, twoUnder] of [[1680, false, false], [1920, false, false], [2200, true, false], [2560, true, true], [3840, true, true]]) {
+    await pw.setViewportSize({ width: w, height: 1200 });
+    await pw.reload({ waitUntil: 'networkidle' });
+    const b = await boxes();
+    const mapBeside = b['#planMap'].left >= b['.plan-table'].right && b['#planMap'].top === b['.plan-table'].top;
+    const sideBySide = b['#planWeek'].left >= b['#planTemplates'].right && b['#planWeek'].top === b['#planTemplates'].top;
+    check(`at ${w}, the map ${beside ? 'sits beside' : 'stays under'} the route table, and the templates and the week ${twoUnder ? 'sit side by side' : 'stack'}`,
+      mapBeside === beside && sideBySide === twoUnder && (await pw.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)), JSON.stringify(b));
+  }
+  await pw.setViewportSize({ width: 2560, height: 1200 });
+  await pw.click('[data-act="tab"][data-tab="drivers"]');
+  const main = await pw.evaluate(() => { const r = document.querySelector('main').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; });
+  same('another tab keeps its 1680, centred', main, [440, 1680]);
+  await ctxW.close();
+}
+
+// Item 7: a passed date moves on open, in memory, with Keep.
+{
+  const TUE = '2026-09-29T09:00:00+02:00';
+  const mon = plan4('2026-09-28');
+  const look = (pg) => pg.evaluate(() => ({
+    date: state.date,
+    saved: localStorage.getItem('carcoord:v1'),
+    keep: document.querySelectorAll('#notices [data-act="keep-date"]').length,
+    keepText: document.querySelector('#notices [data-act="keep-date"]')?.closest('.notice')?.innerText.replace(/\s+/g, ' ') || '',
+  }));
+  const keepAnyway = (pg) => pg.evaluate(() => { const b = document.createElement('button'); b.dataset.act = 'keep-date'; document.body.append(b); b.click(); b.remove(); });
+
+  // The move itself, and nothing written.
+  let pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': mon });
+  let got = await look(pg);
+  check('a Tuesday open of a Monday plan dates it Wednesday, with Keep', got.date === '2026-09-30' && got.keep === 1
+    && got.keepText.includes('Monday 28/09 has passed, so this plan is now dated Wednesday 30/09, the next working day.'), JSON.stringify(got).slice(0, 300));
+  check('and nothing is written at open', got.saved === mon);
+  check('the Start of day backup holds the date as saved', await pg.evaluate(() => JSON.parse(Store.backups().find((b) => b.label === 'Start of day').json).date === '2026-09-28'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  got = await look(pg);
+  check('a reload moves it again and offers Keep again, still writing nothing', got.date === '2026-09-30' && got.keep === 1 && got.saved === mon);
+  // Keep before any change: the old date back, and still nothing written.
+  await pg.click('#notices [data-act="keep-date"]');
+  got = await look(pg);
+  check('Keep before any change puts the old date back and writes nothing', got.date === '2026-09-28' && got.keep === 0 && got.saved === mon, JSON.stringify(got).slice(0, 200));
+  check('and the line under the Date warns', await pg.evaluate(() => document.getElementById('dateLine').classList.contains('off')));
+  // Keep after a real change: the old date back, and saved.
+  await pg.reload({ waitUntil: 'networkidle' });
+  await pg.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Bea');
+  check('a real change saves the moved date', JSON.parse(await pg.evaluate(() => localStorage.getItem('carcoord:v1'))).date === '2026-09-30');
+  await pg.click('#notices [data-act="keep-date"]');
+  check('Keep after a real change puts the old date back, saved', JSON.parse(await pg.evaluate(() => localStorage.getItem('carcoord:v1'))).date === '2026-09-28');
+  // Replaced plans and dates: Keep goes, and a keep-date sent anyway does nothing.
+  for (const [what, act] of [
+    ['a typed date', async () => { await pg.fill('#date', '2026-10-02'); await pg.click('[data-act="tab"][data-tab="plan"]'); }],
+    // Set to tomorrow is only offered for a date that is not the next working
+    // day, and a moved date always is: so, a window left open into Wednesday.
+    ['Set to tomorrow', async () => {
+      await pg.clock.setFixedTime(new Date('2026-09-30T09:00:00+02:00'));
+      await pg.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await pg.click('[data-act="set-tomorrow"]');
+    }],
+    ['Clear the day', async () => { await pg.click('[data-act="clear-day"]'); await pg.click('[data-act="clear-day"]'); }],
+    ['an import', async () => {
+      await pg.click('[data-act="tab"][data-tab="data"]');
+      await pg.setInputFiles('#importFile', { name: 'p.json', mimeType: 'application/json', buffer: Buffer.from(plan4('2026-09-30', { routes: [] })) });
+      await pg.waitForFunction(() => state.routes.length === 0);
+      await pg.click('[data-act="tab"][data-tab="plan"]');
+    }],
+  ]) {
+    await pg.clock.setFixedTime(new Date(TUE));
+    await pg.evaluate((t) => { localStorage.setItem('carcoord:v1', t); }, mon);
+    await pg.reload({ waitUntil: 'networkidle' });
+    await act();
+    const was = await look(pg);
+    await keepAnyway(pg);
+    const after = await look(pg);
+    check(`after ${what}, Keep has gone and a keep-date sent anyway changes nothing`, was.keep === 0 && after.date === was.date && after.saved === was.saved, JSON.stringify({ was: was.date, after: after.date }));
+  }
+  await pg.close();
+
+  // Friday, Saturday and Sunday opens of a Thursday plan all give Monday.
+  for (const at of ['2026-10-02T09:00:00+02:00', '2026-10-03T09:00:00+02:00', '2026-10-04T09:00:00+02:00']) {
+    pg = await calOpen(at, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': plan4('2026-10-01') });
+    check(`an open at ${at.slice(0, 10)} of a Thursday plan shows Monday`, (await pg.evaluate(() => state.date)) === '2026-10-05');
+    await pg.close();
+  }
+  // No move: today, the next working day, not a real day, unreadable, first run.
+  for (const [what, items, date] of [
+    ['a plan dated today', { 'carcoord:v1': plan4('2026-09-29') }, '2026-09-29'],
+    ['a plan for the next working day', { 'carcoord:v1': plan4('2026-09-30') }, '2026-09-30'],
+    ['a date that is not a real day', { 'carcoord:v1': plan4('2026-13-45') }, '2026-13-45'],
+    ['an unreadable save', { 'carcoord:v1': '{not json' }, '2026-09-30'],
+    ['a first run', {}, '2026-09-30'],
+  ]) {
+    pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', ...items });
+    got = await look(pg);
+    check(`${what} is not moved and has no Keep`, got.date === date && got.keep === 0, JSON.stringify(got).slice(0, 160));
+    await pg.close();
+  }
+  // A save from a newer version: moved in memory, its warning stays, Keep writes nothing.
+  const newerMon = JSON.stringify({ ...JSON.parse(mon), schemaVersion: 99 });
+  pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': newerMon });
+  got = await look(pg);
+  check('a newer-version save is moved in memory, its warning kept, nothing written', got.date === '2026-09-30' && got.keep === 1 && got.saved === newerMon
+    && (await pg.locator('#notices .notice.warn', { hasText: 'newer version' }).count()) === 1);
+  await pg.click('#notices [data-act="keep-date"]');
+  check('and Keep on it writes nothing', (await look(pg)).saved === newerMon);
+  await pg.close();
+  // The update note stays last, below Keep.
+  pg = await calOpen(TUE, { 'carcoord:v1': mon });
+  check('Keep comes before the update note, which stays last', await pg.evaluate(() => {
+    const all = [...document.querySelectorAll('#notices .notice')];
+    const k = all.findIndex((n) => n.querySelector('[data-act="keep-date"]'));
+    const u = all.findIndex((n) => n.classList.contains('update'));
+    return k >= 0 && u === all.length - 1 && k < u;
+  }));
+  await pg.setViewportSize({ width: 390, height: 844 });
+  check('the Keep notice fits a phone screen', await pg.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
+  await pg.close();
+  // The save file: Reconnect with no marker writes the moved date to the
+  // file; Keep then puts the old one back there, and writes nothing here.
+  pg = await calOpen(TUE, { 'carcoord:pref:seenUpdate': '@V', 'carcoord:v1': mon });
+  await linkStandIn(pg, mon);
+  await pg.evaluate(() => { tab = 'data'; render(); });
+  await pg.click('[data-act="reconnect-file"]');
+  await pg.waitForFunction(() => window.__disk.writes > 0, null, { timeout: 3000 }).catch(() => {});
+  check('Reconnect wrote the moved date to the file', JSON.parse(await pg.evaluate(() => window.__disk.text)).date === '2026-09-30');
+  await pg.click('#notices [data-act="keep-date"]');
+  await pg.evaluate(() => Store.flush());
+  const fileNow = await pg.evaluate(() => ({ file: JSON.parse(window.__disk.text).date, saved: localStorage.getItem('carcoord:v1') }));
+  check('Keep puts the old date back in the file, and writes nothing here', fileNow.file === '2026-09-28' && fileNow.saved === mon, JSON.stringify(fileNow).slice(0, 120));
+  await pg.close();
+}
+// A move that throws: the plan is drawn as saved, and everything after it runs.
+{
+  const ctxThrow = await browser.newContext({ timezoneId: 'Europe/Oslo' });
+  await ctxThrow.route('**/app.js*', async (route) => {
+    const res = await route.fetch();
+    route.fulfill({ response: res, body: (await res.text()).replace('function moveDateOnOpen() {', 'function moveDateOnOpen() {\n  throw new Error(\'date move broken on purpose\');') });
+  });
+  const pg = await ctxThrow.newPage();
+  const errs = [], warns = [];
+  pg.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); if (m.type() === 'warning') warns.push(m.text()); });
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.clock.setFixedTime(new Date('2026-09-29T09:00:00+02:00'));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  await pg.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:v1', t); }, plan4('2026-09-28'));
+  await pg.reload({ waitUntil: 'networkidle' });
+  const got = await pg.evaluate(() => ({ date: state.date, keep: document.querySelectorAll('[data-act="keep-date"]').length, note: document.querySelectorAll('#notices .notice.update').length, rows: document.querySelectorAll('#tab-plan tbody tr').length }));
+  check('a move that throws leaves the saved date, no Keep, and the note and the plan drawn', got.date === '2026-09-28' && got.keep === 0 && got.note === 1 && got.rows === 1, JSON.stringify(got));
+  check('and logs only a warning', !errs.length && warns.some((w) => w.includes('date move skipped')), errs.join(' | '));
+  await ctxThrow.close();
+}
+
+// --- the calendar: done ---
+check('the calendar cases log no console errors', calErrors.length === 0, calErrors.join(' | '));
+await calCtx.close();
+
+// --- a press that changes nothing saves nothing ---
+// With a save file linked and allowed, every press below leaves carcoord:v1
+// byte for byte and writes nothing to the file, while still doing what it
+// shows. Presses that do change something still save to both.
+const noCtx = await browser.newContext();
+const np = await noCtx.newPage();
+const npErrors = [];
+np.on('console', (m) => m.type() === 'error' && npErrors.push(m.text()));
+np.on('pageerror', (e) => npErrors.push(String(e)));
+await np.goto(base, { waitUntil: 'networkidle' });
+const npPlan = await np.evaluate(() => {
+  const date = nextWorkingDay();
+  return JSON.stringify({
+    schemaVersion: 5, date, qrOnSheet: false,
+    labels: [{ id: 'L1', name: 'Workshop', color: '#6a1b9a', onSheet: false }],
+    cars: [{ id: 'c1', reg: 'NP11111', labelId: 'L1', note: '' }, { id: 'c2', reg: 'NP22222', labelId: '', note: '' }],
+    positions: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [{ name: '1', driver: 'Ana', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false }] }],
+    drivers: [{ id: 'd1', name: 'Ana', available: true, labelId: '', note: '' }, { id: 'd2', name: 'Bo', available: true, labelId: '', note: '' }],
+    driverGroups: [{ id: 'g1', name: WEEKDAYS[parseDay(date).getDay()], driverIds: ['d1', 'd2'] }, { id: 'g2', name: 'Reserves', driverIds: ['d1'] }],
+    routes: [
+      { id: 'r1', name: '1', driver: 'Ana', carId: 'c1', positionId: '', round: '', highlight: false, gapBefore: false },
+      { id: 'r2', name: '2', driver: 'Bo', carId: 'c2', positionId: '', round: '', highlight: false, gapBefore: false },
+    ],
+  });
+});
+await np.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, npPlan);
+await np.reload({ waitUntil: 'networkidle' });
+await linkStandIn(np, npPlan, { perm: 'granted' });
+const npSaved = () => np.evaluate(async () => { await Store.flush(); return { v1: localStorage.getItem('carcoord:v1'), writes: window.__disk.writes }; });
+const npStart = await npSaved();
+const noop = async (what, act) => {
+  const was = await npSaved();
+  await act();
+  const now = await npSaved();
+  check(`a press that changes nothing saves nothing: ${what}`, now.v1 === was.v1 && now.writes === was.writes, `${was.writes} -> ${now.writes} writes`);
+};
+await noop('Up on the first row', () => np.locator('#tab-plan tbody tr').first().locator('[data-act="up"]').click());
+await noop('Down on the last row', () => np.locator('#tab-plan tbody tr').last().locator('[data-act="down"]').click());
+await noop('All when everyone is in', () => np.click('#tab-plan [data-act="all-in"]'));
+await noop('the lit Load', () => np.click('#planWeek .week-load.lit'));
+await noop('a tag to the tag it has', async () => {
+  await np.click('#tab-plan [data-act="tag"][data-kind="car"][data-id="c1"]');
+  await np.click('#tagMenu .tag-choice.on');
+});
+await noop('a label chip that is already on', async () => {
+  await np.click('[data-act="tab"][data-tab="cars"]');
+  await np.locator('#tab-cars .chip.on[data-label="L1"]').first().click();
+  await np.click('[data-act="tab"][data-tab="plan"]');
+});
+await noop('adding a car that is already there', async () => {
+  await np.click('[data-act="tab"][data-tab="cars"]');
+  await np.fill('#newCar', 'NP11111');
+  await np.click('#tab-cars [data-act="add-car"]');
+  await np.click('[data-act="tab"][data-tab="plan"]');
+});
+await noop('picking the car already chosen', async () => {
+  await np.locator('#tab-plan tbody tr').first().locator('[data-field="carId"]').click();
+  await np.click('#picker .pick.on');
+});
+await noop('opening an \u24d8, another, and shutting them', async () => {
+  await np.click('#tab-plan .info-btn[data-info="plan-routes"]');
+  await np.click('#tab-plan .info-btn[data-info="plan-drivers"]');
+  await np.click('#infoBubble [data-info-close]');
+  await np.click('#tab-plan .info-btn[data-info="plan-date"]');
+  await np.keyboard.press('Escape');
+});
+await noop('asking to load a template', () => np.click('#tab-plan .tpl [data-act="ask-template"]'));
+check('and the question is still asked', (await np.locator('#notices .notice.warn [data-act="load-template"]').count()) === 1);
+check('nothing was written in all of that', (await npSaved()).writes === npStart.writes && (await npSaved()).v1 === npStart.v1);
+// And a press that changes something still saves both.
+for (const [what, act] of [
+  ['Mark', () => np.locator('#tab-plan tbody tr').first().locator('[data-act="toggle"][data-field="highlight"]').click()],
+  ['Add route', () => np.click('#tab-plan [data-act="add-route"]')],
+  ['another crew', () => np.click('#tab-plan .rail-groups [data-act="apply-group"]')],
+]) {
+  const was = await npSaved();
+  await act();
+  await np.waitForFunction((n) => window.__disk.writes > n, was.writes, { timeout: 3000 }).catch(() => {});
+  const now = await npSaved();
+  check(`a press that changes something still saves: ${what}`, now.v1 !== was.v1 && now.writes > was.writes, `${was.writes} -> ${now.writes} writes`);
+}
+check('the no-op cases log no console errors', npErrors.length === 0, npErrors.join(' | '));
+await noCtx.close();
+
+// --- under the route list: templates, the week, the map's slot ---
+// A context of its own. The route table comes first, and what sits under it
+// sits right under it, however long the Drivers and Cars panels beside it.
+const layCtx = await browser.newContext({ viewport: { width: 1680, height: 940 } });
+const lp = await layCtx.newPage();
+const lpErrors = [];
+lp.on('console', (m) => m.type() === 'error' && lpErrors.push(m.text()));
+lp.on('pageerror', (e) => lpErrors.push(String(e)));
+await lp.goto(base, { waitUntil: 'networkidle' });
+const layPlan = (extra = {}) => lp.evaluate((extra) => {
+  localStorage.clear();
+  localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
+  localStorage.setItem('carcoord:v1', JSON.stringify({
+    schemaVersion: 6, date: nextWorkingDay(), qrOnSheet: false, labels: [], driverTags: [], positions: [], weekdayTemplates: true,
+    cars: Array.from({ length: 17 }, (_, i) => ({ id: `c${i}`, reg: `LY${10000 + i}`, labelId: '', note: '' })),
+    drivers: Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, name: `Driver ${i + 1}`, available: true, tagId: '', note: '' })),
+    driverGroups: [], templates: [{ id: 't1', name: 'Usual', weekday: '', routes: [] }],
+    routes: ['1', '2', '3'].map((name) => ({ id: `r${name}`, name, driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
+    ...extra,
+  }));
+}, extra);
+const boxOf = (sel) => lp.evaluate((sel) => { const r = document.querySelector(sel)?.getBoundingClientRect(); return r && { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left }; }, sel);
+await layPlan();
+await lp.reload({ waitUntil: 'networkidle' });
+{
+  const table = await boxOf('#tab-plan .plan-table');
+  const shelf = await boxOf('#planTemplates');
+  const rail = await boxOf('#tab-plan .rail');
+  check('with a rail longer than the plan, the templates sit right under the route list',
+    rail.bottom > table.bottom + 100 && shelf.top >= table.bottom && shelf.top - table.bottom <= 30 && Math.abs(shelf.left - table.left) <= 1,
+    JSON.stringify({ table, shelf, rail }));
+  await lp.setViewportSize({ width: 1100, height: 900 });
+  const [r2, t2, s2] = [await boxOf('#tab-plan .rail'), await boxOf('#tab-plan .plan-table'), await boxOf('#planTemplates')];
+  check('at 1100 the page reads rail, route list, templates', r2.top < t2.top && t2.bottom <= s2.top, JSON.stringify({ r2, t2, s2 }));
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
+// The week fixture: five drivers, all in, and crews for Monday, Tuesday
+// (stored out of roster order, Bo in Monday too), a weekend crew, a second
+// Monday, Saturday, and an empty Sunday.
+const weekDrivers = ['Ana', 'Bo', 'Cai', 'Dee', 'Efe'].map((name, i) => ({ id: `d${i}`, name, available: true, tagId: '', note: '' }));
+const weekGroups = [
+  { id: 'g1', name: 'Monday', driverIds: ['d0', 'd1'] },
+  { id: 'g2', name: 'Tuesdays', driverIds: ['d3', 'd1', 'd2'] },
+  { id: 'g3', name: 'Weekend crew', driverIds: ['d3'] },
+  { id: 'g4', name: 'Mon', driverIds: ['d4'] },
+  { id: 'g5', name: 'Lørdag gjeng', driverIds: ['d2', 'd3'] },
+  { id: 'g6', name: 'Sunday', driverIds: [] },
+];
+const loadWeek = async (extra = {}) => {
+  await layPlan({ drivers: weekDrivers, driverGroups: weekGroups, ...extra });
+  await lp.reload({ waitUntil: 'networkidle' });
+};
+const weekView = () => lp.evaluate(() => [...document.querySelectorAll('#planWeek .week-col')].map((c) => ({
+  day: c.querySelector('.week-day').textContent,
+  quiet: c.classList.contains('quiet'),
+  load: !!c.querySelector('[data-act="apply-group"]'),
+  lit: !!c.querySelector('.week-load.lit'),
+  marked: c.getAttribute('aria-current') === 'date',
+  names: [...c.querySelectorAll('li')].map((li) => li.textContent + (li.classList.contains('away') ? ' (away)' : '')),
+  count: c.querySelector('.week-count')?.textContent || '',
+})));
+const inNow = () => lp.evaluate(() => state.drivers.filter((d) => d.available).map((d) => d.name).join(','));
+const v1Minus = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(p); });
+await loadWeek();
+{
+  let w = await weekView();
+  same('the week: Monday to Friday, Wednesday to Friday quiet with no Load',
+    w.map((c) => `${c.day}${c.quiet ? '-' : ''}${c.load ? '' : ' (no Load)'}`), ['Monday', 'Tuesday', 'Wednesday- (no Load)', 'Thursday- (no Load)', 'Friday- (no Load)']);
+  same('Tuesday lists its crew in roster order', w[1].names, ['Bo', 'Cai', 'Dee']);
+  const planDay = await lp.evaluate(() => planWeekday());
+  same("the plan's day is the marked column", w.filter((c) => c.marked).map((c) => c.day),
+    planDay >= 1 && planDay <= 5 ? [['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][planDay]] : []);
+  await lp.evaluate(() => { const d = parseDay(state.date); d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7)); state.date = dayString(d); render(); });
+  check('a Saturday plan marks no column', (await weekView()).every((c) => !c.marked));
+  await lp.reload({ waitUntil: 'networkidle' });
+  // Bo away, from the rail: greyed and counted in Monday and in Tuesday.
+  await lp.click('#tab-plan [data-panel="drivers"] .rail-row[data-id="d1"] [data-act="toggle"][data-field="available"]');
+  w = await weekView();
+  check('a driver set away is greyed and counted in every column they are in',
+    w[0].names.includes('Bo (away)') && w[1].names.includes('Bo (away)') && w[0].count.endsWith('· 1 away') && w[1].count.endsWith('· 1 away'), JSON.stringify(w.slice(0, 2)));
+  // Load: that crew in, everyone else away, and nothing else changed.
+  const notesBefore = await lp.locator('#notices .notice').count();
+  const restBefore = await v1Minus();
+  await lp.focus('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  await lp.keyboard.press('Enter');
+  w = await weekView();
+  check("Load on Monday makes exactly Monday's crew the ones in, and lights it", (await inNow()) === 'Ana,Bo' && w[0].lit && !w[1].lit);
+  check('and keeps the keyboard on Load', await lp.evaluate(() => document.activeElement?.matches('#planWeek .week-col[data-day="1"] [data-act="apply-group"]')));
+  await lp.click('#planWeek .week-col[data-day="2"] [data-act="apply-group"]');
+  check("Tuesday's Load then makes exactly Tuesday's crew the ones in", (await inNow()) === 'Bo,Cai,Dee');
+  check('each Load adds no notice, and saves only who is in', (await lp.locator('#notices .notice').count()) === notesBefore && (await v1Minus()) === restBefore);
+  // With the rail's question open at 1600, the next Load stays under the pointer.
+  await lp.setViewportSize({ width: 1600, height: 940 });
+  await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');   // Sunday's chip asks
+  const next = () => lp.evaluate(() => { const r = document.querySelector('#planWeek .week-col[data-day="2"] [data-act="apply-group"]').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top)].join(); });
+  const at = await next();
+  await lp.click('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  check("a Load leaves the next column's Load under the pointer", (await next()) === at, `${at} -> ${await next()}`);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+// A long roster scrolled down: Load takes the rail's list back to its top.
+{
+  await layPlan({ driverGroups: [{ id: 'gm', name: 'Monday', driverIds: Array.from({ length: 16 }, (_, i) => `d${i}`) }] });
+  await lp.reload({ waitUntil: 'networkidle' });
+  await lp.evaluate(() => { const l = document.querySelector('#tab-plan [data-keep-scroll="drivers"]'); l.scrollTop = l.scrollHeight; l.dispatchEvent(new Event('scroll')); });
+  await lp.click('#planWeek .week-col[data-day="1"] [data-act="apply-group"]');
+  check("a Load takes the rail's driver list back to its top", await lp.evaluate(() => document.querySelector('#tab-plan [data-keep-scroll="drivers"]').scrollTop === 0));
+}
+
+// The rail beside the longer plan: at 1280x850 and 1600x940, on a dev-sized
+// plan, with the week in view, the rail still ends inside the window, and the
+// last car in its list can be reached.
+{
+  await layPlan({
+    routes: Array.from({ length: 15 }, (_, i) => ({ id: `r${i}`, name: String(i + 1), driver: '', carId: '', positionId: '', round: '', highlight: false, gapBefore: false })),
+    driverGroups: [{ id: 'gm', name: 'Monday', driverIds: Array.from({ length: 16 }, (_, i) => `d${i}`) }],
+  });
+  for (const [width, height] of [[1280, 850], [1600, 940]]) {
+    await lp.setViewportSize({ width, height });
+    await lp.reload({ waitUntil: 'networkidle' });
+    await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+    const fits = await lp.evaluate(() => document.querySelector('#tab-plan .rail').getBoundingClientRect().bottom <= innerHeight + 1);
+    check(`at ${width}x${height}, with the week in view, the rail ends inside the window`, fits);
+    const last = await lp.evaluate(() => {
+      const list = document.querySelector('#tab-plan [data-panel="cars"] .rail-list');
+      list.scrollTop = list.scrollHeight;
+      const row = list.lastElementChild.getBoundingClientRect();
+      const hit = document.elementFromPoint(row.left + row.width / 2, row.top + row.height / 2);
+      return !!hit && list.lastElementChild.contains(hit);
+    });
+    check(`at ${width}x${height}, the last car in the list can be reached`, last);
+  }
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
+// The week at narrow widths: one row of five, never wrapped, and nothing
+// moving under the pointer when a Load changes who is in.
+{
+  const weekGroupsAll = [0, 1, 2, 3, 4].map((i) => ({ id: `w${i + 1}`, name: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][i], driverIds: [`d${i}`, `d${(i + 1) % 5}`] }));
+  await layPlan({ drivers: weekDrivers, driverGroups: [...weekGroupsAll, { id: 'gx', name: 'Sunday', driverIds: [] }] });
+  const cols = () => lp.evaluate(() => {
+    const box = document.querySelector('#planWeek .week-cols');
+    const cs = [...box.children].map((c) => c.getBoundingClientRect());
+    return { tops: new Set(cs.map((r) => Math.round(r.top))).size, minWidth: Math.min(...cs.map((r) => r.width)), scrolls: box.scrollWidth > box.clientWidth + 1, right: box.getBoundingClientRect().right };
+  });
+  const loads = () => lp.evaluate(() => [...document.querySelectorAll('#planWeek [data-act="apply-group"]')].map((b) => { const r = b.getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; }).join(' '));
+  for (const width of [1280, 1181, 1100, 900]) {
+    await lp.setViewportSize({ width, height: 850 });
+    await lp.reload({ waitUntil: 'networkidle' });
+    const c = await cols();
+    check(`at ${width}, the five columns sit on one row, each at least 140px, with no sideways scroll`, c.tops === 1 && c.minWidth >= 140 && !c.scrolls, JSON.stringify(c));
+    if (width === 1181 || width === 900) {
+      let moved = '';
+      for (let i = 0; i < 5; i++) {
+        await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+        const before = await loads();
+        await lp.locator('#planWeek [data-act="apply-group"]').nth(i).click();
+        const after = await loads();
+        if (after !== before) moved += ` Load ${i + 1}: ${before} -> ${after}`;
+      }
+      check(`at ${width}, each Load leaves every Load where it was`, !moved, moved);
+    }
+    if (width === 1100) {
+      // The rail sits above the week here: with its question open, a Load
+      // still leaves the next column's Load under the pointer.
+      await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');
+      await lp.evaluate(() => document.getElementById('planWeek').scrollIntoView({ block: 'center' }));
+      const at = await lp.evaluate(() => { const r = document.querySelectorAll('#planWeek [data-act="apply-group"]')[1].getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; });
+      await lp.locator('#planWeek [data-act="apply-group"]').first().click();
+      const now = await lp.evaluate(() => { const r = document.querySelectorAll('#planWeek [data-act="apply-group"]')[1].getBoundingClientRect(); return `${Math.round(r.left)},${Math.round(r.top)}`; });
+      check('at 1100, with the rail above and its question open, the next Load stays under the pointer', now === at, `${at} -> ${now}`);
+    }
+  }
+  // A phone: the week scrolls in its own box, and keeps its place across a Load.
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.reload({ waitUntil: 'networkidle' });
+  const phone = await cols();
+  check('at 390, the week box stays inside the window, its columns at least 140px', phone.right <= 391 && phone.minWidth >= 140 && phone.scrolls, JSON.stringify(phone));
+  await lp.evaluate(() => { const b = document.querySelector('#planWeek .week-cols'); b.scrollLeft = 300; b.dispatchEvent(new Event('scroll')); });
+  const left = await lp.evaluate(() => document.querySelector('#planWeek .week-cols').scrollLeft);
+  await lp.locator('#planWeek [data-act="apply-group"]').nth(3).click();
+  check('and keeps its sideways place across a Load', left > 0 && (await lp.evaluate(() => document.querySelector('#planWeek .week-cols').scrollLeft)) === left);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+
+// An empty weekday saves who is in as its crew, from its own column.
+{
+  const writes = () => lp.evaluate(() => {
+    window.__w = 0;
+    const save = Store.save; Store.save = (...a) => { window.__w++; return save(...a); };
+    const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:v1') window.__w++; return set.call(this, k, v); };
+  });
+  // Everything but the groups, and who is in, which this test itself changes.
+  // Top-level keys sorted: the fixture was written in its own order, and the
+  // app's first save writes the plan in the app's.
+  const groupsOnly = () => lp.evaluate(() => { const p = JSON.parse(localStorage.getItem('carcoord:v1')); delete p.driverGroups; delete p.date; p.drivers = p.drivers.map(({ available, ...d }) => d); return JSON.stringify(Object.fromEntries(Object.entries(p).sort(([a], [b]) => (a < b ? -1 : 1)))); });
+  const wed = '#planWeek .week-col[data-day="3"]';
+  await loadWeek();
+  const allIn = (await lp.locator(`${wed} [data-act="save-day-crew"]`).innerText()).trim();
+  check('with everyone in, the button says so and warns', allIn === "Save all 5 as Wednesday's crew"
+    && (await lp.locator(`${wed} [data-act="save-day-crew"]`).getAttribute('title')).startsWith('That is everyone on the roster'), allIn);
+  // Efe goes away in the page, without a redraw: the count is taken at the click.
+  const rest = await groupsOnly();
+  const notes = await lp.locator('#notices .notice').count();
+  await lp.evaluate(() => { state.drivers[4].available = false; });
+  await lp.focus(`${wed} [data-act="save-day-crew"]`);
+  await lp.keyboard.press('Enter');
+  const saved = await lp.evaluate(() => state.driverGroups.filter((g) => groupWeekday(g.name) === 3).map((g) => g.driverIds.join()));
+  check("Wednesday's Save takes who is in at the click", JSON.stringify(saved) === '["d0,d1,d2,d3"]', JSON.stringify(saved));
+  check('and the column lists that crew with its Load lit', await lp.evaluate((sel) => {
+    const c = document.querySelector(sel);
+    return !!c.querySelector('.week-load.lit') && [...c.querySelectorAll('li')].map((l) => l.textContent).join() === 'Ana,Bo,Cai,Dee';
+  }, wed));
+  check('from the keyboard, the focus lands on the new Load', await lp.evaluate((sel) => document.activeElement?.matches(`${sel} [data-act="apply-group"]`), wed));
+  // Thursday next: still no notice, and only the groups changed.
+  await lp.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+  check('saving Wednesday then Thursday adds no notice', (await lp.locator('#notices .notice').count()) === notes);
+  check('and changes the saved plan only in its day groups', (await groupsOnly()) === rest);
+  // An empty Thursday crew is filled, not doubled, and nobody is sent away.
+  await layPlan({ drivers: weekDrivers, driverGroups: [...weekGroups, { id: 'gt', name: 'Thursday', driverIds: [] }] });
+  await lp.reload({ waitUntil: 'networkidle' });
+  await lp.click('#planWeek .week-col[data-day="4"] [data-act="save-day-crew"]');
+  check("an empty Thursday crew is filled, not doubled, and nobody goes away", await lp.evaluate(() =>
+    state.driverGroups.filter((g) => groupWeekday(g.name) === 4).length === 1 && state.driverGroups.find((g) => g.id === 'gt').driverIds.length === 5
+    && state.drivers.every((d) => d.available)));
+  // Nothing to do: nobody in, or a crew added meanwhile. No write either way.
+  await loadWeek();
+  await lp.evaluate(() => { state.drivers.forEach((d) => { d.available = false; }); });
+  await writes();
+  await lp.click(`${wed} [data-act="save-day-crew"]`);
+  check('a Save that finds nobody in writes nothing, and says why', (await lp.evaluate(() => window.__w)) === 0
+    && (await lp.locator(`${wed} .week-none`, { hasText: 'Nobody is in to save' }).count()) === 1);
+  await loadWeek();
+  await lp.evaluate(() => { state.driverGroups.push({ id: 'gw', name: 'Wednesday', driverIds: ['d0'] }); });
+  await writes();
+  await lp.click(`${wed} [data-act="save-day-crew"]`);
+  check('a Save that finds a crew added meanwhile writes nothing, and shows the crew with Load and no Save',
+    (await lp.evaluate(() => window.__w)) === 0 && (await lp.locator(`${wed} [data-act="apply-group"]`).count()) === 1
+    && (await lp.locator(`${wed} [data-act="save-day-crew"]`).count()) === 0);
+  await lp.reload({ waitUntil: 'networkidle' });
+}
+
+// The chip line: All, then every crew with no column, in the Drivers tab's
+// order. Saturday's and Sunday's crews, and a Monday named twice, keep a
+// button there, so nothing the old row did is lost.
+{
+  await loadWeek();
+  const chipTexts = () => lp.locator('#tab-plan .rail-groups .btn').evaluateAll((bs) => bs.map((b) => b.textContent.trim() + (b.classList.contains('on') ? '*' : '')));
+  same('on the week fixture, the chip line reads All, then every crew with no column', await chipTexts(), ['All*', 'Weekend crew', 'Mon', 'Lørdag gjeng', 'Sunday']);
+  await lp.click('#tab-plan .rail-groups [data-act="apply-group"][data-id="g5"]');
+  check("Lørdag gjeng makes exactly Cai and Dee the ones in, and is lit", (await inNow()) === 'Cai,Dee' && (await chipTexts()).includes('Lørdag gjeng*'));
+  await lp.click('#tab-plan .rail-groups [data-act="group-empty"]');
+  check('Sunday, empty, is quiet, sends nobody away and asks', (await inNow()) === 'Cai,Dee'
+    && (await lp.locator('#tab-plan .day-ask', { hasText: 'Sunday has nobody in it yet' }).count()) === 1);
+  await lp.click('#tab-plan .rail-groups [data-act="all-in"]');
+  check('All puts everyone in', (await inNow()) === 'Ana,Bo,Cai,Dee,Efe');
+  for (const [what, groups] of [['only Monday-to-Friday crews', weekGroups.filter((g) => ['g1', 'g2'].includes(g.id))], ['drivers but no groups', []]]) {
+    await layPlan({ drivers: weekDrivers, driverGroups: groups });
+    await lp.reload({ waitUntil: 'networkidle' });
+    same(`with ${what}, the chip line still shows All`, await chipTexts(), ['All*']);
+  }
+}
+
+// "Use for today" on an empty group, on the Drivers tab: nobody changes, it
+// says why, and nothing is written — not even on a save from a newer version.
+{
+  const empty = { drivers: weekDrivers, driverGroups: [{ id: 'ge', name: 'Nights', driverIds: [] }] };
+  for (const newer of [false, true]) {
+    await layPlan(newer ? { ...empty, schemaVersion: 99 } : empty);
+    await lp.reload({ waitUntil: 'networkidle' });
+    const savedWas = await lp.evaluate(() => localStorage.getItem('carcoord:v1'));
+    await lp.evaluate(() => {
+      window.__w = 0;
+      const save = Store.save; Store.save = (...a) => { window.__w++; return save(...a); };
+      const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:v1') window.__w++; return set.call(this, k, v); };
+    });
+    await lp.click('[data-act="tab"][data-tab="drivers"]');
+    await lp.click('#tab-drivers [data-act="apply-group"][data-id="ge"]');
+    const after = await lp.evaluate(() => ({ inAll: state.drivers.every((d) => d.available), writes: window.__w, saved: localStorage.getItem('carcoord:v1') }));
+    const what = newer ? 'on a save from a newer version' : 'on a plan of this version';
+    check(`Use for today on an empty group changes nobody and writes nothing, ${what}`, after.inAll && after.writes === 0 && after.saved === savedWas, JSON.stringify({ ...after, saved: undefined }));
+    check(`and says why, ${what}`, (await lp.locator('#notices .notice', { hasText: 'Nights has nobody in it yet. Tick names into it first; nobody was changed.' }).count()) === 1);
+    await lp.click('[data-act="tab"][data-tab="plan"]');
+  }
+}
+
+// The parking map in the slot under the week (part 6). Red exactly where the
+// warnings name a spot, the Garage left off, other positions listed, and
+// nothing saved by drawing it — even when map.js is missing or throws.
+{
+  const GATE_NAME = await lp.evaluate(() => ParkingMap.GATE_NAMES[0]);
+  const mapView = () => lp.evaluate(() => ({
+    red: [...document.querySelectorAll('#planMap .parking-box.parking-red > .parking-title')].map((t) => t.textContent),
+    boxes: [...document.querySelectorAll('#planMap .parking-box')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()),
+    listed: [...document.querySelectorAll('#planMap .parking-item > .parking-title')].map((t) => t.textContent),
+    banner: document.querySelector('#tab-plan .problems')?.innerText || '',
+    // The line about the ⓘ buttons is a first open's one notice; any other counts.
+    notes: [...document.querySelectorAll('#notices .notice')].filter((n) => !n.innerText.includes('New here? Click any \u24d8')).length,
+  }));
+  const openWith = async (text) => {
+    await lp.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+    await lp.reload({ waitUntil: 'networkidle' });
+  };
+  await openWith(devPlan);
+  check('the parking map sits in the slot after the week', await lp.evaluate(() =>
+    document.getElementById('planMap').previousElementSibling?.id === 'planWeek' && !!document.querySelector('#planMap .parking-yard')));
+  let v = await mapView();
+  check('on the dev fixture, Spot 2 is red, with its round-2 routes and its tag', v.red.join() === 'Spot 2'
+    && ['Taken by 2 routes in round 2', 'route 9 · EV 73112', 'route 10 · EV 73140'].every((t) => v.boxes[1].includes(t)), JSON.stringify(v.boxes[1]));
+  check(`the positions that are not spots or ${GATE_NAME} are listed, and the Garage is nowhere`,
+    ['Port 1', 'Port 2'].every((n) => v.listed.includes(n)) && ![...v.boxes, ...v.listed].some((t) => /Garage/.test(t)), JSON.stringify(v.listed));
+  const keptState = await lp.evaluate(() => [JSON.stringify(state), localStorage.getItem('carcoord:v1')].join('\n'));
+  await lp.evaluate(() => render());
+  check('drawing the map saves nothing', (await lp.evaluate(() => [JSON.stringify(state), localStorage.getItem('carcoord:v1')].join('\n'))) === keptState);
+
+  // Parity with the warnings, round by round.
+  const spotAt = (rounds, extra = {}) => layPlan({
+    positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'p2', name: 'Garage', multi: true, labelId: '', note: '' }],
+    routes: rounds.map(([name, round], i) => ({ id: `r${i}`, name, driver: '', carId: '', positionId: 'p1', round, highlight: false, gapBefore: false })),
+    ...extra,
+  });
+  for (const rounds of [[['1', '2'], ['2', '2']], [['1', ''], ['2', '']], [['1', ' a '], ['2', 'A']], [['1', '1'], ['2', '2']]]) {
+    await spotAt(rounds);
+    await lp.reload({ waitUntil: 'networkidle' });
+    v = await mapView();
+    const named = /Spot 1\b.* is taken by/.test(v.banner);
+    check(`the map is red exactly where the warnings name the spot: rounds ${rounds.map((r) => JSON.stringify(r[1])).join(' and ')}`,
+      named ? v.red.join() === 'Spot 1' : v.red.length === 0, `${v.banner} / ${v.red}`);
+  }
+  // Many cars: shared on purpose, never red.
+  await layPlan({
+    positions: [{ id: 'p1', name: 'Spot 1', multi: false, labelId: '', note: '' }, { id: 'p2', name: 'Spot 2', multi: true, labelId: '', note: '' }],
+    routes: [['1', 'p2'], ['2', 'p2']].map(([name, positionId], i) => ({ id: `r${i}`, name, driver: '', carId: '', positionId, round: '2', highlight: false, gapBefore: false })),
+  });
+  await lp.reload({ waitUntil: 'networkidle' });
+  v = await mapView();
+  check('a Many cars spot with two routes in one round is not red, and lists both', !v.banner && !v.red.length
+    && ['route 1', 'route 2', 'Many cars'].every((t) => v.boxes[1].includes(t)), v.boxes[1]);
+  // A first run: no notices but the line about the ⓘ buttons, five Free spots, and the
+  // gate looking for its name.
+  await lp.evaluate(() => localStorage.clear());
+  await lp.reload({ waitUntil: 'networkidle' });
+  v = await mapView();
+  check(`a first run: no notices but the line about the \u24d8 buttons, Spot 1 to Spot 5 Free, and the gate box looking for ${GATE_NAME}`,
+    v.notes === 0 && v.boxes.slice(0, 5).every((t) => t.endsWith('Free')) && v.boxes[5].includes(`No position named ${GATE_NAME}`), JSON.stringify(v));
+  // A spot renamed on the Positions tab moves to the list, as its hint says.
+  await lp.click('[data-act="tab"][data-tab="positions"]');
+  check('the Positions tab says how the map finds spots', (await lp.locator('#tab-positions .hint', { hasText: 'finds Spot 1 to Spot 5 and the gate by name' }).count()) === 1);
+  await lp.locator('#tab-positions [data-field="name"][value="Spot 3"]').fill('Spot 3b');
+  await lp.click('[data-act="tab"][data-tab="plan"]');
+  v = await mapView();
+  check('a renamed spot is listed, and its box looks for its old name', v.listed.includes('Spot 3b') && v.boxes[2].includes('No position named Spot 3'));
+
+  // Live while typing: the map follows each keystroke, and the focus and the
+  // caret stay in the box being typed into.
+  await openWith(devPlan);
+  const typeInto = async (sel, text) => {
+    const box = lp.locator(sel);
+    await box.click();
+    await box.press('End');
+    await box.type(text);
+    return lp.evaluate((sel) => { const el = document.activeElement; return el?.matches(sel) && el.selectionStart === el.value.length; }, sel);
+  };
+  const route = (name, field) => `#tab-plan tbody tr[data-route="${name}"] [data-field="${field}"]`;
+  const rid = (n) => lp.evaluate((n) => state.routes.find((r) => r.name === n).id, n);
+  let kept = await typeInto(route(await rid('2'), 'name'), 'x');
+  check('typing a route name updates its line on the map, focus and caret kept', kept && (await mapView()).boxes[1].includes('route 2x · EL 41033'));
+  // Route 1 is alone in Spot 1's round 1, and round 3 is empty there.
+  const r1 = await rid('1');
+  await lp.locator(route(r1, 'round')).fill('');
+  kept = await typeInto(route(r1, 'round'), '3');
+  check('a round changed with no clash either side moves the route to its new round', kept && /Round 3 route 1 ·/.test((await mapView()).boxes[0]), (await mapView()).boxes[0]);
+  kept = await typeInto('#tab-plan [data-panel="cars"] .rail-row[data-id="car-02"] .rail-name', 'Z');
+  check('a registration typed in the rail updates the map', kept && (await mapView()).boxes[1].includes('EL 41033Z'));
+  const onPort2 = await lp.evaluate(() => state.routes.find((r) => r.positionId === 'pos-port1')?.id);
+  kept = await typeInto(route(onPort2, 'name'), 'q');
+  check('typing the name of a route on a listed position updates the list', kept && (await lp.locator('#planMap .parking-item', { hasText: 'route 7q' }).count()) === 1);
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.evaluate(() => { const b = document.getElementById('parkingDrawing'); b.scrollLeft = 90; b.dispatchEvent(new Event('scroll')); });
+  const at = await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft);
+  await typeInto(route(await rid('2x'), 'name'), 'y');
+  check("on a phone, the map's sideways scroll survives a keystroke", at > 0 && (await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft)) === at);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+}
+// An index.html cached from before the map: no map.js, and the plan still draws.
+for (const [what, setup, says] of [
+  ['without the map tag', (ctx) => ctx.route(/\/(index\.html)?(\?.*)?$/, async (route) => {
+    const res = await route.fetch();
+    route.fulfill({ response: res, body: (await res.text()).replace(/\s*<script src="map\.js[^"]*"><\/script>/, '') });
+  }), 'Reload the page to see the parking map.'],
+  ['with a map that throws', (ctx) => ctx.route('**/map.js*', (route) => route.fulfill({ status: 200, contentType: 'text/javascript',
+    body: "const ParkingMap = { GATE_NAMES: ['Gate'], model() { throw new Error('map broken on purpose'); }, drawing() { return ''; }, others() { return ''; } };" })),
+  'The parking map could not be drawn; the plan above is not affected.'],
+]) {
+  const ctx = await browser.newContext();
+  await setup(ctx);
+  const pg = await ctx.newPage();
+  const errs = [];
+  pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  pg.on('pageerror', (e) => errs.push(String(e)));
+  await pg.goto(base, { waitUntil: 'networkidle' });
+  await pg.evaluate((t) => { localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  await pg.reload({ waitUntil: 'networkidle' });
+  const routes = await pg.evaluate(() => [document.querySelectorAll('#tab-plan tbody tr').length, state.routes.length]);
+  check(`${what}: every route is drawn, and the map says so in words`, routes[0] === routes[1] && routes[0] > 0
+    && (await pg.locator('#planMap', { hasText: says }).count()) === 1, JSON.stringify(routes));
+  // Typing still reaches the plan, with the map missing or broken.
+  const first = pg.locator('#tab-plan tbody tr').first();
+  // To the end of the name first: a box focused without a click has its
+  // caret at the start.
+  await first.locator('[data-field="name"]').press('End');
+  await first.locator('[data-field="name"]').type('k');
+  await first.locator('[data-field="round"]').fill('3');
+  check(`${what}: typing a route name and a round still saves`, await pg.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('carcoord:v1')).routes[0];
+    return saved.name.endsWith('k') && saved.round === '3';
+  }));
+  check(`${what}: no console errors`, !errs.length, errs.join(' | '));
+  await ctx.close();
+}
+
+// The yard drawn: on a phone it scrolls in its own box and keeps its place
+// across a redraw; in print it has no boxes; its new colours have dark values.
+{
+  await layPlan({ drivers: weekDrivers, driverGroups: weekGroups });
+  await lp.setViewportSize({ width: 390, height: 844 });
+  await lp.reload({ waitUntil: 'networkidle' });
+  const phone = await lp.evaluate(() => {
+    const card = document.querySelector('#planMap .parking'), box = document.getElementById('parkingDrawing');
+    return { card: card.scrollWidth <= card.clientWidth + 1, box: box.scrollWidth > box.clientWidth };
+  });
+  check('on a phone, the map scrolls sideways in its own box, not its card', phone.card && phone.box, JSON.stringify(phone));
+  await lp.evaluate(() => { const b = document.getElementById('parkingDrawing'); b.scrollLeft = 120; b.dispatchEvent(new Event('scroll')); });
+  const left = await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft);
+  await lp.evaluate(() => { state.routes[0].highlight = !state.routes[0].highlight; render(); });
+  check('and keeps its sideways place across a redraw', left > 0 && (await lp.evaluate(() => document.getElementById('parkingDrawing').scrollLeft)) === left);
+  await lp.setViewportSize({ width: 1680, height: 940 });
+  await lp.emulateMedia({ media: 'print' });
+  check('in print the map has no boxes', await lp.evaluate(() => [...document.querySelectorAll('#planMap .parking-box')].every((b) => b.getClientRects().length === 0)));
+  await lp.emulateMedia({ media: 'screen' });
+  const tokens = await lp.evaluate(() => {
+    const read = () => ['--hatch', '--clash-fill'].map((t) => getComputedStyle(document.documentElement).getPropertyValue(t).trim());
+    const light = read();
+    document.documentElement.dataset.theme = 'dark';
+    const dark = read();
+    delete document.documentElement.dataset.theme;
+    return { light, dark };
+  });
+  check("the map's own colours have dark values", tokens.light.every((v, i) => v && v !== tokens.dark[i]), JSON.stringify(tokens));
+}
+
+// --- under the route list: done ---
+check('the layout cases log no console errors', lpErrors.length === 0, lpErrors.join(' | '));
+await layCtx.close();
+
+// --- the Drivers tab: usual days, tags and notes ---
+// A context of its own, on the dev fixture as imported.
+const drvCtx = await browser.newContext();
+const dv = await drvCtx.newPage();
+const dvErrors = [];
+dv.on('console', (m) => m.type() === 'error' && dvErrors.push(m.text()));
+dv.on('pageerror', (e) => dvErrors.push(String(e)));
+await dv.goto(base, { waitUntil: 'networkidle' });
+const dvOpen = async (text) => {
+  await dv.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+  await dv.reload({ waitUntil: 'networkidle' });
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+};
+const dvRow = (name) => dv.locator('#tab-drivers tbody tr', { has: dv.locator(`[data-field="name"][value="${name}"]`) });
+// The move-over, on the dev fixture as a 0.2.4 browser holds it: each label
+// a driver wears becomes a driver tag of the same name and colour, then the
+// ready-made ones; the labels themselves are not touched.
+const tagOfDriver = (name) => dv.evaluate((n) => { const d = state.drivers.find((x) => x.name === n); return d && state.driverTags.find((t) => t.id === d.tagId)?.name; }, name);
+{
+  await dvOpen(devPlan);
+  same('the dev fixture moves over to these driver tags, in this order',
+    await dv.evaluate(() => state.driverTags.map((t) => `${t.name} ${t.color}`)),
+    ['Holiday #1565c0', 'Course #2e7d32', 'Sick #c62828', 'Vacation #00897b', 'Special situation #ef6c00']);
+  check('Petter keeps Holiday and Randi keeps Course', (await tagOfDriver('Petter')) === 'Holiday' && (await tagOfDriver('Randi')) === 'Course');
+  check('the other drivers wear no tag, and no driver keeps a labelId',
+    await dv.evaluate(() => state.drivers.filter((d) => d.tagId).length === 2 && state.drivers.every((d) => !('labelId' in d))));
+  same('the labels are as they were', await dv.evaluate(() => state.labels.map(({ id, name, color }) => ({ id, name, color }))), JSON.parse(devPlan).labels);
+  check('the move-over is not reported as a repair', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
+  check('and nothing is written until a change', (await dv.evaluate(() => localStorage.getItem('carcoord:v1'))) === devPlan);
+  // One change saves the moved-over plan; loading it again changes nothing.
+  await dvRow('Petter').locator('[data-field="note"]').fill('Back Monday');
+  const saved = await dv.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('a saved moved-over plan loads back exactly as it was saved',
+    JSON.parse(saved).schemaVersion === 6 && (await dv.evaluate(() => JSON.stringify(state))) === saved);
+  await dv.evaluate(() => { state.driverTags = state.driverTags.filter((t) => t.name !== 'Sick'); save(); });
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('and a ready-made tag deleted from it stays deleted', await dv.evaluate(() => !state.driverTags.some((t) => t.name === 'Sick')));
+}
+
+// Each delete sweeps its own kind only: the Course label leaves Randi's
+// Course driver tag alone, and the Course driver tag comes off Randi.
+{
+  await dvOpen(devPlan);
+  await dv.click('[data-act="tab"][data-tab="labels"]');
+  const delLabel = dv.locator('#labelList tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
+  await delLabel.click();
+  await delLabel.click();
+  check('deleting a label leaves the driver wearing a driver tag of that name alone', (await tagOfDriver('Randi')) === 'Course');
+  const del = dv.locator('#driverTagList tbody tr', { has: dv.locator('[data-field="name"][value="Course"]') }).locator('[data-act="del"]');
+  await del.click();
+  await del.click();
+  check('deleting a driver tag takes it off the driver wearing it', await dv.evaluate(() => state.drivers.find((d) => d.name === 'Randi').tagId === ''));
+  check('after the usual backup', (await dv.evaluate(() => Store.backups()[0].label)) === 'Deleting a driver tag');
+  check('and the cars keep their labels', await dv.evaluate(() => state.cars.filter((c) => c.labelId).length === 3));
+  await dv.reload({ waitUntil: 'networkidle' });
+  check('and no repair notice comes after a reload', (await dv.locator('#notices .notice', { hasText: 'Repaired' }).count()) === 0);
+}
+
+// Usual days on each row: pressed exactly where that weekday's first group
+// holds the driver.
+{
+  await dvOpen(devPlan);
+  const shown = await dv.evaluate(() => {
+    const { byDay } = dayCrews();
+    const wrong = [];
+    for (const d of state.drivers) {
+      for (const day of [1, 2, 3, 4, 5]) {
+        const b = document.querySelector(`#tab-drivers [data-act="crew-day"][data-id="${CSS.escape(d.id)}"][data-day="${day}"]`);
+        const want = !!byDay.get(day)?.driverIds.includes(d.id);
+        if (!b || (b.getAttribute('aria-pressed') === 'true') !== want) wrong.push(`${d.name} ${day}`);
+      }
+    }
+    const count = (day) => document.querySelectorAll(`#tab-drivers [data-act="crew-day"][data-day="${day}"][aria-pressed="true"]`).length;
+    return { wrong, tue: count(2), wed: count(3), thu: count(4), tueGroup: byDay.get(2)?.name };
+  });
+  check("each driver's usual days are pressed where that day's group holds them", !shown.wrong.length, shown.wrong.join(', '));
+  check('the fixture: Tirsdagslaget on Tuesday, nobody on Wednesday or Thursday', shown.tueGroup === 'Tirsdagslaget' && shown.tue === 13 && shown.wed === 0 && shown.thu === 0, JSON.stringify(shown));
+}
+
+// Usual days write only day groups. The dev fixture, with one driver's id
+// twice in Monday crew and a second group named "Mon".
+{
+  const fx = JSON.parse(devPlan);
+  const monCrew = fx.driverGroups.find((g) => g.name === 'Monday crew');
+  const twice = monCrew.driverIds.find((id) => id !== 'drv-camilla');
+  monCrew.driverIds.push(twice);
+  fx.driverGroups.push({ id: 'grp-mon2', name: 'Mon', driverIds: fx.drivers.slice(0, 2).map((d) => d.id) });
+  await dvOpen(JSON.stringify(fx));
+  // The plan as this build reads it (the fixture is an older shape, which the
+  // first save writes as this build's).
+  const before = await dv.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const monWas = await dv.evaluate(() => JSON.stringify(state.driverGroups.find((g) => g.id === 'grp-mon2').driverIds));
+  const availWas = await dv.evaluate(() => state.drivers.map((d) => d.available).join());
+  const day = (who, d) => `#tab-drivers [data-act="crew-day"][data-id="${who}"][data-day="${d}"]`;
+  const groups = () => dv.evaluate(() => state.driverGroups.map((g) => ({ name: g.name, ids: g.driverIds })));
+  const tuesdayCol = () => dv.evaluate(() => [...document.querySelectorAll('#planWeek .week-col[data-day="2"] li')].map((l) => l.textContent));
+  await dv.click(day('drv-camilla', 2));
+  let g = await groups();
+  check('ticking Tue puts Camilla in Tirsdagslaget, and makes no Tuesday group', g.find((x) => x.name === 'Tirsdagslaget').ids.includes('drv-camilla') && !g.some((x) => x.name === 'Tuesday'));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check("and the week's Tuesday lists her", (await tuesdayCol()).includes('Camilla'));
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  await dv.click(day('drv-camilla', 2));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check('unticking Tue takes her out of both', !(await groups()).find((x) => x.name === 'Tirsdagslaget').ids.includes('drv-camilla') && !(await tuesdayCol()).includes('Camilla'));
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  const countWas = (await groups()).length;
+  await dv.click(day('drv-camilla', 3));
+  g = await groups();
+  check('ticking Wed adds one group, Wednesday, at the end, with only her', g.length === countWas + 1 && g.at(-1).name === 'Wednesday' && g.at(-1).ids.join() === 'drv-camilla');
+  await dv.click(day('drv-camilla', 3));
+  g = await groups();
+  check('unticking Wed leaves that group in place, empty', g.length === countWas + 1 && g.at(-1).name === 'Wednesday' && g.at(-1).ids.length === 0);
+  await dv.click(day(twice, 1));
+  check('one click on Mon takes out every copy of a duplicated driver', !(await groups()).find((x) => x.name === 'Monday crew').ids.includes(twice));
+  check('the second Monday group is never touched', (await dv.evaluate(() => JSON.stringify(state.driverGroups.find((g) => g.id === 'grp-mon2').driverIds))) === monWas);
+  check('and nobody is set in or away', (await dv.evaluate(() => state.drivers.map((d) => d.available).join())) === availWas);
+  const after = await dv.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')));
+  const rest = (p) => JSON.stringify({ ...p, driverGroups: undefined, date: undefined });
+  check('the saved plan differs only in its day groups', rest(after) === rest(before));
+  check('and every driver still has exactly its own five fields', after.drivers.every((d) => Object.keys(d).sort().join() === 'available,id,name,note,tagId'));
+  await dv.focus(day('drv-camilla', 4));
+  await dv.keyboard.press('Enter');
+  check("a day pressed from the keyboard keeps the focus on the same driver's same day", await dv.evaluate(() =>
+    document.activeElement?.matches('[data-act="crew-day"][data-id="drv-camilla"][data-day="4"]')));
+  // Thursday's group now holds only Camilla. Untick her: the group is empty,
+  // its column under the day plan has no Load, and its Use for today changes
+  // nobody and writes nothing.
+  await dv.focus(day('drv-camilla', 4));
+  await dv.keyboard.press('Enter');
+  const savedNow = await dv.evaluate(() => localStorage.getItem('carcoord:v1'));
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check("an emptied weekday's column has no Load", (await dv.locator('#planWeek .week-col[data-day="4"] [data-act="apply-group"]').count()) === 0);
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  await dv.locator('#tab-drivers .group', { has: dv.locator('[data-field="name"][value="Thursday"]') }).locator('[data-act="apply-group"]').click();
+  check('and its Use for today changes nobody, says why, and writes nothing',
+    (await dv.evaluate(() => state.drivers.map((d) => d.available).join())) === availWas
+    && (await dv.evaluate(() => localStorage.getItem('carcoord:v1'))) === savedNow
+    && (await dv.locator('#notices .notice', { hasText: 'Thursday has nobody in it yet' }).count()) === 1);
+}
+
+// A Tag and a Note on each driver: only that driver's two fields change, a
+// tag never sets anyone away, and both survive a reload and go in Export.
+{
+  await dvOpen(devPlan);
+  const others = () => dv.evaluate(() => JSON.stringify(state.drivers.filter((d) => d.id !== 'drv-camilla')));
+  const othersWas = await others();
+  await dvRow('Camilla').locator('.chip', { hasText: 'Holiday' }).click();
+  await dvRow('Camilla').locator('[data-field="note"]').fill('Back Thursday');
+  const cam = await dv.evaluate(() => state.drivers.find((d) => d.id === 'drv-camilla'));
+  check("a driver's tag and note are set, and they stay in", (await tagOfDriver('Camilla')) === 'Holiday' && cam.note === 'Back Thursday' && cam.available === true, JSON.stringify(cam));
+  check('and no other driver changes', (await others()) === othersWas);
+  await dv.click('[data-act="tab"][data-tab="plan"]');
+  check('the rail still has her in', await dv.evaluate(() => !document.querySelector('#tab-plan [data-panel="drivers"] .rail-row[data-id="drv-camilla"]').classList.contains('away')));
+  await dv.reload({ waitUntil: 'networkidle' });
+  await dv.click('[data-act="tab"][data-tab="drivers"]');
+  check('both survive a reload', (await dvRow('Camilla').locator('.chip.on').innerText()) === 'Holiday'
+    && (await dvRow('Camilla').locator('[data-field="note"]').inputValue()) === 'Back Thursday');
+  await dv.click('[data-act="tab"][data-tab="data"]');
+  const [dl] = await Promise.all([dv.waitForEvent('download'), dv.click('[data-act="export"]')]);
+  const expPlan = JSON.parse(await readFile(await dl.path(), 'utf8'));
+  const exp = expPlan.drivers.find((d) => d.id === 'drv-camilla');
+  check('and both go in Export', expPlan.driverTags.find((t) => t.id === exp.tagId)?.name === 'Holiday' && exp.note === 'Back Thursday');
+}
+
+// Share codes carry no driver tags or notes. The receiving browser keeps its
+// own on the drivers it has, and a driver it gains arrives with neither.
+{
+  await dvOpen(devPlan);
+  const code = await dv.evaluate(async () => {
+    state.drivers.forEach((d, i) => { d.note = `Note ${i}`; d.tagId = state.driverTags[0].id; });
+    return Share.encode(state, 'all');
+  });
+  const rows = await dv.evaluate(async (c) => (await Share.decode(c)).share.dr.map((r) => r.length), code);
+  check('an everything code sends each driver as a name and in or away, and nothing more', rows.length > 0 && rows.every((n) => n === 2), JSON.stringify(rows));
+  const rxCtx = await browser.newContext();
+  const rx = await rxCtx.newPage();
+  const rxErrors = [];
+  rx.on('console', (m) => m.type() === 'error' && rxErrors.push(m.text()));
+  await rx.goto(base, { waitUntil: 'networkidle' });
+  await rx.evaluate(() => {
+    localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION);
+    localStorage.setItem('carcoord:v1', JSON.stringify({ schemaVersion: 5, date: nextWorkingDay(), labels: [{ id: 'RX', name: 'Here only', color: '#1565c0', onSheet: false }], cars: [], positions: [], routes: [], driverGroups: [], templates: [],
+      drivers: [{ id: 'rx-cam', name: 'Camilla', available: true, labelId: 'RX', note: 'Kept here' }] }));
+  });
+  await rx.reload({ waitUntil: 'networkidle' });
+  await rx.click('[data-act="tab"][data-tab="data"]');
+  await readCode(rx, code);
+  await rx.check('#shareDlg input[value="all"]');
+  await rx.click('[data-act="share-apply"]');
+  const got = await rx.evaluate(() => {
+    const cam = state.drivers.find((d) => d.name === 'Camilla');
+    return { cam, camTag: state.driverTags.find((t) => t.id === cam.tagId)?.name, gained: state.drivers.find((d) => d.name !== 'Camilla') };
+  });
+  check('the receiving browser keeps its own tag and note on a driver it had', got.camTag === 'Here only' && got.cam.note === 'Kept here', JSON.stringify(got.cam));
+  await rx.click('[data-act="tab"][data-tab="drivers"]');
+  const gainedRow = rx.locator('#tab-drivers tbody tr', { has: rx.locator(`[data-field="name"][value="${got.gained.name}"]`) });
+  check('and a driver it gains shows an empty note, with OK lit', (await gainedRow.locator('[data-field="note"]').inputValue()) === ''
+    && (await gainedRow.locator('.chip.on').innerText()) === 'OK');
+  check('the receiving browser logs no console errors', !rxErrors.length, rxErrors.join(' | '));
+  await rxCtx.close();
+}
+
+// The words on the tab match the row: no phrase the old day row used, and
+// no "today" (who is in belongs to the plan's day).
+{
+  await dvOpen(devPlan);
+  const words = await dv.evaluate(() => {
+    const tab = document.getElementById('tab-drivers');
+    return [tab.innerText, ...[...tab.querySelectorAll('[title]')].map((e) => e.title)].join('\n');
+  });
+  const stale = ['button beside the day plan', 'under the week', 'In today', 'in today'].filter((p) => words.includes(p));
+  check('the Drivers tab says nothing the old day row said, and no "in today"', !stale.length, stale.join(', '));
+  check("its hint says what a usual day does, and that a tag never sets anyone Away",
+    words.includes("Tick a driver's usual days to put them in that day's group under Day groups.") && words.includes('A tag or a note never sets anyone Away.'));
+  check('and that its tags are the Driver tags, apart from the car labels, with Special situation\'s details in the note',
+    words.includes('The tags are the Driver tags on the Labels tab, apart from the car labels; for Special situation, put the details in the note.'));
+  await dv.click('[data-act="tab"][data-tab="labels"]');
+  const labelWords = await dv.locator('#tab-labels').innerText();
+  check('the Labels tab no longer says its labels are buttons on drivers',
+    !labelWords.includes('cars, positions and drivers') && labelWords.includes('Drivers have tags of their own, under Driver tags below.'));
+}
+
+// The wider row at the Windows app's smallest windows, on the dev fixture:
+// the page never scrolls sideways, and the note box keeps 120px.
+{
+  await dvOpen(devPlan);
+  for (const width of [900, 1024]) {
+    await dv.setViewportSize({ width, height: 700 });
+    const fit = await dv.evaluate(() => {
+      const tab = document.getElementById('tab-drivers'), table = tab.querySelector('table.grid');
+      return {
+        page: document.documentElement.scrollWidth <= innerWidth + 1,
+        note: Math.round(tab.querySelector('tbody tr [data-field="note"]').getBoundingClientRect().width),
+        over: Math.round(table.getBoundingClientRect().right - tab.getBoundingClientRect().right),
+        row: Math.round(tab.querySelector('tbody tr').getBoundingClientRect().height),
+      };
+    });
+    check(`at ${width}, the Drivers tab never scrolls the page sideways, and the note box keeps 120px (table overhang ${fit.over}px, row ${fit.row}px)`,
+      fit.page && fit.note >= 120, JSON.stringify(fit));
+  }
+  await dv.setViewportSize({ width: 1280, height: 720 });
+}
+
+// --- the Drivers tab: done ---
+check('the Drivers tab cases log no console errors', dvErrors.length === 0, dvErrors.join(' | '));
+await drvCtx.close();
+
+// --- right-click menus ---
+// A context of its own, on the dev fixture as imported. Waits are short: a
+// menu that never opens shows as FAIL lines, not a run that stops here.
+const cmCtx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+const cm = await cmCtx.newPage();
+cm.setDefaultTimeout(5000);
+const cmErrors = [];
+cm.on('console', (m) => m.type() === 'error' && cmErrors.push(m.text()));
+cm.on('pageerror', (e) => cmErrors.push(String(e)));
+await cm.goto(base, { waitUntil: 'networkidle' });
+// After every right-click, window.__native says whether the browser's own
+// menu was left to open: the page's menu calls preventDefault.
+const cmOpen = async (text = devPlan) => {
+  await cm.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, text);
+  await cm.reload({ waitUntil: 'networkidle' });
+  await cm.evaluate(() => { window.addEventListener('contextmenu', (e) => { window.__native = !e.defaultPrevented; }); });
+};
+const cmMenu = cm.locator('#ctxMenu');
+const cmRoute = (name) => cm.locator('#tab-plan tr[data-route]', { has: cm.locator(`[data-field="name"][value="${name}"]`) });
+const cmStored = () => cm.evaluate(() => localStorage.getItem('carcoord:v1'));
+const cmNative = () => cm.evaluate(() => window.__native);
+const cmEntries = () => cmMenu.locator('[role="menuitem"]').evaluateAll((els) => els.map((el) => el.querySelector('span').textContent));
+const cmRight = async (loc, modifiers = []) => { await loc.scrollIntoViewIfNeeded(); await loc.click({ button: 'right', modifiers }); };
+const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((x) => x.name === n); return r && { highlight: r.highlight, gapBefore: r.gapBefore }; }, id);
+
+// The layer, opened with the mouse, on a route's Mark cell.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const mark = cmRoute('7').locator('[data-field="highlight"]');
+  await cmRight(mark);
+  check('a right-click on a route\'s Mark opens the page\'s menu, not the browser\'s', await cmMenu.isVisible() && (await cmNative()) === false);
+  same('with the route\'s two toggles first', (await cmEntries()).slice(0, 2), ['Mark pink on the printout', 'Add a blank line above']);
+  check('named for its route', (await cmMenu.getAttribute('aria-label')) === 'Actions for Route 7');
+  check('the menu is absolute, never fixed', (await cmMenu.evaluate((m) => getComputedStyle(m).position)) === 'absolute');
+  await cm.locator('.rail-saved').click();
+  check('a press outside shuts it', await cmMenu.isHidden());
+  check('and opening and shutting it saved nothing', (await cmStored()) === before);
+
+  await cmRight(mark);
+  await cmMenu.locator('[role="menuitem"]').nth(0).click();
+  check('Mark pink on the printout marks the route, and shuts the menu', (await cmFlags('7'))?.highlight === true && await cmMenu.isHidden());
+  await cmRight(mark);
+  same('the toggle then says what it will do', (await cmEntries())[0], 'Remove the pink mark');
+  await cmMenu.locator('[role="menuitem"]').nth(1).click();
+  check('Add a blank line above puts the gap in', (await cmFlags('7'))?.gapBefore === true && await cmMenu.isHidden());
+
+  // A text box in a row opens the row's menu (owner, 2026-09-30); the
+  // browser's own stays with text selected in it, with Shift, and in other
+  // kinds of box.
+  await cmRight(cmRoute('7').locator('[data-field="name"]'));
+  check('a right-click in a route\'s name box opens the route\'s menu', (await cmNative()) === false && await cmMenu.isVisible()
+    && (await cmMenu.locator('.ctx-head').textContent()) === 'Route 7');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('and so does its driver box', (await cmNative()) === false && await cmMenu.isVisible()
+    && (await cmMenu.locator('.ctx-head').textContent()) === 'Route 7');
+  await cm.keyboard.press('Escape');
+  await cmRoute('7').locator('[data-field="name"]').evaluate((i) => { i.focus(); i.setSelectionRange(0, i.value.length); });
+  await cmRoute('7').locator('[data-field="name"]').dispatchEvent('contextmenu', { button: 2 });
+  check('with text selected in it, the browser\'s menu stays, for copying', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(mark, ['Shift']);
+  check('so does Shift+right-click on Mark', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRight(cm.locator('#date'));
+  check('and on the date box', (await cmNative()) === true && await cmMenu.isHidden());
+  await cmRoute('7').locator('td.warntext').evaluate((td) => { const i = document.createElement('input'); i.type = 'time'; i.id = 'cmTime'; td.appendChild(i); });
+  await cmRight(cm.locator('#cmTime'));
+  check('and on a kind of box the page has never had, inside a route row', (await cmNative()) === true && await cmMenu.isHidden());
+
+  // An open picker or tag menu shuts: a right-click fires neither a click nor
+  // a left press, so neither would on its own.
+  await cmRoute('7').locator('select[data-field="carId"]').click();
+  const picked = await cm.locator('#picker').isVisible();
+  await cmRight(mark);
+  check('an open car grid shuts when the menu opens', picked && await cm.locator('#picker').isHidden() && await cmMenu.isVisible());
+  await cm.locator('.rail-saved').click();
+  await cm.locator('#tab-plan .rail-row[data-drag="car"] [data-act="tag"]').first().click();
+  const tagged = await cm.locator('#tagMenu').isVisible();
+  await cmRight(mark);
+  check('and so does an open tag menu', tagged && await cm.locator('#tagMenu').isHidden() && await cmMenu.isVisible());
+
+  // A wheel shuts it; so does changing tab (a click with no press behind it,
+  // so the press rule is not what shuts it).
+  await cm.mouse.move(20, 300);
+  await cm.mouse.wheel(0, 120);
+  // mouse.wheel returns before the page has handled the event.
+  await cmMenu.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => {});
+  check('a wheel over the page shuts it', await cmMenu.isHidden());
+  await cmRight(mark);
+  await cm.locator('[data-act="tab"][data-tab="cars"]').dispatchEvent('click');
+  check('a change of tab shuts it', await cmMenu.isHidden());
+  await cm.locator('[data-act="tab"][data-tab="plan"]').dispatchEvent('click');
+
+  // Never cut off: near the bottom right of a wide screen, and on a phone.
+  for (const [width, height] of [[1366, 768], [390, 844]]) {
+    await cm.setViewportSize({ width, height });
+    const last = cm.locator('#tab-plan tr[data-route]').last().locator('[data-field="highlight"]');
+    await last.evaluate((el) => el.scrollIntoView({ block: 'end', inline: 'end' }));
+    await last.click({ button: 'right' });
+    const cut = await cutOff('#ctxMenu', cm);
+    check(`at ${width}, the menu opened near the bottom right is never cut off`, await cmMenu.isVisible() && !cut.length, cut.join(', '));
+    await cm.keyboard.press('Escape').catch(() => {});
+    await cm.locator('.rail-saved').click();
+  }
+  await cm.setViewportSize({ width: 1366, height: 768 });
+}
+
+// The keyboard: Shift+F10 and the Menu key open the same menu against the
+// focused control, on its first entry; Escape and a choice hand the focus back.
+{
+  await cmOpen();
+  const mark = cmRoute('7').locator('[data-field="highlight"]');
+  const cmFocused = () => cm.evaluate(() => {
+    const f = document.activeElement;
+    if (f === document.body) return 'body';
+    if (f.id === 'ctxMenu') return 'menu:itself';
+    if (f.closest('#ctxMenu')) return `menu:${f.querySelector('span').textContent}`;
+    return `${f.dataset.id || f.id}:${f.dataset.field || f.dataset.act || ''}`;
+  });
+  await mark.focus();
+  await cm.keyboard.press('Shift+F10');
+  check('Shift+F10 on a focused Mark opens the menu on its first entry', await cmMenu.isVisible() && (await cmFocused()) === 'menu:Mark pink on the printout', await cmFocused());
+  // Over the enabled entries only, whatever the menu holds by now.
+  const enabled = (await cmMenu.locator('[role="menuitem"]:not([aria-disabled])').evaluateAll((els) => els.map((el) => `menu:${el.querySelector('span').textContent}`)));
+  const walk = [];
+  for (const key of ['ArrowDown', 'ArrowUp', 'ArrowUp', 'ArrowDown', 'End', 'Home']) {
+    await cm.keyboard.press(key);
+    walk.push(await cmFocused());
+  }
+  same('the arrows wrap, and Home and End go to the ends', walk,
+    [enabled[1], enabled[0], enabled[enabled.length - 1], enabled[0], enabled[enabled.length - 1], enabled[0]]);
+  await cm.keyboard.press('Escape');
+  check('Escape shuts it and puts the focus back on Mark', await cmMenu.isHidden() && (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  await cm.keyboard.press('ContextMenu');
+  check('the Menu key opens it too, on its first entry', await cmMenu.isVisible() && (await cmFocused()) === 'menu:Mark pink on the printout', await cmFocused());
+  await cm.keyboard.press('Enter');
+  check('Enter on the first entry marks the route and shuts the menu', (await cmFlags('7'))?.highlight === true && await cmMenu.isHidden());
+  check('with the focus back on Mark', (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('Tab');
+  check('Tab shuts it too, and the focus goes back to Mark', await cmMenu.isHidden() && (await cmFocused()) === 'rt-07:highlight', await cmFocused());
+
+  // A mouse open starts on the menu itself, and hands nothing back.
+  await cmRight(mark);
+  check('a mouse open focuses the menu itself', (await cmFocused()) === 'menu:itself', await cmFocused());
+  const y = await cm.evaluate(() => scrollY);
+  await cm.keyboard.press('PageDown');
+  await cm.keyboard.press(' ');
+  check('PageDown and Space do not scroll the page under an open menu', (await cm.evaluate(() => scrollY)) === y && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  check('and Escape after a mouse open shuts it without taking the focus anywhere', await cmMenu.isHidden() && !(await cmFocused()).startsWith('rt-07'), await cmFocused());
+}
+
+// Delete from the menu: the ✕'s own act, confirm key and backup. Two clicks,
+// or Enter twice from a keyboard open; nothing else deletes.
+{
+  const cmHas = (id) => cm.evaluate((x) => state.routes.some((r) => r.id === x), id);
+  const cmBackedUp = (label, id) => cm.evaluate(([l, x]) => Store.backups().some((b) => b.label === l && JSON.parse(b.json).routes.some((r) => r.id === x)), [label, id]);
+  const cmDel = cmMenu.locator('[data-act="del"]');
+  const cmDelText = () => cmDel.locator('span').textContent();
+
+  await cmOpen();
+  const x2 = cmRoute('2').locator('[data-act="del"]');
+  await cmRight(x2);
+  same('Delete route comes last, with what is on the route under it', await cmDel.locator('small').textContent(), 'Bjørn, EL 41033, Spot 2/1');
+  await cmDel.click();
+  check('one click on Delete route arms it and leaves the menu open on Sure?', await cmMenu.isVisible() && (await cmDelText()) === 'Sure? Click again');
+  check('with nothing armed holding the focus', await cm.evaluate(() => !document.activeElement.classList.contains('armed')));
+  check('and the row\'s ✕ says Sure? as well', (await x2.textContent()).trim() === 'Sure?');
+  await cmDel.click();
+  check('the second click deletes the route and shuts the menu', !(await cmHas('rt-02')) && await cmMenu.isHidden());
+  check('after a "Deleting a route" backup that still holds it', await cmBackedUp('Deleting a route', 'rt-02'));
+
+  // From the keyboard: Enter twice.
+  await cmOpen();
+  await cmRoute('6').locator('[data-act="del"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.press('Enter');
+  const armedKeyed = await cm.evaluate(() => document.activeElement.classList.contains('armed') && !!document.activeElement.closest('#ctxMenu'));
+  await cm.keyboard.press('Enter');
+  check('Enter twice from a keyboard open deletes, the focus staying on the armed entry between', armedKeyed && !(await cmHas('rt-06')) && await cmBackedUp('Deleting a route', 'rt-06'));
+
+  // None of the single-key paths deletes.
+  await cmOpen();
+  await cmRight(cmRoute('4').locator('[data-act="del"]'));
+  await cmDel.click();
+  await cm.keyboard.press(' ');
+  check('armed with the mouse, a Space pressed next deletes nothing', await cmHas('rt-04'));
+  await cm.keyboard.press('Escape');
+  check('and Escape disarms it', await cmMenu.isHidden() && (await cm.evaluate(() => armed)) === null);
+
+  await cmOpen();
+  const x5 = cmRoute('5').locator('[data-act="del"]');
+  await x5.focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.press('Enter');
+  await cm.keyboard.press('Escape');
+  const backOnX = await cm.evaluate(() => document.activeElement.dataset.act === 'del' && document.activeElement.dataset.id === 'rt-05');
+  await cm.keyboard.press('Enter');
+  check('Shift+F10 on the ✕, End, Enter, Escape, Enter deletes nothing', backOnX && await cmHas('rt-05'));
+
+  await cmOpen();
+  await cmRoute('8').locator('[data-act="del"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('End');
+  await cm.keyboard.down('Enter');
+  await cm.keyboard.down('Enter');
+  await cm.keyboard.up('Enter');
+  check('a held Enter arms Delete route and does not confirm it', await cmHas('rt-08'));
+
+  // A redraw puts every list's scroll back, which fires scroll events: the
+  // menu stays open through them.
+  await cmOpen();
+  await cm.evaluate(() => {
+    const list = document.querySelector('#tab-plan [data-keep-scroll="drivers"]');
+    if (list) list.scrollTop = 120;
+    const table = document.querySelector('#tab-plan [data-keep-scroll="table"]');
+    if (table) table.scrollLeft = 40;
+  });
+  await cm.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await cmRight(cmRoute('9').locator('select[data-field="positionId"]'));
+  await cmDel.click();
+  check('with the rail list and the table scrolled, one click leaves the menu open on Sure?', await cmMenu.isVisible() && (await cmDelText()) === 'Sure? Click again');
+
+  // The confirming click lands where the first one did: the entry's box holds
+  // the first click's point after arming and after the disarm.
+  for (const [width, height] of [[1366, 768], [390, 844]]) {
+    await cm.setViewportSize({ width, height });
+    await cmOpen();
+    const x = cm.locator('#tab-plan tr[data-route]').last().locator('[data-act="del"]');
+    await x.evaluate((el) => el.scrollIntoView({ block: 'end', inline: 'end' }));
+    await x.click({ button: 'right' });
+    const b = await cmDel.boundingBox();
+    const pt = b && { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    const holds = async () => { const r = await cmDel.boundingBox(); return !!r && !!pt && pt.x >= r.x && pt.x <= r.x + r.width && pt.y >= r.y && pt.y <= r.y + r.height; };
+    if (pt) await cm.mouse.click(pt.x, pt.y);
+    const armedHolds = await holds() && (await cmDelText()) === 'Sure? Click again';
+    await cm.waitForTimeout(3300);
+    const disarmedHolds = await holds() && (await cmDelText()) === 'Delete route';
+    check(`at ${width}, the armed entry still holds the first click's point, and so does the disarmed one after 3 s`, armedHolds && disarmedHolds);
+    check(`at ${width}, one click and 3.3 s change nothing`, await cmHas('rt-hau2'));
+  }
+  await cm.setViewportSize({ width: 1366, height: 768 });
+}
+
+// Insert route above and below: a blank route beside the one clicked, every
+// gap left where it was, and the caret in the new name box.
+{
+  await cmOpen();
+  const cmPlan = () => cm.evaluate(() => state.routes.map((r) => ({ id: r.id, name: r.name, gap: r.gapBefore })));
+  const was = await cmPlan();
+  await cmRight(cmRoute('HAU 1').locator('[data-field="highlight"]'));
+  await cmMenu.locator('[data-act="insert-route"][data-where="above"]').click();
+  const above = await cmPlan();
+  const at = was.findIndex((r) => r.name === 'HAU 1');
+  const fresh = above[at];
+  check('Insert route above puts a blank route directly above the clicked row', above.length === was.length + 1 && above[at + 1].name === 'HAU 1' && fresh.name === '' && !was.some((r) => r.id === fresh.id));
+  same('and every gap stays where it was, the clicked row\'s included', above.filter((r) => r.id !== fresh.id), was);
+  check('the new route has no gap of its own', fresh.gap === false);
+  check('the caret is in the new route\'s name box', await cm.evaluate((id) => document.activeElement.dataset.id === id && document.activeElement.dataset.field === 'name', fresh.id));
+  same('the new route has exactly a new route\'s fields', await cm.evaluate((id) => Object.keys(state.routes.find((r) => r.id === id)).sort(), fresh.id), await cm.evaluate(() => Object.keys(newRoute('')).sort()));
+
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  await cmMenu.locator('[data-act="insert-route"][data-where="below"]').click();
+  const below = await cmPlan();
+  const three = above.findIndex((r) => r.name === '3');
+  check('Insert route below puts it directly under the clicked row', below.length === above.length + 1 && below[three].name === '3' && below[three + 1].name === '' && !above.some((r) => r.id === below[three + 1].id));
+  same('with every gap where it was', below.filter((r) => r.id !== below[three + 1].id), above);
+}
+
+// Clear one route: two clicks blank its driver, car, position, round and mark
+// after a backup; its name, its gap, the other routes and the date stay.
+{
+  await cmOpen();
+  const cmState = () => cm.evaluate(() => JSON.parse(JSON.stringify({ date: state.date, routes: state.routes })));
+  const was = await cmState();
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  const clear = cmMenu.locator('[data-act="clear-route"]');
+  same('Clear says what it costs', await clear.locator('small').textContent(), 'Route 3 only. The pink mark goes too.');
+  await clear.click();
+  same('one click alone changes nothing', await cmState(), was);
+  check('and leaves the menu open on Sure?', await cmMenu.isVisible() && (await clear.locator('span').textContent()) === 'Sure? Click again');
+  await clear.click();
+  const now = await cmState();
+  const r3 = now.routes.find((r) => r.id === 'rt-03');
+  const w3 = was.routes.find((r) => r.id === 'rt-03');
+  same('the second click empties route 3\'s driver, car, position, round and mark', [r3.driver, r3.carId, r3.positionId, r3.round, r3.highlight], ['', '', '', '', false]);
+  check('and keeps its name and its gap', r3.name === w3.name && r3.gapBefore === w3.gapBefore);
+  same('the other routes are untouched', now.routes.filter((r) => r.id !== 'rt-03'), was.routes.filter((r) => r.id !== 'rt-03'));
+  check('and so is the date', now.date === was.date);
+  check('after a "Clearing route 3" backup that still holds what was on it', await cm.evaluate(() => Store.backups().some((b) => b.label === 'Clearing route 3'
+    && JSON.parse(b.json).routes.some((r) => r.id === 'rt-03' && r.driver === 'Camilla' && r.highlight === true))));
+
+  // Nothing on it: the entry is there, but disabled, and does nothing.
+  await cmRight(cmRoute('3').locator('[data-field="highlight"]'));
+  const off = cmMenu.locator('[role="menuitem"][aria-disabled]', { hasText: 'Clear driver, car, position and round' });
+  check('on a route with nothing on it, Clear is disabled and carries no act', (await off.count()) === 1 && (await off.getAttribute('data-act')) === null);
+  await cm.keyboard.press('Escape');
+}
+
+// Go to, from a route's car or position: that tab, with the box focused and
+// clear of the top bar, and nothing saved.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const reg = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  same('a right-click on a route\'s car lists Go to that car first', (await cmEntries())[0], `Go to ${reg} on the Cars tab`);
+  await cmMenu.locator('[data-act="go"]').click();
+  const landed = await cm.evaluate(() => {
+    const f = document.activeElement;
+    const bar = document.querySelector('.topbar').getBoundingClientRect().bottom;
+    return { tab: tab, on: f.closest('section.tab')?.id, id: f.dataset.id, field: f.dataset.field, clear: f.getBoundingClientRect().top >= bar };
+  });
+  same('choosing it shows the Cars tab with that reg box focused, clear of the top bar', landed, { tab: 'cars', on: 'tab-cars', id: 'car-07', field: 'reg', clear: true });
+  check('with the menu shut, and nothing saved', await cmMenu.isHidden() && (await cmStored()) === before);
+
+  await cm.locator('[data-act="tab"][data-tab="plan"]').click();
+  await cmRight(cmRoute('7').locator('select[data-field="positionId"]'));
+  same('a route\'s position lists Go to that position first', (await cmEntries())[0], 'Go to Port 1 on the Positions tab');
+  check('then its own entries, and the free spots to move to', (await cmEntries()).includes('Take Port 1 off route 7')
+    && (await cmEntries()).includes('Status: OK ›')
+    && (await cmEntries()).includes('Allow many cars') && (await cmMenu.locator('[data-act="move-pos"]').count()) > 0);
+  await cmMenu.locator('[data-act="go"]').click();
+  check('and it lands in that position\'s name box', await cm.evaluate(() => tab === 'positions' && document.activeElement.dataset.id === 'pos-port1' && document.activeElement.dataset.field === 'name'));
+  await cm.locator('[data-act="tab"][data-tab="plan"]').click();
+  await cmRight(cmRoute('7').locator('[data-field="highlight"]'));
+  check('anywhere else on the row, there is no Go to', (await cmMenu.locator('[data-act="go"]').count()) === 0);
+  await cm.keyboard.press('Escape');
+}
+
+// A route's car and driver: their status and tag, the same list their own
+// tabs' menus open (owner, 2026-10-01).
+{
+  await cmOpen();
+  const reg = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  same('a right-click on a route\'s car offers its status, after Go to', (await cmEntries()).slice(0, 2), [`Go to ${reg} on the Cars tab`, 'Status: OK ›']);
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  same('a right-click on a route\'s driver offers the driver\'s tag first', (await cmEntries())[0], 'Tag: No tag ›');
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  const subOpen = await cm.locator('#ctxSub').isVisible().catch(() => false);
+  const layer = subOpen ? cm.locator('#ctxSub') : cmMenu;
+  same('which lists No tag and every driver tag, No tag ticked', await layer.locator('[data-act="setLabel"] span').allTextContents(),
+    await cm.evaluate(() => ['✓ No tag', ...state.driverTags.map((t) => t.name)]));
+  await layer.locator('[data-act="setLabel"]', { hasText: 'Sick' }).click();
+  check('choosing Sick tags that driver, and saves it', await cm.evaluate(() => {
+    const d = state.drivers.find((x) => x.name === 'Guro');
+    const saved = JSON.parse(localStorage.getItem('carcoord:v1')).drivers.find((x) => x.name === 'Guro');
+    return byId(state.driverTags, d.tagId)?.name === 'Sick' && saved.tagId === d.tagId;
+  }));
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('and the menu then says it', (await cmEntries())[0] === 'Tag: Sick ›');
+  await cm.keyboard.press('Escape');
+  await cmRoute('7').locator('[data-field="driver"]').fill('Nobody Listed');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRoute('7').locator('[data-field="driver"]'));
+  check('a name on no roster has no tag to offer', !(await cmEntries()).some((x) => x.startsWith('Tag:')));
+  await cm.keyboard.press('Escape');
+}
+
+// The menus from the keyboard and a click on an opened submenu, and the armed
+// "Sure?" on small buttons (review, 2026-10-01).
+{
+  await cmOpen();
+  await cm.setViewportSize({ width: 1280, height: 560 });
+  const name = cm.locator('#tab-plan [data-panel="drivers"] .rail-row').first().locator('.rail-name');
+  await name.focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('ArrowDown');
+  check('the keyboard\'s place in a menu is a ring, not only a tint', await cm.evaluate(() => getComputedStyle(document.activeElement).outlineStyle === 'solid'));
+  await cm.keyboard.press('End');
+  check('End in a menu that scrolls shows the entry it lands on', await cm.evaluate(() => {
+    const menu = document.getElementById('ctxMenu').getBoundingClientRect(), item = document.activeElement.getBoundingClientRect();
+    return document.activeElement.closest('#ctxMenu') && item.top >= menu.top - 1 && item.bottom <= menu.bottom + 1;
+  }));
+  await cm.keyboard.press('Escape');
+  await cm.setViewportSize({ width: 1600, height: 940 });
+  // Resting on a submenu entry opens it; a click on it then keeps it open.
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  const status = cmMenu.locator('[data-act="ctx-view"]').first();
+  await status.hover();
+  await cm.waitForTimeout(250);
+  await status.click();
+  check('a click on the entry whose submenu resting just opened keeps it open', await cm.locator('#ctxSub').isVisible().catch(() => false));
+  await cm.keyboard.press('Escape');
+  await cm.keyboard.press('Escape');
+  const del = cm.locator('#planTemplates .tpl-head').first().locator('[data-act="del"]');
+  await del.click();
+  check('an armed ✕ on a template card reads white on red', await del.evaluate((b) => b.textContent === 'Sure?' && getComputedStyle(b).color === 'rgb(255, 255, 255)'));
+  await cm.keyboard.press('Escape');
+}
+
+// The rail's rows: a driver's and a car's menus, opened from anywhere on the
+// row but its name box.
+{
+  await cmOpen();
+  const cmRail = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"]`);
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  same('a rail driver\'s badge opens that driver\'s menu', await cmEntries(), ['Set away', 'Tag: No tag ›', 'Tag…', 'Go to route 1', 'Go to Anders on the Drivers tab', 'Take off route 1',
+    '✓ Works Mondays', '✓ Works Tuesdays', 'Works Wednesdays', 'Works Thursdays', 'Works Fridays', 'Delete driver']);
+  same('its delete says what it costs', await cmMenu.locator('[data-act="del"] small').textContent(),
+    await cm.evaluate(() => { const n = state.driverGroups.filter((g) => g.driverIds.includes('drv-anders')).length; return `${n ? `Taken out of ${n} day group${n === 1 ? '' : 's'}` : 'In no day group'}. Routes keep the name.`; }));
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRail('driver', 'drv-anders').locator('.rail-name'));
+  check('the rail\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  check('and the rail\'s ✕ reads Delete, not Remove', (await cmRail('driver', 'drv-anders').locator('[data-act="del"]').getAttribute('title')) === 'Delete Anders');
+
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Set away flips the rail row\'s tick', await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-anders').available === false)
+    && (await cmRail('driver', 'drv-anders').locator('[data-act="toggle"]').textContent()).trim() === '↺');
+  await cmRight(cmRail('driver', 'drv-anders').locator('.assign'));
+  same('and then offers Bring back in', (await cmEntries())[0], 'Bring back in');
+  await cm.keyboard.press('Escape');
+
+  // Tag…: the tag menu, at the row's own tag button, and no tag chosen.
+  await cmRight(cmRail('driver', 'drv-guro').locator('.assign'));
+  await cmMenu.locator('[data-act="tag"]').click();
+  check('Tag… opens the tag menu at that row\'s tag button, and shuts this one', await cm.locator('#tagMenu').isVisible()
+    && (await cm.locator('#tagMenu').getAttribute('data-for')) === 'driver:drv-guro' && await cmMenu.isHidden());
+  await cm.keyboard.press('Escape');
+  // Down to Tag… by its words: the Tag submenu (0.12.0) sits between it and
+  // Set away, and a fixed count of presses would land on whatever is there.
+  const tagWas = await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId);
+  await cmRail('driver', 'drv-guro').locator('[data-act="tag"]').focus();
+  await cm.keyboard.press('Shift+F10');
+  const onEntry = () => cm.evaluate(() => document.activeElement?.querySelector('span')?.textContent);
+  for (let k = 0; k < 6 && (await onEntry()) !== 'Tag\u2026'; k++) await cm.keyboard.press('ArrowDown');
+  await cm.keyboard.press('Enter');
+  check('Enter on Tag… opens the tag menu without choosing a tag', await cm.locator('#tagMenu').isVisible() && await cmMenu.isHidden()
+    && (await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').tagId)) === tagWas);
+  await cm.keyboard.press('Escape');
+
+  // Go to route 7: the focus in that route's driver box.
+  await cmRight(cmRail('driver', 'drv-guro').locator('.assign'));
+  await cmMenu.locator('[data-act="go"]', { hasText: 'Go to route 7' }).click();
+  check('Go to route 7 puts the focus in that route\'s driver box', await cm.evaluate(() => document.activeElement.dataset.kind === 'route' && document.activeElement.dataset.id === 'rt-07' && document.activeElement.dataset.field === 'driver'));
+
+  // A car: its cost line counts routes and templates.
+  const cost = await cm.evaluate(() => {
+    const t = state.templates.filter((x) => x.routes.some((r) => r.carId === 'car-07')).length;
+    return t ? `On route 7 and in ${t} template${t === 1 ? '' : 's'}` : 'On route 7';
+  });
+  await cmRight(cmRail('car', 'car-07').locator('.assign'));
+  const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+  same('a rail car\'s menu', await cmEntries(), ['Status: OK ›', 'Tag…', 'Go to route 7', `Go to ${reg7} on the Cars tab`, 'Take off route 7', 'Delete car']);
+  same('and its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), cost);
+  await cm.keyboard.press('Escape');
+
+  // A blank-named route reads "Route -"; a car on three routes gets one line.
+  await cm.evaluate(() => { const r = state.routes.find((x) => x.id === 'rt-14'); r.name = ''; r.carId = 'car-02'; save(); render(); });
+  await cmRight(cmRail('car', 'car-02').locator('.assign'));
+  check('a route with no name reads "route -"', (await cmEntries()).includes('Go to route -'), JSON.stringify(await cmEntries()));
+  await cm.keyboard.press('Escape');
+  await cm.evaluate(() => { state.routes.find((x) => x.id === 'rt-14').carId = 'car-01'; save(); render(); });
+  await cmRight(cmRail('car', 'car-01').locator('.assign'));
+  const three = cmMenu.locator('[role="menuitem"][aria-disabled]', { hasText: 'On 3 routes' });
+  check('a car on 3 routes shows one disabled "On 3 routes" line and no Go to or Take off route', (await three.count()) === 1
+    && !(await cmEntries()).some((t) => t.startsWith('Go to route') || t.startsWith('Take off')));
+  await cm.keyboard.press('Escape');
+
+  // With the drivers list scrolled, one click on Delete driver stays on Sure?.
+  await cmOpen();
+  await cm.evaluate(() => { const l = document.querySelector('#tab-plan [data-keep-scroll="drivers"]'); if (l) l.scrollTop = 200; });
+  await cm.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const low = cm.locator('#tab-plan .rail-row[data-drag="driver"]').nth(14);
+  await cmRight(low.locator('.grip'));
+  await cmMenu.locator('[data-act="del"]').click();
+  check('with the drivers list scrolled, one click on Delete driver leaves the menu open on Sure?', await cmMenu.isVisible()
+    && (await cmMenu.locator('[data-act="del"] span').textContent()) === 'Sure? Click again');
+  await cm.keyboard.press('Escape');
+}
+
+// Take off route N: one field on one route, only while it still holds the item.
+{
+  await cmOpen();
+  const cmRoutes = () => cm.evaluate(() => JSON.parse(JSON.stringify(state.routes)));
+  const cmRail8 = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"] .assign`);
+  const was = await cmRoutes();
+  await cmRight(cmRail8('car', 'car-07'));
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 7' }).click();
+  const now = await cmRoutes();
+  check('Take off route 7 on a rail car empties route 7\'s car', now.find((r) => r.id === 'rt-07').carId === '' && await cmMenu.isHidden());
+  same('and changes nothing else', now.map((r) => (r.id === 'rt-07' ? { ...r, carId: 'car-07' } : r)), was);
+  check('with no notice, on the Day plan', (await cm.locator('#notices .notice', { hasText: 'Took ' }).count()) === 0);
+
+  // A driver: only the route the entry names, though another is written
+  // with the same name in other letters.
+  await cm.evaluate(() => { state.routes.find((r) => r.id === 'rt-14').driver = 'ANDERS'; save(); render(); });
+  await cmRight(cmRail8('driver', 'drv-anders'));
+  same('a driver written on two routes gets a Take off for each', (await cmEntries()).filter((t) => t.startsWith('Take off')), ['Take off route 1', 'Take off route 14']);
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 1' }).first().click();
+  same('Take off route 1 clears only route 1\'s driver', await cm.evaluate(() => ['rt-01', 'rt-14'].map((id) => state.routes.find((r) => r.id === id).driver)), ['', 'ANDERS']);
+
+  // An entry left open while its route changed changes nothing.
+  await cmRight(cmRail8('car', 'car-01'));
+  await cm.evaluate(() => { state.routes.find((r) => r.id === 'rt-12').carId = 'car-05'; });
+  await cmMenu.locator('[data-act="take-off"]', { hasText: 'Take off route 12' }).click();
+  check('an entry left open while its route changed changes nothing', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-12').carId)) === 'car-05');
+}
+
+// The rail menus' own entries (owner, 2026-09-30): a free route, a car's
+// status, a driver's usual days, and the way to the driver's row.
+{
+  await cmOpen();
+  const cmRailRow = (kind, id) => cm.locator(`#tab-plan .rail-row[data-drag="${kind}"][data-id="${id}"]`);
+  const freeRoutes = await cm.evaluate(() => state.routes.filter((r) => !r.carId).map((r) => `Put on route ${r.name.trim() || '-'}`).slice(0, 4));
+  await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
+  same('a car on no route offers the routes with no car', (await cmEntries()).filter((x) => x.startsWith('Put on')), freeRoutes);
+  const first = freeRoutes[0].replace('Put on route ', '');
+  await cmMenu.locator('[data-act="put-on"]').first().click();
+  check('Put on route puts the car there, as a drop would', (await cm.evaluate((n) => state.routes.find((r) => r.name === n).carId, first)) === 'car-16' && await cmMenu.isHidden());
+  await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  // Beside the menu where there is room, in its place where there is not.
+  const subOpen = await cm.locator('#ctxSub').isVisible().catch(() => false);
+  const listed = subOpen ? await cm.locator('#ctxSub [role="menuitem"] span').allTextContents() : (await cmEntries()).filter((x) => x !== '‹ Back');
+  same('Status: OK › lists OK and every label, OK ticked', listed, await cm.evaluate(() => ['✓ OK', ...state.labels.map((l) => l.name)]));
+  check('and the menu stays open while it does', await cmMenu.isVisible());
+  if (subOpen) {
+    const [m, s] = [await cmMenu.boundingBox(), await cm.locator('#ctxSub').boundingBox()];
+    check('the submenu opens beside the menu, not over it', s.x >= m.x + m.width - 4 || s.x + s.width <= m.x + 4);
+  }
+  await (subOpen ? cm.locator('#ctxSub') : cmMenu).locator('[data-act="setLabel"]', { hasText: 'Workshop' }).click();
+  check('a status entry sets the car\'s label', await cm.evaluate(() => byId(state.labels, state.cars.find((c) => c.id === 'car-16').labelId)?.name === 'Workshop'));
+  await cmRight(cmRailRow('car', 'car-16').locator('.grip'));
+  check('and the menu then says it', (await cmEntries())[0] === 'Status: Workshop ›');
+  await cmMenu.locator('[data-act="ctx-view"]').click();
+  await cm.keyboard.press('Escape');
+  check('Escape in the status list goes back to the menu, not out of it', await cmMenu.isVisible() && (await cmEntries())[0] === 'Status: Workshop ›');
+  await cm.keyboard.press('Escape');
+  await cmRight(cmRailRow('driver', 'drv-anders').locator('.grip'));
+  await cmMenu.locator('[data-act="crew-day"]', { hasText: 'Works Wednesdays' }).click();
+  check('Works Wednesdays puts the driver in Wednesday\'s crew', await cm.evaluate(() => dayCrews().byDay.get(3)?.driverIds.includes('drv-anders') === true));
+  await cmRight(cmRailRow('driver', 'drv-anders').locator('.grip'));
+  await cmMenu.locator('[data-act="crew-day"]', { hasText: 'Works Mondays' }).click();
+  check('and ✓ Works Mondays takes them out of Monday\'s', await cm.evaluate(() => !dayCrews().byDay.get(1).driverIds.includes('drv-anders')));
+  await cmRight(cmRailRow('driver', 'drv-anders').locator('.grip'));
+  await cmMenu.locator('[data-act="go"]', { hasText: 'on the Drivers tab' }).click();
+  check('Go to Anders on the Drivers tab lands on the name box there', await cm.evaluate(() => tab === 'drivers'
+    && !!document.activeElement?.matches('#tab-drivers [data-id="drv-anders"][data-field="name"]')));
+}
+
+// The Drivers tab's rows: the rail driver's menu without Tag….
+{
+  await cmOpen();
+  await cm.click('[data-act="tab"][data-tab="drivers"]');
+  const cmDrv = (name) => cm.locator('#tab-drivers tbody tr', { has: cm.locator(`[data-field="name"][value="${name}"]`) });
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  same('a roster row opens the driver\'s menu, with its tag and no Tag…', await cmEntries(), ['Set away', 'Tag: No tag ›', 'Go to route 7', 'Take off route 7', 'Delete driver']);
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Set away works from the Drivers tab', await cm.evaluate(() => state.drivers.find((d) => d.id === 'drv-guro').available === false));
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  await cmMenu.locator('[data-act="go"]').click();
+  check('Go to route 7 switches to the Day plan, in that route\'s driver box', await cm.evaluate(() => tab === 'plan' && document.activeElement.dataset.id === 'rt-07' && document.activeElement.dataset.field === 'driver'));
+  await cm.click('[data-act="tab"][data-tab="drivers"]');
+  await cmRight(cmDrv('Guro').locator('.assign'));
+  await cmMenu.locator('[data-act="take-off"]').click();
+  check('Take off route 7 empties that route\'s driver', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').driver)) === '');
+  check('and says so, away from the Day plan', (await cm.locator('#notices .notice', { hasText: 'Took Guro off route 7.' }).count()) === 1);
+  await cmRight(cmDrv('Guro').locator('[data-act="toggle"]'));
+  const del = cmMenu.locator('[data-act="del"]');
+  await del.click();
+  await del.click();
+  check('Delete driver deletes with two clicks, after the usual backup', !(await cm.evaluate(() => state.drivers.some((d) => d.id === 'drv-guro')))
+    && (await cm.evaluate(() => Store.backups()[0].label)) === 'Deleting a driver');
+  await cmRight(cmDrv('Anders').locator('[data-field="name"]'));
+  check('a roster name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  await cmRight(cmDrv('Anders').locator('[data-field="note"]'));
+  check('and so does its note box', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+}
+
+// The Cars, Positions and Labels tabs' rows, opened from the row's buttons.
+{
+  await cmOpen();
+  const cmTabRow = (tabName, field, value) => cm.locator(`#tab-${tabName} tbody tr`, { has: cm.locator(`[data-field="${field}"][value="${value}"]`) });
+  const reg7 = await cm.evaluate(() => state.cars.find((c) => c.id === 'car-07').reg);
+
+  await cm.click('[data-act="tab"][data-tab="cars"]');
+  const car = cmTabRow('cars', 'reg', reg7);
+  await cmRight(car.locator('[data-act="up"]'));
+  same('a Cars tab row opens the car\'s menu, with its status, no Tag… and no jump to its own tab', await cmEntries(), ['Status: OK ›', 'Go to route 7', 'Take off route 7', 'Delete car']);
+  await cmMenu.locator('[data-act="take-off"]').click();
+  check('its Take off empties route 7\'s car and says so', (await cm.evaluate(() => state.routes.find((r) => r.id === 'rt-07').carId)) === ''
+    && (await cm.locator('#notices .notice', { hasText: `Took ${reg7} off route 7.` }).count()) === 1);
+  await cmRight(car.locator('[data-field="reg"]'));
+  check('the reg box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  await cmRight(car.locator('[data-field="note"]'));
+  check('and so does the car\'s note box', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+
+  await cm.click('[data-act="tab"][data-tab="positions"]');
+  const port = cmTabRow('positions', 'name', 'Port 1');
+  await cmRight(port.locator('[data-act="del"]'));
+  same('a Positions tab row opens the position\'s menu', await cmEntries(),
+    ['Allow many cars', 'Go to route 7', 'Go to route HAU 2', 'Take off route 7', 'Take off route HAU 2', 'Delete position']);
+  const posCost = await cm.evaluate(() => {
+    const t = state.templates.filter((x) => x.routes.some((r) => r.positionId === 'pos-port1')).length;
+    return `Used by 2 routes${t ? ` and ${t} template${t === 1 ? '' : 's'}` : ''}`;
+  });
+  same('its delete counts routes and templates', await cmMenu.locator('[data-act="del"] small').textContent(), posCost);
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Allow many cars ticks the row\'s Many cars', await cm.evaluate(() => state.positions.find((p) => p.id === 'pos-port1').multi === true)
+    && await port.locator('[data-field="multi"]').isChecked());
+  await cmRight(port.locator('[data-field="multi"]'));
+  same('a right-click on the Many cars tick opens the menu too, now offering to stop', (await cmEntries())[0], 'Stop allowing many cars');
+  await cm.keyboard.press('Escape');
+  await cmRight(port.locator('[data-field="name"]'));
+  check('the position\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+
+  await cm.click('[data-act="tab"][data-tab="labels"]');
+  const course = cm.locator('#labelList tbody tr', { has: cm.locator('[data-field="name"][value="Course"]') });
+  await cmRight(course.locator('[data-act="down"]'));
+  same('a Labels tab row opens the label\'s menu, the printout tick above its delete', await cmEntries(), ['Show on the printout', 'Delete label']);
+  const labelCost = await cm.evaluate(() => {
+    const n = (list, word) => { const k = list.filter((x) => x.labelId === 'lbl-course').length; return k ? [k, `${k} ${word}${k === 1 ? '' : 's'}`] : null; };
+    const bits = [n(state.cars, 'car'), n(state.positions, 'position'), n(state.drivers, 'driver')].filter(Boolean);
+    const total = bits.reduce((s, [k]) => s + k, 0);
+    const words = bits.map(([, w]) => w);
+    const list = words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+    return total ? `${list} ${total === 1 ? 'has' : 'have'} it` : 'Nothing has it';
+  });
+  same('its delete counts the cars and positions wearing it', await cmMenu.locator('[data-act="del"] small').textContent(), labelCost);
+  check('and never the drivers, who wear driver tags', !/driver/.test(await cmMenu.locator('[data-act="del"] small').textContent()));
+  await cmMenu.locator('[data-act="toggle"]').click();
+  check('Show on the printout ticks the label\'s printout box', await cm.evaluate(() => state.labels.find((l) => l.id === 'lbl-course').onSheet === true)
+    && await course.locator('[data-field="onSheet"]').isChecked());
+  await cmRight(course.locator('[data-field="name"]'));
+  check('the label\'s name box opens the row\'s menu', (await cmNative()) === false && await cmMenu.isVisible());
+  await cm.keyboard.press('Escape');
+  await cmRight(course.locator('[data-field="color"]'));
+  check('and so does its colour box', (await cmNative()) === true && await cmMenu.isHidden());
+  // A driver tag's row: only its delete, counting the drivers wearing it.
+  const courseTag = cm.locator('#driverTagList tbody tr', { has: cm.locator('[data-field="name"][value="Course"]') });
+  await cmRight(courseTag.locator('[data-act="down"]'));
+  same('a Driver tags row opens the tag\'s menu: its delete only', await cmEntries(), ['Delete driver tag']);
+  const tagCost = await cm.evaluate(() => {
+    const id = state.driverTags.find((t) => t.name === 'Course').id;
+    const k = state.drivers.filter((d) => d.tagId === id).length;
+    return k ? `${k} driver${k === 1 ? '' : 's'} ${k === 1 ? 'has' : 'have'} it` : 'No driver has it';
+  });
+  same('its delete counts the drivers wearing it', await cmMenu.locator('[data-act="del"] small').textContent(), tagCost);
+  check('and there is one', tagCost === '1 driver has it', tagCost);
+  await cm.keyboard.press('Escape');
+  await cm.click('[data-act="tab"][data-tab="plan"]');
+}
+
+// A template card: Load… only asks; Show contents opens it;
+// the open table opens the same menu.
+{
+  await cmOpen();
+  const before = await cmStored();
+  const card = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="ask-template"][data-id="tpl-weekday"]') });
+  await cmRight(card.locator('[data-act="peek-template"]'));
+  same('a template card opens the template\'s menu', await cmEntries(), ['Load…', 'Show contents', 'Save the plan into it', 'Delete template']);
+  check('and never offers to load it outright', (await cmMenu.locator('[data-act="load-template"]').count()) === 0);
+  await cmMenu.locator('[data-act="ask-template"]').click();
+  check('Load… raises the same question as the card\'s Load', (await cm.locator('#notices [data-act="load-template"][data-id="tpl-weekday"]').count()) === 1);
+  check('and saves nothing', (await cmStored()) === before);
+  await cmRight(card.locator('.tpl-name'));
+  check('its name opens the same menu', await cmMenu.isVisible() && (await cmEntries())[1] === 'Show contents');
+  await cmMenu.locator('[data-act="peek-template"]').click();
+  check('Show contents opens the table beside the card', await cm.locator('#tplPeek .tpl-table').isVisible() && await cmMenu.isHidden());
+  await cmRight(card.locator('.tpl-name'));
+  same('and the card\'s menu now offers to hide it', await cmEntries(), ['Load…', 'Hide contents', 'Save the plan into it', 'Delete template']);
+  await cmMenu.locator('[data-act="peek-template"]').click();
+  check('which it does', await cm.locator('#tplPeek').isHidden());
+  // An empty weekday template: nothing to load or show, as on its card.
+  const monday = cm.locator('#tab-plan .tpl', { has: cm.locator('[data-act="resave-template"][data-id="tpl-weekday-1"]') });
+  await cmRight(monday.locator('.tpl-name'));
+  same("an empty template's menu offers Save and Delete only", await cmEntries(), ['Save the plan into it', 'Delete template']);
+  same('and its Save says what it becomes', await cmMenu.locator('[data-act="resave-template"] small').textContent(),
+    `It holds nothing yet; it becomes the plan's ${await cm.evaluate(() => state.routes.length)} routes`);
+  await cm.keyboard.press('Escape');
+}
+
+// Update a template from the plan: two clicks, by id, after a backup; its id,
+// name and weekday stay.
+{
+  await cmOpen();
+  const cmTpl = (id) => cm.evaluate((x) => JSON.parse(JSON.stringify(state.templates.find((t) => t.id === x) || null)), id);
+  const cmCard = (id) => cm.locator('#tab-plan .tpl', { has: cm.locator(`[data-act="resave-template"][data-id="${id}"]`) });
+  const plan = await cm.evaluate(() => state.routes.map((r) => ({ name: r.name, driver: r.driver, carId: r.carId, positionId: r.positionId, round: r.round, highlight: r.highlight, gapBefore: r.gapBefore })));
+  const sat = await cmTpl('tpl-saturday');
+  await cmRight(cmCard('tpl-saturday').locator('.tpl-name'));
+  const replace = cmMenu.locator('[data-act="resave-template"]');
+  same('Save the plan into it says what it costs', await replace.locator('small').textContent(), `Its ${sat.routes.length} routes become the plan's ${plan.length}`);
+  await replace.click();
+  same('one click alone changes nothing', await cmTpl('tpl-saturday'), sat);
+  await replace.click();
+  const now = await cmTpl('tpl-saturday');
+  same('two clicks put the plan\'s routes in the template', now.routes, plan);
+  check('and keep its id, name and weekday', now.id === sat.id && now.name === sat.name && now.weekday === sat.weekday);
+  check('after an "Updating the Saturday template from the plan" backup holding what it was', await cm.evaluate((n) => Store.backups().some((b) => b.label === 'Updating the Saturday template from the plan'
+    && JSON.parse(b.json).templates.find((t) => t.id === 'tpl-saturday').routes.length === n), sat.routes.length));
+
+  // Two templates with the same folded name: the one clicked is replaced.
+  await cmOpen();
+  await cm.evaluate(() => { state.templates.push({ id: 'tpl-sat2', name: 'SATURDAY', weekday: '', routes: [] }); save(); render(); });
+  const first = await cmTpl('tpl-saturday');
+  await cmRight(cmCard('tpl-sat2').locator('.tpl-name'));
+  await replace.click();
+  await replace.click();
+  check('with two templates of the same name, the one clicked is the one replaced', (await cmTpl('tpl-sat2')).routes.length === plan.length
+    && JSON.stringify(await cmTpl('tpl-saturday')) === JSON.stringify(first));
+}
+
+// --- the ⓘ buttons and their bubbles ---
+// On the dev fixture, so the parts that show only with data are there: the
+// warnings box, the week, the driver and car tables.
+{
+  const ibCtx = await browser.newContext();
+  const ib = await ibCtx.newPage();
+  const ibErrors = [];
+  ib.on('console', (m) => m.type() === 'error' && ibErrors.push(m.text()));
+  ib.on('pageerror', (e) => ibErrors.push(String(e)));
+  await ib.goto(base, { waitUntil: 'networkidle' });
+  await ib.evaluate((t) => { localStorage.clear(); localStorage.setItem('carcoord:pref:seenUpdate', APP_VERSION); localStorage.setItem('carcoord:v1', t); }, devPlan);
+  await ib.reload({ waitUntil: 'networkidle' });
+  const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview'];
+  const shown = async () => ib.evaluate(() => [...document.querySelectorAll('.info-btn')].filter((b) => b.getBoundingClientRect().width > 0).map((b) => b.dataset.info));
+  const byTab = {};
+  for (const t of TABS) { await ib.click(`[data-act="tab"][data-tab="${t}"]`); byTab[t] = await shown(); }
+  console.log(`       the ⓘ keys by tab: ${JSON.stringify(byTab)}`);
+  const all = Object.values(byTab).flat();
+  const keys = await ib.evaluate(() => Object.keys(HELP));
+  same('every text in help.js has exactly one visible ⓘ, on its tab', [...all].sort(), [...keys].sort());
+  check('and every one has a title and words', await ib.evaluate(() => Object.values(HELP).every((h) => h.title.trim() && h.text.trim())));
+  check('no ⓘ is inside anything that acts, so none can reach a save', await ib.evaluate(() => [...document.querySelectorAll('.info-btn')].every((b) => !b.closest('[data-act]'))));
+  const savedWas = await ib.evaluate(() => [localStorage.getItem('carcoord:v1'), localStorage.getItem('carcoord:backups')].join('\n'));
+
+  // Every ⓘ opens its own words beside itself, inside the window, at every width.
+  for (const width of [1680, 1280, 900, 390]) {
+    await ib.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const wrong = [];
+    for (const t of TABS) {
+      await ib.click(`[data-act="tab"][data-tab="${t}"]`);
+      for (const key of byTab[t]) {
+        const btn = ib.locator(`.info-btn[data-info="${key}"]`);
+        await btn.evaluate((b) => b.scrollIntoView({ block: 'center', inline: 'center' }));
+        // The page may already be wider than a phone (the print preview's
+        // sheet is); the bubble must not make it any wider.
+        const pageWidth = await ib.evaluate(() => Math.max(document.documentElement.scrollWidth, window.innerWidth));
+        await btn.click();
+        const got = await ib.evaluate(([key, pageWidth]) => {
+          const layer = document.getElementById('infoBubble');
+          const a = document.querySelector(`.info-btn[data-info="${key}"]`).getBoundingClientRect();
+          const m = layer.getBoundingClientRect();
+          const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+          return {
+            open: !layer.hidden && document.getElementById('infoTitle').textContent === HELP[key].title && layer.querySelector('p').textContent === HELP[key].text,
+            inside: m.left >= -0.5 && m.right <= vw + 0.5 && m.top >= -0.5 && m.bottom <= vh + 0.5,
+            beside: Math.abs(m.top - a.bottom) <= 4 || Math.abs(m.bottom - a.top) <= 4,
+            wide: document.documentElement.scrollWidth <= pageWidth + 1,
+          };
+        }, [key, pageWidth]);
+        const bad = Object.entries(got).filter(([, v]) => !v).map(([k]) => k);
+        if (bad.length) wrong.push(`${key}: ${bad.join('/')}`);
+        await ib.keyboard.press('Escape');
+      }
+    }
+    same(`at ${width}, every ⓘ opens its own words beside itself, inside the window`, wrong, []);
+  }
+  await ib.setViewportSize({ width: 1280, height: 900 });
+  await ib.click('[data-act="tab"][data-tab="plan"]');
+  await ib.evaluate(() => window.scrollTo(0, 0));
+
+  // One at a time; the same ⓘ again shuts it; a press outside shuts it.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.click('.info-btn[data-info="plan-drivers"]');
+  check('another ⓘ swaps the bubble: one at a time', (await ib.locator('#infoBubble').count()) === 1
+    && (await ib.locator('#infoTitle').textContent()) === 'The Drivers panel'
+    && await ib.evaluate(() => [...document.querySelectorAll('.info-btn[aria-expanded="true"]')].map((b) => b.dataset.info).join() === 'plan-drivers'));
+  await ib.click('.info-btn[data-info="plan-drivers"]');
+  check('the same ⓘ again shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('#tab-plan .plan-table thead');
+  check('a press outside it shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('#infoBubble p');
+  check('a press inside it does not', await ib.locator('#infoBubble').isVisible());
+  await ib.click('#infoBubble [data-info-close]');
+  check('and its ✕ does', await ib.locator('#infoBubble').isHidden());
+  await ib.click('.info-btn[data-info="plan-date"]');
+  await ib.click('[data-act="tab"][data-tab="cars"]');
+  check('another tab shuts it', await ib.locator('#infoBubble').isHidden());
+  await ib.click('[data-act="tab"][data-tab="plan"]');
+
+  // The keyboard: Enter opens it with the focus in it, Escape hands the focus
+  // back, and Tab from inside goes on from the ⓘ.
+  await ib.locator('.info-btn[data-info="plan-date"]').focus();
+  await ib.keyboard.press('Enter');
+  check('Enter on an ⓘ opens its bubble with the focus in it', await ib.evaluate(() => document.activeElement?.id === 'infoBubble'));
+  await ib.keyboard.press('Escape');
+  check('Escape shuts it and hands the focus back to its ⓘ', await ib.locator('#infoBubble').isHidden()
+    && await ib.evaluate(() => document.activeElement?.dataset.info === 'plan-date'));
+  await ib.keyboard.press('Enter');
+  await ib.keyboard.press('Tab');
+  check('Tab through it goes on past its ⓘ and shuts it', await ib.locator('#infoBubble').isHidden()
+    && await ib.evaluate(() => document.activeElement?.dataset.act === 'date-step'));
+  await ib.locator('.info-btn[data-info="plan-date"]').focus();
+  await ib.keyboard.press('Enter');
+  await ib.locator('#tab-plan tbody tr').first().locator('[data-field="name"]').focus();
+  check('the focus going anywhere else shuts it', await ib.locator('#infoBubble').isHidden());
+
+  // Right-click menus and the bubble never stand together.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.locator('#tab-plan tbody tr').first().locator('[data-act="toggle"][data-field="highlight"]').click({ button: 'right' });
+  check('a right-click menu shuts the bubble', await ib.locator('#infoBubble').isHidden() && await ib.locator('#ctxMenu').isVisible());
+  await ib.keyboard.press('Escape');
+
+  // Never printed.
+  await ib.click('.info-btn[data-info="plan-routes"]');
+  await ib.emulateMedia({ media: 'print' });
+  check('an open bubble is not printed', await ib.evaluate(() => getComputedStyle(document.getElementById('infoBubble')).display === 'none'
+    && [...document.querySelectorAll('.info-btn')].every((b) => b.getBoundingClientRect().width === 0)));
+  await ib.emulateMedia({ media: null });
+  await ib.keyboard.press('Escape');
+
+  check('none of it wrote the plan or the backups', (await ib.evaluate(() => [localStorage.getItem('carcoord:v1'), localStorage.getItem('carcoord:backups')].join('\n'))) === savedWas);
+  check('the ⓘ cases log no console errors', ibErrors.length === 0, ibErrors.join(' | '));
+  await ibCtx.close();
+
+  // An index.html from before help.js: no ⓘ and no line about them, and the
+  // app runs.
+  const oldCtx = await browser.newContext();
+  await oldCtx.route('**/help.js*', (r) => r.fulfill({ status: 404, body: '' }));
+  const op = await oldCtx.newPage();
+  const opErrors = [];
+  op.on('pageerror', (e) => opErrors.push(String(e)));
+  await op.goto(base, { waitUntil: 'networkidle' });
+  check('without help.js: no ⓘ, no line about them, and the plan is drawn', (await op.locator('.info-btn').count()) === 0
+    && !(await op.locator('#notices').innerText()).includes('ⓘ') && (await op.locator('#tab-plan tbody tr').count()) > 0 && !opErrors.length, opErrors.join(' | '));
+  await oldCtx.close();
+}
+
+// --- right-click menus: done ---
+check('the right-click menu cases log no console errors', cmErrors.length === 0, cmErrors.join(' | '));
+await cmCtx.close();
+
+// --- every colour is a token, and the paper is never dark ---
+// style.css writes colours only in custom properties, the scripts only the
+// label colours they are allowed, and no dark block names a paper token.
+const colourProblems = await colourGuard();
+check('every colour in style.css and the scripts is a token or on the list', !colourProblems.length, colourProblems.join(' | '));
+
 // --- the promise on the tin: nothing the page loads comes from anywhere else ---
 // On a context of its own, because a refusal is logged as a console error and
 // the run below fails on those — rightly, everywhere but here.
@@ -2012,5 +6204,6 @@ check('no console errors', errors.length === 0, errors.join(' | '));
 await browser.close();
 server.close();
 
+if (skipped.length) console.log(`\n${skipped.length} group(s) skipped: this browser crashes reading back a stored file handle`);
 console.log(failures.length ? `\n${failures.length} check(s) failed` : '\nall checks passed');
 process.exit(failures.length ? 1 : 0);

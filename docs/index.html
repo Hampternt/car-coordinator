@@ -14,7 +14,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; form-action 'none'; base-uri 'none'">
   <title>Car Coordinator</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%231a1c1e'/><rect y='48' width='64' height='16' fill='%23ffd400'/><path d='M8 36V20h26v16zm28-10h10l8 10H36z' fill='%23ffd400'/><circle cx='18' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/><circle cx='44' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/></svg>">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=0.14.1">
+  <script src="theme.js?v=0.14.1"></script>
 </head>
 <body>
   <header class="topbar">
@@ -35,7 +36,10 @@
     <button class="primary" data-act="print">Print / save PDF</button>
   </header>
 
-  <div id="notices"></div>
+  <!-- Plain markup, so it shows even when no script runs: a broken or
+       half-updated app.js leaves an empty page, and this line is the way out.
+       The app's first draw replaces it. -->
+  <div id="notices"><p class="boot-line">If this page stays empty, open the <a href="recover.html">recovery page</a>.</p></div>
 
   <main>
     <section id="tab-plan" class="tab"></section>
@@ -45,7 +49,7 @@
     <section id="tab-labels" class="tab"></section>
     <section id="tab-data" class="tab"></section>
     <section id="tab-preview" class="tab">
-      <p class="hint">This is exactly what gets printed. In the print dialog pick a printer, or "Microsoft Print to PDF" for a PDF file.</p>
+      <p class="hint"><span id="previewInfo"></span>This is exactly what gets printed. In the print dialog pick a printer, or "Microsoft Print to PDF" for a PDF file.</p>
     </section>
   </main>
 
@@ -57,12 +61,18 @@
   <!-- The rail's tag menu, for the same reason: drawn inside its row, the
        scrolling list around it cut it off. -->
   <div id="tagMenu" class="tag-menu" role="dialog" hidden></div>
+  <!-- A row's right-click menu, out here for the same reason. -->
+  <div id="ctxMenu" class="ctx-menu" role="menu" tabindex="-1" hidden></div>
 
   <div id="sheet" class="sheet"></div>
 
-  <script src="store.js"></script>
-  <script src="share.js"></script>
-  <script src="qr.js"></script>
-  <script src="app.js"></script>
+  <!-- ?v= is APP_VERSION: a new release is a new address, so no browser pairs
+       a new file with a cached one. scripts/versions.mjs keeps them level. -->
+  <script src="store.js?v=0.14.1"></script>
+  <script src="share.js?v=0.14.1"></script>
+  <script src="map.js?v=0.14.1"></script>
+  <script src="updates.js?v=0.14.1"></script>
+  <script src="help.js?v=0.14.1"></script>
+  <script src="app.js?v=0.14.1"></script>
 </body>
 </html>

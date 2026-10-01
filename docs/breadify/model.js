@@ -97,8 +97,50 @@ const Model = (() => {
    */
   function exactNumber(cell) {
     if (!cell) return null;
-    const number = cell.kind === 'number' ? cell.value : Number(cell.value);
+    if (cell.kind === 'number') return Number.isFinite(cell.value) ? cell.value : null;
+    // `Number('')` and `Number('   ')` are 0, and `Number(true)` is 1: a
+    // blank or a TRUE is not a number the file gave, so it is none.
+    if (cell.kind === 'boolean' || String(cell.value).trim() === '') return null;
+    const number = Number(cell.value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  /**
+   * The most characters a quantity that is not a number prints, before "…"
+   * (the owner, 2026-10-01: "just have a basic check to make sure whatever is
+   * being put instead of a num is not super long … maybe have it only able to
+   * be something like 20 characters long").
+   */
+  const QUANTITY_TEXT_MAX = 20;
+
+  /**
+   * A quantity cell that holds no number, as it prints: whatever it says,
+   * trimmed, and cut to 20 characters with "…" past that, so a paragraph
+   * cannot push the line apart. A blank prints blank and an error cell as
+   * its code. Null for a cell that holds a number, which prints as one.
+   *
+   * The owner, 2026-10-01: "if it appears as something other than num like
+   * string then just write whatever it says". It used to print as 0. A
+   * departure from the Rust app, which reads the column as a number only.
+   */
+  function quantityText(cell) {
+    if (exactNumber(cell) !== null) return null;
+    const written = Array.from(text(cell));
+    return written.length > QUANTITY_TEXT_MAX
+      ? `${written.slice(0, QUANTITY_TEXT_MAX).join('')}…`
+      : written.join('');
+  }
+
+  /**
+   * How many a quantity cell asks for, for the crates and the route total.
+   * A number is truncated as `integer` does; text counts as the whole number
+   * it starts with — `3 stk` is 3, `3,5` is 3 — and as 0 when it starts
+   * with none, as a blank or an error cell does.
+   */
+  function quantity(cell) {
+    if (exactNumber(cell) !== null) return integer(cell);
+    const leading = /^\d+/.exec(text(cell));
+    return leading ? Number(leading[0]) : 0;
   }
 
   /**
@@ -110,6 +152,25 @@ const Model = (() => {
     if (cell.kind === 'boolean') return cell.value;
     if (cell.kind === 'number') return cell.value !== 0;
     return /^(1|true|yes)$/i.test(String(cell.value).trim());
+  }
+
+  /**
+   * The same answer, but only where the file states it plainly: a real Excel
+   * boolean, 1 or 0, or the words true, false, yes or no. Anything else — a
+   * blank, "ja", "N/A", an error cell — is null, and validate.js says so.
+   *
+   * `boolean()` reads every one of those as false, and false prints bold on
+   * the sheet as "want substitute: false": an answer the file never gave.
+   * It still does, if the leader continues past the finding.
+   */
+  function exactBoolean(cell) {
+    if (!cell || cell.kind === 'error') return null;
+    if (cell.kind === 'boolean') return cell.value;
+    if (cell.kind === 'number') return cell.value === 1 ? true : cell.value === 0 ? false : null;
+    const word = String(cell.value).trim().toLowerCase();
+    if (word === 'true' || word === 'yes' || word === '1') return true;
+    if (word === 'false' || word === 'no' || word === '0') return false;
+    return null;
   }
 
   /**
@@ -167,8 +228,13 @@ const Model = (() => {
       return {
         excelRow: row.number,
         orderId: integer(cell(COLUMN.orderId)),
-        quantity: integer(cell(COLUMN.quantity)),
+        // A blank or unreadable id reads as 0 above, and every such row would
+        // fold into one order. validate.js says so from this.
+        orderIdExact: exactNumber(cell(COLUMN.orderId)),
+        quantity: quantity(cell(COLUMN.quantity)),
         quantityExact: exactNumber(cell(COLUMN.quantity)),
+        // What prints where the cell holds no number; null where it does.
+        quantityText: quantityText(cell(COLUMN.quantity)),
         productId: integer(cell(COLUMN.productId)),
         productName: text(cell(COLUMN.productName)),
         supplierSku: text(cell(COLUMN.supplierSku)),
@@ -181,6 +247,7 @@ const Model = (() => {
         routeNickname: text(cell(COLUMN.routeNickname)),
         routeOrdering: integer(cell(COLUMN.routeOrdering)),
         acceptAlternatives: boolean(cell(COLUMN.acceptAlternatives)),
+        acceptAlternativesExact: exactBoolean(cell(COLUMN.acceptAlternatives)),
         region: text(cell(COLUMN.region)),
       };
     });
@@ -330,9 +397,21 @@ const Model = (() => {
    * Folds rows into orders, keeping both the orders and their lines in the
    * order the file lists them.
    *
+   * The Rust app prints each order's lines in that same file order. The web
+   * port departs from it at print time, at the owner's request (2026-09-29):
+   * route() puts every order's lines in supplier-then-name order (see
+   * printingLines()). What is folded here stays exactly as the file had it.
+   *
    * A row is one product on one order; everything else on it belongs to the
-   * order and is repeated onto each line. One order is one stop, one block and
-   * one crate label (D16).
+   * order and is repeated onto each line. Its lines and its substitute answer
+   * are its own.
+   *
+   * D16 makes one order one stop, one block and one crate label. The web
+   * port departs from all three, at the owner's request (2026-09-29): a
+   * customer's orders at one stop share a block, and route() groups them;
+   * and the orders there that share a department share a crate label and one
+   * crate count (departmentGroups(), packedCrateCount()). The Rust app still
+   * prints one block, and one crate count, per order.
    */
   function fold(rows) {
     const orders = [];
@@ -347,6 +426,9 @@ const Model = (() => {
           supplier: row.supplier,
         },
         quantity: row.quantity,
+        // Printed in place of the number when the file gave text; the sums
+        // read `quantity` alone.
+        quantityText: typeof row.quantityText === 'string' ? row.quantityText : null,
       };
 
       const position = positionOf.get(row.orderId);
@@ -390,6 +472,51 @@ const Model = (() => {
     return order.sequence !== 0;
   }
 
+  // ── The lines of an order ──────────────────────────────────────────────
+
+  /** Norwegian alphabetical order, so æ, ø and å come after z. */
+  const NORWEGIAN = new Intl.Collator('nb');
+
+  /**
+   * Where a line's supplier sorts: the house bakeries first, in their own
+   * order (SB, then BH); then any other supplier, A to Z by its code and then
+   * by its name, so two that share a code stay apart; then a line that names
+   * no supplier at all.
+   */
+  function lineSupplierKey(line) {
+    const supplier = String(line.product.supplier || '');
+    if (supplier.trim() === '') return [KNOWN_SUPPLIERS.length + 1, '', ''];
+    const house = KNOWN_SUPPLIERS.findIndex(([name]) => name === supplier.toLowerCase());
+    if (house !== -1) return [house, '', ''];
+    return [KNOWN_SUPPLIERS.length, supplierCode(supplier), supplier.toLowerCase()];
+  }
+
+  function compareLines(left, right) {
+    const [leftRank, leftCode, leftName] = lineSupplierKey(left);
+    const [rightRank, rightCode, rightName] = lineSupplierKey(right);
+    return (
+      leftRank - rightRank ||
+      NORWEGIAN.compare(leftCode, rightCode) ||
+      NORWEGIAN.compare(leftName, rightName) ||
+      NORWEGIAN.compare(left.product.name, right.product.name)
+    );
+  }
+
+  /**
+   * An order's lines in the order the page prints them: by supplier (SB,
+   * then BH, then the rest by code), and within a supplier by bread name, A to
+   * Z with æ, ø and å last. Lines that tie keep the file's order.
+   *
+   * A departure from the Rust app, which prints an order's lines in the order
+   * the file lists them, at the owner's request (2026-09-29). It only ever
+   * sorts within one order: two orders' lines are never mixed, so the order's
+   * crates and marker still sit on its first line — the first after sorting.
+   * A copy is returned; the folded order keeps the file's order.
+   */
+  function printingLines(lines) {
+    return lines.slice().sort(compareLines);
+  }
+
   // ── Routes ─────────────────────────────────────────────────────────────
 
   /**
@@ -423,29 +550,92 @@ const Model = (() => {
   }
 
   /**
-   * What decides where a stop prints: sequenced stops in ascending sequence,
-   * then the unsequenced ones, with address, department and order id breaking
-   * ties so two runs of one file print identically (D2).
+   * What decides where an order prints: sequenced stops in ascending
+   * sequence, then the unsequenced ones, with ties broken so two runs of one
+   * file print identically (D2).
    *
    * Equal sequences are legitimate — one site with several delivery points —
    * which is exactly why the tiebreak is not optional.
+   *
+   * D2 breaks ties by address, department and order id. The web port puts
+   * the customer before the department, a departure that follows from
+   * printing a customer's orders at one stop in one block (see route()): it
+   * keeps those orders next to each other, grouped by department. It
+   * reorders nothing in either sample export. An order with no department
+   * sorts first, which is what puts it straight under the customer's name.
    */
-  function printingPosition(stop) {
+  function printingPosition(order) {
     return [
-      isSequenced(stop) ? 0 : 1,
-      stop.sequence,
-      stop.deliveryStreet,
-      stop.department === null ? '' : stop.department,
-      stop.id,
+      isSequenced(order) ? 0 : 1,
+      order.sequence,
+      order.deliveryStreet,
+      order.customer,
+      order.department === null ? '' : order.department,
+      order.id,
     ];
   }
 
-  function sortStops(stops) {
-    stops.sort((left, right) => compare(printingPosition(left), printingPosition(right)));
-    return stops;
+  function sortOrders(orders) {
+    orders.sort((left, right) => compare(printingPosition(left), printingPosition(right)));
+    return orders;
   }
 
-  /** Groups orders into routes, both in printing order. */
+  /**
+   * Whether two orders, next to each other in printing order, are one stop:
+   * the same customer at the same street and the same position in the route,
+   * compared exactly as the file spells them.
+   *
+   * The department is not part of it (the owner, 2026-09-29): a customer's
+   * departments share the block and are told apart inside it. The street is,
+   * because the address never prints — merging two streets would hide a
+   * second drop-off. Two spellings of one name stay two blocks, which is
+   * exactly what printed before, so never a wrong print.
+   */
+  function sameStop(left, right) {
+    return (
+      left.customer === right.customer &&
+      left.deliveryStreet === right.deliveryStreet &&
+      left.sequence === right.sequence
+    );
+  }
+
+  /**
+   * One route: its orders in printing order, and the same orders grouped into
+   * the stops the page prints, one block each.
+   *
+   * `orders` is what every sum reads — the crates, the route total, the
+   * supplier key. `stops` is what the page walks. A stop carries no lines, id
+   * or substitute answer of its own, so nothing can add across two orders by
+   * accident, and a stop handed to code that wants an order fails loudly
+   * instead of printing.
+   *
+   * Each order comes out as a copy with its lines in printing order (see
+   * printingLines()), so everything that walks a route walks the lines as
+   * they print.
+   */
+  function route(nickname, orders) {
+    const sorted = sortOrders(
+      orders.map((order) => ({ ...order, lines: printingLines(order.lines) })),
+    );
+    const stops = [];
+    for (const order of sorted) {
+      const last = stops[stops.length - 1];
+      if (last && sameStop(last.orders[0], order)) {
+        last.orders.push(order);
+        continue;
+      }
+      stops.push({
+        customer: order.customer,
+        deliveryStreet: order.deliveryStreet,
+        route: order.route,
+        sequence: order.sequence,
+        orders: [order],
+      });
+    }
+    return { nickname, orders: sorted, stops };
+  }
+
+  /** Groups orders into routes, in printing order. */
   function group(orders) {
     const byNickname = new Map();
     for (const order of orders) {
@@ -453,22 +643,20 @@ const Model = (() => {
       byNickname.get(order.route).push(order);
     }
 
-    const routes = Array.from(byNickname, ([nickname, stops]) => ({
-      nickname,
-      stops: sortStops(stops),
-    }));
+    const routes = Array.from(byNickname, ([nickname, list]) => route(nickname, list));
     routes.sort((left, right) =>
       compare(naturalKey(left.nickname), naturalKey(right.nickname)),
     );
     return routes;
   }
 
+  /** The stops, not the orders: a count of blocks, as the page prints them. */
   function unsequencedStops(route) {
     return route.stops.filter((stop) => !isSequenced(stop));
   }
 
   function lineCount(route) {
-    return route.stops.reduce((sum, stop) => sum + stop.lines.length, 0);
+    return route.orders.reduce((sum, order) => sum + order.lines.length, 0);
   }
 
   // ── Crates (D17, D24, D25) ─────────────────────────────────────────────
@@ -536,7 +724,9 @@ const Model = (() => {
   }
 
   /**
-   * How many crates of each size an order needs, in the fewest containers.
+   * How many crates of each size an order needs, in the fewest containers —
+   * or anything else with `lines`, such as a group of orders packed together
+   * (see packedCrateCount()).
    *
    * A remainder that fits a small crate takes one; a remainder too big for one
    * takes a large crate rather than two smalls.
@@ -561,10 +751,47 @@ const Model = (() => {
   /** More than this on one route and the sheet asks for a pallet (D25). */
   const PALLET_THRESHOLD = 16;
 
-  /** Every crate a route needs, all stops summed. */
+  /**
+   * A stop's orders grouped by department, in the order the stop already
+   * sorts them: the orders with no department first, then each department.
+   *
+   * One group is one crate label — the customer and the department — and one
+   * crate count (the owner, 2026-09-29). D16 makes every order its own crate
+   * label; the web port departs from it, because the warehouse packs a
+   * customer-department's bread together whatever orders it came in.
+   */
+  function departmentGroups(orders) {
+    const groups = [];
+    for (const order of orders) {
+      const last = groups[groups.length - 1];
+      if (last && last.department === order.department) last.orders.push(order);
+      else groups.push({ department: order.department, orders: [order] });
+    }
+    return groups;
+  }
+
+  /**
+   * The crates a group of orders needs packed together: every line's room
+   * added up first and rounded up once, so two half-slot breads from two
+   * orders share a slot rather than taking one each. For one order it is
+   * that order's crateCount().
+   */
+  function packedCrateCount(orders, rules) {
+    return crateCount({ lines: orders.flatMap((order) => order.lines) }, rules);
+  }
+
+  /**
+   * Every crate a route needs: each stop's department groups, each packed
+   * together, summed. The pallet call follows it (D25).
+   */
   function routeCrates(route, rules) {
     return route.stops.reduce(
-      (sum, stop) => sum + crateTotal(crateCount(stop, rules)),
+      (sum, stop) =>
+        sum +
+        departmentGroups(stop.orders).reduce(
+          (count, group) => count + crateTotal(packedCrateCount(group.orders, rules)),
+          0,
+        ),
       0,
     );
   }
@@ -579,8 +806,8 @@ const Model = (() => {
    */
   function routeTotal(route) {
     const byProduct = new Map();
-    for (const stop of route.stops) {
-      for (const line of stop.lines) {
+    for (const order of route.orders) {
+      for (const line of order.lines) {
         let entry = byProduct.get(line.product.id);
         if (!entry) {
           entry = { product: line.product, units: 0, fullTens: 0 };
@@ -682,7 +909,9 @@ const Model = (() => {
     isSequenced,
     naturalKey,
     compare,
-    sortStops,
+    sortOrders,
+    printingLines,
+    route,
     group,
     unsequencedStops,
     lineCount,
@@ -694,6 +923,8 @@ const Model = (() => {
     spokenSize,
     slots,
     crateCount,
+    departmentGroups,
+    packedCrateCount,
     crateTotal,
     PALLET_THRESHOLD,
     routeCrates,

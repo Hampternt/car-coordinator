@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 4,
+  "date": "2026-09-28",
+  "qrOnSheet": true,
+  "labels": [
+    { "id": "lbl-oos", "name": "Out of service", "color": "#c62828" },
+    { "id": "lbl-unavailable", "name": "Unavailable", "color": "#ef6c00" },
+    { "id": "lbl-workshop", "name": "Workshop", "color": "#6a1b9a" },
+    { "id": "lbl-holiday", "name": "Holiday", "color": "#1565c0" },
+    { "id": "lbl-course", "name": "Course", "color": "#2e7d32" }
+  ],
+  "positions": [
+    { "id": "pos-spot1", "name": "Spot 1", "multi": false, "labelId": "", "note": "" },
+    { "id": "pos-spot2", "name": "Spot 2", "multi": false, "labelId": "", "note": "" },
+    { "id": "pos-spot3", "name": "Spot 3", "multi": false, "labelId": "", "note": "" },
+    { "id": "pos-spot4", "name": "Spot 4", "multi": false, "labelId": "", "note": "" },
+    { "id": "pos-spot5", "name": "Spot 5", "multi": false, "labelId": "lbl-unavailable", "note": "Resurfacing until Friday" },
+    { "id": "pos-garage", "name": "Garage", "multi": true, "labelId": "", "note": "" },
+    { "id": "pos-port1", "name": "Port 1", "multi": false, "labelId": "", "note": "" },
+    { "id": "pos-port2", "name": "Port 2", "multi": false, "labelId": "lbl-oos", "note": "Door motor broken" }
+  ],
+  "cars": [
+    { "id": "car-01", "reg": "EL 41027", "labelId": "", "note": "" },
+    { "id": "car-02", "reg": "EL 41033", "labelId": "", "note": "" },
+    { "id": "car-03", "reg": "EL 41058", "labelId": "", "note": "" },
+    { "id": "car-04", "reg": "EL 41062", "labelId": "", "note": "" },
+    { "id": "car-05", "reg": "EK 20814", "labelId": "", "note": "" },
+    { "id": "car-06", "reg": "EK 20819", "labelId": "", "note": "" },
+    { "id": "car-07", "reg": "EK 20877", "labelId": "", "note": "Tail lift is slow" },
+    { "id": "car-08", "reg": "EV 73105", "labelId": "", "note": "" },
+    { "id": "car-09", "reg": "EV 73112", "labelId": "", "note": "" },
+    { "id": "car-10", "reg": "EV 73140", "labelId": "", "note": "" },
+    { "id": "car-11", "reg": "BT 55210", "labelId": "", "note": "" },
+    { "id": "car-12", "reg": "BT 55236", "labelId": "", "note": "" },
+    { "id": "car-13", "reg": "BT 55241", "labelId": "lbl-workshop", "note": "Brakes, back Thursday" },
+    { "id": "car-14", "reg": "ZH 90417", "labelId": "lbl-oos", "note": "Waiting on insurance" },
+    { "id": "car-15", "reg": "ZH 90433", "labelId": "lbl-unavailable", "note": "Lent to the other depot" },
+    { "id": "car-16", "reg": "ZH 90458", "labelId": "", "note": "" },
+    { "id": "car-17", "reg": "EL 41090", "labelId": "", "note": "" }
+  ],
+  "drivers": [
+    { "id": "drv-anders", "name": "Anders", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-bjorn", "name": "Bjørn", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-camilla", "name": "Camilla", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-dag", "name": "Dag", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-elin", "name": "Elin", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-fredrik", "name": "Fredrik", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-guro", "name": "Guro", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-hakon", "name": "Håkon", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-ingrid", "name": "Ingrid", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-jonas", "name": "Jonas", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-kari", "name": "Kari", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-lars", "name": "Lars", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-marte", "name": "Marte", "available": true, "labelId": "", "note": "HAU only" },
+    { "id": "drv-nils", "name": "Nils", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-ola", "name": "Ola", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-siri", "name": "Siri", "available": true, "labelId": "", "note": "" },
+    { "id": "drv-petter", "name": "Petter", "available": false, "labelId": "lbl-holiday", "note": "Back 6 October" },
+    { "id": "drv-randi", "name": "Randi", "available": false, "labelId": "lbl-course", "note": "Forklift course Mon–Tue" },
+    { "id": "drv-tor", "name": "Tor", "available": false, "labelId": "", "note": "" },
+    { "id": "drv-vegard", "name": "Vegard", "available": false, "labelId": "", "note": "Weekends only" }
+  ],
+  "driverGroups": [
+    {
+      "id": "grp-monday", "name": "Monday crew",
+      "driverIds": ["drv-anders", "drv-bjorn", "drv-camilla", "drv-dag", "drv-elin", "drv-fredrik", "drv-guro", "drv-hakon", "drv-ingrid", "drv-jonas", "drv-kari", "drv-lars", "drv-marte", "drv-nils", "drv-ola", "drv-siri"]
+    },
+    {
+      "id": "grp-tuesday", "name": "Tirsdagslaget",
+      "driverIds": ["drv-anders", "drv-bjorn", "drv-dag", "drv-elin", "drv-guro", "drv-hakon", "drv-jonas", "drv-kari", "drv-lars", "drv-nils", "drv-ola", "drv-petter", "drv-tor"]
+    },
+    {
+      "id": "grp-friday", "name": "Friday",
+      "driverIds": ["drv-camilla", "drv-fredrik", "drv-ingrid", "drv-marte", "drv-ola", "drv-randi", "drv-siri", "drv-tor"]
+    },
+    {
+      "id": "grp-saturday", "name": "Lørdag gjeng",
+      "driverIds": ["drv-bjorn", "drv-marte", "drv-siri", "drv-vegard"]
+    },
+    {
+      "id": "grp-reserves", "name": "Reserves",
+      "driverIds": ["drv-ola", "drv-siri", "drv-vegard"]
+    }
+  ],
+  "routes": [
+    { "id": "rt-01", "name": "1", "driver": "Anders", "carId": "car-01", "positionId": "pos-spot1", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-02", "name": "2", "driver": "Bjørn", "carId": "car-02", "positionId": "pos-spot2", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-03", "name": "3", "driver": "Camilla", "carId": "car-03", "positionId": "pos-spot3", "round": "1", "highlight": true, "gapBefore": false },
+    { "id": "rt-04", "name": "4", "driver": "Dag", "carId": "car-04", "positionId": "pos-spot4", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-05", "name": "5", "driver": "Elin", "carId": "car-05", "positionId": "pos-garage", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-06", "name": "6", "driver": "Fredrik", "carId": "car-06", "positionId": "pos-garage", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-07", "name": "7", "driver": "Guro", "carId": "car-07", "positionId": "pos-port1", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "rt-08", "name": "8", "driver": "Håkon", "carId": "car-08", "positionId": "pos-spot1", "round": "2", "highlight": false, "gapBefore": false },
+    { "id": "rt-09", "name": "9", "driver": "Ingrid", "carId": "car-09", "positionId": "pos-spot2", "round": "2", "highlight": false, "gapBefore": false },
+    { "id": "rt-10", "name": "10", "driver": "Jonas", "carId": "car-10", "positionId": "pos-spot2", "round": "2", "highlight": false, "gapBefore": false },
+    { "id": "rt-11", "name": "11", "driver": "Kari", "carId": "car-13", "positionId": "pos-spot3", "round": "2", "highlight": false, "gapBefore": false },
+    { "id": "rt-12", "name": "12", "driver": "Lars", "carId": "car-01", "positionId": "pos-spot4", "round": "2", "highlight": false, "gapBefore": false },
+    { "id": "rt-14", "name": "14", "driver": "", "carId": "", "positionId": "", "round": "", "highlight": false, "gapBefore": false },
+    { "id": "rt-hau1", "name": "HAU 1", "driver": "Marte", "carId": "car-11", "positionId": "pos-garage", "round": "2", "highlight": true, "gapBefore": true },
+    { "id": "rt-hau2", "name": "HAU 2", "driver": "Nils", "carId": "car-12", "positionId": "pos-port1", "round": "2", "highlight": false, "gapBefore": false }
+  ],
+  "templates": [
+    {
+      "id": "tpl-weekday", "name": "Standard weekday", "weekday": "",
+      "routes": [
+        { "name": "1", "driver": "Anders", "carId": "car-01", "positionId": "pos-spot1", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "2", "driver": "Bjørn", "carId": "car-02", "positionId": "pos-spot2", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "3", "driver": "Camilla", "carId": "car-03", "positionId": "pos-spot3", "round": "1", "highlight": true, "gapBefore": false },
+        { "name": "4", "driver": "Dag", "carId": "car-04", "positionId": "pos-spot4", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "5", "driver": "Elin", "carId": "car-05", "positionId": "pos-garage", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "6", "driver": "Fredrik", "carId": "car-06", "positionId": "pos-garage", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "7", "driver": "Guro", "carId": "car-07", "positionId": "pos-port1", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "8", "driver": "Håkon", "carId": "car-08", "positionId": "pos-spot1", "round": "2", "highlight": false, "gapBefore": false },
+        { "name": "9", "driver": "Ingrid", "carId": "car-09", "positionId": "pos-spot2", "round": "2", "highlight": false, "gapBefore": false },
+        { "name": "10", "driver": "Jonas", "carId": "car-10", "positionId": "pos-spot3", "round": "2", "highlight": false, "gapBefore": false },
+        { "name": "11", "driver": "Kari", "carId": "car-16", "positionId": "pos-spot4", "round": "2", "highlight": false, "gapBefore": false },
+        { "name": "12", "driver": "Lars", "carId": "car-17", "positionId": "pos-garage", "round": "2", "highlight": false, "gapBefore": false },
+        { "name": "14", "driver": "", "carId": "", "positionId": "", "round": "", "highlight": false, "gapBefore": false },
+        { "name": "HAU 1", "driver": "Marte", "carId": "car-11", "positionId": "pos-garage", "round": "2", "highlight": true, "gapBefore": true },
+        { "name": "HAU 2", "driver": "Nils", "carId": "car-12", "positionId": "pos-port1", "round": "2", "highlight": false, "gapBefore": false }
+      ]
+    },
+    {
+      "id": "tpl-saturday", "name": "Saturday", "weekday": "6",
+      "routes": [
+        { "name": "1", "driver": "Bjørn", "carId": "car-01", "positionId": "pos-spot1", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "2", "driver": "Siri", "carId": "car-02", "positionId": "pos-spot2", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "3", "driver": "Vegard", "carId": "car-05", "positionId": "pos-garage", "round": "1", "highlight": false, "gapBefore": false },
+        { "name": "HAU 1", "driver": "Marte", "carId": "car-11", "positionId": "pos-garage", "round": "1", "highlight": true, "gapBefore": true }
+      ]
+    }
+  ]
+}
