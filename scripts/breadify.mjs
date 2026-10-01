@@ -1571,14 +1571,16 @@ inspected('the same block on a freezer sheet', crowdedFirstLine.freezerSeen);
 same('where a line of its own lines its id up too', crowdedFirstLine.freezerOffsets, [0]);
 
 // When the layout does refuse, the Print step says why and prints nothing.
+// Entering the step lays every route out afresh, so that is where it is made
+// to fail: a tick lays out only a route the step has not laid out yet.
 const laidOutWrong = await page.evaluate(() => {
   const real = Sheet.day;
-  const tick = document.querySelector('#routes input[type="checkbox"]');
+  const enter = document.querySelector('#steps [data-step="print"]');
   Sheet.day = () => {
     throw new Error('a stand-in failure');
   };
   try {
-    tick.click();
+    enter.click();
     return {
       summary: document.getElementById('printSummary').textContent,
       sheets: document.querySelectorAll('#preview .bf-sheet').length,
@@ -1586,7 +1588,7 @@ const laidOutWrong = await page.evaluate(() => {
     };
   } finally {
     Sheet.day = real;
-    tick.click();
+    enter.click();
   }
 });
 same('a layout that fails says why, shows no sheets and cannot be printed', laidOutWrong, {
@@ -1599,6 +1601,275 @@ check(
   (await page.locator('#preview .bf-sheet').count()) === sheets.length &&
     !(await page.locator('#print').isDisabled()),
 );
+
+// ── Ticking routes (the owner, 2026-10-01) ─────────────────────────────────
+// "it takes a long time to load after unselected a route": every tick used to
+// lay the whole day out again. Now a tick lays out only a route the step has
+// not laid out yet, an untick lays out nothing, and quick clicks gather into
+// one update after a short pause. What the preview then shows must be exactly
+// what laying the day out afresh makes, and printing never goes ahead of it.
+const ticking = await page.evaluate(async () => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const preview = document.getElementById('preview');
+  const ticks = () => Array.from(document.querySelectorAll('#routes input[type="checkbox"]'));
+  const enter = () => document.querySelector('#steps [data-step="print"]').click();
+  const shown = () => [...new Set(Array.from(preview.querySelectorAll('.bf-sheet'), (s) => s.dataset.route))];
+  const snapshot = () =>
+    Array.from(preview.querySelectorAll('.bf-sheet'), (sheet) => {
+      const copy = sheet.cloneNode(true);
+      copy.removeAttribute('style'); // the preview's zoom, not the sheet
+      return copy.outerHTML;
+    });
+  // Ten clicks 30 ms apart: quick, but not all in one go.
+  const clickAll = async (boxes) => {
+    for (const box of boxes) {
+      box.click();
+      await pause(30);
+    }
+  };
+
+  const real = Sheet.day;
+  const realPrint = window.print;
+  let layouts = [];
+  Sheet.day = (routes, ...rest) => {
+    layouts.push(routes.length);
+    return real(routes, ...rest);
+  };
+  let updates = 0;
+  const watch = new MutationObserver(() => {
+    updates += 1;
+  });
+  watch.observe(preview, { childList: true });
+  let printed = null;
+  window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    printed = [...new Set(Array.from(document.querySelectorAll('#sheets .bf-sheet'), (s) => s.dataset.route))];
+    window.dispatchEvent(new Event('afterprint'));
+  };
+
+  try {
+    const first = ticks()[3];
+    first.click();
+    const atOnce = {
+      ticked: first.checked,
+      summary: document.getElementById('printSummary').textContent,
+      sheets: preview.querySelectorAll('.bf-sheet').length,
+    };
+    first.click();
+    await pause(400);
+
+    const ten = ticks().slice(3, 13);
+    layouts = [];
+    updates = 0;
+    await clickAll(ten);
+    await pause(400);
+    const unticked = { layouts: [...layouts], updates, routes: shown().length };
+
+    layouts = [];
+    updates = 0;
+    await clickAll(ten);
+    await pause(400);
+    const reticked = { layouts: [...layouts], updates, routes: shown().length };
+
+    // The same sheets, byte for byte, as entering the step makes afresh.
+    const kept = snapshot();
+    enter();
+    const fresh = snapshot();
+    const sameSheets = kept.length === fresh.length && kept.every((html, index) => html === fresh[index]);
+
+    // Ten unticked, the step entered again, then all ten ticked back: one
+    // layout, of just those ten.
+    await clickAll(ticks().slice(3, 13));
+    await pause(400);
+    layouts = [];
+    enter();
+    const entered = [...layouts];
+    await pause(0); // the step's own update is observed here, not below
+    layouts = [];
+    updates = 0;
+    await clickAll(ticks().slice(3, 13));
+    await pause(400);
+    const laidOnce = { layouts: [...layouts], updates, routes: shown().length };
+
+    // Print straight after an untick, by the button and by Ctrl+P: the
+    // update comes first, so the unticked route does not print.
+    const route = shown()[0];
+    ticks()[0].click();
+    document.getElementById('print').click();
+    const button = { waited: !printed.includes(route), routes: printed.length };
+    ticks()[0].click();
+    await pause(400);
+    printed = null;
+    ticks()[0].click();
+    const key = new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(key);
+    const keyboard = { waited: !!printed && !printed.includes(route), routes: printed ? printed.length : 0, taken: key.defaultPrevented };
+    ticks()[0].click();
+    await pause(400);
+
+    return { atOnce, unticked, reticked, sameSheets, sheets: fresh.length, entered, laidOnce, button, keyboard,
+             after: preview.querySelectorAll('.bf-sheet').length };
+  } finally {
+    Sheet.day = real;
+    window.print = realPrint;
+    watch.disconnect();
+  }
+});
+same('an untick shows at once and says the preview is updating, before it changes', ticking.atOnce, {
+  ticked: false,
+  summary: 'Updating preview…',
+  sheets: sheets.length,
+});
+same('ten quick unticks make one update and lay nothing out', ticking.unticked, { layouts: [], updates: 1, routes: 6 });
+same('ticking them back lays nothing out either: the step already has them', ticking.reticked, {
+  layouts: [],
+  updates: 1,
+  routes: 16,
+});
+check('and the sheets are byte for byte the ones a fresh layout makes', ticking.sameSheets && ticking.sheets === sheets.length,
+  `${ticking.sheets} sheets`);
+same('entering the step lays the ticked routes out in one go', ticking.entered, [6]);
+same('and ten quick ticks after it lay out just those ten, once', ticking.laidOnce, { layouts: [10], updates: 1, routes: 16 });
+same('Print right after an untick waits for the update', ticking.button, { waited: true, routes: 15 });
+same('and so does Ctrl+P, which the page takes over', ticking.keyboard, { waited: true, routes: 15, taken: true });
+check('every route is ticked again afterwards', ticking.after === sheets.length, String(ticking.after));
+
+// ── A severe warning when the pages miss a bread (the owner, 2026-10-01) ──
+// "can it give a severe warning if the list does not print all the bread?"
+// After the preview is built, each ticked route's lines are compared with the
+// rows drawn inside the paper. Any shortfall raises a red banner beside Print
+// naming the route, its lines and units, and the first missing bread, and
+// Print waits for "Print anyway". Routes unticked on purpose are said plainly.
+// Here a style pushes one row of route 8 off its first page, as a block too
+// tall for its page would be; the paginator's measuring column never sees it.
+same('the bread day carries every line: no banner, and Print is free', await page.evaluate(() => ({
+  banner: !document.getElementById('shortfall').hidden,
+  printDisabled: document.getElementById('print').disabled,
+  leftOut: !document.getElementById('leftOut').hidden,
+})), { banner: false, printDisabled: false, leftOut: false });
+
+const shortfall = await page.evaluate(async () => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const enter = () => document.querySelector('#steps [data-step="print"]').click();
+  const banner = document.getElementById('shortfall');
+  const printButton = document.getElementById('print');
+  const tickOf = (nickname) =>
+    Array.from(document.querySelectorAll('#routes .route')).find(
+      (row) => row.querySelector('.route-name').textContent === `Route ${nickname}`,
+    );
+  const linesOf = (nickname) => Number(/(\d+) lines/.exec(tickOf(nickname).querySelector('.route-meta').textContent)[1]);
+  const toggle = async (...nicknames) => {
+    for (const nickname of nicknames) tickOf(nickname).querySelector('input').click();
+    await pause(300);
+  };
+  const state = () => ({ shown: !banner.hidden, printDisabled: printButton.disabled });
+
+  const realPrint = window.print;
+  let prints = 0;
+  let printedSheets = 0;
+  window.print = () => {
+    prints += 1;
+    window.dispatchEvent(new Event('beforeprint'));
+    printedSheets = document.querySelectorAll('#sheets .bf-sheet').length;
+    window.dispatchEvent(new Event('afterprint'));
+  };
+  const target = '.bf-sheet[data-route="8"][data-page="1"] .bf-body > article.bf-block:nth-of-type(2) .bf-lines > .bf-row:first-child';
+  const force = document.createElement('style');
+  force.textContent = `${target} { margin-top: 400mm; }`;
+  document.head.append(force);
+  try {
+    enter();
+    const sheet = document.querySelector('#preview .bf-sheet[data-route="8"][data-page="1"]');
+    const pushed = document.querySelector(`#preview ${target}`);
+    const rows = Array.from(sheet.querySelectorAll('.bf-row'));
+    const gone = rows.slice(rows.indexOf(pushed));
+    const all = document.querySelectorAll('#preview .bf-sheet[data-route="8"] .bf-row').length;
+    const units = gone.reduce((sum, row) => sum + Number(row.querySelector('.bf-qty').textContent), 0);
+    const raised = {
+      ...state(),
+      says: Array.from(document.querySelectorAll('#shortfallRoutes li'), (li) => li.textContent),
+      want: [
+        `Route 8: ${gone.length} of ${all} lines (${units} units) are not on the paper, ` +
+          `starting with ${pushed.querySelector('.bf-product').textContent}.`,
+      ],
+    };
+
+    // Held: neither the button nor Ctrl+P prints, and Ctrl+P points at the way on.
+    printButton.click();
+    const key = new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(key);
+    const heldBack = {
+      prints,
+      taken: key.defaultPrevented,
+      pointed: document.activeElement === document.getElementById('printAnyway'),
+    };
+    // The browser's own menu cannot be stopped, so it gets nothing to print.
+    window.dispatchEvent(new Event('beforeprint'));
+    const menu = document.querySelectorAll('#sheets .bf-sheet').length;
+    window.dispatchEvent(new Event('afterprint'));
+    const previewKept = document.querySelectorAll('#preview .bf-sheet').length;
+
+    // Print anyway prints every sheet, as it stands.
+    document.getElementById('printAnyway').click();
+    const anyway = { prints, printedSheets, printDisabled: printButton.disabled };
+
+    // Any change of ticks asks again.
+    await toggle('1');
+    await toggle('1');
+    const again = state();
+
+    // Route 8 unticked is left out on purpose: said plainly, never as a warning.
+    await toggle('8');
+    const without8 = { ...state(), leftOut: document.getElementById('leftOut').textContent };
+    await toggle('8');
+
+    force.remove();
+    enter();
+    const cleared = state();
+
+    await toggle('5', '7');
+    const leftOut = {
+      ...state(),
+      shown: !document.getElementById('leftOut').hidden,
+      says: document.getElementById('leftOut').textContent,
+      want: `Left out on purpose: 5, 7 — ${linesOf('5') + linesOf('7')} lines.`,
+      banner: !banner.hidden,
+    };
+    await toggle('5', '7');
+    return {
+      raised, heldBack, menu, previewKept, anyway, again, without8, cleared, leftOut,
+      eightLines: linesOf('8'),
+      after: document.querySelectorAll('#preview .bf-sheet').length,
+      leftOutAfter: !document.getElementById('leftOut').hidden,
+    };
+  } finally {
+    force.remove();
+    window.print = realPrint;
+  }
+});
+check('a row pushed off the paper raises the banner, and Print is held',
+  shortfall.raised.shown && shortfall.raised.printDisabled, JSON.stringify(shortfall.raised));
+same('the banner names the route, its lines and units, and the first missing bread',
+  shortfall.raised.says, shortfall.raised.want);
+same('while held, neither Print nor Ctrl+P prints, and Ctrl+P points at Print anyway', shortfall.heldBack,
+  { prints: 0, taken: true, pointed: true });
+check('a print from the browser’s menu carries no sheet, and the preview keeps them all',
+  shortfall.menu === 0 && shortfall.previewKept === sheets.length, `${shortfall.menu} / ${shortfall.previewKept}`);
+same('Print anyway prints every sheet, as it stands', shortfall.anyway,
+  { prints: 1, printedSheets: sheets.length, printDisabled: false });
+same('any change of ticks holds Print again', shortfall.again, { shown: true, printDisabled: true });
+same('route 8 unticked is left out on purpose, and nothing is short', shortfall.without8, {
+  shown: false,
+  printDisabled: false,
+  leftOut: `Left out on purpose: 8 — ${shortfall.eightLines} lines.`,
+});
+same('with the row back on the paper, the banner goes', shortfall.cleared, { shown: false, printDisabled: false });
+check('routes unticked on purpose are listed plainly, with their lines, never as a warning',
+  shortfall.leftOut.shown && shortfall.leftOut.says === shortfall.leftOut.want && !shortfall.leftOut.banner &&
+    !shortfall.leftOut.printDisabled,
+  JSON.stringify(shortfall.leftOut));
+check('every route is ticked again afterwards, and nothing is left out',
+  shortfall.after === sheets.length && !shortfall.leftOutAfter, String(shortfall.after));
 
 // "Show the order ID" is for one-order blocks. In a block of several orders
 // the id is what tells them apart, so it prints on every line regardless.
@@ -1636,6 +1907,54 @@ same(
     [1000621633, 1000622154, 1000622155],
   ],
 );
+
+// ── A new file clears the old sheets (the owner, 2026-10-01) ─────────────
+// Ctrl+P prints whatever was last laid out, from any step. A file opened
+// after the Print step used to leave the old file's sheets there to print;
+// so did switching between bread and freezer on Check.
+await page.evaluate(() => {
+  window.realPrint = window.print;
+  window.printedRoutes = null;
+  window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    window.printedRoutes = Array.from(document.querySelectorAll('#sheets .bf-sheet'), (s) => s.dataset.route);
+    window.dispatchEvent(new Event('afterprint'));
+  };
+});
+const breadLaidOut = await page.locator('#preview .bf-sheet').count();
+await page.setInputFiles('#file', `scripts/fixtures/${FREEZER}`);
+await page.waitForFunction(() => document.getElementById('mode').dataset.kind === 'freezer');
+await page.keyboard.press('Control+p');
+const afterOpen = await page.evaluate(() => ({
+  printed: window.printedRoutes,
+  preview: document.querySelectorAll('#preview .bf-sheet').length,
+  printDisabled: document.getElementById('print').disabled,
+}));
+await page.click('#advance');
+await page.click('#advance');
+await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0);
+const freezerLaidOut = await page.locator('#preview .bf-sheet').count();
+await page.click('#steps [data-step="check"]');
+await page.click('#mode [data-kind="bread"]');
+await page.evaluate(() => {
+  window.printedRoutes = null;
+});
+await page.keyboard.press('Control+p');
+const afterFlip = await page.evaluate(() => ({
+  printed: window.printedRoutes,
+  preview: document.querySelectorAll('#preview .bf-sheet').length,
+}));
+await page.evaluate(() => {
+  window.print = window.realPrint;
+});
+check('the bread day was laid out before the freezer file was opened', breadLaidOut === sheets.length, String(breadLaidOut));
+same('Ctrl+P after opening another file prints none of the old file’s sheets', afterOpen, {
+  printed: [],
+  preview: 0,
+  printDisabled: true,
+});
+check('the freezer day was laid out before its kind was switched', freezerLaidOut > 0, String(freezerLaidOut));
+same('nor after switching between bread and freezer on Check', afterFlip, { printed: [], preview: 0 });
 
 // ── The freezer list ───────────────────────────────────────────────────────
 
@@ -1684,6 +2003,10 @@ await page.waitForSelector('#step-print:not([hidden])');
 await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0, {
   timeout: 30000,
 });
+same('the freezer day carries every line: no banner, and Print is free', await page.evaluate(() => ({
+  banner: !document.getElementById('shortfall').hidden,
+  printDisabled: document.getElementById('print').disabled,
+})), { banner: false, printDisabled: false });
 
 const freezer = await page.evaluate(() => {
   const all = Array.from(document.querySelectorAll('#preview .bf-sheet'));
@@ -1924,20 +2247,25 @@ for (const [folder, fixture, what] of EDGE) {
             crates: Model.defaultCrateRules(),
       };
       const pages = [];
+      const byRoute = [];
       for (const route of Model.group(Model.fold(rows))) {
-        pages.push(
-          ...Sheet.paginate(
-            route,
-            settings,
-            { dates: null, source: 'edge', routeStops: route.orders.length,
-              routeLines: Model.lineCount(route) },
-            { host },
-          ),
+        const own = Sheet.paginate(
+          route,
+          settings,
+          { dates: null, source: 'edge', routeStops: route.orders.length,
+            routeLines: Model.lineCount(route) },
+          { host },
         );
+        pages.push(...own);
+        byRoute.push([route, own]);
       }
       for (const sheet of pages) host.appendChild(sheet);
 
       const seen = inspectSheets(pages);
+      // What the Print step's banner reads: every line on the paper.
+      const short = byRoute
+        .map(([route, own]) => [route.nickname, Sheet.coverage(route, own)])
+        .filter(([, coverage]) => !coverage || coverage.missing.lines > 0);
 
       // Every code the lines print has to be spelled out in the key above them.
       const codes = new Set(Array.from(host.querySelectorAll('.bf-code'), (n) => n.textContent));
@@ -1958,6 +2286,7 @@ for (const [folder, fixture, what] of EDGE) {
         seen,
         unexplained,
         columnWidths: Array.from(widths).sort((a, b) => a - b),
+        short,
       };
     } finally {
       host.remove();
@@ -1966,6 +2295,7 @@ for (const [folder, fixture, what] of EDGE) {
 
   inspected(what, shape.seen);
   same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
+  same(`${what}: every line is on the paper, so no banner`, shape.short, []);
   check(
     `${what}: the bakery columns are all one width`,
     shape.columnWidths.length <= 1,
@@ -2281,16 +2611,21 @@ for (const [fixture, expected, saying] of SHAPES) {
       const settings = { kind: Model.BREAD, showOrderId: true,
                          crates: Model.defaultCrateRules() };
       let printed = '';
+      const short = [];
       for (const route of Model.group(Model.fold(rows))) {
-        for (const sheet of Sheet.paginate(
+        const own = Sheet.paginate(
           route, settings,
           { dates: null, source: 'shape', routeStops: route.orders.length,
             routeLines: Model.lineCount(route) },
           { host },
-        )) {
+        );
+        for (const sheet of own) {
           host.appendChild(sheet);
           printed += ` ${sheet.textContent}`;
         }
+        // What the Print step's banner reads: every line on the paper.
+        const coverage = Sheet.coverage(route, own);
+        if (!coverage || coverage.missing.lines > 0) short.push(route.nickname);
       }
       return {
         outcome: 'read',
@@ -2298,6 +2633,7 @@ for (const [fixture, expected, saying] of SHAPES) {
         said: findings.map((f) => f.kind),
         // A number that went wrong shows up as one of these on the paper.
         nonsense: ['NaN', 'Infinity', 'undefined', '[object'].filter((w) => printed.includes(w)),
+        short,
       };
     } catch (error) {
       return { outcome: 'threw', why: String((error && error.message) || error) };
@@ -2318,6 +2654,7 @@ for (const [fixture, expected, saying] of SHAPES) {
       got.outcome === 'read' && got.rows === expected && got.nonsense.length === 0,
       JSON.stringify(got),
     );
+    same(`${fixture}: every line is on the paper, so no banner`, got.short, []);
   }
 }
 
@@ -2468,6 +2805,118 @@ same('a line asking for nothing is called out', quantitySays.zero,
   [['warning', '1 line(s) ask for nothing']]);
 same('half a bread is not quietly made whole', quantitySays.fractional,
   [['warning', '1 quantity(ies) are not whole breads']]);
+
+// ── A quantity that is not a number (the owner, 2026-10-01) ───────────────
+// "if it appears as something other than num like string then just write
+// whatever it says", and "maybe have it only able to be something like 20
+// characters long". Five lines of one order on the bread sample are given
+// `3 stk`, `3,5`, a 200-character note, a blank and #N/A. They print as
+// written, cut to 20 characters with "…"; the crates and the route total count
+// the whole number each starts with (3, 3, 0, 0, 0), exactly as the same lines
+// given those numbers do; Check says so once, as a warning naming the route,
+// customer and bread; and "ask for nothing" keeps to true zeros.
+const NOTE = 'Leveres ved bakdøra, ring på klokka to ganger og vent. '.repeat(4).slice(0, 200);
+const textQuantities = await page.evaluate(async ([bytes, note]) => {
+  const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+  const plain = Model.readRows(await book.sheet('Data'));
+  // The first order in the file with five lines or more.
+  const byOrder = new Map();
+  for (const row of plain) byOrder.set(row.orderId, [...(byOrder.get(row.orderId) || []), row]);
+  const order = [...byOrder.values()].find((rows) => rows.length >= 5);
+  const targets = order.slice(0, 5).map((row) => row.excelRow);
+  const variant = async (cells) => {
+    const sheet = await book.sheet('Data');
+    for (const row of sheet.rows) {
+      const at = targets.indexOf(row.number);
+      if (at < 0) continue;
+      if (cells[at] === null) row.cells.delete(Model.COLUMN.quantity);
+      else row.cells.set(Model.COLUMN.quantity, cells[at]);
+    }
+    return Model.readRows(sheet);
+  };
+  const textRows = await variant([
+    { kind: 'text', value: '3 stk' },
+    { kind: 'text', value: '  3,5 ' },
+    { kind: 'text', value: note },
+    null,
+    { kind: 'error', value: '#N/A' },
+  ]);
+  const numberRows = await variant([3, 3, 0, 0, 0].map((value) => ({ kind: 'number', value })));
+
+  const nickname = order[0].routeNickname;
+  const routeOf = (rows) => Model.group(Model.fold(rows)).find((route) => route.nickname === nickname);
+  const rules = Model.defaultCrateRules();
+  const figures = (rows) => {
+    const route = routeOf(rows);
+    return {
+      crates: Model.routeCrates(route, rules),
+      packed: route.stops.map((stop) =>
+        Model.departmentGroups(stop.orders).map((group) => Model.packedCrateCount(group.orders, rules))),
+      total: Model.routeTotal(route),
+    };
+  };
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const printed = {};
+  const seen = {};
+  try {
+    for (const kind of [Model.BREAD, Model.FREEZER]) {
+      const route = routeOf(textRows);
+      const pages = Sheet.paginate(
+        route,
+        { kind, showOrderId: true, crates: rules },
+        { dates: null, source: 'text', routeStops: route.stops.length, routeLines: Model.lineCount(route) },
+        { host },
+      );
+      for (const sheet of pages) host.appendChild(sheet);
+      printed[kind] = Array.from(host.querySelectorAll('.bf-qty-text'), (node) => node.textContent).sort();
+      seen[kind] = inspectSheets(pages);
+      host.replaceChildren();
+    }
+  } finally {
+    host.remove();
+  }
+
+  const said = (rows) =>
+    Validate.run(rows, Model.BREAD)
+      .filter((f) => f.kind === 'quantity-not-a-number' || f.kind === 'impossible-quantity')
+      .map((f) => [f.severity, f.headline, f.rows]);
+  const finding = Validate.run(textRows, Model.BREAD).find((f) => f.kind === 'quantity-not-a-number');
+  const first = order[0];
+  return {
+    read: textRows.filter((row) => targets.includes(row.excelRow)).map((row) => [row.quantity, row.quantityText]),
+    printed,
+    seen,
+    sameFigures: JSON.stringify(figures(textRows)) === JSON.stringify(figures(numberRows)),
+    textSaid: said(textRows),
+    numberSaid: said(numberRows).map(([severity, headline]) => [severity, headline]),
+    names: !!finding && [`route ${nickname}`, first.customer, first.productName].every((part) => finding.detail.includes(part)),
+    targets,
+  };
+}, [breadBytes, NOTE]);
+const cut = `${NOTE.slice(0, 20)}…`;
+same('a quantity that is not a number reads as written, and counts as the number it starts with', textQuantities.read, [
+  [3, '3 stk'],
+  [3, '3,5'],
+  [0, cut],
+  [0, ''],
+  [0, '#N/A'],
+]);
+same('it prints as written on a pick line, cut to 20 characters', textQuantities.printed.bread,
+  ['', '#N/A', '3 stk', '3,5', cut].sort());
+same('and on a check line', textQuantities.printed.freezer, ['', '#N/A', '3 stk', '3,5', cut].sort());
+inspected('a pick line with a quantity in words', textQuantities.seen.bread);
+inspected('a check line with a quantity in words', textQuantities.seen.freezer);
+check('the crates and the route total count it as 3, 3, 0, 0 and 0', textQuantities.sameFigures);
+same('Check says so once, as a warning, and nothing asks for nothing', textQuantities.textSaid, [
+  ['warning', '5 line(s) give a quantity that is not a number', textQuantities.targets],
+]);
+check('naming the route, the customer and the bread', textQuantities.names);
+same('while the same lines given 0 do ask for nothing', textQuantities.numberSaid, [
+  ['warning', '3 line(s) ask for nothing'],
+]);
 
 // ── More bakeries than the key can name ────────────────────────────────────
 //

@@ -744,6 +744,49 @@ input[type='number'] {
   color: var(--body);
 }
 
+/* A ticked route whose pages do not carry every line (the owner, 2026-10-01:
+ * "a severe warning if the list does not print all the bread"). Red like
+ * .error, beside Print, which it holds until "Print anyway". */
+.shortfall {
+  margin: 12px 0;
+  color: var(--strong);
+  background: var(--card);
+  border: 1px solid var(--danger);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-card);
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.shortfall b {
+  color: var(--danger);
+}
+
+.shortfall ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+
+.shortfall p {
+  margin: 8px 0;
+  color: var(--body);
+}
+
+.shortfall button {
+  padding: 7px 14px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--danger);
+  font: 600 14px/1 'Space Grotesk', sans-serif;
+  cursor: pointer;
+}
+
+.shortfall button:hover {
+  background: var(--danger);
+  color: #150e22;
+}
+
 .preview {
   display: flex;
   flex-direction: column;
