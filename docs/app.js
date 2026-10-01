@@ -1938,6 +1938,19 @@ function coloursRow() {
       ${themeKept ? '' : `<p class="status warn-status">This browser couldn't keep the choice, so it lasts only until this page is closed or reloaded.</p>`}`;
 }
 
+/* A backup's key for its Restore button: its time, and how many before it
+   share that time (two can, written in the same millisecond, or by hand). A
+   backup taken later goes on top with a time of its own, so no key it leaves
+   behind changes between the two clicks. */
+function backupKeys(list) {
+  const seen = new Map();
+  return list.map((b) => {
+    const n = seen.get(String(b.t)) || 0;
+    seen.set(String(b.t), n + 1);
+    return `${b.t}#${n}`;
+  });
+}
+
 const when = (d) => {
   if (!d) return '';
   const t = new Date(d);
@@ -2069,6 +2082,7 @@ function renderData() {
   // entry used to take the whole app down — including the Data tab holding
   // the eleven good backups beside it. Say what it is instead, and leave its
   // Restore button off.
+  const keys = backupKeys(list);
   const rows = list.map((b, i) => {
     let contents = null;
     try { const s = JSON.parse(b.json); contents = `${s.routes.length} routes, ${s.cars.length} cars`; } catch { /* unreadable */ }
@@ -2076,7 +2090,7 @@ function renderData() {
       <td>${esc(when(b.t))}</td>
       <td>${esc(b.label)}</td>
       <td>${contents === null ? 'Unreadable \u2014 only half of it was saved' : esc(contents)}</td>
-      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', String(b.t), armed === `restore:${b.t}` ? 'Sure?' : 'Restore', armed === `restore:${b.t}` ? 'armed' : '')}</td>
+      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', keys[i], armed === `restore:${keys[i]}` ? 'Sure?' : 'Restore', armed === `restore:${keys[i]}` ? 'armed' : '')}</td>
     </tr>`;
   }).join('');
 
@@ -2558,9 +2572,10 @@ async function dataAction(act, b, fromKeyboard = false) {
       // the two clicks (another tab) shifts every row down by one, and the
       // second click restored the entry that moved into the row (review,
       // 2026-10-01).
-      const t = b.dataset.id;
-      if (!confirmTwice(`restore:${t}`, fromKeyboard)) return;
-      const entry = Store.backups().find((x) => String(x.t) === t);
+      const key = b.dataset.id;
+      if (!confirmTwice(`restore:${key}`, fromKeyboard)) return;
+      const all = Store.backups();
+      const entry = all[backupKeys(all).indexOf(key)];
       if (!entry) break;
       if (!Store.snapshot(state, 'Restoring a backup')) break;   // render() shows why
       const next = Store.restore(entry, defaults);

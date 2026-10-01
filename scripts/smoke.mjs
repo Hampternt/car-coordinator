@@ -306,7 +306,7 @@ await page.evaluate(() => {
 });
 await page.locator(`[data-act="restore"][data-id="${armedAt}"]`).click();
 check('Restore restores the backup first clicked, though another was taken between the clicks',
-  await page.evaluate((t) => notices.some((n) => n.text === `Restored the backup from ${when(t)}.`) && state.routes[0].driver !== 'Another Tab', armedAt));
+  await page.evaluate((key) => notices.some((n) => n.text === `Restored the backup from ${when(key.split('#')[0])}.`) && state.routes[0].driver !== 'Another Tab', armedAt));
 await page.click('[data-act="tab"][data-tab="plan"]');
 
 // With the browser's storage full the backup a delete promises cannot be
