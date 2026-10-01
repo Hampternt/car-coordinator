@@ -1,6 +1,6 @@
 # Pack: Breadify — faster ticks, and no bread left off quietly
 
-**Status:** 🚧 go given 2026-10-01 by the owner ("go on … breadify fixes"). All four items are committed on `worktree-agent-ace86b4469f3cdf51` and the pack gate is green (2026-10-01). Waiting on the review (2 lenses + verify) and the browser walkthrough. Not merged, not pushed, no PR.
+**Status:** ✅ MERGED into `dev`, 2026-10-01: all four items, the review's findings fixed, `node scripts/breadify.mjs` all passed. Waiting, with the rest of `dev`, on the owner's test before `main`.
 **Date:** 2026-10-01
 
 ## The owner's words
@@ -75,3 +75,6 @@ Agents: build 1 (medium; docs/breadify is one file set) · review 2 lenses (corr
   all passed
   ```
   check.sh OK. (Comment-only follow-up: the item 2 comments in model.js `quantityText` and in `breadLine` now say it departs from the Rust app, which reads the quantity as a number, as the brief asks. Nothing executable changed, so the suite was not rerun; its green run above was on 7dd09f5. check.sh OK.) The INVENTORY 🚧 line (Breadify section) already describes what shipped and stays 🚧 until the merge. No version touched, and the car app is not touched. README's list of departures was not edited because it is outside this pack's file set. Two things are not yet recorded there: the text quantity (a departure from the Rust app, which reads the column as a number) and the shortfall banner.
+- 2026-10-01: merged into the coordinator's branch (d4a13ee), with three follow-ups (c992ce6): a print from the browser's menu while Print is held prints one page saying why; Ctrl+P on another step while held goes to the Print step; the README names the departures. Pack gate at c992ce6: `npm test` all passed (car and Breadify), screens, upgrade 0.2.4 → 0.14.1.
+- 2026-10-01: review, 2 lenses (correctness, print) + one skeptic per finding. Confirmed: Ctrl+P or a menu print from Configure printed the sheets laid out before a setting changed (high, both lenses; it predates the pack); a 20-character quantity in words could push a freezer check line's M box off the paper (medium); Print anyway could release a short route ticked in the pause before (low). Refuted: coverage missing horizontal clipping (the clipped parts are the M box and dotted field, not a line). All three fixed in 1f3c1af: leaving Print forgets the sheets and Ctrl+P goes to Print first, a menu print with nothing laid out says where to go; Print anyway releases only the routes it named; a check line with a quantity in words wraps (0 mm past the edge over 352 lines). Known gap, for the owner: a route total taller than a page is still cut without a warning; the check counts bread lines, and a total holds none.
+- 2026-10-01: end gate after the fixes: `CHROMIUM_PATH=/usr/bin/google-chrome node scripts/breadify.mjs` — all passed. The car app is unchanged since c992ce6, whose full gate is above.
