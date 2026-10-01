@@ -120,7 +120,8 @@ const Model = (() => {
    * its code. Null for a cell that holds a number, which prints as one.
    *
    * The owner, 2026-10-01: "if it appears as something other than num like
-   * string then just write whatever it says". It used to print as 0.
+   * string then just write whatever it says". It used to print as 0. A
+   * departure from the Rust app, which reads the column as a number only.
    */
   function quantityText(cell) {
     if (exactNumber(cell) !== null) return null;

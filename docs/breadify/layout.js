@@ -410,7 +410,8 @@ const Sheet = (() => {
       // 2026-09-30; a departure from F8, which has C alone at the left).
       bread ? null : tickBox('D'),
       // A quantity the file gave as text prints as it says, cut to 20
-      // characters (Model.quantityText; the owner, 2026-10-01).
+      // characters (Model.quantityText; the owner, 2026-10-01). A departure
+      // from the Rust app, whose quantity is always a number.
       typeof line.quantityText === 'string'
         ? element('span', 'bf-qty bf-qty-text', line.quantityText)
         : element('span', 'bf-qty', line.quantity),
