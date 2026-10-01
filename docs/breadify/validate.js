@@ -22,6 +22,7 @@ const Validate = (() => {
     'address-on-two-routes',
     'product-details-disagree',
     'impossible-quantity',
+    'quantity-not-a-number',
     'unfamiliar-value',
     'supplier-code-collision',
     'unsequenced-stops',
@@ -327,7 +328,8 @@ const Validate = (() => {
     const enormous = [];
     for (const row of rows) {
       if (row.quantity < 0) negative.push(row);
-      else if (row.quantity === 0) empty.push(row);
+      // Only a true zero: a quantity given as text is said once, below.
+      else if (row.quantity === 0 && typeof row.quantityText !== 'string') empty.push(row);
       else if (row.quantity >= IMPLAUSIBLE_QUANTITY) enormous.push(row);
       if (
         row.quantityExact !== null &&
@@ -392,6 +394,41 @@ const Validate = (() => {
       });
     }
     return findings;
+  }
+
+  /**
+   * Quantities the file gives as something other than a number: `3 stk`,
+   * `3,5`, a note, a blank, an error cell (the owner, 2026-10-01).
+   *
+   * Not blocking. Each prints as written, cut to 20 characters, and the
+   * crates and the route total count the whole number it starts with — 0
+   * where it starts with none. A line counted as 0 packs no crate, which is
+   * worth a word; it used to print as 0 as well, said only as a line asking
+   * for nothing.
+   */
+  function quantitiesNotNumbers(rows) {
+    const text = rows.filter((row) => typeof row.quantityText === 'string');
+    if (text.length === 0) return [];
+    const named = text.slice(0, 5).map((row) => {
+      const says = row.quantityText === '' ? 'blank' : JSON.stringify(row.quantityText);
+      return (
+        `route ${row.routeNickname || '(none)'}, ${row.customer || 'no customer'}, ` +
+        `${row.productName || 'no bread'}: ${says}, counted as ${row.quantity}`
+      );
+    });
+    return [
+      {
+        severity: WARNING,
+        kind: 'quantity-not-a-number',
+        headline: `${text.length} line(s) give a quantity that is not a number`,
+        detail:
+          `${named.join('; ')}${text.length > 5 ? `; and ${text.length - 5} more` : ''}. ` +
+          'Each prints as the file writes it, cut to 20 characters. The crates and the ' +
+          'route total count the whole number it starts with, and 0 where it starts ' +
+          'with none — check the export.',
+        rows: rowNumbers(text),
+      },
+    ];
   }
 
   /**
@@ -491,6 +528,7 @@ const Validate = (() => {
       ...addressesOnTwoRoutes(rows),
       ...productsThatDisagree(rows),
       ...impossibleQuantities(rows),
+      ...quantitiesNotNumbers(rows),
       ...unfamiliarValues(rows, kind),
       ...collidingSupplierCodes(rows),
       ...unsequencedStops(rows),

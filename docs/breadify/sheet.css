@@ -631,6 +631,17 @@
   font: 600 13.1pt/1 'IBM Plex Mono', monospace;
 }
 
+/* A quantity in words (at most 20 characters, model.js) wraps within its own
+ * slot rather than run the line long: a slot of about 24 mm, broken between
+ * words first (the owner, 2026-10-01; review). */
+.bf-qty-text {
+  max-width: 24mm;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 10pt;
+  line-height: 1.15;
+}
+
 /* The code, not the name: dropping the repeated bakery name off every row is
  * what paid for the 11 pt body (D4). */
 /* Wide enough for the codes supplierCode() can now produce, and no wider:

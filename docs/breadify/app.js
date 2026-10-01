@@ -156,6 +156,26 @@
     state.findings = Validate.run(state.rows, state.settings.kind);
     state.routes = Model.group(Model.fold(state.rows));
     state.selected = new Set(state.routes.map((route) => route.nickname));
+    forgetSheets();
+  }
+
+  /**
+   * The sheets laid out for the file or kind before go, so nothing can print
+   * them. Ctrl+P prints whatever `built` holds, from any step, and only the
+   * Print step used to set it: a file opened after the last Print step
+   * printed the previous file's sheets.
+   */
+  function forgetSheets() {
+    clearTimeout(pending);
+    pending = null;
+    laid.clear();
+    built = [];
+    short = [];
+    released = false;
+    $('preview').replaceChildren();
+    $('sheets').replaceChildren();
+    $('shortfall').hidden = true;
+    $('print').disabled = true;
   }
 
   function productsById() {
@@ -175,6 +195,13 @@
   // ── Steps ──────────────────────────────────────────────────────────────
 
   function go(step) {
+    // A tick's update still waiting lands while its preview can be laid out.
+    if (state.step === 'print') flush();
+    // Leaving the Print step forgets its sheets: Configure can change what
+    // they would say (crates, order ids, Pay attention), and a print from
+    // there must never carry the old ones (review, 2026-10-01). Coming back
+    // lays them out afresh, as it always has.
+    if (state.step === 'print' && step !== 'print') forgetSheets();
     state.step = step;
     state.reached.add(step);
     for (const name of STEPS) {
@@ -417,7 +444,49 @@
 
   let built = [];
 
+  /**
+   * Each route's sheets once laid out, by nickname, so a tick lays out only
+   * the route it adds and an untick lays out nothing (the owner, 2026-10-01:
+   * "it takes a long time to load after unselected a route"). Every tick used
+   * to lay the whole day out again, about 130 ms on the bread sample.
+   *
+   * Emptied whenever the Print step is entered: the file, the kind, the crate
+   * sizes and the Pay attention marks can only change on the other steps, and
+   * every one of them changes what a sheet says.
+   *
+   * Each entry is `{ sheets, coverage }`: the sheets, and what of the route's
+   * lines they carry on the paper (Sheet.coverage), measured once.
+   */
+  const laid = new Map();
+
+  /**
+   * Quick clicks gather into one update: the tick shows at once, and the
+   * preview follows after this pause, so ten quick unticks make one update,
+   * not ten. Printing never waits it out — it brings the update forward.
+   */
+  const PREVIEW_PAUSE = 150;
+  let pending = null;
+
+  /** How much the preview draws the sheets down to fit the window. */
+  let scale = 1;
+
+  /**
+   * The ticked routes whose pages miss a line, as `[route, coverage]`, and
+   * whether "Print anyway" has been pressed for them. Print is held while
+   * any are short and it has not; any change of ticks or file asks again.
+   */
+  let short = [];
+  let released = false;
+
+  function held() {
+    return short.length > 0 && !released;
+  }
+
   function renderPrint() {
+    laid.clear();
+    clearTimeout(pending);
+    pending = null;
+    released = false;
     const routes = $('routes');
     routes.replaceChildren(
       ...state.routes.map((route) => {
@@ -430,7 +499,7 @@
         tick.onchange = () => {
           if (tick.checked) state.selected.add(route.nickname);
           else state.selected.delete(route.nickname);
-          rebuild();
+          later();
         };
 
         const name = document.createElement('span');
@@ -449,43 +518,162 @@
       }),
     );
     rebuild();
+    scalePreview();
   }
 
-  /** Re-lays the selected routes out and shows them. */
+  /** A tick changed: the preview follows after the pause, once for a run of clicks. */
+  function later() {
+    clearTimeout(pending);
+    released = false;
+    pending = setTimeout(() => {
+      pending = null;
+      rebuild();
+    }, PREVIEW_PAUSE);
+    $('printSummary').textContent = 'Updating preview…';
+  }
+
+  /** Brings a waiting update forward, so what prints is what is ticked. */
+  function flush() {
+    if (pending === null) return;
+    clearTimeout(pending);
+    pending = null;
+    rebuild();
+  }
+
+  /**
+   * Lays out the ticked routes it does not already have — all of them in one
+   * go — and shows the ticked ones.
+   *
+   * A route's sheets do not depend on any other route's (D1: each starts a
+   * fresh page), so the ones already laid out are exactly what a full
+   * rebuild would make.
+   */
   function rebuild() {
+    clearTimeout(pending);
+    pending = null;
     const chosen = state.routes.filter((route) => state.selected.has(route.nickname));
+    const missing = chosen.filter((route) => !laid.has(route.nickname));
     const context = {
       dates: dates(),
       source: Model.sourceLabel(state.filename, dates()),
     };
 
     try {
-      built = Sheet.day(chosen, state.settings, context, {});
+      if (missing.length > 0) {
+        const sheets = Sheet.day(missing, state.settings, context, {});
+        const byRoute = new Map(missing.map((route) => [route.nickname, []]));
+        for (const sheet of sheets) byRoute.get(sheet.dataset.route).push(sheet);
+        const covered = measureCoverage(missing, byRoute);
+        for (const route of missing) {
+          laid.set(route.nickname, {
+            sheets: byRoute.get(route.nickname),
+            coverage: covered.get(route.nickname),
+          });
+        }
+      }
     } catch (error) {
       // The layout throws on a value it cannot print correctly. Nothing
       // printing is the safe outcome; a sheet with something wrong on it is
       // not.
       built = [];
+      short = [];
       $('preview').replaceChildren();
+      $('shortfall').hidden = true;
       const message = error && error.message ? error.message : String(error);
       $('printSummary').textContent =
         `The sheets could not be laid out, so nothing will print: ${message}`;
       $('print').disabled = true;
       return;
     }
-    $('preview').replaceChildren(...built);
-    scalePreview();
+    built = chosen.flatMap((route) => laid.get(route.nickname).sheets);
+    showSheets();
 
     const routeWord = chosen.length === 1 ? 'route' : 'routes';
     const sheetWord = built.length === 1 ? 'sheet' : 'sheets';
     $('printSummary').textContent =
       `${chosen.length} ${routeWord} · ${built.length} ${sheetWord} of A4.`;
-    $('print').disabled = built.length === 0;
+    renderShortfall(chosen);
+    $('print').disabled = built.length === 0 || held();
+  }
+
+  /**
+   * What each newly laid-out route's sheets carry on the paper, measured as
+   * they print: at full size, off-screen, before the preview draws them
+   * down. Done once per route; an untick measures nothing.
+   */
+  function measureCoverage(routes, byRoute) {
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:absolute;left:-10000px;top:0';
+    document.body.append(stage);
+    try {
+      for (const route of routes) stage.append(...byRoute.get(route.nickname));
+      return new Map(
+        routes.map((route) => [route.nickname, Sheet.coverage(route, byRoute.get(route.nickname))]),
+      );
+    } finally {
+      stage.remove();
+    }
+  }
+
+  /**
+   * The routes left out on purpose, said plainly. And, said loudly, any
+   * ticked route whose pages do not carry every line the file gives it,
+   * with Print held until "Print anyway" (the owner, 2026-10-01: "can it
+   * give a severe warning if the list does not print all the bread?").
+   */
+  function renderShortfall(chosen) {
+    const left = state.routes.filter((route) => !state.selected.has(route.nickname));
+    const leftLines = left.reduce((sum, route) => sum + Model.lineCount(route), 0);
+    $('leftOut').hidden = left.length === 0;
+    $('leftOut').textContent =
+      `Left out on purpose: ${left.map((route) => route.nickname).join(', ')} — ` +
+      `${leftLines} ${leftLines === 1 ? 'line' : 'lines'}.`;
+
+    short = chosen
+      .map((route) => [route, laid.get(route.nickname).coverage])
+      .filter(([, coverage]) => coverage && coverage.missing.lines > 0);
+    $('shortfall').hidden = short.length === 0;
+    $('shortfallRoutes').replaceChildren(
+      ...short.map(([route, coverage]) => {
+        const item = document.createElement('li');
+        const { lines, units, first } = coverage.missing;
+        item.textContent =
+          `Route ${route.nickname}: ${lines} of ${coverage.lines} ` +
+          `${coverage.lines === 1 ? 'line' : 'lines'} (${units} ${units === 1 ? 'unit' : 'units'}) ` +
+          `are not on the paper, starting with ${first}.`;
+        return item;
+      }),
+    );
+  }
+
+  /**
+   * Puts `built` in the preview, touching only what changed: an unticked
+   * route's sheets are taken out and a ticked one's put in at its place, and
+   * every other sheet stays where it is, never laid out again.
+   */
+  function showSheets() {
+    const preview = $('preview');
+    const wanted = new Set(built);
+    for (const node of Array.from(preview.children)) {
+      if (!wanted.has(node)) node.remove();
+    }
+    let at = preview.firstElementChild;
+    for (const sheet of built) {
+      if (sheet === at) {
+        at = at.nextElementSibling;
+        continue;
+      }
+      sheet.style.zoom = scale === 1 ? '' : String(scale);
+      preview.insertBefore(sheet, at);
+    }
   }
 
   /**
    * Fits the sheets to the window without re-typesetting them: the drawing is
    * scaled, the type is not. A preview that re-flowed would stop being one.
+   *
+   * Measured when the step opens and when the window changes size; a sheet
+   * put in by a tick takes the scale already found.
    */
   function scalePreview() {
     const preview = $('preview');
@@ -498,17 +686,70 @@
     probe.remove();
 
     const room = preview.clientWidth;
-    const scale = room > 0 && sheetWidth > room ? room / sheetWidth : 1;
+    scale = room > 0 && sheetWidth > room ? room / sheetWidth : 1;
     for (const sheet of built) sheet.style.zoom = scale === 1 ? '' : String(scale);
+  }
+
+  /** The Print button and Ctrl+P alike: a waiting update first, then the dialog. */
+  function printNow() {
+    // Off the Print step, the Print step first: the sheets are laid out from
+    // the settings as they are now, and the warning is checked again.
+    if (state.step !== 'print') {
+      if (!state.rows) return;
+      go('print');
+    }
+    flush();
+    if (held()) {
+      // Held: the warning says why, and its button is the way on. Ctrl+P on
+      // another step goes to the Print step first, where the warning is.
+      if (state.step !== 'print') go('print');
+      $('shortfall').scrollIntoView({ block: 'nearest' });
+      $('printAnyway').focus();
+      return;
+    }
+    window.print();
   }
 
   // Printing takes the sheets out of the preview so the page can be hidden
   // wholesale, and puts them back afterwards. One set of nodes, never two.
+  // A print from the browser's own menu bypasses printNow(), so the waiting
+  // update is brought forward here too; and since that print cannot be
+  // stopped, a held one prints nothing.
   window.addEventListener('beforeprint', () => {
+    flush();
+    if (!held() && built.length === 0) {
+      // A print from the browser's menu with nothing laid out (off the Print
+      // step): one page saying where the sheets are, not a blank one.
+      const note = document.createElement('div');
+      note.className = 'held-print';
+      const head = document.createElement('h1');
+      head.textContent = 'Nothing laid out to print';
+      const how = document.createElement('p');
+      how.textContent = 'Open the Print step in Breadify, then print from there.';
+      note.append(head, how);
+      $('sheets').replaceChildren(note);
+      return;
+    }
+    if (held()) {
+      // The browser's own Print menu cannot be stopped, so the paper says
+      // why it carries no sheets, rather than coming out blank.
+      const note = document.createElement('div');
+      note.className = 'held-print';
+      const head = document.createElement('h1');
+      head.textContent = 'Not printed: not every bread is on the pages';
+      const list = document.createElement('ul');
+      list.append(...Array.from($('shortfallRoutes').children, (item) => item.cloneNode(true)));
+      const how = document.createElement('p');
+      how.textContent = 'Open the Print step in Breadify to look, then press Print anyway to print the sheets as they stand.';
+      note.append(head, list, how);
+      $('sheets').replaceChildren(note);
+      return;
+    }
     for (const sheet of built) sheet.style.zoom = '';
     $('sheets').replaceChildren(...built);
   });
   window.addEventListener('afterprint', () => {
+    if (!$('sheets').firstElementChild) return;
     $('preview').replaceChildren(...built);
     scalePreview();
   });
@@ -578,7 +819,28 @@
       };
     }
 
-    $('print').onclick = () => window.print();
+    $('print').onclick = printNow;
+    $('printAnyway').onclick = () => {
+      // Released for the routes the warning named when it was pressed, and
+      // no others: a route ticked in the pause before, short too, is named
+      // first and needs its own press (review, 2026-10-01).
+      const named = new Set(short.map(([route]) => route.nickname));
+      flush();
+      if (short.some(([route]) => !named.has(route.nickname))) {
+        $('shortfall').scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      released = true;
+      $('print').disabled = built.length === 0;
+      printNow();
+    };
+    // Ctrl+P is taken over so it waits exactly as the button does.
+    window.addEventListener('keydown', (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        printNow();
+      }
+    });
     window.addEventListener('resize', () => {
       if (state.step === 'print') scalePreview();
     });

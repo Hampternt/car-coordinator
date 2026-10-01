@@ -140,6 +140,15 @@
           the 11 pt body below its floor.
         </p>
         <p class="hint" id="printSummary"></p>
+        <p class="hint" id="leftOut" hidden></p>
+        <!-- A ticked route whose pages do not carry every line the file gives
+             it. Print is held until the leader chooses to print anyway. -->
+        <div class="shortfall" id="shortfall" role="alert" hidden>
+          <b>Not every bread is on the pages.</b>
+          <ul id="shortfallRoutes"></ul>
+          <p>Print is held. Check the preview, or print as it stands.</p>
+          <button type="button" id="printAnyway">Print anyway</button>
+        </div>
         <p>
           <button type="button" class="primary" id="print">Print / save PDF</button>
         </p>
