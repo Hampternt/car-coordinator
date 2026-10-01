@@ -161,7 +161,11 @@ function typedDay(text) {
    write to the save file) draws the box with what was typed, not the day. */
 function dateTyping() {
   const box = document.getElementById('date');
-  return box && document.activeElement === box && box.value.trim() && !typedDay(box.value) ? box.value : null;
+  // Emptied too: clearing the box to retype the date is half typing it, and
+  // saving the plan with no date (then reloading the day's crew over the
+  // availability set by hand, when the same date is typed back) was wrong
+  // (review, 2026-10-01). Leaving the box puts the plan's day back.
+  return box && document.activeElement === box && !typedDay(box.value) ? box.value : null;
 }
 const dateBoxText = () => dateTyping() ?? dmyOf(state.date);
 /* A day or a month on from a date: a month on keeps the day of the month, or
@@ -1741,7 +1745,7 @@ function saveTemplate(name) {
     // is the same template being corrected, and the shelf should not quietly
     // rename itself under a leader who was only re-saving the routes.
     const kept = state.templates[at];
-    Store.snapshot(state, `Replacing the ${kept.name} template`);
+    if (!Store.snapshot(state, `Replacing the ${kept.name} template`)) return;   // the warning says why
     state.templates[at] = { ...kept, routes };
     note('info', `Replaced the ${kept.name} template with the ${routes.length} routes on the plan now.`);
   } else {
@@ -2072,7 +2076,7 @@ function renderData() {
       <td>${esc(when(b.t))}</td>
       <td>${esc(b.label)}</td>
       <td>${contents === null ? 'Unreadable \u2014 only half of it was saved' : esc(contents)}</td>
-      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', String(i), armed === `restore:${i}` ? 'Sure?' : 'Restore', armed === `restore:${i}` ? 'armed' : '')}</td>
+      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', String(b.t), armed === `restore:${b.t}` ? 'Sure?' : 'Restore', armed === `restore:${b.t}` ? 'armed' : '')}</td>
     </tr>`;
   }).join('');
 
@@ -2265,7 +2269,7 @@ document.addEventListener('input', (e) => {
   // overwrite who is in (review, 2026-10-01). A date retyped as it was loads
   // nothing, so availability set by hand stays.
   const crewMoved = kind === 'meta' && name === 'date' && state.date !== dayWas && !!parseDay(state.date)
-    && /^\d{2}\/\d{2}\/\d{4}$/.test(String(value).trim()) && loadDayCrew();
+    && /^(\d{2}[/.-]\d{2}[/.-]\d{4}|\d{4}-\d{2}-\d{2})$/.test(String(value).trim()) && loadDayCrew();
   save();
   // A tick is often pressed with Space, and the next Tab has to go on from it.
   if (el.type === 'checkbox') renderKeepingFocus();
@@ -2448,7 +2452,7 @@ async function shareAction(act, b) {
     }
     case 'share-apply': {
       const { state: next, skipped } = Share.apply(state, pending.share, pending);
-      Store.snapshot(state, 'Loading a shared list');
+      if (!Store.snapshot(state, 'Loading a shared list')) { render(); return; }   // the warning says why
       state = next;
       save();
       const left = [...skipped.cars, ...skipped.positions];
@@ -2550,11 +2554,15 @@ async function dataAction(act, b, fromKeyboard = false) {
     case 'export': Store.flush(); Store.download(state); break;
     case 'import': $('#importFile').click(); return;
     case 'restore': {
-      const i = Number(b.dataset.id);
-      if (!confirmTwice(`restore:${i}`, fromKeyboard)) return;
-      const entry = Store.backups()[i];
+      // By the backup's time, as Archives' Restore is: a backup taken between
+      // the two clicks (another tab) shifts every row down by one, and the
+      // second click restored the entry that moved into the row (review,
+      // 2026-10-01).
+      const t = b.dataset.id;
+      if (!confirmTwice(`restore:${t}`, fromKeyboard)) return;
+      const entry = Store.backups().find((x) => String(x.t) === t);
       if (!entry) break;
-      Store.snapshot(state, 'Restoring a backup');
+      if (!Store.snapshot(state, 'Restoring a backup')) break;   // render() shows why
       const next = Store.restore(entry, defaults);
       if (!next) break;                        // render() carries its reason
       state = next;
@@ -2991,7 +2999,7 @@ function askTemplate(t) {
 function applyImport(text, source) {
   const { state: incoming, error, repaired } = Store.parseImport(text, defaults);
   if (error) { note('warn', error); render(); return; }
-  Store.snapshot(state, `Importing ${source}`);
+  if (!Store.snapshot(state, `Importing ${source}`)) { render(); return; }   // the warning says why
   state = incoming;
   save();
   note('info', `Loaded ${incoming.routes.length} routes and ${incoming.cars.length} cars from ${source}.${repaired && repaired.length ? ' Some entries needed repairing.' : ''}`);
@@ -3120,7 +3128,10 @@ document.addEventListener('click', (e) => {
       if (!confirmTwice(`del:${id}`, e.detail === 0)) return;
       // The backup list shows this label as written, so say it the way it
       // reads on screen rather than the way the code spells it.
-      Store.snapshot(state, `Deleting a ${{ driverGroup: 'day group', driverTag: 'driver tag' }[kind] || kind}`);
+      // Every act that throws something away goes ahead only once its backup
+      // is stored: with the browser's storage full it stops, and the warning
+      // says why (review, 2026-10-01).
+      if (!Store.snapshot(state, `Deleting a ${{ driverGroup: 'day group', driverTag: 'driver tag' }[kind] || kind}`)) break;
       list.splice(i, 1);
       if (kind === 'car') state.routes.forEach((r) => { if (r.carId === id) r.carId = ''; });
       if (kind === 'position') state.routes.forEach((r) => { if (r.positionId === id) r.positionId = ''; });
@@ -3163,7 +3174,7 @@ document.addEventListener('click', (e) => {
     }
     case 'clear-day':
       if (!confirmTwice('clear', e.detail === 0)) return;
-      Store.snapshot(state, 'Clearing the day');
+      if (!Store.snapshot(state, 'Clearing the day')) break;
       state.routes.forEach((r) => { r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false; });
       state.date = nextWorkingDay();
       // The same plan object and the moved date again, so Keep would not see
@@ -3187,7 +3198,7 @@ document.addEventListener('click', (e) => {
       const r = list[i];
       if (routeIsBlank(r)) { render(); return; }   // blanked meanwhile: no backup for nothing
       if (!confirmTwice(`clear:${id}`, e.detail === 0)) return;
-      Store.snapshot(state, `Clearing route ${r.name.trim() || '-'}`);
+      if (!Store.snapshot(state, `Clearing route ${r.name.trim() || '-'}`)) break;
       r.driver = ''; r.carId = ''; r.positionId = ''; r.round = ''; r.highlight = false;
       break;
     }
@@ -3273,7 +3284,7 @@ document.addEventListener('click', (e) => {
     case 'resave-template': {
       if (!confirmTwice(`resave:${id}`, e.detail === 0)) return;
       const t = list[i];
-      Store.snapshot(state, `Updating the ${t.name} template from the plan`);
+      if (!Store.snapshot(state, `Updating the ${t.name} template from the plan`)) break;
       const routes = templateRoutes();
       list[i] = { ...t, routes };
       note('info', `Updated the ${t.name} template from the plan: it holds the ${routes.length} routes on the plan now. What it held before is in Backups.`);
@@ -3301,7 +3312,7 @@ document.addEventListener('click', (e) => {
       const taken = partWords(parts, true);
       if (!parts.routes && !taken.length) return;
       const done = templateLoad(t, parts, state.routes);
-      Store.snapshot(state, `Loading the ${t.name} template`);
+      if (!Store.snapshot(state, `Loading the ${t.name} template`)) break;
       state.routes = done.routes;
       dropOffers();
       note('info', parts.routes
@@ -3413,7 +3424,7 @@ document.addEventListener('click', (e) => {
       // Nothing left to split: the button was pressed twice, or another tab
       // on the same browser got there first.
       if (!plan.spots.length) { dropOffers(); break; }
-      Store.snapshot(state, 'Splitting the round out of the spot names');
+      if (!Store.snapshot(state, 'Splitting the round out of the spot names')) break;
       applySpotRoundSplit(plan);
       const { filled, kept } = plan.routes;
       const merged = plan.spots.reduce((n, s) => n + s.absorbed.length, 0);
@@ -4022,8 +4033,12 @@ function ctxChoose(e) {
       ctx.view = null;
       renderCtxMenu();
       $('#ctxMenu [role="menuitem"]:not([aria-disabled])')?.focus({ preventScroll: true });
-    } else if (ctx.sub === b.dataset.view) ctxCloseSub(false);
-    else ctxOpenSub(b.dataset.view, e.detail === 0);
+    } else if (ctx.sub === b.dataset.view) {
+      // Open already: the keyboard shuts it again; a click keeps it, since
+      // resting on the entry opened it a moment before the click landed
+      // (review, 2026-10-01).
+      if (e.detail === 0) ctxCloseSub(false);
+    } else ctxOpenSub(b.dataset.view, e.detail === 0);
     return;
   }
   if (b.dataset.arm && b.dataset.arm !== armed) return;
@@ -4031,6 +4046,17 @@ function ctxChoose(e) {
   ctx = null;
 }
 $('#ctxMenu')?.addEventListener('click', ctxChoose);
+// A menu taller than its room scrolls inside itself: the entry the arrows,
+// Home or End move to is scrolled into view within it, never the page
+// (review, 2026-10-01).
+document.addEventListener('focusin', (e) => {
+  const item = e.target.closest?.('#ctxMenu [role="menuitem"], #ctxSub [role="menuitem"]');
+  const box = item && item.closest('#ctxMenu, #ctxSub');
+  if (!box || box.scrollHeight <= box.clientHeight) return;
+  const top = item.offsetTop, bottom = top + item.offsetHeight;
+  if (top < box.scrollTop) box.scrollTop = top;
+  else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight;
+});
 /* After the dispatcher: an act that drew nothing still hides the menu. And a
    choice made from the keyboard, in a menu the keyboard opened, hands the
    focus back to where it came from, unless the act put it somewhere itself

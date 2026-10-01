@@ -182,8 +182,11 @@ const Store = (() => {
     // day a template's name already reads as, and skipping one whose id is
     // already there (a default renamed, back from an older build that dropped
     // the mark). The mark is then always set, so a weekday template its owner
-    // deleted is never added again.
-    if (raw.weekdayTemplates !== true) {
+    // deleted is never added again. A plan that already carries any default
+    // weekday template has been through this before, an older build having
+    // only dropped the mark: none is added then, so one its owner deleted
+    // stays deleted (review, 2026-10-01).
+    if (raw.weekdayTemplates !== true && !templates.some((x) => /^tpl-weekday-[1-5]$/.test(x.id))) {
       for (const t of weekdayTemplates()) {
         const day = WEEKDAY_TEMPLATES.indexOf(t.name) + 1;
         if (!templates.some((x) => x.id === t.id || weekdayOf(x.name) === day)) templates.push(t);

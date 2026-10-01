@@ -292,6 +292,43 @@ await page.click('[data-act="tab"][data-tab="plan"]');
 check('restore brings the driver back', (await firstRow.locator('[data-field="driver"]').inputValue()) === 'Test Driver');
 check('restore brings the round back', (await firstRow.locator('[data-field="round"]').inputValue()) === '2');
 
+// Restore goes by the backup's time, as Archives' does: a backup taken between
+// the two clicks (another tab) shifts the rows, and the second click still
+// restores the one first clicked (review, 2026-10-01).
+await page.click('[data-act="tab"][data-tab="data"]');
+const armedAt = await page.locator('[data-act="restore"]').first().getAttribute('data-id');
+await page.locator('[data-act="restore"]').first().click();
+await page.evaluate(() => {
+  const other = JSON.parse(JSON.stringify(state));
+  other.routes[0].driver = 'Another Tab';
+  Store.snapshot(other, 'Another tab');
+  render();
+});
+await page.locator(`[data-act="restore"][data-id="${armedAt}"]`).click();
+check('Restore restores the backup first clicked, though another was taken between the clicks',
+  await page.evaluate((t) => notices.some((n) => n.text === `Restored the backup from ${when(t)}.`) && state.routes[0].driver !== 'Another Tab', armedAt));
+await page.click('[data-act="tab"][data-tab="plan"]');
+
+// With the browser's storage full the backup a delete promises cannot be
+// stored, so nothing is thrown away, and the warning says why (review,
+// 2026-10-01).
+await page.evaluate(() => {
+  window.realSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === 'carcoord:backups') throw new DOMException('full', 'QuotaExceededError');
+    return window.realSetItem.call(this, key, value);
+  };
+});
+const routesBefore = await page.evaluate(() => state.routes.length);
+const lastDel = page.locator('#tab-plan tr[data-route]').last().locator('[data-act="del"]');
+await lastDel.click();
+await lastDel.click();
+check('a delete with no room for its backup deletes nothing, and says so',
+  (await page.evaluate(() => state.routes.length)) === routesBefore
+  && (await page.locator('#notices').innerText()).includes('Could not take a backup'),
+  await page.locator('#notices').innerText());
+await page.evaluate(() => { Storage.prototype.setItem = window.realSetItem; notices = []; render(); });
+
 // --- export / import round trip ---
 await page.click('[data-act="tab"][data-tab="data"]');
 const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="export"]')]);
@@ -1226,6 +1263,11 @@ check('dismissing the question takes the question, not the notice beside it',
   await wed.click();
   await page.reload({ waitUntil: 'networkidle' });
   same('a deleted Wednesday template does not come back', await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Thursday', 'Friday']);
+  // Nor after an older build saves the plan, dropping the mark (review,
+  // 2026-10-01): a plan already carrying a default weekday template gains none.
+  await page.evaluate(() => { const raw = JSON.parse(localStorage.getItem('carcoord:v1')); delete raw.weekdayTemplates; localStorage.setItem('carcoord:v1', JSON.stringify(raw)); });
+  await page.reload({ waitUntil: 'networkidle' });
+  same('nor after an older build saved the plan without the mark', await page.evaluate(() => state.templates.map((t) => t.name)), ['Mandag', 'Tuesday', 'Thursday', 'Friday']);
 }
 
 // --- loading a template in parts ---
@@ -4132,7 +4174,7 @@ for (const [seededAt, wantNew, what] of [
     ['29/09/2026', 'This plan is dated today, Tuesday 29/09. The next working day is Wednesday 30/09.'],
     ['28/09/2026', 'Monday 28/09 has passed. The next working day is Wednesday 30/09.'],
     ['01/10/2026', 'Thursday 01/10 is not the next working day, Wednesday 30/09.'],
-    ['', 'The date is not a real day. The next working day is Wednesday 30/09.'],
+    ['', 'Not a real day yet: type it as dd/mm/yyyy, or click the box for the calendar. The plan keeps'],
   ];
   for (const [typed, want] of cases) {
     await pg.fill('#date', typed);
@@ -4146,7 +4188,7 @@ for (const [seededAt, wantNew, what] of [
   const head = () => pg.locator('#dateHead').evaluate((el) => el.innerText.replace(/\s+/g, ' ').trim());
   for (const [typed, want] of [['30/09/2026', 'Wednesday 30/09/2026 Planning tomorrow'], ['29/09/2026', 'Tuesday 29/09/2026 Planning today'],
     ['28/09/2026', 'Monday 28/09/2026 Planning yesterday'], ['02/10/2026', 'Friday 02/10/2026 Planning three days ahead'],
-    ['25/09/2026', 'Friday 25/09/2026 Planning four days ago'], ['20/10/2026', 'Tuesday 20/10/2026 Planning 21 days ahead'], ['', 'No date set']]) {
+    ['25/09/2026', 'Friday 25/09/2026 Planning four days ago'], ['20/10/2026', 'Tuesday 20/10/2026 Planning 21 days ahead'], ['', 'Not a date yet']]) {
     await pg.fill('#date', typed);
     same(`typing ${typed || 'nothing'}, the day above the line reads`, await head(), want);
   }
@@ -4297,6 +4339,23 @@ for (const [at, date, what] of [
   await pg.keyboard.type('05');
   same('editing the day in place loads the crew of the day written', await inNow(), await crewOf('Monday crew'));
   check('and keeps the focus in the Date box, reading 05/10/2026', await pg.evaluate(() => document.activeElement?.id === 'date' && document.activeElement.value === '05/10/2026'));
+  // Emptying the box to retype the same day keeps the day, saves nothing, and
+  // so loads no crew over availability set by hand (review, 2026-10-01).
+  await pg.evaluate(() => { state.drivers.find((d) => d.name === 'Camilla').available = true; save(); render(); });
+  await pg.locator('#date').focus();
+  await pg.keyboard.press('Control+a');
+  await pg.keyboard.press('Backspace');
+  check('an emptied Date box keeps the plan\'s day and saves no blank date', await pg.evaluate(() =>
+    state.date === '2026-10-05' && JSON.parse(localStorage.getItem('carcoord:v1')).date === '2026-10-05'));
+  await pg.keyboard.type('05/10/2026');
+  check('and typing the same day back loads no crew: Camilla, set in by hand, stays in',
+    await pg.evaluate(() => state.drivers.find((d) => d.name === 'Camilla').available));
+  await pg.fill('#date', '');
+  await pg.locator('#date').blur();
+  check('leaving it empty puts the plan\'s day back in the box', (await pg.inputValue('#date')) === '05/10/2026');
+  // A date written with dots, as Norway writes it, loads its crew too.
+  await pg.fill('#date', '02.10.2026');
+  same('a date typed with dots loads that day\'s crew', await inNow(), await crewOf('Friday'));
   await pg.close();
 }
 
@@ -5620,6 +5679,38 @@ const cmFlags = async (id) => cm.evaluate((n) => { const r = state.routes.find((
   await cm.keyboard.press('Escape');
   await cmRight(cmRoute('7').locator('[data-field="driver"]'));
   check('a name on no roster has no tag to offer', !(await cmEntries()).some((x) => x.startsWith('Tag:')));
+  await cm.keyboard.press('Escape');
+}
+
+// The menus from the keyboard and a click on an opened submenu, and the armed
+// "Sure?" on small buttons (review, 2026-10-01).
+{
+  await cmOpen();
+  await cm.setViewportSize({ width: 1280, height: 560 });
+  const name = cm.locator('#tab-plan [data-panel="drivers"] .rail-row').first().locator('.rail-name');
+  await name.focus();
+  await cm.keyboard.press('Shift+F10');
+  await cm.keyboard.press('ArrowDown');
+  check('the keyboard\'s place in a menu is a ring, not only a tint', await cm.evaluate(() => getComputedStyle(document.activeElement).outlineStyle === 'solid'));
+  await cm.keyboard.press('End');
+  check('End in a menu that scrolls shows the entry it lands on', await cm.evaluate(() => {
+    const menu = document.getElementById('ctxMenu').getBoundingClientRect(), item = document.activeElement.getBoundingClientRect();
+    return document.activeElement.closest('#ctxMenu') && item.top >= menu.top - 1 && item.bottom <= menu.bottom + 1;
+  }));
+  await cm.keyboard.press('Escape');
+  await cm.setViewportSize({ width: 1600, height: 940 });
+  // Resting on a submenu entry opens it; a click on it then keeps it open.
+  await cmRight(cmRoute('7').locator('select[data-field="carId"]'));
+  const status = cmMenu.locator('[data-act="ctx-view"]').first();
+  await status.hover();
+  await cm.waitForTimeout(250);
+  await status.click();
+  check('a click on the entry whose submenu resting just opened keeps it open', await cm.locator('#ctxSub').isVisible().catch(() => false));
+  await cm.keyboard.press('Escape');
+  await cm.keyboard.press('Escape');
+  const del = cm.locator('#planTemplates .tpl-head').first().locator('[data-act="del"]');
+  await del.click();
+  check('an armed ✕ on a template card reads white on red', await del.evaluate((b) => b.textContent === 'Sure?' && getComputedStyle(b).color === 'rgb(255, 255, 255)'));
   await cm.keyboard.press('Escape');
 }
 
