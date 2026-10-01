@@ -1,6 +1,6 @@
 # Pack: Breadify — faster ticks, and no bread left off quietly
 
-**Status:** 🚧 go given 2026-10-01 by the owner ("go on … breadify fixes"). Building.
+**Status:** 🚧 go given 2026-10-01 by the owner ("go on … breadify fixes"). All four items are committed on `worktree-agent-ace86b4469f3cdf51` and the pack gate is green (2026-10-01). Waiting on the review (2 lenses + verify) and the browser walkthrough. Not merged, not pushed, no PR.
 **Date:** 2026-10-01
 
 ## The owner's words
@@ -67,3 +67,11 @@ Agents: build 1 (medium; docs/breadify is one file set) · review 2 lenses (corr
   - a style pushing a route 8 row 400 mm down, re-entering Print: banner text exact, Print held, Ctrl+P taken and pointing at Print anyway, a menu print empty, Print anyway printing all 28, a tick change re-holding, route 8 unticked clearing the banner, the left-out line.
 
   Harness runs: shortfall block 11/11, edge loop all ok, shape loop 38/38. Gate: check.sh OK.
+- 2026-10-01 · **Pack gate green.** `CHROMIUM_PATH=/usr/bin/google-chrome node scripts/breadify.mjs`, run once after item 4: exit 0, 445 ok, 0 FAIL. Last lines:
+  ```
+    ok   the mark is remembered on this PC — got {"3474":"Dansk Rugbrød Hel Sandnes Bakeri"}
+    ok   with no errors
+
+  all passed
+  ```
+  check.sh OK. The INVENTORY 🚧 line (Breadify section) already describes what shipped and stays 🚧 until the merge. No version touched, and the car app is not touched. README's list of departures was not edited because it is outside this pack's file set. Two things are not yet recorded there: the text quantity (a departure from the Rust app, which reads the column as a number) and the shortfall banner.
