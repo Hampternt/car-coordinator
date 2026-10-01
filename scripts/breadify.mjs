@@ -1734,6 +1734,143 @@ same('Print right after an untick waits for the update', ticking.button, { waite
 same('and so does Ctrl+P, which the page takes over', ticking.keyboard, { waited: true, routes: 15, taken: true });
 check('every route is ticked again afterwards', ticking.after === sheets.length, String(ticking.after));
 
+// ── A severe warning when the pages miss a bread (the owner, 2026-10-01) ──
+// "can it give a severe warning if the list does not print all the bread?"
+// After the preview is built, each ticked route's lines are compared with the
+// rows drawn inside the paper. Any shortfall raises a red banner beside Print
+// naming the route, its lines and units, and the first missing bread, and
+// Print waits for "Print anyway". Routes unticked on purpose are said plainly.
+// Here a style pushes one row of route 8 off its first page, as a block too
+// tall for its page would be; the paginator's measuring column never sees it.
+same('the bread day carries every line: no banner, and Print is free', await page.evaluate(() => ({
+  banner: !document.getElementById('shortfall').hidden,
+  printDisabled: document.getElementById('print').disabled,
+  leftOut: !document.getElementById('leftOut').hidden,
+})), { banner: false, printDisabled: false, leftOut: false });
+
+const shortfall = await page.evaluate(async () => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const enter = () => document.querySelector('#steps [data-step="print"]').click();
+  const banner = document.getElementById('shortfall');
+  const printButton = document.getElementById('print');
+  const tickOf = (nickname) =>
+    Array.from(document.querySelectorAll('#routes .route')).find(
+      (row) => row.querySelector('.route-name').textContent === `Route ${nickname}`,
+    );
+  const linesOf = (nickname) => Number(/(\d+) lines/.exec(tickOf(nickname).querySelector('.route-meta').textContent)[1]);
+  const toggle = async (...nicknames) => {
+    for (const nickname of nicknames) tickOf(nickname).querySelector('input').click();
+    await pause(300);
+  };
+  const state = () => ({ shown: !banner.hidden, printDisabled: printButton.disabled });
+
+  const realPrint = window.print;
+  let prints = 0;
+  let printedSheets = 0;
+  window.print = () => {
+    prints += 1;
+    window.dispatchEvent(new Event('beforeprint'));
+    printedSheets = document.querySelectorAll('#sheets .bf-sheet').length;
+    window.dispatchEvent(new Event('afterprint'));
+  };
+  const target = '.bf-sheet[data-route="8"][data-page="1"] .bf-body > article.bf-block:nth-of-type(2) .bf-lines > .bf-row:first-child';
+  const force = document.createElement('style');
+  force.textContent = `${target} { margin-top: 400mm; }`;
+  document.head.append(force);
+  try {
+    enter();
+    const sheet = document.querySelector('#preview .bf-sheet[data-route="8"][data-page="1"]');
+    const pushed = document.querySelector(`#preview ${target}`);
+    const rows = Array.from(sheet.querySelectorAll('.bf-row'));
+    const gone = rows.slice(rows.indexOf(pushed));
+    const all = document.querySelectorAll('#preview .bf-sheet[data-route="8"] .bf-row').length;
+    const units = gone.reduce((sum, row) => sum + Number(row.querySelector('.bf-qty').textContent), 0);
+    const raised = {
+      ...state(),
+      says: Array.from(document.querySelectorAll('#shortfallRoutes li'), (li) => li.textContent),
+      want: [
+        `Route 8: ${gone.length} of ${all} lines (${units} units) are not on the paper, ` +
+          `starting with ${pushed.querySelector('.bf-product').textContent}.`,
+      ],
+    };
+
+    // Held: neither the button nor Ctrl+P prints, and Ctrl+P points at the way on.
+    printButton.click();
+    const key = new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(key);
+    const heldBack = {
+      prints,
+      taken: key.defaultPrevented,
+      pointed: document.activeElement === document.getElementById('printAnyway'),
+    };
+    // The browser's own menu cannot be stopped, so it gets nothing to print.
+    window.dispatchEvent(new Event('beforeprint'));
+    const menu = document.querySelectorAll('#sheets .bf-sheet').length;
+    window.dispatchEvent(new Event('afterprint'));
+    const previewKept = document.querySelectorAll('#preview .bf-sheet').length;
+
+    // Print anyway prints every sheet, as it stands.
+    document.getElementById('printAnyway').click();
+    const anyway = { prints, printedSheets, printDisabled: printButton.disabled };
+
+    // Any change of ticks asks again.
+    await toggle('1');
+    await toggle('1');
+    const again = state();
+
+    // Route 8 unticked is left out on purpose: said plainly, never as a warning.
+    await toggle('8');
+    const without8 = { ...state(), leftOut: document.getElementById('leftOut').textContent };
+    await toggle('8');
+
+    force.remove();
+    enter();
+    const cleared = state();
+
+    await toggle('5', '7');
+    const leftOut = {
+      ...state(),
+      shown: !document.getElementById('leftOut').hidden,
+      says: document.getElementById('leftOut').textContent,
+      want: `Left out on purpose: 5, 7 — ${linesOf('5') + linesOf('7')} lines.`,
+      banner: !banner.hidden,
+    };
+    await toggle('5', '7');
+    return {
+      raised, heldBack, menu, previewKept, anyway, again, without8, cleared, leftOut,
+      eightLines: linesOf('8'),
+      after: document.querySelectorAll('#preview .bf-sheet').length,
+      leftOutAfter: !document.getElementById('leftOut').hidden,
+    };
+  } finally {
+    force.remove();
+    window.print = realPrint;
+  }
+});
+check('a row pushed off the paper raises the banner, and Print is held',
+  shortfall.raised.shown && shortfall.raised.printDisabled, JSON.stringify(shortfall.raised));
+same('the banner names the route, its lines and units, and the first missing bread',
+  shortfall.raised.says, shortfall.raised.want);
+same('while held, neither Print nor Ctrl+P prints, and Ctrl+P points at Print anyway', shortfall.heldBack,
+  { prints: 0, taken: true, pointed: true });
+check('a print from the browser’s menu carries no sheet, and the preview keeps them all',
+  shortfall.menu === 0 && shortfall.previewKept === sheets.length, `${shortfall.menu} / ${shortfall.previewKept}`);
+same('Print anyway prints every sheet, as it stands', shortfall.anyway,
+  { prints: 1, printedSheets: sheets.length, printDisabled: false });
+same('any change of ticks holds Print again', shortfall.again, { shown: true, printDisabled: true });
+same('route 8 unticked is left out on purpose, and nothing is short', shortfall.without8, {
+  shown: false,
+  printDisabled: false,
+  leftOut: `Left out on purpose: 8 — ${shortfall.eightLines} lines.`,
+});
+same('with the row back on the paper, the banner goes', shortfall.cleared, { shown: false, printDisabled: false });
+check('routes unticked on purpose are listed plainly, with their lines, never as a warning',
+  shortfall.leftOut.shown && shortfall.leftOut.says === shortfall.leftOut.want && !shortfall.leftOut.banner &&
+    !shortfall.leftOut.printDisabled,
+  JSON.stringify(shortfall.leftOut));
+check('every route is ticked again afterwards, and nothing is left out',
+  shortfall.after === sheets.length && !shortfall.leftOutAfter, String(shortfall.after));
+
 // "Show the order ID" is for one-order blocks. In a block of several orders
 // the id is what tells them apart, so it prints on every line regardless.
 await page.click('[data-step="configure"]');
@@ -1866,6 +2003,10 @@ await page.waitForSelector('#step-print:not([hidden])');
 await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0, {
   timeout: 30000,
 });
+same('the freezer day carries every line: no banner, and Print is free', await page.evaluate(() => ({
+  banner: !document.getElementById('shortfall').hidden,
+  printDisabled: document.getElementById('print').disabled,
+})), { banner: false, printDisabled: false });
 
 const freezer = await page.evaluate(() => {
   const all = Array.from(document.querySelectorAll('#preview .bf-sheet'));
@@ -2106,20 +2247,25 @@ for (const [folder, fixture, what] of EDGE) {
             crates: Model.defaultCrateRules(),
       };
       const pages = [];
+      const byRoute = [];
       for (const route of Model.group(Model.fold(rows))) {
-        pages.push(
-          ...Sheet.paginate(
-            route,
-            settings,
-            { dates: null, source: 'edge', routeStops: route.orders.length,
-              routeLines: Model.lineCount(route) },
-            { host },
-          ),
+        const own = Sheet.paginate(
+          route,
+          settings,
+          { dates: null, source: 'edge', routeStops: route.orders.length,
+            routeLines: Model.lineCount(route) },
+          { host },
         );
+        pages.push(...own);
+        byRoute.push([route, own]);
       }
       for (const sheet of pages) host.appendChild(sheet);
 
       const seen = inspectSheets(pages);
+      // What the Print step's banner reads: every line on the paper.
+      const short = byRoute
+        .map(([route, own]) => [route.nickname, Sheet.coverage(route, own)])
+        .filter(([, coverage]) => !coverage || coverage.missing.lines > 0);
 
       // Every code the lines print has to be spelled out in the key above them.
       const codes = new Set(Array.from(host.querySelectorAll('.bf-code'), (n) => n.textContent));
@@ -2140,6 +2286,7 @@ for (const [folder, fixture, what] of EDGE) {
         seen,
         unexplained,
         columnWidths: Array.from(widths).sort((a, b) => a - b),
+        short,
       };
     } finally {
       host.remove();
@@ -2148,6 +2295,7 @@ for (const [folder, fixture, what] of EDGE) {
 
   inspected(what, shape.seen);
   same(`${what}: no code prints without the key explaining it`, shape.unexplained, []);
+  same(`${what}: every line is on the paper, so no banner`, shape.short, []);
   check(
     `${what}: the bakery columns are all one width`,
     shape.columnWidths.length <= 1,
@@ -2463,16 +2611,21 @@ for (const [fixture, expected, saying] of SHAPES) {
       const settings = { kind: Model.BREAD, showOrderId: true,
                          crates: Model.defaultCrateRules() };
       let printed = '';
+      const short = [];
       for (const route of Model.group(Model.fold(rows))) {
-        for (const sheet of Sheet.paginate(
+        const own = Sheet.paginate(
           route, settings,
           { dates: null, source: 'shape', routeStops: route.orders.length,
             routeLines: Model.lineCount(route) },
           { host },
-        )) {
+        );
+        for (const sheet of own) {
           host.appendChild(sheet);
           printed += ` ${sheet.textContent}`;
         }
+        // What the Print step's banner reads: every line on the paper.
+        const coverage = Sheet.coverage(route, own);
+        if (!coverage || coverage.missing.lines > 0) short.push(route.nickname);
       }
       return {
         outcome: 'read',
@@ -2480,6 +2633,7 @@ for (const [fixture, expected, saying] of SHAPES) {
         said: findings.map((f) => f.kind),
         // A number that went wrong shows up as one of these on the paper.
         nonsense: ['NaN', 'Infinity', 'undefined', '[object'].filter((w) => printed.includes(w)),
+        short,
       };
     } catch (error) {
       return { outcome: 'threw', why: String((error && error.message) || error) };
@@ -2500,6 +2654,7 @@ for (const [fixture, expected, saying] of SHAPES) {
       got.outcome === 'read' && got.rows === expected && got.nonsense.length === 0,
       JSON.stringify(got),
     );
+    same(`${fixture}: every line is on the paper, so no banner`, got.short, []);
   }
 }
 

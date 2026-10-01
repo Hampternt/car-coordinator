@@ -373,6 +373,13 @@ const Sheet = (() => {
   }
 
   /**
+   * The order line each printed row draws, so coverage() can say which of a
+   * route's lines made it onto the paper. Kept off the page, so the sheets
+   * print exactly as they did.
+   */
+  const drawing = new WeakMap();
+
+  /**
    * One product line, with every second one tinted.
    *
    * The bread list writes a pick line: `P` box, quantity, code, name, then the
@@ -394,6 +401,7 @@ const Sheet = (() => {
       'div',
       `bf-row${bread ? '' : ' bf-row-check'}${tinted ? ' bf-row-zebra' : ''}`,
     );
+    drawing.set(row, line);
 
     append(
       row,
@@ -1444,7 +1452,10 @@ const Sheet = (() => {
         sheet.dataset.of = String(pages.length);
 
         const body = element('div', 'bf-body');
-        for (const piece of indices) body.appendChild(pieces[piece].node);
+        for (const piece of indices) {
+          body.appendChild(pieces[piece].node);
+          if (pieces[piece].over) taller.add(pieces[piece].node);
+        }
         // The page is shared out; now its dead space, if any, gets Notes lines.
         // Only the real budget counts — never the floor that lets furniture
         // overfill a page — so the 10 mm above the footer is never touched.
@@ -1486,12 +1497,83 @@ const Sheet = (() => {
     );
   }
 
+  // ── Whether the paper carries every line ──────────────────────────────
+
+  /**
+   * Pieces taller than a page that nothing could cut (stopPieces(),
+   * totalPieces()). The sheet's `overflow: hidden` clips them without a
+   * word, so whatever they hold counts as not drawn.
+   */
+  const taller = new WeakSet();
+
+  /** Sub-pixel rounding between boxes, not real overlap. */
+  const SLACK = 0.5;
+
+  /**
+   * How many of a route's lines its sheets carry on the paper (the owner,
+   * 2026-10-01: "can it give a severe warning if the list does not print all
+   * the bread?").
+   *
+   * A line is drawn when its row lies within its sheet and above the
+   * footer, and not inside a piece taller than a page. Anything else is
+   * hidden by the sheet's `overflow: hidden` without a word. The sheets must
+   * be laid out in the document, unzoomed, as they print.
+   *
+   * Returns the route's lines and units, and those missing with the first
+   * missing bread in printing order. Returns null when the sheets have no
+   * size, because nothing can be said then. A row with the right count is
+   * not enough: each of the file's lines must be the one a drawn row
+   * carries.
+   */
+  function coverage(route, sheets) {
+    const drawn = new Set();
+    for (const sheet of sheets) {
+      const paper = sheet.getBoundingClientRect();
+      if (!(paper.height > 0)) return null;
+      const footer = sheet.querySelector('.bf-footer');
+      const floor = footer ? Math.min(paper.bottom, footer.getBoundingClientRect().top) : paper.bottom;
+      for (const row of sheet.querySelectorAll('.bf-row')) {
+        const line = drawing.get(row);
+        if (!line || insideTaller(row, sheet)) continue;
+        const box = row.getBoundingClientRect();
+        if (
+          box.top >= paper.top - SLACK &&
+          box.bottom <= floor + SLACK &&
+          box.left >= paper.left - SLACK &&
+          box.right <= paper.right + SLACK
+        ) {
+          drawn.add(line);
+        }
+      }
+    }
+    const lines = route.orders.flatMap((order) => order.lines);
+    const missing = lines.filter((line) => !drawn.has(line));
+    const units = (some) => some.reduce((sum, line) => sum + line.quantity, 0);
+    return {
+      lines: lines.length,
+      units: units(lines),
+      missing: {
+        lines: missing.length,
+        units: units(missing),
+        first: missing.length > 0 ? missing[0].product.name : null,
+      },
+    };
+  }
+
+  function insideTaller(row, sheet) {
+    for (let node = row.parentElement; node && node !== sheet; node = node.parentElement) {
+      if (taller.has(node)) return true;
+    }
+    return false;
+  }
+
   return {
     PAGE_HEIGHT,
     CONTENT_HEIGHT,
     FOOTER_CLEARANCE,
     paginate,
     day,
+    coverage,
     stopBlock,
     routeTotalBlock,
     checkTotalBlock,
