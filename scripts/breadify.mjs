@@ -1771,6 +1771,54 @@ same(
   ],
 );
 
+// ── A new file clears the old sheets (the owner, 2026-10-01) ─────────────
+// Ctrl+P prints whatever was last laid out, from any step. A file opened
+// after the Print step used to leave the old file's sheets there to print;
+// so did switching between bread and freezer on Check.
+await page.evaluate(() => {
+  window.realPrint = window.print;
+  window.printedRoutes = null;
+  window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    window.printedRoutes = Array.from(document.querySelectorAll('#sheets .bf-sheet'), (s) => s.dataset.route);
+    window.dispatchEvent(new Event('afterprint'));
+  };
+});
+const breadLaidOut = await page.locator('#preview .bf-sheet').count();
+await page.setInputFiles('#file', `scripts/fixtures/${FREEZER}`);
+await page.waitForFunction(() => document.getElementById('mode').dataset.kind === 'freezer');
+await page.keyboard.press('Control+p');
+const afterOpen = await page.evaluate(() => ({
+  printed: window.printedRoutes,
+  preview: document.querySelectorAll('#preview .bf-sheet').length,
+  printDisabled: document.getElementById('print').disabled,
+}));
+await page.click('#advance');
+await page.click('#advance');
+await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0);
+const freezerLaidOut = await page.locator('#preview .bf-sheet').count();
+await page.click('#steps [data-step="check"]');
+await page.click('#mode [data-kind="bread"]');
+await page.evaluate(() => {
+  window.printedRoutes = null;
+});
+await page.keyboard.press('Control+p');
+const afterFlip = await page.evaluate(() => ({
+  printed: window.printedRoutes,
+  preview: document.querySelectorAll('#preview .bf-sheet').length,
+}));
+await page.evaluate(() => {
+  window.print = window.realPrint;
+});
+check('the bread day was laid out before the freezer file was opened', breadLaidOut === sheets.length, String(breadLaidOut));
+same('Ctrl+P after opening another file prints none of the old file’s sheets', afterOpen, {
+  printed: [],
+  preview: 0,
+  printDisabled: true,
+});
+check('the freezer day was laid out before its kind was switched', freezerLaidOut > 0, String(freezerLaidOut));
+same('nor after switching between bread and freezer on Check', afterFlip, { printed: [], preview: 0 });
+
 // ── The freezer list ───────────────────────────────────────────────────────
 
 const freezerBytes = Array.from(await readFile(`scripts/fixtures/${FREEZER}`));

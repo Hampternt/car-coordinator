@@ -156,6 +156,23 @@
     state.findings = Validate.run(state.rows, state.settings.kind);
     state.routes = Model.group(Model.fold(state.rows));
     state.selected = new Set(state.routes.map((route) => route.nickname));
+    forgetSheets();
+  }
+
+  /**
+   * The sheets laid out for the file or kind before go, so nothing can print
+   * them. Ctrl+P prints whatever `built` holds, from any step, and only the
+   * Print step used to set it: a file opened after the last Print step
+   * printed the previous file's sheets.
+   */
+  function forgetSheets() {
+    clearTimeout(pending);
+    pending = null;
+    laid.clear();
+    built = [];
+    $('preview').replaceChildren();
+    $('sheets').replaceChildren();
+    $('print').disabled = true;
   }
 
   function productsById() {
