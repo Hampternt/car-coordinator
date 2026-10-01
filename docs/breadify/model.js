@@ -106,6 +106,43 @@ const Model = (() => {
   }
 
   /**
+   * The most characters a quantity that is not a number prints, before "…"
+   * (the owner, 2026-10-01: "just have a basic check to make sure whatever is
+   * being put instead of a num is not super long … maybe have it only able to
+   * be something like 20 characters long").
+   */
+  const QUANTITY_TEXT_MAX = 20;
+
+  /**
+   * A quantity cell that holds no number, as it prints: whatever it says,
+   * trimmed, and cut to 20 characters with "…" past that, so a paragraph
+   * cannot push the line apart. A blank prints blank and an error cell as
+   * its code. Null for a cell that holds a number, which prints as one.
+   *
+   * The owner, 2026-10-01: "if it appears as something other than num like
+   * string then just write whatever it says". It used to print as 0.
+   */
+  function quantityText(cell) {
+    if (exactNumber(cell) !== null) return null;
+    const written = Array.from(text(cell));
+    return written.length > QUANTITY_TEXT_MAX
+      ? `${written.slice(0, QUANTITY_TEXT_MAX).join('')}…`
+      : written.join('');
+  }
+
+  /**
+   * How many a quantity cell asks for, for the crates and the route total.
+   * A number is truncated as `integer` does; text counts as the whole number
+   * it starts with — `3 stk` is 3, `3,5` is 3 — and as 0 when it starts
+   * with none, as a blank or an error cell does.
+   */
+  function quantity(cell) {
+    if (exactNumber(cell) !== null) return integer(cell);
+    const leading = /^\d+/.exec(text(cell));
+    return leading ? Number(leading[0]) : 0;
+  }
+
+  /**
    * `Accept alternatives` is a genuine Excel boolean. An exporter that ever
    * writes it as 0/1 or as the words still reads correctly here.
    */
@@ -193,8 +230,10 @@ const Model = (() => {
         // A blank or unreadable id reads as 0 above, and every such row would
         // fold into one order. validate.js says so from this.
         orderIdExact: exactNumber(cell(COLUMN.orderId)),
-        quantity: integer(cell(COLUMN.quantity)),
+        quantity: quantity(cell(COLUMN.quantity)),
         quantityExact: exactNumber(cell(COLUMN.quantity)),
+        // What prints where the cell holds no number; null where it does.
+        quantityText: quantityText(cell(COLUMN.quantity)),
         productId: integer(cell(COLUMN.productId)),
         productName: text(cell(COLUMN.productName)),
         supplierSku: text(cell(COLUMN.supplierSku)),
@@ -386,6 +425,9 @@ const Model = (() => {
           supplier: row.supplier,
         },
         quantity: row.quantity,
+        // Printed in place of the number when the file gave text; the sums
+        // read `quantity` alone.
+        quantityText: typeof row.quantityText === 'string' ? row.quantityText : null,
       };
 
       const position = positionOf.get(row.orderId);

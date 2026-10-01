@@ -401,7 +401,11 @@ const Sheet = (() => {
       // The freezer line's second box, D for delivered, beside C (the owner,
       // 2026-09-30; a departure from F8, which has C alone at the left).
       bread ? null : tickBox('D'),
-      element('span', 'bf-qty', line.quantity),
+      // A quantity the file gave as text prints as it says, cut to 20
+      // characters (Model.quantityText; the owner, 2026-10-01).
+      typeof line.quantityText === 'string'
+        ? element('span', 'bf-qty bf-qty-text', line.quantityText)
+        : element('span', 'bf-qty', line.quantity),
       element('span', 'bf-code', Model.supplierCode(line.product.supplier)),
     );
 

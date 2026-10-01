@@ -2603,6 +2603,118 @@ same('a line asking for nothing is called out', quantitySays.zero,
 same('half a bread is not quietly made whole', quantitySays.fractional,
   [['warning', '1 quantity(ies) are not whole breads']]);
 
+// ── A quantity that is not a number (the owner, 2026-10-01) ───────────────
+// "if it appears as something other than num like string then just write
+// whatever it says", and "maybe have it only able to be something like 20
+// characters long". Five lines of one order on the bread sample are given
+// `3 stk`, `3,5`, a 200-character note, a blank and #N/A. They print as
+// written, cut to 20 characters with "…"; the crates and the route total count
+// the whole number each starts with (3, 3, 0, 0, 0), exactly as the same lines
+// given those numbers do; Check says so once, as a warning naming the route,
+// customer and bread; and "ask for nothing" keeps to true zeros.
+const NOTE = 'Leveres ved bakdøra, ring på klokka to ganger og vent. '.repeat(4).slice(0, 200);
+const textQuantities = await page.evaluate(async ([bytes, note]) => {
+  const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+  const plain = Model.readRows(await book.sheet('Data'));
+  // The first order in the file with five lines or more.
+  const byOrder = new Map();
+  for (const row of plain) byOrder.set(row.orderId, [...(byOrder.get(row.orderId) || []), row]);
+  const order = [...byOrder.values()].find((rows) => rows.length >= 5);
+  const targets = order.slice(0, 5).map((row) => row.excelRow);
+  const variant = async (cells) => {
+    const sheet = await book.sheet('Data');
+    for (const row of sheet.rows) {
+      const at = targets.indexOf(row.number);
+      if (at < 0) continue;
+      if (cells[at] === null) row.cells.delete(Model.COLUMN.quantity);
+      else row.cells.set(Model.COLUMN.quantity, cells[at]);
+    }
+    return Model.readRows(sheet);
+  };
+  const textRows = await variant([
+    { kind: 'text', value: '3 stk' },
+    { kind: 'text', value: '  3,5 ' },
+    { kind: 'text', value: note },
+    null,
+    { kind: 'error', value: '#N/A' },
+  ]);
+  const numberRows = await variant([3, 3, 0, 0, 0].map((value) => ({ kind: 'number', value })));
+
+  const nickname = order[0].routeNickname;
+  const routeOf = (rows) => Model.group(Model.fold(rows)).find((route) => route.nickname === nickname);
+  const rules = Model.defaultCrateRules();
+  const figures = (rows) => {
+    const route = routeOf(rows);
+    return {
+      crates: Model.routeCrates(route, rules),
+      packed: route.stops.map((stop) =>
+        Model.departmentGroups(stop.orders).map((group) => Model.packedCrateCount(group.orders, rules))),
+      total: Model.routeTotal(route),
+    };
+  };
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-10000px;top:0';
+  document.body.append(host);
+  const printed = {};
+  const seen = {};
+  try {
+    for (const kind of [Model.BREAD, Model.FREEZER]) {
+      const route = routeOf(textRows);
+      const pages = Sheet.paginate(
+        route,
+        { kind, showOrderId: true, crates: rules },
+        { dates: null, source: 'text', routeStops: route.stops.length, routeLines: Model.lineCount(route) },
+        { host },
+      );
+      for (const sheet of pages) host.appendChild(sheet);
+      printed[kind] = Array.from(host.querySelectorAll('.bf-qty-text'), (node) => node.textContent).sort();
+      seen[kind] = inspectSheets(pages);
+      host.replaceChildren();
+    }
+  } finally {
+    host.remove();
+  }
+
+  const said = (rows) =>
+    Validate.run(rows, Model.BREAD)
+      .filter((f) => f.kind === 'quantity-not-a-number' || f.kind === 'impossible-quantity')
+      .map((f) => [f.severity, f.headline, f.rows]);
+  const finding = Validate.run(textRows, Model.BREAD).find((f) => f.kind === 'quantity-not-a-number');
+  const first = order[0];
+  return {
+    read: textRows.filter((row) => targets.includes(row.excelRow)).map((row) => [row.quantity, row.quantityText]),
+    printed,
+    seen,
+    sameFigures: JSON.stringify(figures(textRows)) === JSON.stringify(figures(numberRows)),
+    textSaid: said(textRows),
+    numberSaid: said(numberRows).map(([severity, headline]) => [severity, headline]),
+    names: !!finding && [`route ${nickname}`, first.customer, first.productName].every((part) => finding.detail.includes(part)),
+    targets,
+  };
+}, [breadBytes, NOTE]);
+const cut = `${NOTE.slice(0, 20)}…`;
+same('a quantity that is not a number reads as written, and counts as the number it starts with', textQuantities.read, [
+  [3, '3 stk'],
+  [3, '3,5'],
+  [0, cut],
+  [0, ''],
+  [0, '#N/A'],
+]);
+same('it prints as written on a pick line, cut to 20 characters', textQuantities.printed.bread,
+  ['', '#N/A', '3 stk', '3,5', cut].sort());
+same('and on a check line', textQuantities.printed.freezer, ['', '#N/A', '3 stk', '3,5', cut].sort());
+inspected('a pick line with a quantity in words', textQuantities.seen.bread);
+inspected('a check line with a quantity in words', textQuantities.seen.freezer);
+check('the crates and the route total count it as 3, 3, 0, 0 and 0', textQuantities.sameFigures);
+same('Check says so once, as a warning, and nothing asks for nothing', textQuantities.textSaid, [
+  ['warning', '5 line(s) give a quantity that is not a number', textQuantities.targets],
+]);
+check('naming the route, the customer and the bread', textQuantities.names);
+same('while the same lines given 0 do ask for nothing', textQuantities.numberSaid, [
+  ['warning', '3 line(s) ask for nothing'],
+]);
+
 // ── More bakeries than the key can name ────────────────────────────────────
 //
 // The key is furniture: it prints on every sheet, so whatever it costs, it
