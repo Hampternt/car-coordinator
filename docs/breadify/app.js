@@ -689,7 +689,9 @@
   function printNow() {
     flush();
     if (held()) {
-      // Held: the warning says why, and its button is the way on.
+      // Held: the warning says why, and its button is the way on. Ctrl+P on
+      // another step goes to the Print step first, where the warning is.
+      if (state.step !== 'print') go('print');
       $('shortfall').scrollIntoView({ block: 'nearest' });
       $('printAnyway').focus();
       return;
@@ -705,7 +707,18 @@
   window.addEventListener('beforeprint', () => {
     flush();
     if (held()) {
-      $('sheets').replaceChildren();
+      // The browser's own Print menu cannot be stopped, so the paper says
+      // why it carries no sheets, rather than coming out blank.
+      const note = document.createElement('div');
+      note.className = 'held-print';
+      const head = document.createElement('h1');
+      head.textContent = 'Not printed: not every bread is on the pages';
+      const list = document.createElement('ul');
+      list.append(...Array.from($('shortfallRoutes').children, (item) => item.cloneNode(true)));
+      const how = document.createElement('p');
+      how.textContent = 'Open the Print step in Breadify to look, then press Print anyway to print the sheets as they stand.';
+      note.append(head, list, how);
+      $('sheets').replaceChildren(note);
       return;
     }
     for (const sheet of built) sheet.style.zoom = '';

@@ -860,6 +860,18 @@ input[type='number'] {
   #sheets {
     display: block;
   }
+
+  /* Print held, from the browser's own menu: one page saying why. */
+  .held-print {
+    padding: 20mm;
+    color: #000;
+    font: 12pt/1.4 'Space Grotesk', sans-serif;
+  }
+
+  .held-print h1 {
+    font-size: 18pt;
+    margin: 0 0 6mm;
+  }
 }
 
 /* The colophon. Quiet — it is a legal courtesy and a statement of fact, not
