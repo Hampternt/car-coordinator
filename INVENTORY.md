@@ -6,7 +6,7 @@ What this repo's two apps are, at feature altitude. Implementation lives in
 State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## In flight
-- 🚧 **The review round** — all nine packs are built and merged into `dev` (0.11.0), with Breadify's blocks. Waiting for the owner to test `dev` before it goes to `main`. `manifests/2026-09-28-review-round.md`.
+- 🚧 **The review round, released as 0.14.1** — all nine packs and everything since are on `dev`. The owner tested the update from the live 0.2.4 on `dev` with their own data (2026-10-01); the combined review ran and its findings are fixed. Goes to `main` with PR #17 on the owner's go. `manifests/2026-09-28-review-round.md`.
 
 ## Day plan
 - ✅ **Route rows** — route name, driver, car, packing **position** and **round** as separate fields, with reorder and two-click delete.

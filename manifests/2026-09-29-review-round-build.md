@@ -1,6 +1,6 @@
 # Combined pack: the rest of the review round, built in one go
 
-**Status:** 🚧 go given 2026-09-29 by the owner ("combine all the UI changes and minor features … begin on its own worktree"). Building.
+**Status:** ✅ BUILT and MERGED into `dev` (parts 2–9, 0.4.0–0.11.0). The review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5; the owner tested the whole update on `dev` (2026-10-01). It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-29
 **Branch:** `review-round`, in its own worktree. It is cut from `update-note` (pack 1, whose review fixes are still landing), then merged with `origin/dev` for the plans. It comes back into `dev` through **one PR** at the end. Nothing goes to `main` until the owner has tested the full update on `dev`.
 

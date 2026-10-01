@@ -1,6 +1,6 @@
 # Container: The review round
 
-**Status:** 🚧 pack 1 (update note and fail-safe) built, reviewed, fixed and green on `update-note`; PR into `dev` next. Packs 2–9 are being built together as one combined pack on `review-round`, in its own worktree (owner, 2026-09-29): `manifests/2026-09-29-review-round-build.md`. The Reconnect fix is on `dev` (0.2.5).
+**Status:** ✅ ALL PACKS MERGED into `dev`, with everything since, as 0.14.1. The owner tested the update from 0.2.4 on `dev` with their own data (2026-10-01); the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. The container goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-28
 **Branch:** `dev` is where everything is combined (owner, 2026-09-28). Each pack cuts its branch from `dev` and comes back through a PR into `dev`, and CI runs the tests on those PRs. `main` only receives `dev`, and **only after the owner has tested the full combined update on `dev` and said go** (2026-09-29). Nothing else is a go: not a pack's approval, not a PR into `dev`, not green gates. that push is what publishes Pages and builds the Windows release. `dev` starts at 0.2.5, with the save-file fix and the dev fixture.
 

@@ -1,6 +1,6 @@
 # Pack: Day-plan left rail, driver roster with day groups, position/round split
 
-**Status:** 🚧 all items committed, pack gate green — awaiting the browser walkthrough and item 3's review
+**Status:** ✅ SHIPPED on `main` (0.2.x). The walkthrough was the owner's daily use since; item 3's separate review was never recorded.
 **Date:** 2026-09-18
 **Branch:** `day-plan-rail-and-round`
 

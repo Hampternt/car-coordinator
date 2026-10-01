@@ -1,6 +1,6 @@
 # Pack: Drivers tab
 
-**Status:** 🚧 items 1 and 3-11 built on `review-round` (combined pack, part 7; item 2 dropped), cut at 0.9.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 4 individually) and the walkthrough.
+**Status:** ✅ MERGED into `dev` (part 7, 0.9.0; item 2 dropped). Item 4 was reviewed in the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `drivers-tab`, from `dev` after pack 6 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 

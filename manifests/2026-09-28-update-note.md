@@ -1,6 +1,6 @@
 # Pack: Update note and fail-safe — say what changed, and keep an untouched copy
 
-**Status:** 🚧 all 12 items built. The review's findings are fixed and the pack gate is green again (2026-09-29, system Chrome). Waiting on the browser walkthrough.
+**Status:** ✅ MERGED into `dev` (0.2.5 onwards), reviewed (13 findings fixed). The update path was walked by the owner on 2026-10-01: live 0.2.4 to `dev` on one address, with their own data, everything kept. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-28. Reworked against `dev` at b0ae257, after the 0.2.5 save-file fix. Revised 2026-09-29 after the plan review (see Ledger).
 **Branch:** `update-note`, cut from `dev` and merged back into `dev` through a PR (the container's Branch line).
 

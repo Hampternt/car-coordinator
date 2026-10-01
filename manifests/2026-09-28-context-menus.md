@@ -1,6 +1,6 @@
 # Pack: Right-click menus: the actions for the thing under the pointer
 
-**Status:** 🚧 items 1-14 built on `review-round` (combined pack, part 8), cut at 0.10.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (items 3, 5 and 12 individually), the walkthrough and the hand checks.
+**Status:** ✅ MERGED into `dev` (part 8 of the review-round build, 0.10.0, extended since). The individual reviews of items 3, 5 and 12 ran as part of the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-28
 **Branch:** cut when execution starts: `context-menus`, from `dev`, after pack 7 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 

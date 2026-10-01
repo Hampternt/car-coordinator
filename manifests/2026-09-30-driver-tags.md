@@ -1,6 +1,6 @@
 # Pack: Driver tags, apart from car labels
 
-**Status:** BUILT, gates green (2026-09-30), on branch `driver-tags` (cut from `dev` at 69d1e47). Next: the main session's review of item 1, the merge into `dev`, and the owner's browser walkthrough.
+**Status:** ✅ MERGED into `dev` at 0.12.0 (item 1 reviewed, no findings). The owner's 2026-10-01 upgrade test carried their Holiday and Course statuses over as driver tags. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Branch:** `dev`, where the combined update is being tested. It ships with it, as 0.12.0.
 
 Observable: a driver's tag menu and the Drivers tab offer only driver tags (Sick, Holiday, Vacation, Course, Special situation and your own), never Workshop or Out of service. Cars and positions offer only their labels. Every driver keeps the tag they had.

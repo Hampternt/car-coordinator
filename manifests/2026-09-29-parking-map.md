@@ -1,6 +1,6 @@
 # Pack: Parking map
 
-**Status:** 🚧 all 9 items built on `review-round` (combined pack, part 6), cut at 0.8.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 4 individually) and the walkthrough.
+**Status:** ✅ MERGED into `dev` (part 6, 0.8.0, redrawn since to the owner's drawing). Item 4 was reviewed in the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `parking-map`, from `dev` after pack 5 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line). Items 1–2 can start earlier, but only on their own branch, `parking-map-model` (Design H).
 

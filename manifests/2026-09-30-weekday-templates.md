@@ -1,6 +1,6 @@
 # Pack: Weekday templates, Update from plan, and loading in parts
 
-**Status:** BUILT, gates green (2026-09-30), on branch `weekday-templates` (cut from `dev` at a84fdab). Next: the main session's review of item 1, the merge into `dev`, and the owner's browser walkthrough.
+**Status:** ✅ MERGED into `dev` at 0.13.0. Item 1's data-safety review, skipped before the merge, ran in the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5 (a deleted weekday template could come back after an older build's save: fixed). It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Branch:** its own, `weekday-templates`, cut from `dev` and merged back into `dev` when green. It ships as 0.13.0.
 
 Observable: the shelf holds Monday to Friday templates. Each card has an **Update from plan** button. Loading one opens a question with ticks (Routes, Drivers, Cars, Positions and rounds, all ticked) and a sentence and a button that say exactly what will happen.

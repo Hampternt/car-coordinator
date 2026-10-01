@@ -1,6 +1,6 @@
 # Pack: Breadify — room to write
 
-**Status:** 🚧 all three items committed on `breadify-notes` (cut from `dev` at 86efb1a), test:breadify green (2026-09-30). Waiting on the owner's look and the coordinator's merge. Merged into `dev` by the coordinator; no push, merge or PR from here.
+**Status:** ✅ MERGED into `dev` (room to write). Goes to `main` with 0.14.1 (PR #17), on the owner's go.
 **Date:** 2026-09-30
 
 ## The owner's words

@@ -1,6 +1,6 @@
 # Pack: Breadify — one-look marker, one block per customer
 
-**Status:** 🚧 all eleven items and the review's 18 fixes (R1–R16) committed on `breadify-blocks`, pack gate green (2026-09-29). Waiting on the owner: review of items 8 and 9 and one pass for the rest, the look at the PDFs, and the browser walkthrough. Not pushed, no PR.
+**Status:** ✅ MERGED into `dev` (reviewed: 18 findings fixed); the later Breadify packs built on it. Goes to `main` with 0.14.1 (PR #17), on the owner's go.
 **Date:** 2026-09-29
 **Branch:** `breadify-blocks`, cut from `dev` and merged back into `dev` through a PR. It shares three files with the review-round packs: README.md, INVENTORY.md and `scripts/check.sh`. In `scripts/check.sh`, item 1 changes only the loop line at :38. update-note edits that file's header and tail, not :38.
 

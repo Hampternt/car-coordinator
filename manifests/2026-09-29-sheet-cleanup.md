@@ -1,6 +1,6 @@
 # Pack: Printed sheet cleanup
 
-**Status:** 🚧 all 7 items built and the pack gate green, 2026-09-29, on `review-round` (combined pack, part 2), at 0.4.0. Waiting on the individual review of item 3, one review for the rest, the browser walkthrough, and pack close.
+**Status:** ✅ MERGED into `dev` (part 2, 0.4.0; its review: 3 findings fixed). Item 3 was reviewed again in the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-29. Planned against `dev` at 73dd734, before pack 1 merged.
 **Branch:** cut when execution starts: `sheet-cleanup`, from `dev` after pack 1 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 

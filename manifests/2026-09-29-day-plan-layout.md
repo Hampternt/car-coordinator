@@ -1,6 +1,6 @@
 # Pack: Day plan layout
 
-**Status:** 🚧 all 12 items built on `review-round` (combined pack, part 5), cut at 0.7.0, 2026-09-30. Its tests run with the whole build's suite at the end; then the combined review (item 6 individually) and the walkthrough.
+**Status:** ✅ MERGED into `dev` (part 5, 0.7.0). Item 6 was reviewed in the review round's combined review ran on 2026-10-01 (before `main`), its findings fixed in 31dfba5. It goes to `main` as 0.14.1 with PR #17, on the owner's go.
 **Date:** 2026-09-29
 **Branch:** cut when execution starts: `day-plan-layout`, from `dev` after pack 4 has merged into `dev`, and merged back into `dev` through a PR (the container's Branch line).
 
