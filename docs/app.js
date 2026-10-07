@@ -360,7 +360,13 @@ let notices = [];
    nowhere else. It lasts until the plan or its date is replaced, or its
    notice is put away. */
 let dateMove = null;
+// Set once another tab has saved a newer plan while this one is in a shared
+// plan; only a reload clears it. See the storage listener there.
+let planElsewhere = false;
 const save = () => {
+  // Another tab saved a newer plan (planElsewhere, in the shared plan's code):
+  // this one's is stale until reloaded, and writing it would undo that change.
+  if (planElsewhere) return;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
   Store.save(state);
 };
@@ -2698,6 +2704,7 @@ function renderRoomLook() {
 }
 
 async function roomRestore(id, plain) {
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was restored. Reload this tab first.'); renderKeepingFocus(); return; }
   const v = roomVersion(id);
   let got = plain ? { plain, name: v ? v.name : '' } : await roomFetch(id);
   if (!got || !got.plain) { roomFetchFailed(got); return; }
@@ -2720,6 +2727,7 @@ async function roomPush() {
   if (!r || !r.conn) return;
   const box = document.getElementById('roomVersionName');
   const name = String(box?.value || '').replace(/\s+/g, ' ').trim();
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was pushed. Reload this tab first.'); render(); return; }
   if (roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
   if (r.conn.status !== 'connected') { note('warn', 'The shared plan cannot be reached right now, so nothing was pushed. Your plan is saved on this PC; push again once it says Connected.'); render(); return; }
   // Before the catchup the room could be a newer build's: wait for it.
@@ -2752,6 +2760,7 @@ function roomSays() {
     }[closeCode] || 'The relay refused what this browser sent.';
     return { short: 'Refused', text: `${why} Your plan is still on this PC.`, cls: 'warn-status' };
   }
+  if (planElsewhere) return { short: 'Reload this tab', text: 'The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.', cls: 'warn-status' };
   if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
   if (status === 'connected') return { short: 'Connected', text: 'Connected to the shared plan.', cls: 'on' };
   if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
@@ -2879,7 +2888,7 @@ function roomCardHtml() {
 function roomVersionsHtml() {
   const ro = roomReadOnly();
   const up = room.conn && room.conn.status === 'connected';
-  const canPush = up && room.caught && !ro;
+  const canPush = up && room.caught && !ro && !planElsewhere;
   const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => {
     const sure = armed === `room-restore:${v.id}`;
     const newer = v.schema > Store.SCHEMA;
@@ -2949,6 +2958,41 @@ async function roomOfferStart(secret) {
     renderRoomOffer();
   });
   renderRoomOffer();
+}
+
+/* Another tab of this browser saved the plan while this one is in a shared
+   plan. This tab's plan is now stale, and every change in it would be saved
+   (and could be pushed) over the other tab's. Loading the new plan in place
+   would leave this tab's undo history, a moved date and an open dialog all
+   pointing at the old one, so instead the tab stops: it saves and pushes
+   nothing, and a dialog that does not close asks for a reload. planElsewhere
+   is declared beside save(), which it stops. */
+window.addEventListener('storage', (e) => {
+  if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
+  let now = null;
+  try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
+  // The plan this tab last saved, written again: nothing has changed.
+  if (now === JSON.stringify(state)) return;
+  planElsewhere = true;
+  renderPlanElsewhere();
+  renderRoom();
+});
+function renderPlanElsewhere() {
+  let dlg = document.getElementById('elsewhereDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'elsewhereDlg';
+    dlg.innerHTML = `
+      <h2>This plan changed in another tab</h2>
+      <p>Another tab of this browser saved a change to the plan. This tab still shows the plan from before, so it saves nothing and pushes nothing to the shared plan until it is reloaded.</p>
+      <div class="bar" style="margin:16px 0 0"><button class="btn primary-ish" type="button" id="elsewhereReload">Reload this tab</button></div>`;
+    // Esc would close it; there is nothing to go back to.
+    dlg.addEventListener('cancel', (e) => e.preventDefault());
+    dlg.addEventListener('close', () => { if (planElsewhere && !dlg.open) dlg.showModal(); });
+    dlg.querySelector('#elsewhereReload').addEventListener('click', () => location.reload());
+    document.body.appendChild(dlg);
+  }
+  if (!dlg.open) dlg.showModal();
 }
 
 // Another tab of this browser joined or left: this one follows, so a Leave
@@ -3023,6 +3067,7 @@ function renderRoomOffer() {
 
 function roomTake() {
   const o = roomOffer;
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was taken. Reload this tab first.'); roomOfferEnd(); render(); return; }
   if (!o || !o.plain || o.schema > Store.SCHEMA || o.ahead) return;
   const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
   if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }

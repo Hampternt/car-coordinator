@@ -76,18 +76,23 @@ const relay = fakeRelay();
 async function profile({ items = {}, routed = true } = {}) {
   const context = await browser.newContext();
   if (routed) await relay.attach(context);
-  await context.addInitScript((seed) => {
+  await context.addInitScript(() => {
+    window.__sockets = 0;
+    const Real = window.WebSocket;
+    window.WebSocket = class extends Real { constructor(...a) { window.__sockets++; super(...a); } };
+  });
+  const page = await context.newPage();
+  // Seeded by the first page only: a second tab opened later finds the
+  // browser's storage as it is, as a real one does, rather than clearing it
+  // under the first (which that tab would take for a change to the plan).
+  await page.addInitScript((seed) => {
     if (location.protocol === 'about:') return;
     if (!sessionStorage.getItem('seeded')) {
       sessionStorage.setItem('seeded', '1');
       localStorage.clear();
       for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, v);
     }
-    window.__sockets = 0;
-    const Real = window.WebSocket;
-    window.WebSocket = class extends Real { constructor(...a) { window.__sockets++; super(...a); } };
   }, items);
-  const page = await context.newPage();
   const errors = [];
   const sockets = [];
   const requests = [];
@@ -531,6 +536,45 @@ let pushed = null;   // { id, plan } for the Restore section
   same('live op: no console errors', [...a.errors, ...b.errors], []);
   await a.context.close();
   await b.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// A second tab of the same browser changes the plan: this one is stale, so it
+// saves and pushes nothing until it is reloaded.
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const p = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(p.page, 'Connected');
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  const second = await p.context.newPage();
+  await second.goto(base, { waitUntil: 'networkidle' });
+  await pillSays(second, 'Connected');
+  const elsewhereOpen = (pg) => pg.evaluate(() => !!document.getElementById('elsewhereDlg')?.open);
+  await wait(500);
+  check('opening a second tab leaves the first as it was', !(await elsewhereOpen(p.page)));
+  const driver = () => p.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver);
+  await second.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Second Tab Svendsen');
+  same('the second tab saves its edit', await driver(), 'Second Tab Svendsen');
+  check('the first tab says the plan changed in another tab', await p.page.waitForFunction(() => { const d = document.getElementById('elsewhereDlg'); return !!d && d.open && /changed in another tab/.test(d.innerText); }, null, { timeout: 5000 }).then(() => true, () => false));
+  // Twice: Chrome lets a second Esc close a dialog that refused the first.
+  await p.page.keyboard.press('Escape');
+  await p.page.keyboard.press('Escape');
+  await wait(300);
+  check('and Esc does not put it away', await elsewhereOpen(p.page));
+  check('the bar says to reload', await pillSays(p.page, 'Reload this tab'));
+  await p.page.evaluate(() => { state.routes[0].driver = 'Stale Stian'; save(); });
+  same('a save in the stale tab writes nothing over it', await driver(), 'Second Tab Svendsen');
+  const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+  const wrote = writes();
+  await p.page.evaluate(() => { const box = document.getElementById('roomVersionName'); box.value = 'From the stale tab'; return roomPush(); });
+  check('and a push from it sends nothing', await noticeSays(p.page, /changed in another tab, so nothing was pushed/) && writes() === wrote);
+  await Promise.all([p.page.waitForEvent('load'), p.page.click('#elsewhereReload')]);
+  await pillSays(p.page, 'Connected');
+  same('Reload: the first tab now shows the second tab\'s plan', await p.page.evaluate(() => state.routes[0].driver), 'Second Tab Svendsen');
+  check('and is a normal tab again', !(await elsewhereOpen(p.page)));
+  same('second tab: no console errors', p.errors, []);
+  await p.context.close();
 }
 
 // ---------------------------------------------------------------------------
