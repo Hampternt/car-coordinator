@@ -2827,7 +2827,10 @@ function roomCardHtml() {
       <button class="btn" data-act="room-copy">Copy the invite link</button></div>
       ${qr ? `<div class="room-qr">${qr}</div>` : ''}
     </div>
-    ${roomVersionsHtml()}`;
+    ${roomVersionsHtml()}
+    <h4>Leave</h4>
+    <p class="hint">Stops sharing on this PC and forgets the invite link here. Your plan stays on screen as it is; the shared plan stays on the server for the other manager.</p>
+    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}`;
 }
 
 // Push, and the versions pushed so far, newest first.
@@ -2902,6 +2905,15 @@ async function roomOfferStart(secret) {
   });
   renderRoomOffer();
 }
+
+// Another tab of this browser joined or left: this one follows, so a Leave
+// there leaves no connection open here.
+window.addEventListener('storage', (e) => {
+  if (!syncReady() || (e.key !== null && e.key !== 'carcoord:pref:room')) return;
+  const secret = Store.pref('room');
+  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); renderKeepingFocus(); } }
+  else if (!room || room.secret !== secret) roomStart(secret);
+});
 
 // An invite pasted into the address bar of an open page changes only the
 // fragment: no reload, so start() never sees it.
@@ -2991,6 +3003,14 @@ async function roomAction(act, b, fromKeyboard = false) {
     case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
+    case 'room-leave': {
+      if (!room || !confirmTwice('room-leave', fromKeyboard)) return;
+      roomStop();
+      if (Store.setPref('room', null)) note('info', 'Left the shared plan. Your plan stays on this PC as it is. The invite link would open the shared plan again.');
+      else note('warn', 'Left the shared plan for now, but this browser would not forget its link, so it may join again when the page is next opened.');
+      render();
+      return;
+    }
     case 'room-look': await roomLookFirst(Number(b.dataset.id)); return;
     case 'room-look-close': { roomLook = null; const dlg = document.getElementById('roomDlg'); if (dlg && dlg.open) dlg.close(); return; }
     case 'room-restore': {
@@ -4766,7 +4786,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

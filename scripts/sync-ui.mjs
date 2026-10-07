@@ -468,6 +468,46 @@ let pushed = null;   // { id, plan } for the Restore section
   await p.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// Leave: the key is forgotten, the plan stays, and the network goes quiet,
+// in this tab, in another tab of the same browser, and after a reload.
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const p = await profile({ items: inRoom(SEED, secret) });
+  const second = await p.context.newPage();
+  await second.goto(base, { waitUntil: 'networkidle' });
+  await pillSays(p.page, 'Connected');
+  check('a second tab of the same browser is in the room too', await pillSays(second, 'Connected'));
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  const plan = await p.page.evaluate(() => JSON.stringify(state));
+  const saved = (await kept(p.page)).plan;
+  await p.page.click('[data-act="room-leave"]');
+  check('Leave asks Sure? first, and is still in the room', (await p.page.locator('[data-act="room-leave"]').innerText()) === 'Sure?' && (await kept(p.page)).room === secret);
+  await p.page.click('[data-act="room-leave"]');
+  check('Leave: said so', await noticeSays(p.page, /Left the shared plan\. Your plan stays on this PC/));
+  same('the key is forgotten', (await kept(p.page)).room, null);
+  same('the plan on screen is unchanged', await p.page.evaluate(() => JSON.stringify(state)), plan);
+  same('and so is the saved one', (await kept(p.page)).plan, saved);
+  check('no status in the bar', (await pill(p.page).count()) === 0);
+  check('the card offers Create again', (await p.page.locator('#roomCard [data-act="room-create"]').count()) === 1);
+  check('the Data tab says nothing is sent again', (await p.page.locator('#tab-data > .hint').first().innerText()).includes('never sends'));
+  check('the other tab left with it', await second.waitForFunction(() => !document.getElementById('syncStatus'), null, { timeout: 5000 }).then(() => true, () => false));
+  check('and no socket to the room is open', await until(() => relay.open === 0));
+  const made = await p.page.evaluate(() => window.__sockets);
+  const dials = relay.dialled;
+  await wait(2500);
+  same('after Leave: no new socket, in either tab', [await p.page.evaluate(() => window.__sockets) - made, relay.dialled - dials], [0, 0]);
+  await p.page.reload({ waitUntil: 'networkidle' });
+  for (const t of TABS) await p.page.click(`[data-act="tab"][data-tab="${t}"]`);
+  await wait(2500);
+  same('after Leave and a reload: no WebSocket at all', await p.page.evaluate(() => window.__sockets), 0);
+  same('no request leaves the app\'s own server', p.requests, []);
+  same('and the plan is still the one left with', await p.page.evaluate(() => JSON.stringify(state)), plan);
+  same('Leave: no console errors', p.errors, []);
+  await p.context.close();
+}
+
 await browser.close();
 await server.close();
 console.log(failures.length ? `\n${failures.length} sync-ui check(s) failed` : '\nsync-ui checks passed');
