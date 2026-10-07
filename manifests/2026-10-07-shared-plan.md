@@ -179,6 +179,18 @@ Drafted in full while the owner tests round 1.
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: **targeted review** (auth + live data, on e389251). The relay's auth, the crypto and the secret's storage were clean. Seven findings were fixed in c262cb6…2d03a86, each with a test that fails against the old code:
+  - **Medium:** an older client could erase a newer room's live edits. It now never snapshots above what it has applied, and treats a room holding edits it can't apply as read-only.
+  - **Medium-low:** a second tab with a stale plan could push it. While in a room, it now blocks with "Reload this tab".
+  - **Low:** Push now rechecks the room after encrypting, before sending.
+  - **Low:** the date is escaped in the preview.
+  - **Low:** a version's body is bound to its name with a nonce, and the plan's own schema is checked too.
+  - **Low:** the relay accepts a snapshot over the disk cap and gives the space back (incremental vacuum).
+  - **Low:** a half-failed Create now says so honestly.
+  - Gates: `sync-ui` 182 ok, three runs in a row; relay 48/48; clippy clean.
+  - Accepted as is: a connection with no `Origin` header, `ws://127.0.0.1:*` in the security policy, the create code throttled by nginx plus a long random code, pings not counted against the rate limit, and the secret in origin-wide localStorage.
+  - Ledger: `manifests/archive/2026-10-08-shared-plan-fixes.ledger.md`. The review findings were checked against the code before fixing, and no separate verifier agents ran.
+- 2026-10-08: the upgrade check gains "no network call and no WebSocket" for an old profile (f979a81). INVENTORY's Local only and HANDOFF's decision 2 were updated (c9df5c3). Announced and cut as 0.15.0.
 - 2026-10-08: **round 1 built.** Both builders worked in this one worktree, as planned. Their unit ledgers are folded in below and kept in `manifests/archive/`.
   - **Separation:** the relay's 8 commits touch only `relay/` and its own ledger. None of the client's 10 commits touches `relay/`.
   - **Pack 1, the relay** (7c7224f…5c58d56): `cargo test` 45/45 (the 35 scaffold tests plus 10 new), five runs in a row; clippy clean; the README steps ran against a local release build. **`nginx -t` was not run:** this user can't reach Docker, so the owner runs the one-liner from the README. Close codes 1001 (too far behind) and 1011 (storage error) were added to the protocol in 41d1851.
