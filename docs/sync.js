@@ -302,8 +302,47 @@ const Sync = (() => {
     return conn;
   }
 
+  /* ---------- what taking a shared plan changes ---------- */
+
+  // joinPreview(local, shared) -> {date, routes, cars, drivers, templates, onlyHere}
+  //   For the offer to take a shared plan (or restore a version): what the
+  //   other plan holds, and what exists only in `local` and so stays behind,
+  //   in the Backup taken first. Matched the way share.js matches, on what a
+  //   person reads (a registration, a name), case and spaces aside, because
+  //   ids are random per PC. onlyHere lists, by their names as written here:
+  //   cars, positions, labels, drivers, crews (day groups) and templates.
+  const fold = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+  function joinPreview(local, shared) {
+    const list = (s, k) => (s && Array.isArray(s[k]) ? s[k] : []);
+    const only = (k, field) => {
+      const there = new Set(list(shared, k).map((x) => fold(x && x[field])));
+      const out = [];
+      for (const x of list(local, k)) {
+        const name = String((x && x[field]) ?? '').trim();
+        if (name && !there.has(fold(name)) && !out.some((o) => fold(o) === fold(name))) out.push(name);
+      }
+      return out;
+    };
+    return {
+      date: shared && typeof shared.date === 'string' ? shared.date : '',
+      routes: list(shared, 'routes').length,
+      cars: list(shared, 'cars').length,
+      drivers: list(shared, 'drivers').length,
+      templates: list(shared, 'templates').length,
+      onlyHere: {
+        cars: only('cars', 'reg'),
+        positions: only('positions', 'name'),
+        labels: only('labels', 'name'),
+        drivers: only('drivers', 'name'),
+        crews: only('driverGroups', 'name'),
+        templates: only('templates', 'name'),
+      },
+    };
+  }
+
   return {
     RELAY, RELAY_PREF, ROOM_PREF, KINDS, INFO, CLOSE,
     relayUrl, roomUrl, newSecret, deriveKeys, seal, open, inviteLink, readInvite, connect,
+    joinPreview,
   };
 })();

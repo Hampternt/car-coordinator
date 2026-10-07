@@ -323,6 +323,35 @@ await block('readInvite', () => {
   });
 }
 
+// --- joinPreview: what stays behind when a shared plan is taken ---
+await block('joinPreview', () => {
+  const local = {
+    cars: [{ reg: 'AB 12345' }, { reg: 'zz 90001' }, { reg: 'ZZ  90001 ' }, { reg: '' }],
+    positions: [{ name: 'Spot 1' }, { name: 'Back yard' }],
+    labels: [{ name: 'Out of service' }],
+    drivers: [{ name: 'Anders' }, { name: 'Testa Testesen' }],
+    driverGroups: [{ name: 'Night crew' }, { name: 'monday crew' }],
+    templates: [{ name: 'Holiday rota' }, { name: 'Saturday' }],
+    routes: [{}, {}],
+  };
+  const shared = {
+    date: '2026-10-09',
+    cars: [{ reg: 'ab12345' }, { reg: 'AB 12345' }, { reg: 'EL 1' }],
+    positions: [{ name: 'spot 1' }],
+    labels: [{ name: 'Out of service' }],
+    drivers: [{ name: 'anders' }],
+    driverGroups: [{ name: 'Monday crew' }],
+    templates: [{ name: 'Saturday' }, { name: 'Monday' }],
+    routes: [{}, {}, {}],
+  };
+  const p = Sync.joinPreview(local, shared);
+  same('it counts what the shared plan holds', [p.date, p.routes, p.cars, p.drivers, p.templates], ['2026-10-09', 3, 3, 1, 2]);
+  same('and names what is only here, matched as a person reads it, once each', p.onlyHere, {
+    cars: ['zz 90001'], positions: ['Back yard'], labels: [], drivers: ['Testa Testesen'], crews: ['Night crew'], templates: ['Holiday rota'],
+  });
+  same('a plan with lists missing is read as empty, not a throw', Sync.joinPreview({}, null).onlyHere.cars, []);
+});
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);

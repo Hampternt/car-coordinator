@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 6,
+  "date": "2026-10-09",
+  "qrOnSheet": false,
+  "labels": [
+    { "id": "o-lbl-oos", "name": "Out of service", "color": "#c62828", "onSheet": false },
+    { "id": "o-lbl-loan", "name": "On loan", "color": "#00897b", "onSheet": false }
+  ],
+  "positions": [
+    { "id": "o-pos-1", "name": "Spot 1", "multi": false, "labelId": "", "note": "" },
+    { "id": "o-pos-back", "name": "Back yard", "multi": true, "labelId": "", "note": "behind the bins" }
+  ],
+  "cars": [
+    { "id": "o-car-1", "reg": "EL 41027", "labelId": "", "note": "" },
+    { "id": "o-car-2", "reg": "ZZ 90001", "labelId": "o-lbl-loan", "note": "borrowed, made-up reg" },
+    { "id": "o-car-3", "reg": "ZZ 90002", "labelId": "", "note": "" }
+  ],
+  "drivers": [
+    { "id": "o-drv-1", "name": "Anders", "available": true },
+    { "id": "o-drv-2", "name": "Testa Testesen", "available": true },
+    { "id": "o-drv-3", "name": "Prøve Person", "available": false }
+  ],
+  "driverGroups": [
+    { "id": "o-grp-1", "name": "Night crew", "driverIds": ["o-drv-2", "o-drv-3"] }
+  ],
+  "templates": [
+    { "id": "o-tpl-1", "name": "Holiday rota", "weekday": "", "routes": [
+      { "name": "1", "driver": "Testa Testesen", "carId": "o-car-2", "positionId": "o-pos-back", "round": "1", "highlight": false, "gapBefore": false }
+    ] }
+  ],
+  "routes": [
+    { "id": "o-rt-1", "name": "1", "driver": "Testa Testesen", "carId": "o-car-2", "positionId": "o-pos-back", "round": "1", "highlight": false, "gapBefore": false },
+    { "id": "o-rt-2", "name": "2", "driver": "Anders", "carId": "o-car-1", "positionId": "o-pos-1", "round": "1", "highlight": true, "gapBefore": false }
+  ]
+}

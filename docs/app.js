@@ -2693,8 +2693,143 @@ function roomCardHtml() {
     </div>`;
 }
 
+/* ---------- joining: an offer, never forced ----------
+   An invite link opens a dialog that reaches the room to show what it holds,
+   and asks. Not now closes the connection and changes nothing at all. Take
+   the shared plan puts this plan into Backups first, then replaces the plan
+   and setup with the room's: ids are random per PC, so the room's win. */
+// { secret, keys, conn, plain: {schema, plan} | null, caught, empty }
+let roomOffer = null;
+// { id, name, plain } while a version's Look first is open in the same dialog.
+let roomLook = null;
+
+function roomDialog() {
+  let dlg = document.getElementById('roomDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'roomDlg';
+    document.body.appendChild(dlg);
+    // Esc closes a dialog on its own; for an offer that is Not now.
+    dlg.addEventListener('close', () => { if (roomOffer) roomOfferEnd(); roomLook = null; });
+  }
+  return dlg;
+}
+
+async function roomOfferStart(secret) {
+  if (!syncReady()) return;
+  if (room && room.secret === secret) { note('info', 'This browser is already in that shared plan.'); render(); return; }
+  roomOfferEnd();
+  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0 };
+  roomOffer = o;
+  o.keys = await Sync.deriveKeys(secret);
+  if (roomOffer !== o) return;
+  o.conn = Sync.connect({ keys: o.keys });
+  o.conn.on('status', (status) => {
+    if (status === 'connected') o.conn.send({ type: 'catchup', since: o.conn.seq });
+    if (roomOffer === o) renderRoomOffer();
+  });
+  o.conn.on('frame', async (f) => {
+    if (f.type !== 'catchup') return;
+    const plain = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(o, 'snapshot', f.snapshot.body) : null;
+    const labels = [];
+    for (const v of Array.isArray(f.versions) ? f.versions : []) { const l = await openOr(o, 'label', v.label); if (l) labels.push(l.schema); }
+    if (roomOffer !== o) return;
+    o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
+    o.schema = Math.max(0, plain ? plain.schema : 0, ...labels);
+    o.caught = true;
+    // Only one look: the offer shows what the room held when it was opened.
+    o.conn.close();
+    renderRoomOffer();
+  });
+  renderRoomOffer();
+}
+
+// An invite pasted into the address bar of an open page changes only the
+// fragment: no reload, so start() never sees it.
+window.addEventListener('hashchange', () => {
+  if (!syncReady() || !/^#join=/.test(location.hash || '')) return;
+  const secret = Sync.readInvite(location.hash);
+  if (secret) roomOfferStart(secret);
+});
+
+function roomOfferEnd() {
+  const o = roomOffer;
+  roomOffer = null;
+  if (o && o.conn) o.conn.close();
+  const dlg = document.getElementById('roomDlg');
+  if (dlg && dlg.open && !roomLook) dlg.close();
+}
+
+// The lines a preview lists: what the plan offered holds, and what exists only
+// on this PC and so is kept in the Backup rather than carried over.
+function previewHtml(plan, verb) {
+  const p = Sync.joinPreview(state, plan);
+  const [y, m, d] = String(p.date || '').split('-');
+  const n = (k, one) => `${k} ${one}${k === 1 ? '' : 's'}`;
+  const groups = [['Cars', p.onlyHere.cars], ['Positions', p.onlyHere.positions], ['Labels', p.onlyHere.labels], ['Drivers', p.onlyHere.drivers], ['Day groups', p.onlyHere.crews], ['Templates', p.onlyHere.templates]]
+    .filter(([, names]) => names.length);
+  return `<p>It is dated <b>${y ? `${d}/${m}/${y}` : 'no date'}</b> and holds <b>${n(p.routes, 'route')}</b>, ${n(p.cars, 'car')}, ${n(p.drivers, 'driver')} and ${n(p.templates, 'template')}.</p>
+    <p class="status warn-status"><b>${verb} replaces everything on screen: the day plan and the setup.</b> Your own plan goes into Backups first, so you can get it back.</p>
+    ${groups.length ? `<p>Only on this PC, so kept in that Backup and not in what you take:</p>
+      <ul class="room-only">${groups.map(([what, names]) => `<li><b>${what}:</b> ${names.map(esc).join(', ')}</li>`).join('')}</ul>` : ''}`;
+}
+
+function renderRoomOffer() {
+  const o = roomOffer;
+  if (!o) return;
+  const dlg = roomDialog();
+  const status = o.conn ? o.conn.status : 'connecting';
+  let body;
+  if (o.caught && o.plain && o.schema > Store.SCHEMA) {
+    body = `<p class="status warn-status">This shared plan was saved by a newer version of Car Coordinator. Update the app to join it; nothing has changed here.</p>`;
+  } else if (o.caught && o.plain) {
+    body = previewHtml(o.plain.plan, 'Taking it')
+      + (room ? '<p>This browser leaves the shared plan it is in now.</p>' : '');
+  } else if (o.caught) {
+    body = '<p class="status warn-status">This shared plan holds no plan yet, so there is nothing to take. Nothing has changed here.</p>';
+  } else if (status === 'refused') {
+    body = '<p class="status warn-status">This invite link does not open a shared plan: it may be mistyped, or the plan was removed from the server. Nothing has changed here.</p>';
+  } else if (status === 'offline') {
+    body = '<p class="status warn-status">The shared plan\'s server cannot be reached right now. Still trying; nothing has changed here.</p>';
+  } else {
+    body = '<p class="status off">Opening the shared plan\u2026</p>';
+  }
+  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA;
+  dlg.innerHTML = `
+    <h2>Join this shared plan?</h2>
+    ${body}
+    <div class="bar" style="margin:16px 0 0">
+      ${canTake ? '<button class="btn primary-ish" data-act="room-take">Take the shared plan</button>' : ''}
+      <button class="btn" data-act="room-notnow">Not now</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+function roomTake() {
+  const o = roomOffer;
+  if (!o || !o.plain || o.schema > Store.SCHEMA) return;
+  const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
+  if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }
+  if (!Store.snapshot(state, 'Before joining the shared plan')) { roomOfferEnd(); render(); return; }   // the warning says why
+  if (!Store.setPref('room', o.secret)) {
+    note('warn', 'This browser would not keep the shared plan\'s link (its storage may be full or switched off), so nothing was changed.');
+    roomOfferEnd();
+    render();
+    return;
+  }
+  roomOfferEnd();
+  state = next;
+  save();
+  roomStart(o.secret);
+  tab = 'data';
+  note('info', 'Joined the shared plan. What was on screen before is in Backups on the Data tab.');
+  render();
+}
+
 async function roomAction(act) {
   switch (act) {
+    case 'room-take': roomTake(); return;
+    case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-copy': {
       if (!room) return;
@@ -4226,7 +4361,7 @@ document.addEventListener('contextmenu', (e) => {
   const layer = $('#ctxMenu');
   if (!layer) return;
   if (inCtx(t)) { e.preventDefault(); return; }
-  if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
+  if (e.shiftKey || $('#shareDlg').open || document.getElementById('roomDlg')?.open || !t.closest) return;
   if (t.closest('textarea, a')) return;
   if (t.tagName === 'INPUT') {
     if (CTX_TEXT.has(t.type) ? t.selectionStart !== t.selectionEnd : !CTX_INPUTS.has(t.type)) return;
@@ -4454,7 +4589,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
@@ -4568,6 +4703,8 @@ async function start() {
 
   // The shared plan this browser has joined, if any. None: no connection, ever.
   if (syncReady()) { const secret = Store.pref('room'); if (SECRET_RE.test(String(secret || ''))) roomStart(secret); }
+  // An invite opened: offer it. A mangled one was stripped all the same.
+  if (invite) roomOfferStart(invite);
 
   const fromLink = Share.readHash();
   if (fromLink) {

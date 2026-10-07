@@ -77,6 +77,7 @@ async function profile({ items = {}, routed = true } = {}) {
   const context = await browser.newContext();
   if (routed) await relay.attach(context);
   await context.addInitScript((seed) => {
+    if (location.protocol === 'about:') return;
     if (!sessionStorage.getItem('seeded')) {
       sessionStorage.setItem('seeded', '1');
       localStorage.clear();
@@ -237,6 +238,78 @@ let created = null;   // { secret, plan }: the room the next sections join
   check('recover.html lists the plan but never the shared plan\'s secret', page.includes('The plan and setup') && !page.includes(secret) && !page.includes('carcoord:pref:room'));
   same('Create: no console errors', p.errors, []);
   created = { secret, plan: JSON.parse(onScreen) };
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// Join: the other PC opens the invite. The fragment goes at once; Not now
+// changes nothing; Take backs this plan up and puts the room's in its place.
+const OTHER = await readFile(new URL('./fixtures/shared-plan-other-pc.json', import.meta.url), 'utf8');
+const OTHER_SEED = { 'carcoord:v1': OTHER, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
+const kept = (pg) => pg.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups'), room: localStorage.getItem('carcoord:pref:room') }));
+// An invite opened the way a link is: a fresh load of the page.
+const openInvite = async (pg, hash) => { await pg.goto('about:blank'); await pg.goto(`${base}${hash}`, { waitUntil: 'networkidle' }); };
+const href = (pg) => pg.evaluate(() => location.href);
+const dialogSays = async (pg, re, ms = 5000) => {
+  try { await pg.waitForFunction((src) => { const d = document.getElementById('roomDlg'); return !!d && d.open && new RegExp(src).test(d.innerText); }, re.source, { timeout: ms }); return true; } catch { return false; }
+};
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const p = await profile({ items: OTHER_SEED });
+  // A first save, so carcoord:v1 is this build's own text before the invite.
+  await p.page.evaluate(() => { save(); });
+  const before = await kept(p.page);
+  const hellos = relay.sent('hello', k.roomId).length;
+  await openInvite(p.page, `#join=${secret}`);
+  check('the invite is stripped from the address bar', await href(p.page) === base, await href(p.page));
+  check('an invite opens the offer, with a preview', await dialogSays(p.page, /Join this shared plan\?[\s\S]*holds 15 routes/), await p.page.locator('#roomDlg').innerText().catch(() => 'no dialog'));
+  const offer = await p.page.locator('#roomDlg').innerText();
+  check('which says it replaces everything, and that a backup is taken first', /Taking it replaces everything on screen[\s\S]*Backups first/.test(offer));
+  check('and names the cars, templates and day groups only on this PC, as staying in that Backup',
+    /kept in that Backup/.test(offer) && /Cars: ZZ 90001, ZZ 90002/.test(offer) && /Templates: Holiday rota/.test(offer) && /Day groups: Night crew/.test(offer) && /Positions: Back yard/.test(offer), offer);
+  check('but not what the shared plan has too', !/EL 41027/.test(offer) && !/Templates:[^\n]*Saturday/.test(offer));
+  check('opening the offer said hello to the room, once', relay.sent('hello', k.roomId).length === hellos + 1);
+  check('nothing is kept before the answer', (await kept(p.page)).room === null && (await pill(p.page).count()) === 0);
+
+  await p.page.click('[data-act="room-notnow"]');
+  check('Not now closes the offer', !(await p.page.evaluate(() => document.getElementById('roomDlg').open)));
+  same('Not now: the plan, Backups and the room pref are exactly as they were', await kept(p.page), before);
+  await wait(2500);
+  same('and the offer\'s connection is gone for good', [relay.open, relay.sent('hello', k.roomId).length], [0, hellos + 1]);
+  check('Not now: no status in the bar', (await pill(p.page).count()) === 0);
+
+  // A mangled invite: stripped, and nothing else at all.
+  const sockets = await p.page.evaluate(() => window.__sockets);
+  await openInvite(p.page, `#join=${secret.slice(0, 30)}`);
+  check('a mangled invite is stripped too', await href(p.page) === base, await href(p.page));
+  check('and opens nothing', !(await p.page.evaluate(() => !!document.getElementById('roomDlg')?.open)) && await p.page.evaluate(() => window.__sockets) === 0, String(sockets));
+
+  // Pasted into the address bar of the open page: only the fragment changes,
+  // and Esc is Not now as well.
+  await p.page.evaluate((h) => { location.hash = h; }, `#join=${secret}`);
+  await dialogSays(p.page, /holds 15 routes/);
+  await p.page.keyboard.press('Escape');
+  check('an invite pasted into the open page is offered and stripped as well', await href(p.page) === base, await href(p.page));
+  check('Esc on the offer changes nothing either', JSON.stringify(await kept(p.page)) === JSON.stringify(before));
+
+  await openInvite(p.page, `#join=${secret}`);
+  await dialogSays(p.page, /holds 15 routes/);
+  await p.page.click('[data-act="room-take"]');
+  const after = await kept(p.page);
+  same('Take: the room is kept under carcoord:pref:room', after.room, secret);
+  const backups = JSON.parse(after.backups || '[]');
+  // Labelled for the join, or the Start of day backup when that already held
+  // exactly this plan: Store.snapshot never stores the same plan twice running.
+  check('Take: this PC\'s own plan is the newest Backup',
+    backups.length > 0 && ['Before joining the shared plan', 'Start of day'].includes(backups[0].label) && backups[0].json === JSON.stringify(JSON.parse(before.plan)), JSON.stringify(backups.map((b) => b.label)));
+  same('and the plan is now the shared one', await p.page.evaluate(() => JSON.stringify(state)), JSON.stringify(created.plan));
+  same('saved as such', after.plan, JSON.stringify(created.plan));
+  check('Take: the bar says Connected', await pillSays(p.page, 'Connected'));
+  const rest = await elsewhere(p.page);
+  check('Take: the secret is in no Backup and nowhere else', !rest.includes(secret) && !rest.includes(k.token));
+  check('Take: no dialog left open', !(await p.page.evaluate(() => document.getElementById('roomDlg').open)));
+  same('Join: no console errors', p.errors, []);
   await p.context.close();
 }
 
