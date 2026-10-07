@@ -40,6 +40,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## Sharing
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
+- 🚧 **Shared plan** — two managers on one plan from any PC, live, with who-is-editing and pushed versions; end-to-end encrypted through a relay on the owner's server. `manifests/2026-10-07-shared-plan.md`.
 
 ## Data
 - ✅ **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white.

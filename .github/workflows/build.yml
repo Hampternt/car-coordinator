@@ -16,6 +16,8 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path relay/Cargo.toml
       - run: npm test
       - run: npm run screens
       - if: always()
