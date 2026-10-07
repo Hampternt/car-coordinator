@@ -9,6 +9,48 @@ use crate::protocol::{OpOut, SnapshotOut, VersionMeta};
 pub type StorageError = rusqlite::Error;
 pub type Result<T> = std::result::Result<T, StorageError>;
 
+pub const DB_FILE: &str = "carsync.db";
+
+/// Schema, by `PRAGMA user_version`. A database is moved forward one step at a
+/// time and never back; append new steps, never edit an old one.
+const MIGRATIONS: &[&str] = &[
+    // 1: rooms, the op log after each room's snapshot, and versions.
+    "CREATE TABLE rooms (
+        id TEXT PRIMARY KEY,
+        token_hash BLOB NOT NULL,
+        latest_seq INTEGER NOT NULL DEFAULT 0,
+        next_version INTEGER NOT NULL DEFAULT 1,
+        snapshot_seq INTEGER,
+        snapshot_body TEXT,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE ops (
+        room TEXT NOT NULL REFERENCES rooms(id),
+        seq INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        PRIMARY KEY (room, seq)
+    );
+    CREATE TABLE versions (
+        room TEXT NOT NULL REFERENCES rooms(id),
+        id INTEGER NOT NULL,
+        at INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        body TEXT NOT NULL,
+        PRIMARY KEY (room, id)
+    );",
+];
+
+fn migrate(conn: &rusqlite::Connection) -> Result<()> {
+    let current: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    for (step, sql) in MIGRATIONS.iter().enumerate().skip(current) {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", step + 1)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
 pub struct Storage {
     conn: Mutex<rusqlite::Connection>,
 }
@@ -33,7 +75,15 @@ pub struct StoredVersion {
 impl Storage {
     /// Opens (creating if needed) the database in `dir`.
     pub fn open(dir: &Path) -> Result<Storage> {
-        todo!("pack 1: open and migrate")
+        let conn = rusqlite::Connection::open(dir.join(DB_FILE))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // WAL keeps a write to one room from blocking a read; FULL makes an
+        // acked write survive a power cut, not only a crash.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "FULL")?;
+        conn.pragma_update(None, "journal_size_limit", 16 * 1024 * 1024)?;
+        migrate(&conn)?;
+        Ok(Storage { conn: Mutex::new(conn) })
     }
 
     pub fn room_count(&self) -> Result<u64> {

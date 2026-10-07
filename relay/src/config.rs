@@ -86,7 +86,31 @@ impl Config {
     /// `RELAY_MAX_ROOMS` and `RELAY_MAX_DISK_BYTES` through `get`, applying the
     /// defaults of PROTOCOL.md §7. Origins are split on commas and trimmed;
     /// empty entries are dropped. Other limits take `Limits::default()`.
+    /// An empty value counts as unset.
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Config, ConfigError> {
-        todo!("pack 1: read the environment")
+        let get = |name: &str| get(name).filter(|value| !value.trim().is_empty());
+
+        let data_dir = get("RELAY_DATA").ok_or(ConfigError::Missing("RELAY_DATA"))?;
+        let bind = parse_or("RELAY_BIND", get("RELAY_BIND"), DEFAULT_BIND)?;
+        let origins = get("RELAY_ORIGINS").unwrap_or_else(|| DEFAULT_ORIGINS.to_string());
+        let defaults = Limits::default();
+        let limits = Limits {
+            max_rooms: parse_or("RELAY_MAX_ROOMS", get("RELAY_MAX_ROOMS"), &defaults.max_rooms.to_string())?,
+            max_disk_bytes: parse_or("RELAY_MAX_DISK_BYTES", get("RELAY_MAX_DISK_BYTES"), &defaults.max_disk_bytes.to_string())?,
+            ..defaults
+        };
+
+        Ok(Config {
+            bind,
+            data_dir: PathBuf::from(data_dir),
+            create_code: get("RELAY_CREATE_CODE"),
+            origins: origins.split(',').map(str::trim).filter(|o| !o.is_empty()).map(String::from).collect(),
+            limits,
+        })
     }
+}
+
+fn parse_or<T: std::str::FromStr>(name: &'static str, value: Option<String>, default: &str) -> Result<T, ConfigError> {
+    let value = value.unwrap_or_else(|| default.to_string());
+    value.trim().parse().map_err(|_| ConfigError::Invalid { name, value })
 }

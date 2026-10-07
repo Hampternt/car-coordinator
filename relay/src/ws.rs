@@ -1,7 +1,11 @@
 //! The WebSocket handler and per-room fan-out. PROTOCOL.md §3-4.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use tokio::sync::Notify;
 
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Path, State};
@@ -15,6 +19,42 @@ use crate::AppState;
 #[derive(Default)]
 pub struct Rooms {
     open: Mutex<HashMap<String, Room>>,
+    /// Upgraded connections still running, so shutdown can wait for them.
+    live: AtomicUsize,
+    all_closed: Notify,
+}
+
+impl Rooms {
+    /// Waits until every connection counted by `Live` has ended.
+    pub async fn wait_until_closed(&self) {
+        loop {
+            let notified = self.all_closed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.live.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
+
+/// Counts one connection as live for as long as it is held.
+pub struct Live(Arc<Rooms>);
+
+impl Live {
+    pub fn new(rooms: &Arc<Rooms>) -> Live {
+        rooms.live.fetch_add(1, Ordering::SeqCst);
+        Live(rooms.clone())
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        if self.0.live.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.all_closed.notify_waiters();
+        }
+    }
 }
 
 /// One room's open connections. Pack 1 picks the channel type.

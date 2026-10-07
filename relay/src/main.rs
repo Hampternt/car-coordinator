@@ -1,5 +1,7 @@
 //! The relay binary: configuration from the environment (PROTOCOL.md §7),
-//! then serve until killed.
+//! then serve until SIGINT or SIGTERM (systemd stops services with SIGTERM).
+
+use tokio::signal::unix::{SignalKind, signal};
 
 #[tokio::main]
 async fn main() {
@@ -18,6 +20,11 @@ async fn main() {
         }
     };
     eprintln!("carsync-relay listening on {}", relay.addr);
-    let _ = tokio::signal::ctrl_c().await;
+    let mut terminate = signal(SignalKind::terminate()).expect("a SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+    eprintln!("carsync-relay shutting down");
     relay.shutdown().await;
 }
