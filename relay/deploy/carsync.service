@@ -1,0 +1,39 @@
+# /etc/systemd/system/carsync.service — the Car Coordinator shared-plan relay.
+# Install steps: relay/README.md. Listens on 127.0.0.1:3010 only; nginx's
+# `location /carsync/` is the one way in from outside.
+[Unit]
+Description=Car Coordinator shared-plan relay (carsync)
+After=network.target
+
+[Service]
+Type=simple
+User=carsync
+Group=carsync
+WorkingDirectory=/opt/carsync
+# RELAY_BIND, RELAY_DATA, RELAY_CREATE_CODE, ... (see carsync.env.example).
+# systemd reads it as root before dropping to `carsync`, so it can stay 0600 root.
+EnvironmentFile=/opt/carsync/.env
+ExecStart=/opt/carsync/carsync-relay
+Restart=on-failure
+RestartSec=5
+# The relay closes every WebSocket with 1001 on SIGTERM; give the clients a moment.
+TimeoutStopSec=15
+
+# Hardening: the relay needs its data directory and the loopback port, nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/carsync/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
