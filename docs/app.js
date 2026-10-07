@@ -2834,9 +2834,14 @@ async function roomCreate() {
     if (text) note('warn', text);
     render();
   };
+  // Once connected, the relay has made the room (it welcomes a create only
+  // after `created`), so a failure from then on leaves it there, empty.
+  const madeEmpty = 'The shared plan was made on the server, but your plan did not reach it, so this browser is not using it. It may be on the server without its plan. Ask the server\'s owner to remove it, or try again. Your plan is unchanged.';
   c.conn = Sync.connect({ keys, create: { createCode: code } });
   c.conn.on('status', async (status, closeCode) => {
-    if (status === 'refused') {
+    if ((status === 'refused' || status === 'offline') && c.sent) {
+      finish(madeEmpty);
+    } else if (status === 'refused') {
       finish(closeCode === Sync.CLOSE.WRONG_CREATE_CODE
         ? 'The create code was not accepted, so no shared plan was made. Check the code and try again.'
         : 'The server refused to make the shared plan, so none was made. Your plan is unchanged.');
@@ -2844,15 +2849,16 @@ async function roomCreate() {
       finish('Could not reach the shared plan\'s server, so no shared plan was made. Your plan is unchanged; try again later.');
     } else if (status === 'connected' && !c.sent) {
       c.sent = true;
-      const body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state });
+      let body = null;
+      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
       // Seq 0: a room just made holds no ops, and this plan includes none.
-      if (roomCreating === c) c.conn.send({ type: 'snapshot', seq: 0, body });
+      if (roomCreating === c && !(body && c.conn.send({ type: 'snapshot', seq: 0, body }))) finish(madeEmpty);
     }
   });
   c.conn.on('frame', (f) => {
     if (f.type !== 'ack' || roomCreating !== c) return;
     if (!Store.setPref('room', secret)) {
-      finish('The shared plan was made, but this browser would not keep its link, so it cannot use it. Its storage may be full or switched off.');
+      finish('The shared plan was made, but this browser would not keep its link, so it cannot use it. Its storage may be full or switched off. The plan stays on the server unused: ask the server\'s owner to remove it, or try again.');
       return;
     }
     roomCreating = null;

@@ -254,6 +254,26 @@ let created = null;   // { secret, plan }: the room the next sections join
   await p.context.close();
 }
 
+// Create made the room but its plan never reached it: said honestly, since
+// the room may stay on the server, and nothing is remembered here.
+{
+  const p = await profile({ items: SEED });
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  for (const [why, code] of [['the connection drops', 1006], ['the relay refuses the plan', 4413]]) {
+    const rooms = relay.rooms.size;
+    relay.dropNext('snapshot', code);
+    await p.page.fill('#roomCode', 'test-create-code');
+    await p.page.click('[data-act="room-create"]');
+    check(`made, then ${why}: says the shared plan may be on the server without its plan`, await noticeSays(p.page, /may be on the server without its plan\. Ask the server's owner to remove it, or try again/), await p.page.locator('#notices').innerText());
+    check('and does not say none was made', !/no shared plan was made|so none was made/.test(await p.page.locator('#notices').innerText()));
+    check('the room is on the relay, with no plan', relay.rooms.size === rooms + 1 && [...relay.rooms.values()].at(-1).snapshot === null);
+    check('and nothing is remembered here', await p.page.evaluate(() => localStorage.getItem('carcoord:pref:room') === null && document.getElementById('syncStatus') === null));
+    await p.page.evaluate(() => { notices = []; render(); });
+  }
+  same('failed Create: no console errors', p.errors, []);
+  await p.context.close();
+}
+
 // ---------------------------------------------------------------------------
 // Join: the other PC opens the invite. The fragment goes at once; Not now
 // changes nothing; Take backs this plan up and puts the room's in its place.

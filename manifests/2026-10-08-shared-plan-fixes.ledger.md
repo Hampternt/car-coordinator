@@ -15,7 +15,7 @@ relay cargo test 45/45.
 - [x] 4. Unescaped date in previewHtml; esc audit — check.sh OK; sync.mjs passed; sync-ui 161 ok / 0 FAIL (3 new checks FAIL on the old app.js: the img was inserted; CSP blocked its handler)
 - [x] 5. Version body and label bound by name + nonce; plan schemaVersion checked — check.sh OK; sync.mjs passed; sync-ui 173 ok / 0 FAIL (the new binding checks FAIL on the old app.js)
 - [x] 6. Relay disk-cap wedge: snapshot allowed over the cap; incremental vacuum — cargo test 48/48 (3 new: limits a_snapshot_is_stored_over_the_disk_cap…, which FAILED before the fix; storage auto_vacuum and reclaim unit tests); `cargo clippy -- -D warnings` clean
-- [ ] 7. A failed Create after `created` says so honestly
+- [x] 7. A failed Create after `created` says so honestly — check.sh OK; sync.mjs passed; sync-ui 182 ok / 0 FAIL (4 new checks FAIL on the old app.js)
 
 ## Decisions and deviations
 - Fix 1: the invite offer also refuses Take for a room holding ops (same "Update the app to join it" as a newer schema): its snapshot alone is not the room's plan. A live `op` frame also sets read-only. Create sends its snapshot at a literal seq 0.
@@ -28,3 +28,14 @@ relay cargo test 45/45.
 - Fix 5: `planSchema()` takes the newer of the envelope's `schema` and the plan's own `schemaVersion`; it decides Look first's "newer", Restore's refusal, the offer's Take, and the room's read-only schema from its snapshot.
 - Fix 6: migration 2 is `PRAGMA auto_vacuum = INCREMENTAL; VACUUM;`, run outside a transaction (VACUUM refuses one) through a new `Step::Alone`; it is safe to rerun if cut short. After a stored snapshot, `reclaim` steps `PRAGMA incremental_vacuum` until done (one step frees one page, and execute_batch steps once) and then `wal_checkpoint(TRUNCATE)`, since in WAL mode the freed pages stay in `-wal`, which the cap counts. A failure there is logged and the snapshot still acked. Runs after every stored snapshot, not only one that dropped ops (a replaced snapshot body frees pages too); costs one checkpoint per push.
 - Fix 6 gate note: `cargo clippy --all-targets -- -D warnings` fails on a pre-existing `type_complexity` in relay/tests/rooms.rs:143 (untouched here); lib and bin are clean with `-D warnings`, and none of the touched files warn. `cargo fmt --check` differs across the crate (pre-existing; the crate is not kept rustfmt-default).
+- Fix 7: a create connection reaching `connected` means the relay made the room (it welcomes a create only after `created`; sync.js does not pass `created` on), so any refusal or drop after that, a seal that throws, or a send that fails, says: "The shared plan was made on the server, but your plan did not reach it, so this browser is not using it. It may be on the server without its plan. Ask the server's owner to remove it, or try again. Your plan is unchanged." Nothing is remembered, as before. The fake relay gained `dropNext(type, code)` for the test.
+- Fix 7 also: the existing path where the relay stored the plan but this browser would not keep the link now adds "The plan stays on the server unused: ask the server's owner to remove it, or try again."
+
+## Final gates (after fix 7)
+
+- `bash scripts/check.sh`: CHECK OK — every shipped script parses and the versions agree.
+- `node scripts/sync.mjs`: sync checks passed.
+- `node scripts/sync-ui.mjs`, three runs in a row: 182 ok / 0 FAIL each (144 after fix 1).
+- `cargo test --manifest-path relay/Cargo.toml`, three runs in a row: 48 passed / 0 failed each (45 at baseline + 3 new).
+- `cargo clippy --manifest-path relay/Cargo.toml -- -D warnings`: clean. (`--all-targets` fails only on the pre-existing tests/rooms.rs:143 type_complexity.)
+- Full `npm test` not run here, as dispatched: the main session runs it.

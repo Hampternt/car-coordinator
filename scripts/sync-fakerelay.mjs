@@ -26,6 +26,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   // While held, catchup replies wait here, to look at a client before it has
   // heard what the room holds.
   let hold = null;
+  // { type, code }: the next frame of that type closes its socket instead.
+  let drop = null;
 
   function attach(target) {
     return target.routeWebSocket(/\/rooms\/[^/]+\/ws$/, (ws) => {
@@ -50,6 +52,7 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     try { f = JSON.parse(String(text)); } catch { shut(c, 4400); return; }
     if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.type !== 'string') { shut(c, 4400); return; }
     log.push({ roomId: c.roomId, frame: f });
+    if (drop && drop.type === f.type) { const { code } = drop; drop = null; shut(c, code); return; }
     const room = rooms.get(c.roomId);
     if (!c.welcomed) {
       if (f.type === 'hello') {
@@ -138,6 +141,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     down() { down = true; for (const c of [...live]) shut(c, 1006); },
     up() { down = false; },
     holdCatchup() { hold = hold || []; },
+    // The next `type` frame any client sends closes its socket with `code`.
+    dropNext(type, code = 1006) { drop = { type, code }; },
     releaseCatchup() { const waiting = hold || []; hold = null; for (const reply of waiting) reply(); },
     // A room made directly, as if another browser had created it. `ops` are
     // [{seq, body}] after the snapshot; `seq` is the room's latest.
