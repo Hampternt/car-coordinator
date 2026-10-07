@@ -24,9 +24,16 @@ curl http://127.0.0.1:3010/health                     # → ok
 
 The app reaches a local relay through the pref `carcoord:pref:relay`
 (`ws://127.0.0.1:3010`). With no `RELAY_ORIGINS` set, only the production
-origins and connections with no `Origin` are allowed. For a dev server, add its
-origin, for example
-`RELAY_ORIGINS=https://hampternt.github.io,http://tauri.localhost,http://127.0.0.1:5173`.
+origins and connections with no `Origin` are allowed. The browser sends the
+page's address exactly as it was opened, so add the dev server's: `npm run dev`
+prints `http://localhost:5173/`, and both spellings are listed here in case it
+is opened as `127.0.0.1`:
+
+```bash
+RELAY_DATA=/tmp/carsync-dev RELAY_CREATE_CODE=dev \
+RELAY_ORIGINS=https://hampternt.github.io,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173 \
+  cargo run --manifest-path relay/Cargo.toml
+```
 
 ## Deploy
 
@@ -40,12 +47,16 @@ The files are in [`deploy/`](deploy/):
 | `nginx-carsync-location.conf` | inside the `listen 443` server block of `/etc/nginx/sites-available/portfolio` |
 | `nginx-check.conf` | nowhere; it checks the two snippets locally (step 1) |
 
-`ssh hetzner` below stands for however you log in to the server.
+`ssh hetzner` below stands for however you log in to the server. Every block
+says where it runs: **on this PC** (in the repo's root) or **on the server**
+(after `ssh hetzner`).
 
 ### 1. Build, and check the snippets
 
 The server is x86_64. A binary built on this PC runs there only if the server's
-glibc is at least as new as this PC's. Compare the two first:
+glibc is at least as new as this PC's. Compare the two first.
+
+On this PC:
 
 ```bash
 ldd --version | head -1                 # this PC
@@ -54,17 +65,19 @@ cargo build --release --locked --manifest-path relay/Cargo.toml
 # → relay/target/release/carsync-relay
 ```
 
-If the server's glibc is older, build there instead. It has a Rust toolchain,
-which the portfolio's emergency update uses. Copy the crate over and build it:
+If the server's glibc is older, build there instead. The portfolio's emergency
+update builds there, so it has a toolchain, but this crate needs Rust 1.85 or
+newer (edition 2024) and a C compiler (SQLite is compiled in). On this PC:
 
 ```bash
+ssh hetzner 'rustc --version; cc --version | head -1'   # rustc 1.85+, and any cc
 rsync -a --exclude target relay/ hetzner:/tmp/carsync-src/
 ssh hetzner 'cd /tmp/carsync-src && cargo build --release --locked'
 # → /tmp/carsync-src/target/release/carsync-relay on the server
 ```
 
 Check the nginx snippets with any nginx container before they go near the
-server:
+server. On this PC:
 
 ```bash
 docker run --rm -v "$PWD/relay/deploy:/etc/nginx/carsync:ro" nginx:stable \
@@ -74,34 +87,39 @@ docker run --rm -v "$PWD/relay/deploy:/etc/nginx/carsync:ro" nginx:stable \
 
 ### 2. First install on the server
 
+On this PC, copy the binary and the two files over. If the binary was built on
+the server, skip its line and use `/tmp/carsync-src/target/release/carsync-relay`
+on the server below instead of `/tmp/carsync-relay`.
+
+```bash
+scp relay/target/release/carsync-relay hetzner:/tmp/
+scp relay/deploy/carsync.env.example hetzner:/tmp/carsync.env
+scp relay/deploy/carsync.service hetzner:/tmp/
+```
+
+On the server:
+
 ```bash
 # The user and the directories. The data directory holds only ciphertext,
 # but it is still nobody else's business.
 sudo useradd --system --home-dir /opt/carsync --shell /usr/sbin/nologin carsync
 sudo install -d -o root -g root -m 755 /opt/carsync
 sudo install -d -o carsync -g carsync -m 700 /opt/carsync/data
+sudo install -o root -g root -m 755 /tmp/carsync-relay /opt/carsync/carsync-relay
 
-# The binary (from this PC; if it was built on the server, use that path).
-scp relay/target/release/carsync-relay hetzner:/tmp/
-ssh hetzner 'sudo install -o root -g root -m 755 /tmp/carsync-relay /opt/carsync/carsync-relay'
-
-# The settings. Put a fresh create code in RELAY_CREATE_CODE; you type it once
-# in the app when creating the shared plan.
-scp relay/deploy/carsync.env.example hetzner:/tmp/carsync.env
-ssh hetzner
-  openssl rand -base64 24                          # the create code
-  sudo install -o root -g root -m 600 /tmp/carsync.env /opt/carsync/.env
-  sudo nano /opt/carsync/.env                      # paste it after RELAY_CREATE_CODE=
-  rm /tmp/carsync.env
+# The settings. Make a fresh create code and paste it after RELAY_CREATE_CODE=;
+# you type it once in the app when creating the shared plan.
+openssl rand -base64 24
+sudo install -o root -g root -m 600 /tmp/carsync.env /opt/carsync/.env
+sudo nano /opt/carsync/.env
+rm /tmp/carsync.env
 
 # The service.
-scp relay/deploy/carsync.service hetzner:/tmp/
-ssh hetzner
-  sudo install -o root -g root -m 644 /tmp/carsync.service /etc/systemd/system/carsync.service
-  sudo systemctl daemon-reload
-  sudo systemctl enable --now carsync
-  systemctl status carsync --no-pager              # active (running)
-  curl http://127.0.0.1:3010/health                # → ok
+sudo install -o root -g root -m 644 /tmp/carsync.service /etc/systemd/system/carsync.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now carsync
+systemctl status carsync --no-pager              # active (running)
+curl http://127.0.0.1:3010/health                # → ok
 ```
 
 Port 3010 listens on 127.0.0.1 only, so the firewall needs no change.
@@ -111,10 +129,15 @@ Port 3010 listens on 127.0.0.1 only, so the firewall needs no change.
 nginx is not deployed by anything automatic. As with the portfolio, **`diff -u`
 the live file against what you are about to install, and never copy blind.**
 
+On this PC:
+
 ```bash
 scp relay/deploy/nginx-carsync-http.conf relay/deploy/nginx-carsync-location.conf hetzner:/tmp/
-ssh hetzner
+```
 
+On the server:
+
+```bash
 # a. Neither name may exist yet (a duplicate zone or map fails `nginx -t`), and
 #    conf.d must be included inside `http`. Ubuntu's stock nginx.conf does both.
 grep -rn 'zone=carsync\|carsync_connection' /etc/nginx/        # expect nothing
@@ -140,6 +163,8 @@ sudo cp /tmp/portfolio.new /etc/nginx/sites-available/portfolio
 
 ### 4. Check it from outside
 
+On this PC:
+
 ```bash
 curl https://portfolio.dblo.net/carsync/health                 # → ok
 curl -s -o /dev/null -w '%{http_code}\n' https://portfolio.dblo.net/            # the portfolio still answers
@@ -160,7 +185,7 @@ Logs: `journalctl -u carsync`. The relay never logs tokens or bodies.
 
 ### Updating
 
-Build as in step 1, then:
+Build as in step 1, then on this PC:
 
 ```bash
 scp relay/target/release/carsync-relay hetzner:/tmp/
@@ -173,6 +198,8 @@ own when a new version needs a new schema, and never back. Before an update
 that changes the schema, copy the data directory while the service is stopped.
 
 ### Removing it
+
+On the server:
 
 ```bash
 sudo systemctl disable --now carsync

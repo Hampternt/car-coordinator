@@ -39,6 +39,12 @@ in the shared worktree (owns `relay/` and this file only). Scaffold ea8f1f4, sta
 - Risk flags for the auth review: `relay/src/auth.rs`, the opening in `relay/src/ws.rs`
   (`room_ws`, `origin_allowed`, `open`, `create`), and the per-room lock in `handle`/`join`.
 
+- Item 6 follow-up: the README's server steps are split into blocks labelled "On this PC" and
+  "On the server", so no server command can run on the PC when pasted top to bottom. The dev
+  example's `RELAY_ORIGINS` now lists `http://localhost:5173`, which `npm run dev` prints, and
+  `127.0.0.1:5173`. The build-on-server path checks for `rustc` 1.85+ and `cc`, and
+  `Cargo.toml` gains `rust-version = "1.85"`.
+
 ## Unit gate (2026-10-08)
 
 `cargo test --manifest-path relay/Cargo.toml --no-fail-fast`: 45 passed, 0 failed. That is the 35

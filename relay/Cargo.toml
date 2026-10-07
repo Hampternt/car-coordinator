@@ -2,6 +2,7 @@
 name = "carsync-relay"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Stores and forwards Car Coordinator's end-to-end encrypted shared plan. See PROTOCOL.md."
 publish = false
 
