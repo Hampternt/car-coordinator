@@ -573,6 +573,32 @@ let pushed = null;   // { id, plan } for the Restore section
 }
 
 // ---------------------------------------------------------------------------
+// What comes out of the room is shown as text, never as markup: the date
+// included, which is the one part of a preview drawn without esc() before.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  const evil = '<img src=x onerror="window.__xss=1">';
+  const plan = { ...created.plan, date: evil };
+  relay.makeRoom(k.roomId, k.token, {
+    snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan }) },
+    versions: [{ label: seal(secret, 'label', { schema: 6, name: `${evil} name` }), body: seal(secret, 'version', { schema: 6, plan }) }],
+  });
+  const p = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(p.page, 'Connected');
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  await p.page.waitForSelector('#roomCard [data-act="room-look"]');
+  check('a version\'s name with markup in it is shown as text', (await p.page.locator('#roomCard .room-v-name').innerText()) === `${evil} name` && (await p.page.locator('#roomCard img').count()) === 0);
+  await p.page.click('#roomCard [data-act="room-look"]');
+  check('a date that is not a date: Look first says no date', await dialogSays(p.page, /It is dated no date/), await p.page.locator('#roomDlg').innerText().catch(() => ''));
+  await wait(300);
+  check('and draws none of it as markup', (await p.page.locator('#roomDlg img').count()) === 0 && await p.page.evaluate(() => window.__xss === undefined));
+  await p.page.click('[data-act="room-look-close"]');
+  same('markup: no console errors', p.errors, []);
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
 // A second tab of the same browser changes the plan: this one is stale, so it
 // saves and pushes nothing until it is reloaded.
 {

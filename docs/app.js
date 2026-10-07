@@ -3028,7 +3028,8 @@ function roomOfferEnd() {
 // on this PC and so is kept in the Backup rather than carried over.
 function previewHtml(plan, verb) {
   const p = Sync.joinPreview(state, plan);
-  const [y, m, d] = String(p.date || '').split('-');
+  // From the room, so read as a stranger's: a date the app writes, or none.
+  const [y, m, d] = /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date.split('-') : [];
   const n = (k, one) => `${k} ${one}${k === 1 ? '' : 's'}`;
   const groups = [['Cars', p.onlyHere.cars], ['Positions', p.onlyHere.positions], ['Labels', p.onlyHere.labels], ['Drivers', p.onlyHere.drivers], ['Day groups', p.onlyHere.crews], ['Templates', p.onlyHere.templates]]
     .filter(([, names]) => names.length);
