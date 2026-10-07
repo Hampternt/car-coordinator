@@ -11,7 +11,7 @@ relay cargo test 45/45.
 
 - [x] 1. An older client can erase a newer room's op log (appliedSeq, read-only on ops) — check.sh OK; sync.mjs passed; sync-ui 144 ok / 0 FAIL (8 new checks FAIL on the old app.js)
 - [x] 2. A second tab does not follow carcoord:v1 — check.sh OK; sync.mjs passed; sync-ui 154 ok / 0 FAIL (5 new checks FAIL on the old app.js)
-- [ ] 3. Push race: recheck after the awaited seals
+- [x] 3. Push race: recheck after the awaited seals — check.sh OK; sync.mjs passed; sync-ui 157 ok / 0 FAIL (2 new checks FAIL on the old app.js)
 - [ ] 4. Unescaped date in previewHtml; esc audit
 - [ ] 5. Version body and label bound by name + nonce; plan schemaVersion checked
 - [ ] 6. Relay disk-cap wedge: snapshot allowed over the cap; incremental vacuum

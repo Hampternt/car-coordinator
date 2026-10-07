@@ -539,6 +539,40 @@ let pushed = null;   // { id, plan } for the Restore section
 }
 
 // ---------------------------------------------------------------------------
+// Push seals first, which takes a moment: what the room says meanwhile still
+// counts, and a push that is no longer allowed sends nothing.
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const p = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(p.page, 'Connected');
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  await p.page.waitForSelector('[data-act="room-push"]:not([disabled])');
+  const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+  // Holds every seal until let go, then flips the room while Push waits.
+  const racePush = (flip) => p.page.evaluate(async (what) => {
+    const real = Sync.seal;
+    let go;
+    const held = new Promise((resolve) => { go = resolve; });
+    Sync.seal = async (...args) => { await held; return real(...args); };
+    document.getElementById('roomVersionName').value = `Raced by ${what}`;
+    const pushing = roomPush();
+    if (what === 'reconnect') room.caught = false; else room.ahead = true;
+    go();
+    await pushing;
+    Sync.seal = real;
+    if (what === 'reconnect') room.caught = true; else room.ahead = false;
+  }, flip);
+  const wrote = writes();
+  await racePush('reconnect');
+  check('a reconnect during Push: nothing sent, and said so', writes() === wrote && await noticeSays(p.page, /changed while the version was being made, so nothing was pushed/), String(writes() - wrote));
+  await racePush('ops');
+  check('the room read-only by the time it is sealed: nothing sent, and said so', writes() === wrote && await noticeSays(p.page, /Update the app to push/), String(writes() - wrote));
+  same('push race: no console errors', p.errors, []);
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
 // A second tab of the same browser changes the plan: this one is stale, so it
 // saves and pushes nothing until it is reloaded.
 {

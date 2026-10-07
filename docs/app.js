@@ -2739,6 +2739,10 @@ async function roomPush() {
     Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name }),
     Sync.seal(r.keys, 'snapshot', plan),
   ]);
+  // Sealing takes a moment, in which the room can reconnect (and not be caught
+  // up again yet), turn out read-only, or this tab's plan go stale.
+  if (room === r && roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
+  if (room === r && (!r.caught || planElsewhere)) { note('warn', 'The shared plan changed while the version was being made, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
   r.acks.push({ kind: 'version', name });
   // Never above the seq this plan includes: the relay deletes every op up to it.
