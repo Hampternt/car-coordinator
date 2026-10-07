@@ -2514,7 +2514,9 @@ function openShare(share) {
 
    Pack 2 never changes the plan on its own: only Take the shared plan and a
    version's Restore replace it, each after a backup. Live edits are pack 3. */
-const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function';
+// A cached store.js from before prefs cannot keep a room, so no room at all.
+const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function'
+  && typeof Store.pref === 'function' && typeof Store.setPref === 'function';
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
 // { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
 let room = null;
@@ -2795,10 +2797,21 @@ async function roomCreate() {
 }
 
 // The QR is the invite link again, for a phone or a second PC with a camera;
-// drawn once per link.
+// drawn once per link. qr.js is fetched only when there is an invite to
+// draw, so a browser in no shared plan loads nothing it did not before.
 let roomQr = { link: '', svg: '' };
+let qrLoading = false;
 function inviteQr(link) {
-  if (typeof QR === 'undefined' || typeof QR.svg !== 'function') return '';
+  if (typeof QR === 'undefined' || typeof QR.svg !== 'function') {
+    if (!qrLoading) {
+      qrLoading = true;
+      const tag = document.createElement('script');
+      tag.src = `qr.js?v=${APP_VERSION}`;
+      tag.onload = () => renderRoom();
+      document.head.appendChild(tag);
+    }
+    return '';
+  }
   if (roomQr.link !== link) {
     let svg = '';
     try { svg = QR.svg(link, { level: 'M', label: 'The invite link as a QR code' }); } catch { /* too long: the link alone */ }

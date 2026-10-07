@@ -117,6 +117,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
   check('no room: no status in the bar', (await pill(p.page).count()) === 0);
   same('no room: the Data tab still says nothing is sent', await p.page.locator('#tab-data > .hint').first().innerText(), 'Everything you type stays on this PC. This page never sends it anywhere.');
   check('no room: the Shared plan card is there, offering to start one', (await p.page.locator('#roomCard h3').innerText()).startsWith('Shared plan'));
+  check('no room: the QR encoder is not even loaded', await p.page.evaluate(() => typeof QR === 'undefined' && ![...document.scripts].some((t) => /qr\.js/.test(t.src))));
   same('no room: no console errors', p.errors, []);
   await p.context.close();
 }
@@ -228,7 +229,7 @@ let created = null;   // { secret, plan }: the room the next sections join
   same('at seq 0', stored && stored.snapshot.seq, 0);
   same('the create frame carried the code', relay.sent('create', k.roomId).map((f) => f.createCode), ['test-create-code']);
   same('the invite link is this page plus #join=', await p.page.locator('#roomInvite').inputValue(), `${base}#join=${secret}`);
-  check('and is drawn as a QR beside it', (await p.page.locator('#roomCard .room-qr svg path').count()) === 1);
+  check('and is drawn as a QR beside it', await p.page.waitForSelector('#roomCard .room-qr svg path', { timeout: 5000 }).then(() => true, () => false));
   const rest = await elsewhere(p.page);
   check('neither the secret nor the token is stored anywhere else', !rest.includes(secret) && !rest.includes(k.token));
   check('nor in the plan, which is what Export writes', !onScreen.includes(secret) && !onScreen.includes(k.token));
