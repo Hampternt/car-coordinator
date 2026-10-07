@@ -4,6 +4,8 @@
 use std::path::Path;
 use std::sync::Mutex;
 
+use rusqlite::{OptionalExtension, params};
+
 use crate::protocol::{OpOut, SnapshotOut, VersionMeta};
 
 pub type StorageError = rusqlite::Error;
@@ -39,6 +41,11 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (room, id)
     );",
 ];
+
+pub fn now_ms() -> u64 {
+    let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    since_epoch.as_millis() as u64
+}
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
     let current: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -86,21 +93,38 @@ impl Storage {
         Ok(Storage { conn: Mutex::new(conn) })
     }
 
+    fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        // A panic while the lock was held cannot leave a transaction half
+        // done (rusqlite rolls back on drop), so a poisoned lock is safe to use.
+        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     pub fn room_count(&self) -> Result<u64> {
-        todo!()
+        self.conn().query_row("SELECT COUNT(*) FROM rooms", [], |row| row.get(0))
     }
 
     pub fn create_room(&self, room: &str, token_hash: &[u8; 32]) -> Result<CreateOutcome> {
-        todo!()
+        let inserted = self.conn().execute(
+            "INSERT INTO rooms (id, token_hash, created_at) VALUES (?1, ?2, ?3) ON CONFLICT (id) DO NOTHING",
+            params![room, &token_hash[..], now_ms()],
+        )?;
+        Ok(if inserted == 1 { CreateOutcome::Created } else { CreateOutcome::Exists })
     }
 
     pub fn token_hash(&self, room: &str) -> Result<Option<[u8; 32]>> {
-        todo!()
+        let blob: Option<Vec<u8>> = self
+            .conn()
+            .query_row("SELECT token_hash FROM rooms WHERE id = ?1", [room], |row| row.get(0))
+            .optional()?;
+        // A stored hash of the wrong length matches nothing.
+        Ok(blob.and_then(|b| b.try_into().ok()))
     }
 
     /// The room's latest op seq (0 before any op).
     pub fn latest_seq(&self, room: &str) -> Result<u64> {
-        todo!()
+        let seq: Option<u64> =
+            self.conn().query_row("SELECT latest_seq FROM rooms WHERE id = ?1", [room], |row| row.get(0)).optional()?;
+        Ok(seq.unwrap_or(0))
     }
 
     /// Stores the snapshot unless `seq` is below the stored one, dropping ops
