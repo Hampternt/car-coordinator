@@ -18,3 +18,31 @@ in the shared worktree (owns `relay/` and this file only). Scaffold ea8f1f4, sta
   builders overwrite each other's "now" file. Expected with one shared worktree.
 - The scaffold tests overlap item boundaries (some rooms tests need `op`/`catchup`), so each item
   is gated on the tests it turns green, named below; the whole suite is green from item 5 on.
+- **Contract questions for the main session** (built as below, nothing in PROTOCOL.md changed):
+  - A connection whose 1024-frame queue fills (it stopped reading) is dropped from its room and
+    closed with `1001` "too far behind", so the client reconnects with backoff and catches up.
+    PROTOCOL §5's table gives 1001 only for "relay shutting down"; a dedicated code, or a line in
+    the table, is the main session's call.
+  - A database or disk-measuring failure closes with `1011` "storage error" (not in the table).
+    The log line names the failing statement, never a value.
+- Behaviour the protocol leaves open, chosen here:
+  - Every `RELAY_*` variable set to an empty value counts as unset (so `RELAY_ORIGINS=` means the
+    default list, matching `RELAY_CREATE_CODE=` meaning creation is disabled).
+  - More than one `Origin` header is refused with 403.
+  - The disk cap is `usage >= cap` checked before the write, so one write may overshoot by up to one
+    body (512 KB).
+  - The relay creates `RELAY_DATA` if it is missing.
+  - The 5 s close drain is cut to 1 s once shutdown starts, so a client that never answers a close
+    cannot hold up a restart.
+  - A missing room is compared against an all-zero hash, so "no room" and "wrong token" take the
+    same path to 4401.
+- Risk flags for the auth review: `relay/src/auth.rs`, the opening in `relay/src/ws.rs`
+  (`room_ws`, `origin_allowed`, `open`, `create`), and the per-room lock in `handle`/`join`.
+
+## Unit gate (2026-10-08)
+
+`cargo test --manifest-path relay/Cargo.toml --no-fail-fast`: 45 passed, 0 failed. That is the 35
+scaffold tests (config 6, http 5, limits 7, rooms 11, sync 6) plus 10 new unit tests in auth,
+protocol, storage and limits. Five consecutive full runs on item 5 were also 45/0.
+`cargo clippy -- -D warnings` (lib + bin) is clean. The `nginx -t` container check is still open:
+see item 6.
