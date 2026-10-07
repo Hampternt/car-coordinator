@@ -179,6 +179,7 @@ Drafted in full while the owner tests round 1.
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: round 1 took 123 min from the plan commit to handover, 37 commits (`wave-times.sh 2026-10-07T23:00`).
 - 2026-10-08: **pack gate on a frozen copy of c702444:**
   - `npm test` exit 0: `VERSIONS OK`, `map checks passed`, `sync checks passed`, `sync-ui checks passed`; smoke `all checks passed` (3 groups skipped for the stored file handle, as before); breadify `all passed`.
   - `npm run screens` exit 0: `no console errors, 4 warnings raised and asserted`.
