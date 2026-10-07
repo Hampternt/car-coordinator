@@ -2518,6 +2518,8 @@ const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === '
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
 // { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
 let room = null;
+// { conn } while Create is making a room, before it is this browser's room.
+let roomCreating = null;
 
 // The schema the room's plans are written in, as far as this browser has
 // seen: the newest of its snapshot's and its versions'. Newer than this
@@ -2608,14 +2610,100 @@ function renderRoomPill() {
   pill.textContent = `Shared plan: ${says.short}`;
 }
 
+/* Create: a new room on the relay, seeded with this plan. The owner's create
+   code is asked for each time and kept nowhere. The room becomes this
+   browser's only once the relay has stored the plan; until then nothing is
+   remembered, so a failed Create leaves no trace but the message. */
+async function roomCreate() {
+  if (room || roomCreating || !syncReady()) return;
+  const code = String(document.getElementById('roomCode')?.value || '').trim();
+  if (!code) { note('warn', 'Type the create code first. It is set on the shared plan\'s server; the owner of the server has it.'); render(); return; }
+  const secret = Sync.newSecret();
+  const keys = await Sync.deriveKeys(secret);
+  const c = { conn: null, sent: false };
+  roomCreating = c;
+  const finish = (text) => {
+    if (roomCreating !== c) return;
+    roomCreating = null;
+    c.conn.close();
+    if (text) note('warn', text);
+    render();
+  };
+  c.conn = Sync.connect({ keys, create: { createCode: code } });
+  c.conn.on('status', async (status, closeCode) => {
+    if (status === 'refused') {
+      finish(closeCode === Sync.CLOSE.WRONG_CREATE_CODE
+        ? 'The create code was not accepted, so no shared plan was made. Check the code and try again.'
+        : 'The server refused to make the shared plan, so none was made. Your plan is unchanged.');
+    } else if (status === 'offline') {
+      finish('Could not reach the shared plan\'s server, so no shared plan was made. Your plan is unchanged; try again later.');
+    } else if (status === 'connected' && !c.sent) {
+      c.sent = true;
+      const body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state });
+      if (roomCreating === c) c.conn.send({ type: 'snapshot', seq: c.conn.seq, body });
+    }
+  });
+  c.conn.on('frame', (f) => {
+    if (f.type !== 'ack' || roomCreating !== c) return;
+    if (!Store.setPref('room', secret)) {
+      finish('The shared plan was made, but this browser would not keep its link, so it cannot use it. Its storage may be full or switched off.');
+      return;
+    }
+    roomCreating = null;
+    c.conn.close();
+    roomStart(secret);
+    note('info', 'Made a shared plan from your plan. Send the invite link on the Data tab to the other manager, and to no one else.');
+    render();
+  });
+  renderRoom();
+}
+
+// The QR is the invite link again, for a phone or a second PC with a camera;
+// drawn once per link.
+let roomQr = { link: '', svg: '' };
+function inviteQr(link) {
+  if (typeof QR === 'undefined' || typeof QR.svg !== 'function') return '';
+  if (roomQr.link !== link) {
+    let svg = '';
+    try { svg = QR.svg(link, { level: 'M', label: 'The invite link as a QR code' }); } catch { /* too long: the link alone */ }
+    roomQr = { link, svg };
+  }
+  return roomQr.svg;
+}
+
 function roomCardHtml() {
+  const head = `<h3>Shared plan${infoBtn('data-shared')}</h3>`;
   if (!room) {
-    return `<h3>Shared plan${infoBtn('data-shared')}</h3>
-      <p class="hint">Work on one plan with another manager, from any PC.</p>`;
+    return `${head}
+      <p class="hint">One plan for two managers, on any PC. It is locked on this PC before it is sent, so the server cannot read it; only the invite link opens it. To join one, open the invite link you were sent.</p>
+      <label class="room-code">Create code <input type="password" id="roomCode" autocomplete="off" spellcheck="false"${roomCreating ? ' disabled' : ''}></label>
+      <button class="btn primary-ish" data-act="room-create"${roomCreating ? ' disabled' : ''}>${roomCreating ? 'Creating\u2026' : 'Create a shared plan'}</button>`;
   }
   const says = roomSays();
-  return `<h3>Shared plan${infoBtn('data-shared')}</h3>
-    <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>`;
+  const link = Sync.inviteLink(room.secret);
+  const qr = inviteQr(link);
+  return `${head}
+    <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    <h4>Invite link</h4>
+    <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
+    <div class="room-invite">
+      <div><textarea id="roomInvite" class="code" readonly rows="2">${esc(link)}</textarea>
+      <button class="btn" data-act="room-copy">Copy the invite link</button></div>
+      ${qr ? `<div class="room-qr">${qr}</div>` : ''}
+    </div>`;
+}
+
+async function roomAction(act) {
+  switch (act) {
+    case 'room-create': await roomCreate(); return;
+    case 'room-copy': {
+      if (!room) return;
+      try { await navigator.clipboard.writeText(Sync.inviteLink(room.secret)); note('info', 'Copied the invite link.'); } catch { note('warn', 'The clipboard did not take it. Select the link on the Data tab and copy it from there.'); }
+      render();
+      return;
+    }
+    default:
+  }
 }
 
 /* The card is drawn with the Data tab, and again on its own when the
@@ -3178,6 +3266,7 @@ document.addEventListener('click', (e) => {
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
+  if (ROOM_ACTS.has(act)) { roomAction(act, b, e.detail === 0); return; }
   // A tick in a template's load question changes the question, never the plan.
   if (act === 'tpl-part') {
     const n = notices[Number(b.dataset.index)];
@@ -4348,7 +4437,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag', roomCode: 'room-create' };
   // The rail's own boxes press their own buttons, not the tabs' — they add to
   // the same lists, but from a different box.
   const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];
@@ -4364,6 +4453,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
+// The Shared plan card's, which talk to the relay and so are async.
+const ROOM_ACTS = new Set(['room-create', 'room-copy']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

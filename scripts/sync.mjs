@@ -294,6 +294,16 @@ await block('readInvite', () => {
     c.close();
   });
 
+  await block('connect: closed from its own offline listener', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    sockets.length = 0;
+    const c = S.connect({ keys, WebSocket: FakeSocket, retry });
+    c.on('status', (st) => { if (st === 'offline') c.close(); });
+    sockets[0].drop(1006);
+    await wait(80);
+    same('a close() made while it says offline stops the redial', [c.status, sockets.length], ['closed', 1]);
+  });
+
   await block('connect: a network error with no close', async () => {
     const keys = await S.deriveKeys(VECTOR.secret);
     sockets.length = 0;

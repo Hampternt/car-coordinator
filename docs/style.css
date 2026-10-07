@@ -192,6 +192,16 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
   .topbar:has(.sync-pill) .primary { margin-left: auto; }
 }
 
+/* The Shared plan card: the invite link beside its QR, which stays square
+   and on white so a phone can read it in dark mode too. */
+.room-code { display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; }
+.room-code input { width: 16em; }
+#roomCard h4 { font: 600 15px var(--head); margin: 14px 0 4px; }
+.room-invite { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+.room-invite > div:first-child { flex: 1 1 360px; }
+.room-qr { width: 132px; flex: none; }
+.room-qr svg { width: 132px; height: 132px; display: block; }
+
 /* 1200 was right when the plan was a table with a narrow rail beside it. The
    rail is a working panel now and lives to the right of the table, so the page
    takes the width a desk monitor actually has — and stops well before a line

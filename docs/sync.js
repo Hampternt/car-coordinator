@@ -263,6 +263,8 @@ const Sync = (() => {
       if (stopped) return;
       if (REFUSED.has(code)) { stopped = true; setStatus('refused', code); return; }
       setStatus('offline', code);
+      // A listener may have given up on it just now.
+      if (stopped) return;
       const wait = Math.min(max, first * 2 ** attempt);
       attempt++;
       // A little jitter, so two browsers that lost the relay together do not

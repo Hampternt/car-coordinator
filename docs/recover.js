@@ -50,6 +50,10 @@
   const held = {};
   try {
     for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    // Never the shared plan's secret: whoever holds it can open and change
+    // the shared plan, and a recovery file gets mailed about. The plan itself
+    // is in carcoord:v1 like any other.
+    keys = keys.filter((k) => k !== 'carcoord:pref:room');
     for (const k of keys) held[k] = localStorage.getItem(k);
   } catch (e) {
     list.replaceChildren(el('p', `This browser would not let this page read its storage (${e && e.name ? e.name : 'refused'}). Nothing can be recovered from this page in this browser.`, 'warn'));

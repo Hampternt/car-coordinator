@@ -182,6 +182,64 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
   await p.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// Create: a wrong code makes nothing; the right one seeds the room from this
+// plan, and the invite link and its QR are shown.
+const SEED = { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
+// Every value this browser stores, but the room's own pref, joined: where the
+// secret and the token must never turn up.
+const elsewhere = (pg) => pg.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'carcoord:pref:room').map((k) => `${k}=${localStorage.getItem(k)}`).join('\n'));
+const noticeSays = async (pg, re, ms = 5000) => {
+  try { await pg.waitForFunction((src) => new RegExp(src).test(document.getElementById('notices').innerText), re.source, { timeout: ms }); return true; } catch { return false; }
+};
+let created = null;   // { secret, plan }: the room the next sections join
+{
+  const p = await profile({ items: SEED });
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  const rooms = relay.rooms.size;
+  await p.page.click('[data-act="room-create"]');
+  check('Create with no code asks for one, and calls nobody', await noticeSays(p.page, /Type the create code first/) && await p.page.evaluate(() => window.__sockets) === 0);
+  await p.page.fill('#roomCode', 'not-the-code');
+  await p.page.click('[data-act="room-create"]');
+  check('a wrong create code: said so', await noticeSays(p.page, /create code was not accepted/), await p.page.locator('#notices').innerText());
+  check('and nothing made or remembered', relay.rooms.size === rooms && await p.page.evaluate(() => localStorage.getItem('carcoord:pref:room') === null && document.getElementById('syncStatus') === null));
+
+  relay.down();
+  await p.page.fill('#roomCode', 'test-create-code');
+  await p.page.click('[data-act="room-create"]');
+  check('the server unreachable: said so, nothing remembered', await noticeSays(p.page, /Could not reach the shared plan's server/) && await p.page.evaluate(() => localStorage.getItem('carcoord:pref:room') === null));
+  relay.up();
+  const dialled = relay.dialled;
+  await wait(2500);
+  same('and a failed Create does not keep knocking', relay.dialled, dialled);
+
+  await p.page.fill('#roomCode', 'test-create-code');
+  await p.page.press('#roomCode', 'Enter');
+  check('the right code: the bar says Connected', await pillSays(p.page, 'Connected'), await pill(p.page).textContent().catch(() => 'no pill'));
+  const secret = await p.page.evaluate(() => localStorage.getItem('carcoord:pref:room'));
+  check('the room\'s secret is kept under carcoord:pref:room', /^[A-Za-z0-9_-]{43}$/.test(String(secret)), secret);
+  const k = keysOf(secret);
+  const stored = relay.rooms.get(k.roomId);
+  check('the relay holds the room under its id, and only the token\'s hash', !!stored && stored.hash === nodeCrypto.createHash('sha256').update(Buffer.from(k.token, 'base64url')).digest('hex'));
+  const snap = stored && stored.snapshot && unseal(secret, 'snapshot', stored.snapshot.body);
+  const onScreen = await p.page.evaluate(() => JSON.stringify(state));
+  check('its snapshot opens, with this key, to this plan', !!snap && snap.schema === 6 && JSON.stringify(snap.plan) === onScreen);
+  same('at seq 0', stored && stored.snapshot.seq, 0);
+  same('the create frame carried the code', relay.sent('create', k.roomId).map((f) => f.createCode), ['test-create-code']);
+  same('the invite link is this page plus #join=', await p.page.locator('#roomInvite').inputValue(), `${base}#join=${secret}`);
+  check('and is drawn as a QR beside it', (await p.page.locator('#roomCard .room-qr svg path').count()) === 1);
+  const rest = await elsewhere(p.page);
+  check('neither the secret nor the token is stored anywhere else', !rest.includes(secret) && !rest.includes(k.token));
+  check('nor in the plan, which is what Export writes', !onScreen.includes(secret) && !onScreen.includes(k.token));
+  check('the create code is kept nowhere', !rest.includes('test-create-code') && !(await p.page.evaluate(() => localStorage.getItem('carcoord:pref:room'))).includes('test-create-code'));
+  await p.page.goto(`${base}recover.html`, { waitUntil: 'networkidle' });
+  const page = await p.page.locator('body').innerText();
+  check('recover.html lists the plan but never the shared plan\'s secret', page.includes('The plan and setup') && !page.includes(secret) && !page.includes('carcoord:pref:room'));
+  same('Create: no console errors', p.errors, []);
+  created = { secret, plan: JSON.parse(onScreen) };
+  await p.context.close();
+}
+
 await browser.close();
 await server.close();
 console.log(failures.length ? `\n${failures.length} sync-ui check(s) failed` : '\nsync-ui checks passed');
