@@ -38,6 +38,8 @@ const oldVersion = JSON.parse(await readFile(join(oldRoot, 'package.json'), 'utf
 // From 0.3.0 on, the old build has its own release notes and Archives, so a
 // browser holding its cached files is not a blank slate for this build.
 const OLD_HAS_NOTES = existsSync(join(OLD_DOCS, 'updates.js'));
+// From 0.13.0 on, the old store.js adds the weekday templates itself.
+const OLD_HAS_WEEKDAY = (await readFile(join(OLD_DOCS, 'store.js'), 'utf8')).includes('tpl-weekday');
 const NEW = JSON.parse(await readFile(join(HERE, 'package.json'), 'utf8')).version;
 const NEW_SCHEMA = Number((await readFile(join(NEW_DOCS, 'store.js'), 'utf8')).match(/const SCHEMA = (\d+);/)[1]);
 const devPlan = await readFile(join(HERE, 'scripts', 'fixtures', 'dev-data.json'), 'utf8');
@@ -402,9 +404,9 @@ const scenarios = {
         check('mixed files: an old store.js means no Driver tags section, and no driver tags in memory', section === 0
           && await now.page.evaluate(() => state.driverTags === undefined && state.drivers.every((d) => !('tagId' in d))), `${section} section parts`);
       }
-      // An old store.js adds no weekday templates, and the shelf shows the
-      // plan's own.
-      check('mixed files: an old store.js means the plan\'s own templates only', await now.page.evaluate(() => state.weekdayTemplates === undefined
+      // An old store.js from before 0.13.0 adds no weekday templates, and the
+      // shelf shows the plan's own.
+      if (!OLD_HAS_WEEKDAY) check('mixed files: an old store.js means the plan\'s own templates only', await now.page.evaluate(() => state.weekdayTemplates === undefined
         && !state.templates.some((t) => /^tpl-weekday-\d$/.test(t.id))
         && document.querySelectorAll('#planTemplates .tpl').length === state.templates.length));
       check('mixed files: no console errors', !now.errors.length, now.errors.join(' | '));
