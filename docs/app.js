@@ -2526,8 +2526,18 @@ let roomCreating = null;
 // The schema the room's plans are written in, as far as this browser has
 // seen: the newest of its snapshot's and its versions'. Newer than this
 // build's means read-only, so an older normalise() can never drop a field
-// for both managers.
-const roomReadOnly = () => !!room && room.schema > Store.SCHEMA;
+// for both managers. So does a room holding ops (`ahead`): this build applies
+// none (live edits are pack 3), so a snapshot from it would claim ops it never
+// saw, and the relay would delete them (PROTOCOL.md §4.3).
+const roomReadOnly = () => !!room && (room.schema > Store.SCHEMA || room.ahead);
+
+// Whether a catchup shows ops this build cannot apply: any op in it, or a room
+// seq past its snapshot's. The catchup asks only for ops after the welcome's
+// seq, so the seq is what shows the ones between the snapshot and the welcome.
+const opsAhead = (f) => {
+  const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+  return (Array.isArray(f.ops) && f.ops.length > 0) || (Number.isInteger(f.seq) && f.seq > snapSeq);
+};
 
 async function roomStart(secret) {
   roomStop();
@@ -2537,7 +2547,10 @@ async function roomStart(secret) {
   // fetches: version id -> the resolvers waiting for its body (getVersion).
   // caught: the catchup since the last (re)connect has been read. Until then
   // the room's schema is unknown, so nothing is written to it.
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [], fetches: new Map(), caught: false };
+  // appliedSeq: the seq of the last op this browser's plan includes, the only
+  // seq it may send a snapshot at; with no ops applied, the room snapshot's.
+  // ahead: the room holds ops past it (opsAhead), so it is read-only here.
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, appliedSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
@@ -2589,6 +2602,8 @@ async function roomFrame(r, f) {
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
     r.versions = versions;
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
+    r.appliedSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+    r.ahead = opsAhead(f);
     r.schema = Math.max(0, snap ? snap.schema : 0, ...versions.map((v) => v.schema));
     r.caught = true;
     renderRoom();
@@ -2607,6 +2622,12 @@ async function roomFrame(r, f) {
     roomFetched(r, f.id, plain && plain.plan && typeof plain.plan === 'object' ? { plain, name: String(label?.name || '') } : { unreadable: true });
   } else if (f.type === 'noVersion') {
     roomFetched(r, f.id, null);
+  } else if (f.type === 'op') {
+    // A newer build's live edit: this one cannot apply it, so from now on it
+    // only reads the room.
+    if (room !== r || r.ahead) return;
+    r.ahead = true;
+    renderRoom();
   } else if (f.type === 'version' && typeof f.body !== 'string') {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
@@ -2712,7 +2733,8 @@ async function roomPush() {
   ]);
   if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
   r.acks.push({ kind: 'version', name });
-  if (r.conn.send({ type: 'snapshot', seq: r.seq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
+  // Never above the seq this plan includes: the relay deletes every op up to it.
+  if (r.conn.send({ type: 'snapshot', seq: r.appliedSeq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
   if (box) box.value = '';
 }
 
@@ -2784,7 +2806,8 @@ async function roomCreate() {
     } else if (status === 'connected' && !c.sent) {
       c.sent = true;
       const body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state });
-      if (roomCreating === c) c.conn.send({ type: 'snapshot', seq: c.conn.seq, body });
+      // Seq 0: a room just made holds no ops, and this plan includes none.
+      if (roomCreating === c) c.conn.send({ type: 'snapshot', seq: 0, body });
     }
   });
   c.conn.on('frame', (f) => {
@@ -2901,7 +2924,7 @@ async function roomOfferStart(secret) {
   if (!syncReady()) return;
   if (room && room.secret === secret) { note('info', 'This browser is already in that shared plan.'); render(); return; }
   roomOfferEnd();
-  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0 };
+  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0, ahead: false };
   roomOffer = o;
   o.keys = await Sync.deriveKeys(secret);
   if (roomOffer !== o) return;
@@ -2918,6 +2941,8 @@ async function roomOfferStart(secret) {
     if (roomOffer !== o) return;
     o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
     o.schema = Math.max(0, plain ? plain.schema : 0, ...labels);
+    // Ops past the snapshot: the snapshot alone is not the room's plan.
+    o.ahead = opsAhead(f);
     o.caught = true;
     // Only one look: the offer shows what the room held when it was opened.
     o.conn.close();
@@ -2971,7 +2996,7 @@ function renderRoomOffer() {
   const dlg = roomDialog();
   const status = o.conn ? o.conn.status : 'connecting';
   let body;
-  if (o.caught && o.plain && o.schema > Store.SCHEMA) {
+  if (o.caught && o.plain && (o.schema > Store.SCHEMA || o.ahead)) {
     body = `<p class="status warn-status">This shared plan was saved by a newer version of Car Coordinator. Update the app to join it; nothing has changed here.</p>`;
   } else if (o.caught && o.plain) {
     body = previewHtml(o.plain.plan, 'Taking it')
@@ -2985,7 +3010,7 @@ function renderRoomOffer() {
   } else {
     body = '<p class="status off">Opening the shared plan\u2026</p>';
   }
-  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA;
+  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA && !o.ahead;
   dlg.innerHTML = `
     <h2>Join this shared plan?</h2>
     ${body}
@@ -2998,7 +3023,7 @@ function renderRoomOffer() {
 
 function roomTake() {
   const o = roomOffer;
-  if (!o || !o.plain || o.schema > Store.SCHEMA) return;
+  if (!o || !o.plain || o.schema > Store.SCHEMA || o.ahead) return;
   const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
   if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }
   if (!Store.snapshot(state, 'Before joining the shared plan')) { roomOfferEnd(); render(); return; }   // the warning says why

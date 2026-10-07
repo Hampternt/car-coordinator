@@ -479,6 +479,61 @@ let pushed = null;   // { id, plan } for the Restore section
 }
 
 // ---------------------------------------------------------------------------
+// A room holding ops, a newer build's live edits: this build applies none, so
+// it only reads the room, and never sends a snapshot that would make the relay
+// delete them (PROTOCOL.md §4.3).
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  // The ops come after the snapshot and before this browser's welcome, so the
+  // catchup lists none of them: only its seq shows they are there.
+  relay.makeRoom(k.roomId, k.token, {
+    seq: 2,
+    snapshot: { seq: 1, body: seal(secret, 'snapshot', { schema: 6, plan: created.plan }) },
+    ops: [{ seq: 2, body: seal(secret, 'op', { schema: 6, made: 'up' }) }],
+  });
+  const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+  const j = await profile({ items: OTHER_SEED });
+  const before = await kept(j.page);
+  await openInvite(j.page, `#join=${secret}`);
+  check('a room holding ops offered: Update the app, and no Take', await dialogSays(j.page, /Update the app to join it/) && (await j.page.locator('[data-act="room-take"]').count()) === 0, await j.page.locator('#roomDlg').innerText().catch(() => ''));
+  await j.page.click('[data-act="room-notnow"]');
+  same('and nothing changed', await kept(j.page), before);
+  await j.context.close();
+
+  const p = await profile({ items: inRoom(SEED, secret) });
+  check('in a room holding ops: the bar says Update the app', await pillSays(p.page, 'Update the app'), await pill(p.page).textContent().catch(() => 'no pill'));
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  check('Push is disabled', await p.page.locator('[data-act="room-push"]').isDisabled());
+  await p.page.evaluate(() => { const box = document.getElementById('roomVersionName'); box.disabled = false; box.value = 'Over the ops'; return roomPush(); });
+  check('pushing anyway says to update', await noticeSays(p.page, /Update the app to push/));
+  same('and sends no snapshot, version or op', writes(), 0);
+  same('the room\'s op is still there', relay.rooms.get(k.roomId).ops.map((o) => o.seq), [2]);
+  same('ops room: no console errors', p.errors, []);
+  await p.context.close();
+}
+// A live op from another browser makes a room read-only here from then on.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  relay.makeRoom(k.roomId, k.token, { snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan: created.plan }) } });
+  const a = await profile({ items: inRoom(SEED, secret) });
+  const b = await profile({ items: inRoom(SEED, secret) });
+  for (const x of [a, b]) await pillSays(x.page, 'Connected');
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  check('before any op, Push is there', !(await a.page.locator('[data-act="room-push"]').isDisabled()));
+  await b.page.evaluate((body) => room.conn.send({ type: 'op', body }), seal(secret, 'op', { schema: 6, made: 'up' }));
+  check('an op arrives: the bar says Update the app', await pillSays(a.page, 'Update the app'), await pill(a.page).textContent().catch(() => 'no pill'));
+  const snaps = relay.sent('snapshot', k.roomId).length;
+  await a.page.evaluate(() => { const box = document.getElementById('roomVersionName'); box.disabled = false; box.value = 'After the op'; return roomPush(); });
+  same('and a push sends no snapshot over it', relay.sent('snapshot', k.roomId).length, snaps);
+  same('the op is still there', relay.rooms.get(k.roomId).ops.map((o) => o.seq), [1]);
+  same('live op: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close();
+  await b.context.close();
+}
+
+// ---------------------------------------------------------------------------
 // Leave: the key is forgotten, the plan stays, and the network goes quiet,
 // in this tab, in another tab of the same browser, and after a reload.
 {

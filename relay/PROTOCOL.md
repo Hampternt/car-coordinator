@@ -156,6 +156,15 @@ The ack's `seq` is the stored snapshot's seq **after** handling the frame: equal
 to what was sent means it was stored, higher means a newer one already was.
 The room's latest seq never goes down.
 
+The client's side of the same rule (the relay cannot check it, since it never
+reads a body): a snapshot MUST hold the result of every op up to its `seq`. A
+client sends one only at a `seq` whose ops it has applied, never simply the
+room's latest; otherwise the relay deletes ops the snapshot does not contain.
+A client that cannot apply ops (round 1's build applies none, so its applied
+seq is the snapshot's it caught up from) treats a room holding ops past that
+snapshot (any in a `catchup`, a `catchup.seq` above `snapshot.seq`, or a live
+`op`) as read-only, and sends it no snapshot at all.
+
 ### 4.4 Catchup reply
 
 ```

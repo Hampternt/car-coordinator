@@ -139,9 +139,10 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     up() { down = false; },
     holdCatchup() { hold = hold || []; },
     releaseCatchup() { const waiting = hold || []; hold = null; for (const reply of waiting) reply(); },
-    // A room made directly, as if another browser had created it.
-    makeRoom(roomId, token, { seq = 0, snapshot = null, versions = [] } = {}) {
-      rooms.set(roomId, { hash: sha256(token), seq, snapshot, ops: [], versions: versions.map((v, i) => ({ id: i + 1, at: Date.now(), ...v })), nextId: versions.length + 1 });
+    // A room made directly, as if another browser had created it. `ops` are
+    // [{seq, body}] after the snapshot; `seq` is the room's latest.
+    makeRoom(roomId, token, { seq = 0, snapshot = null, ops = [], versions = [] } = {}) {
+      rooms.set(roomId, { hash: sha256(token), seq, snapshot, ops: ops.map((o) => ({ ...o })), versions: versions.map((v, i) => ({ id: i + 1, at: Date.now(), ...v })), nextId: versions.length + 1 });
     },
   };
 }
