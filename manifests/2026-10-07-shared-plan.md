@@ -157,11 +157,46 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 ## Round 2: Live updates (pack 3)
 
-Drafted in full while the owner tests round 1.
-
-**Goal:** while connected, every edit reaches the other person within about a second, as one change per field (`route X, car = Y`), applied in the server's order so both screens end up identical. A change made offline is sent on reconnect. Two edits to the same field within a few seconds are flagged on both screens ("Kari also changed this"), never silently lost. The plan is snapshotted from time to time so a newcomer does not replay the whole history.
-*Done when:* a two-browser smoke test edits simultaneously, offline and back, and both end identical, with the collision shown.
+**Status:** 💭 drafted 2026-10-08 while the owner tests round 1. Building waits for their go.
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
+`Agent brief:` this manifest's Safety rules, `relay/PROTOCOL.md` (§4.3 snapshot rule, op frames), `docs/sync.js`, the Shared plan code in `docs/app.js` (roomPush, roomFrame, catchup, read-only, `planElsewhere`), `save()` at `docs/app.js:366`, the `input` handler at `docs/app.js:2268`, `scripts/sync-ui.mjs` and `scripts/sync-fakerelay.mjs`. Depends on: round 1 merged into `dev`.
+**Runs serial:** one unit, and every item writes `docs/app.js`.
+
+**Goal:** while connected, every edit reaches the other person within about a second, and both screens end up identical. The relay already orders changes (round 1); this pack teaches the app to send and apply them.
+
+<details><summary>Design: how edits become changes (no relay change needed)</summary>
+
+- **Diff at save, not at every edit site.** Every edit path in `app.js` (the `input` handler and some 70 click actions) ends in `save()`. In a room, `save()` also compares the plan to the last state both sides agree on and sends the differences. Nothing can be missed by a forgotten edit site.
+- **Change shapes**, each sealed as an `op`:
+  - `set {kind, id, field, value}`: one field of one item (`kind` is route, car, position, label, driver, driverTag, driverGroup or template), or a top-level field such as the date with `kind: "meta"`;
+  - `add {kind, item, after}`;
+  - `remove {kind, id}`;
+  - `order {kind, ids}`.
+- **Converging:** each browser keeps *confirmed* (everything the relay has sequenced) and *pending* (its own changes not yet acked). The screen shows confirmed with pending on top. Changes are applied in the relay's order, so once everything is acked both sides hold the same plan.
+- **Collisions:** an incoming change to a field this browser has pending, or one changed while offline, is flagged on both screens ("Also changed by the other manager: kept X"). The change that reached the relay last wins. Nothing is lost silently, and the losing value is in the flag.
+- **Typing:** changes to a field are batched for about 300 ms. A field you are typing in is never rewritten under your cursor; it is flagged instead.
+- **Offline:** the confirmed state is kept beside the plan (`carcoord:roomBase`, never in Backups or Export). On reconnect: catch up, then work out the pending changes from that base to the plan on screen and send them, flagging collisions. This survives a reload and a closed browser.
+- **No schema bump:** a round-1 copy of the app already turns read-only when a room holds changes it can't apply (fix c262cb6).
+- **Compaction:** after 200 changes, and on Push, a browser that has applied everything sends a snapshot at the seq it has applied.
+
+</details>
+
+**Items** (one commit each, item gate `check.sh` + `sync.mjs` + `sync-ui.mjs`; the full suite once at the end):
+- [ ] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
+- [ ] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
+- [ ] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
+- [ ] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
+- [ ] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
+- [ ] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
+- [ ] **Replace-everything in a room asks first:** Import, Restore from Backups, Load a share code and Restore a version say "This changes the shared plan for both of you" before going ahead (each still Backups first). *Done when:* sync-ui covers each one, and Cancel sends nothing.
+- [ ] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
+- [ ] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
+
+**Decisions for the owner before building:**
+- **Replace-everything:** in a room, Import, Restore from Backups, a share code and Restore a version change the plan for both of you, after asking (recommended). The alternative is to leave the room first.
+- **Collision rule:** the last change to reach the server wins, flagged on both screens with the losing value (recommended), or the first one wins.
+
+**Test it yourself (round 2), outline:** two windows in the room; type in both at once; stop the relay, edit, restart; edit the same driver in both within a second and read the flag.
 
 ## Round 3: Who is editing (pack 4)
 
