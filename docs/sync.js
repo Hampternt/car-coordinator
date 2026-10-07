@@ -11,8 +11,13 @@
    Plaintexts are JSON objects, and every one carries `schema` (Store's data
    version), so an older build can tell it is looking at a newer plan and stay
    read-only rather than drop fields it does not know:
-     snapshot, version   {schema, plan}       pack 2 fixes what `plan` holds
-     label               {schema, name}       a version's name, "Monday final"
+     snapshot            {schema, plan}       pack 2 fixes what `plan` holds
+     version             {schema, plan, name, nonce}
+     label               {schema, name, nonce}  a version's name, "Monday final"
+   A version's body and its label are sealed apart, so the relay could pair
+   one version's label with another's body. Each push puts the same name and
+   a fresh random nonce in both, and the app refuses a body whose name or
+   nonce is not its label's ("This version does not match its name").
      op                  pack 3
      presence            pack 4
 

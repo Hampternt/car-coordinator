@@ -66,8 +66,13 @@ body = base64url( iv[12] ‖ AES-GCM-256(encKey, iv, plaintext, aad) )
   as another, so the relay cannot pass a version off as a snapshot.
 
 Plaintext shapes per kind belong to the app and are documented in
-`docs/sync.js`, except `label`, which is `{schema, name}` (the version's name,
-e.g. "Monday final"). The relay never decrypts anything.
+`docs/sync.js`, except `label`, which is `{schema, name, nonce}` (the version's
+name, e.g. "Monday final", and a random string fresh for each push). The
+version body it names is `{schema, plan, name, nonce}` with the same `name` and
+`nonce`: AAD binds a body to its kind, not to one version, so this is what
+stops a relay pairing one version's label with another's body. A client MUST
+refuse a version body whose `name` or `nonce` differs from its label's, or that
+lacks them. The relay never decrypts anything.
 
 ## 3. Where
 

@@ -2545,6 +2545,21 @@ const opsAhead = (f) => {
   return (Array.isArray(f.ops) && f.ops.length > 0) || (Number.isInteger(f.seq) && f.seq > snapSeq);
 };
 
+// The schema an opened {schema, plan} was written in: the envelope's, or the
+// plan's own schemaVersion when that is newer, since normalise() loads a newer
+// plan with only a warning and would drop what it does not know.
+const planSchema = (plain) => Math.max(
+  Number.isInteger(plain && plain.schema) ? plain.schema : 0,
+  plain && plain.plan && Number.isInteger(plain.plan.schemaVersion) ? plain.plan.schemaVersion : 0,
+);
+
+// A version's name and body are sealed apart (the label and the body), so the
+// relay could pair one version's name with another's body. Each push puts the
+// same random nonce, and the name, in both; a body that does not carry its
+// label's is refused. 16 random bytes, as hex.
+const versionNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.nonce : null);
+
 async function roomStart(secret) {
   roomStop();
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
@@ -2602,7 +2617,7 @@ async function roomFrame(r, f) {
     const versions = [];
     for (const v of Array.isArray(f.versions) ? f.versions : []) {
       const label = await openOr(r, 'label', v.label);
-      if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), schema: label.schema });
+      if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
     }
     if (room !== r) return;
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
@@ -2610,14 +2625,14 @@ async function roomFrame(r, f) {
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
     r.appliedSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
     r.ahead = opsAhead(f);
-    r.schema = Math.max(0, snap ? snap.schema : 0, ...versions.map((v) => v.schema));
+    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema));
     r.caught = true;
     renderRoom();
   } else if (f.type === 'ack') {
     const a = r.acks.shift();
     if (!a || room !== r) return;
     if (a.kind === 'version' && Number.isInteger(f.id)) {
-      if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, schema: Store.SCHEMA });
+      if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, nonce: a.nonce, schema: Store.SCHEMA });
       note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
       renderKeepingFocus();
     }
@@ -2625,7 +2640,9 @@ async function roomFrame(r, f) {
     // getVersion's answer: the whole version, for Look first or Restore.
     const plain = await openOr(r, 'version', f.body);
     const label = await openOr(r, 'label', f.label);
-    roomFetched(r, f.id, plain && plain.plan && typeof plain.plan === 'object' ? { plain, name: String(label?.name || '') } : { unreadable: true });
+    if (!plain || !plain.plan || typeof plain.plan !== 'object' || !label) { roomFetched(r, f.id, { unreadable: true }); return; }
+    const bound = typeof plain.name === 'string' && plain.name === label.name && typeof plain.nonce === 'string' && plain.nonce === labelNonce(label);
+    roomFetched(r, f.id, bound ? { plain, name: plain.name, nonce: plain.nonce } : { mismatch: true });
   } else if (f.type === 'noVersion') {
     roomFetched(r, f.id, null);
   } else if (f.type === 'op') {
@@ -2638,7 +2655,7 @@ async function roomFrame(r, f) {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
     if (!label || room !== r || r.versions.some((v) => v.id === f.id)) return;
-    r.versions.push({ id: f.id, at: f.at, name: String(label.name || ''), schema: label.schema });
+    r.versions.push({ id: f.id, at: f.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
     r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
     renderRoom();
   }
@@ -2657,7 +2674,8 @@ function roomFetched(r, id, result) {
 function roomFetchesEnd(r) {
   for (const id of [...r.fetches.keys()]) roomFetched(r, id, { offline: true });
 }
-// -> { plain, name } | { unreadable } | { offline } | null (no such version)
+// -> { plain, name, nonce } | { unreadable } | { mismatch } | { offline } |
+//    null (no such version)
 function roomFetch(id) {
   const r = room;
   if (!r || !r.conn) return Promise.resolve({ offline: true });
@@ -2673,17 +2691,22 @@ const roomVersion = (id) => room && room.versions.find((v) => v.id === id);
 function roomFetchFailed(got) {
   if (!got) note('warn', 'That version is no longer in the shared plan: only the newest 50 are kept. Nothing was changed.');
   else if (got.offline) note('warn', 'The shared plan cannot be reached right now, so the version could not be fetched. Nothing was changed.');
+  else if (got.mismatch) note('warn', 'This version does not match its name, so nothing was changed.');
   else note('warn', 'That version could not be read, so nothing was changed.');
   renderKeepingFocus();
 }
 
+// The body fetched is the one whose name the list shows: same name, same nonce.
+const matchesListed = (got, v) => !!v && got.name === v.name && got.nonce === v.nonce;
+
 async function roomLookFirst(id) {
   const v = roomVersion(id);
   if (!v) return;
-  const got = await roomFetch(id);
+  let got = await roomFetch(id);
+  if (got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
   if (!got || !got.plain) { roomFetchFailed(got); return; }
   if (roomOffer) return;   // an invite's question came first
-  roomLook = { id, name: v.name, at: v.at, plain: got.plain };
+  roomLook = { id, name: got.name, at: v.at, plain: got.plain };
   renderRoomLook();
 }
 
@@ -2691,7 +2714,7 @@ function renderRoomLook() {
   const l = roomLook;
   if (!l) return;
   const dlg = roomDialog();
-  const newer = l.plain.schema > Store.SCHEMA;
+  const newer = planSchema(l.plain) > Store.SCHEMA;
   dlg.innerHTML = `
     <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
     <p class="hint">Pushed ${esc(when(l.at))}.</p>
@@ -2703,13 +2726,16 @@ function renderRoomLook() {
   if (!dlg.open) dlg.showModal();
 }
 
-async function roomRestore(id, plain) {
+// looked: {plain, name} when it comes from Look first's dialog.
+async function roomRestore(id, looked) {
   if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was restored. Reload this tab first.'); renderKeepingFocus(); return; }
   const v = roomVersion(id);
-  let got = plain ? { plain, name: v ? v.name : '' } : await roomFetch(id);
+  // From Look first the body was matched to its name when it was fetched.
+  let got = looked || await roomFetch(id);
+  if (!looked && got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
   if (!got || !got.plain) { roomFetchFailed(got); return; }
-  const name = got.name || (v && v.name) || 'Unnamed';
-  if (got.plain.schema > Store.SCHEMA) { note('warn', `Update the app to restore \u201c${name}\u201d: it was saved by a newer version of Car Coordinator. Nothing was changed.`); renderKeepingFocus(); return; }
+  const name = got.name || 'Unnamed';
+  if (planSchema(got.plain) > Store.SCHEMA) { note('warn', `Update the app to restore \u201c${name}\u201d: it was saved by a newer version of Car Coordinator. Nothing was changed.`); renderKeepingFocus(); return; }
   const { state: next, error } = Store.parseImport(JSON.stringify(got.plain.plan), defaults);
   if (error || !next) { note('warn', 'That version could not be read, so nothing was changed.'); renderKeepingFocus(); return; }
   if (!Store.snapshot(state, `Before restoring the shared version \u201c${name}\u201d`)) { render(); return; }   // the warning says why
@@ -2733,18 +2759,18 @@ async function roomPush() {
   // Before the catchup the room could be a newer build's: wait for it.
   if (!r.caught) { note('warn', 'The shared plan is still being read, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
-  const plan = { schema: Store.SCHEMA, plan: state };
+  const nonce = versionNonce();
   const [body, label, snapshot] = await Promise.all([
-    Sync.seal(r.keys, 'version', plan),
-    Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name }),
-    Sync.seal(r.keys, 'snapshot', plan),
+    Sync.seal(r.keys, 'version', { schema: Store.SCHEMA, plan: state, name, nonce }),
+    Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name, nonce }),
+    Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: state }),
   ]);
   // Sealing takes a moment, in which the room can reconnect (and not be caught
   // up again yet), turn out read-only, or this tab's plan go stale.
   if (room === r && roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
   if (room === r && (!r.caught || planElsewhere)) { note('warn', 'The shared plan changed while the version was being made, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
-  r.acks.push({ kind: 'version', name });
+  r.acks.push({ kind: 'version', name, nonce });
   // Never above the seq this plan includes: the relay deletes every op up to it.
   if (r.conn.send({ type: 'snapshot', seq: r.appliedSeq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
   if (box) box.value = '';
@@ -2953,7 +2979,7 @@ async function roomOfferStart(secret) {
     for (const v of Array.isArray(f.versions) ? f.versions : []) { const l = await openOr(o, 'label', v.label); if (l) labels.push(l.schema); }
     if (roomOffer !== o) return;
     o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
-    o.schema = Math.max(0, plain ? plain.schema : 0, ...labels);
+    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels);
     // Ops past the snapshot: the snapshot alone is not the room's plan.
     o.ahead = opsAhead(f);
     o.caught = true;
@@ -3113,10 +3139,10 @@ async function roomAction(act, b, fromKeyboard = false) {
       // From Look first, the dialog's button is the second press; from the
       // list it takes two, as a backup's Restore does.
       if (b.dataset.sure === '1' && roomLook && roomLook.id === id) {
-        const { plain } = roomLook;
+        const { plain, name } = roomLook;
         roomLook = null;
         document.getElementById('roomDlg')?.close();
-        await roomRestore(id, plain);
+        await roomRestore(id, { plain, name });
         return;
       }
       if (!confirmTwice(`room-restore:${id}`, fromKeyboard)) return;

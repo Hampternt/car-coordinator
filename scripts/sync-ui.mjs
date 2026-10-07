@@ -54,6 +54,13 @@ const unseal = (secret, kind, body) => {
   return JSON.parse(Buffer.concat([d.update(raw.subarray(12, raw.length - 16)), d.final()]).toString('utf8'));
 };
 
+// A version as the app pushes one: the same name and a fresh nonce in its
+// label and its body (PROTOCOL.md §2).
+const versionOf = (secret, name, plan, schema = 6) => {
+  const nonce = b64(nodeCrypto.randomBytes(16));
+  return { label: seal(secret, 'label', { schema, name, nonce }), body: seal(secret, 'version', { schema, plan, name, nonce }) };
+};
+
 // A port nothing listens on: a relay that is not there, reached for real.
 const deadPort = async () => {
   const s = net.createServer();
@@ -347,8 +354,9 @@ let pushed = null;   // { id, plan } for the Restore section
   const room = relay.rooms.get(k.roomId);
   const v = room.versions[room.versions.length - 1];
   const aPlan = await a.page.evaluate(() => JSON.stringify(state));
-  same('the relay holds its name sealed as a label', unseal(secret, 'label', v.label), { schema: 6, name: 'Monday final' });
-  check('and its plan sealed as a version, as it is on screen', JSON.stringify(unseal(secret, 'version', v.body)) === JSON.stringify({ schema: 6, plan: JSON.parse(aPlan) }));
+  const lab = unseal(secret, 'label', v.label);
+  check('the relay holds its name sealed as a label, with a fresh nonce', lab.schema === 6 && lab.name === 'Monday final' && /^[0-9a-f]{32}$/.test(lab.nonce) && Object.keys(lab).length === 3, JSON.stringify(lab));
+  check('and its plan sealed as a version, as it is on screen, with the label\'s name and nonce', JSON.stringify(unseal(secret, 'version', v.body)) === JSON.stringify({ schema: 6, plan: JSON.parse(aPlan), name: 'Monday final', nonce: lab.nonce }));
   check('which a snapshot key does not open', (() => { try { unseal(secret, 'snapshot', v.body); return false; } catch { return true; } })());
   check('the room\'s snapshot is now the pushed plan, so a later Take gets it', JSON.stringify(unseal(secret, 'snapshot', room.snapshot.body).plan) === aPlan);
   check('the other browser sees it in its list, without a reload', await b.page.waitForFunction(() => [...document.querySelectorAll('#roomCard .room-v-name')].some((n) => n.textContent === 'Monday final'), null, { timeout: 5000 }).then(() => true, () => false));
@@ -435,8 +443,8 @@ let pushed = null;   // { id, plan } for the Restore section
   relay.makeRoom(k.roomId, k.token, {
     snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 7, plan: newer }) },
     versions: [
-      { label: seal(secret, 'label', { schema: 6, name: 'Old one' }), body: seal(secret, 'version', { schema: 6, plan: older }) },
-      { label: seal(secret, 'label', { schema: 7, name: 'From the future' }), body: seal(secret, 'version', { schema: 7, plan: newer }) },
+      versionOf(secret, 'Old one', older),
+      versionOf(secret, 'From the future', newer, 7),
     ],
   });
   // Opened as an invite first: it cannot be taken.
@@ -582,7 +590,7 @@ let pushed = null;   // { id, plan } for the Restore section
   const plan = { ...created.plan, date: evil };
   relay.makeRoom(k.roomId, k.token, {
     snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan }) },
-    versions: [{ label: seal(secret, 'label', { schema: 6, name: `${evil} name` }), body: seal(secret, 'version', { schema: 6, plan }) }],
+    versions: [versionOf(secret, `${evil} name`, plan)],
   });
   const p = await profile({ items: inRoom(SEED, secret) });
   await pillSays(p.page, 'Connected');
@@ -596,6 +604,70 @@ let pushed = null;   // { id, plan } for the Restore section
   await p.page.click('[data-act="room-look-close"]');
   same('markup: no console errors', p.errors, []);
   await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// A version's body must be the one its name was pushed with, and a plan whose
+// own schemaVersion is newer is never taken or restored, whatever its
+// envelope says.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  const plan = created.plan;
+  const swapped = { ...plan, routes: plan.routes.map((r, i) => (i === 0 ? { ...r, driver: 'Swapped Sara' } : r)) };
+  const tuesday = versionOf(secret, 'Tuesday', plan);
+  const wednesday = versionOf(secret, 'Wednesday', swapped);
+  relay.makeRoom(k.roomId, k.token, {
+    snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan }) },
+    versions: [
+      // 1: Tuesday's name with Wednesday's body, as a relay could pair them.
+      { label: tuesday.label, body: wednesday.body },
+      // 2: a body with no name or nonce at all.
+      { label: seal(secret, 'label', { schema: 6, name: 'Unbound' }), body: seal(secret, 'version', { schema: 6, plan: swapped }) },
+      // 3: an envelope of this build's schema round a newer plan.
+      versionOf(secret, 'Newer inside', { ...swapped, schemaVersion: 7 }),
+    ],
+  });
+  const p = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(p.page, 'Connected');
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  await p.page.waitForSelector('#roomCard [data-act="room-look"]');
+  const was = await kept(p.page);
+  const fresh = () => p.page.evaluate(() => { notices = []; render(); });
+  const dialogOpen = () => p.page.evaluate(() => !!document.getElementById('roomDlg')?.open);
+  const mismatch = /This version does not match its name, so nothing was changed/;
+  for (const id of [1, 2]) {
+    await fresh();
+    await p.page.click(`#roomCard [data-act="room-look"][data-id="${id}"]`);
+    check(`version ${id}, Look first: does not match its name, and shows nothing`, await noticeSays(p.page, mismatch) && !(await dialogOpen()));
+    await fresh();
+    await p.page.click(`#roomCard [data-act="room-restore"][data-id="${id}"]`);
+    await p.page.click(`#roomCard [data-act="room-restore"][data-id="${id}"]`);
+    check(`version ${id}, Restore: does not match its name`, await noticeSays(p.page, mismatch));
+  }
+  same('and nothing changed', await kept(p.page), was);
+  check('the swapped plan is not on screen', await p.page.evaluate(() => state.routes[0].driver) !== 'Swapped Sara');
+  await p.page.click('#roomCard [data-act="room-look"][data-id="3"]');
+  check('a newer plan in a current envelope: Look first says to update, with no Restore', await dialogSays(p.page, /Update the app to restore it/) && (await p.page.locator('#roomDlg [data-act="room-restore"]').count()) === 0);
+  await p.page.click('[data-act="room-look-close"]');
+  await fresh();
+  await p.page.evaluate(() => roomRestore(3));
+  check('and Restore refuses it', await noticeSays(p.page, /Update the app to restore \u201cNewer inside\u201d/));
+  same('nothing changed', await kept(p.page), was);
+  same('binding: no console errors', p.errors, []);
+  await p.context.close();
+
+  // A snapshot whose plan is newer than its envelope: the offer has no Take.
+  const secret2 = newSecret();
+  const k2 = keysOf(secret2);
+  relay.makeRoom(k2.roomId, k2.token, { snapshot: { seq: 0, body: seal(secret2, 'snapshot', { schema: 6, plan: { ...plan, schemaVersion: 7 } }) } });
+  const j = await profile({ items: OTHER_SEED });
+  const before = await kept(j.page);
+  await openInvite(j.page, `#join=${secret2}`);
+  check('a newer plan in a current snapshot: the offer says to update, with no Take', await dialogSays(j.page, /Update the app to join it/) && (await j.page.locator('[data-act="room-take"]').count()) === 0);
+  await j.page.click('[data-act="room-notnow"]');
+  same('and nothing changed', await kept(j.page), before);
+  await j.context.close();
 }
 
 // ---------------------------------------------------------------------------

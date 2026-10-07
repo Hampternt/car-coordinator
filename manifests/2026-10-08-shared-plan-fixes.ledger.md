@@ -13,7 +13,7 @@ relay cargo test 45/45.
 - [x] 2. A second tab does not follow carcoord:v1 — check.sh OK; sync.mjs passed; sync-ui 154 ok / 0 FAIL (5 new checks FAIL on the old app.js)
 - [x] 3. Push race: recheck after the awaited seals — check.sh OK; sync.mjs passed; sync-ui 157 ok / 0 FAIL (2 new checks FAIL on the old app.js)
 - [x] 4. Unescaped date in previewHtml; esc audit — check.sh OK; sync.mjs passed; sync-ui 161 ok / 0 FAIL (3 new checks FAIL on the old app.js: the img was inserted; CSP blocked its handler)
-- [ ] 5. Version body and label bound by name + nonce; plan schemaVersion checked
+- [x] 5. Version body and label bound by name + nonce; plan schemaVersion checked — check.sh OK; sync.mjs passed; sync-ui 173 ok / 0 FAIL (the new binding checks FAIL on the old app.js)
 - [ ] 6. Relay disk-cap wedge: snapshot allowed over the cap; incremental vacuum
 - [ ] 7. A failed Create after `created` says so honestly
 
@@ -23,3 +23,6 @@ relay cargo test 45/45.
 - Fix 2 residual (not fixed): a save-file write this tab queued before the other tab's change can still be flushed on pagehide (the Reload). The other tab queues its own, newer write; ordering between the two is not guaranteed. Pre-existing multi-tab save-file behaviour, outside the shared plan.
 - Fix 2 test harness: sync-ui's profile() now seeds storage from the first page only (page.addInitScript), so a second tab no longer clears and reseeds localStorage under the first, which the first would rightly take for a change. The socket counter stays context-wide.
 - Fix 4 audit: every other string from the room already reaches innerHTML through esc(): version names in the list and in Look first's title, `when(at)`, version ids in data-id, the onlyHere lists (`names.map(esc)`), and notices (renderNotices escapes every line). The card's status texts and the offer's bodies are constants; the QR is drawn from this page's own invite link. The date was the only gap.
+- Fix 5: version plaintext is now `{schema, plan, name, nonce}` and the label `{schema, name, nonce}` (nonce: 16 random bytes as hex, fresh per push); PROTOCOL.md §2 and the sync.js header say so. A fetched body is refused ("This version does not match its name, so nothing was changed.") unless its name and nonce equal the label that came with it AND the list entry the person clicked (so a relay cannot swap labels between the catchup and getVersion either). Look first's title now shows the fetched, verified name. A body without name/nonce is refused: round 1 has not shipped, so no older versions exist.
+- Fix 5 test changes, required by the shape change, not weakening: the Push section's exact label/version plaintext checks now expect the name and nonce; the newer-room and markup fixtures seal versions through a `versionOf` helper that binds them as the app does.
+- Fix 5: `planSchema()` takes the newer of the envelope's `schema` and the plan's own `schemaVersion`; it decides Look first's "newer", Restore's refusal, the offer's Take, and the room's read-only schema from its snapshot.
