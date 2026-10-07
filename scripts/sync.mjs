@@ -244,7 +244,8 @@ await block('readInvite', () => {
     sockets[0].frame({ type: 'ack', seq: 1 });
     same('frames after welcome reach on(\'frame\'), until unsubscribed', frames, ['catchup']);
 
-    for (const code of [1001, 1006, 4429, 4507]) {
+    // 1011 (a storage error on the relay) joined the list in 41d1851.
+    for (const code of [1001, 1006, 1011, 4429, 4507]) {
       const n = sockets.length;
       sockets[n - 1].drop(code);
       same(`${code}: offline`, [c.status, c.closeCode], ['offline', code]);

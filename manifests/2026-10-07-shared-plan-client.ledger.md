@@ -21,6 +21,8 @@ pack 1 (relay/); this unit commits only its own paths.
 - Second `npm test`: exit 0. `VERSIONS OK`; `map checks passed`; `sync checks passed` (108 ok); `sync-ui checks passed` (128 ok); smoke `all checks passed` (1086 ok; `3 group(s) skipped: this browser crashes reading back a stored file handle`, as before this pack); breadify `all passed`.
 - `npm run screens`: exit 0, `no console errors, 4 warnings raised and asserted`. The screens cover no room state; the room's card has not been looked at by eye.
 
+- After the suite: PROTOCOL.md gained close code 1011 (storage error, reconnect) in 41d1851. The client already reconnects on every code but the five refusals; sync.mjs now checks 1011 too: 113 ok, 0 FAIL; check.sh OK.
+
 ## Decisions and deviations
 
 - The progress "now" file is `<git-dir>/progress-now-pack2.json`, not `progress-now.json`: both builders share one git dir, and pack 1 already writes that name.

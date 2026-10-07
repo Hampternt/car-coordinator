@@ -187,7 +187,8 @@ const Sync = (() => {
   //   Also: .closeCode, the code of the last close (null while connected),
   //   and opts.retry {first, max} in ms, the backoff (1 s doubling to 30 s),
   //   which tests shorten. Any other close code reconnects, as a network
-  //   error does: only the codes that would fail the same way again stop it.
+  //   error does (1011, a storage error on the relay, among them): only the
+  //   codes that would fail the same way again stop it.
   const REFUSED = new Set([CLOSE.BAD_FRAME, CLOSE.NOT_ALLOWED, CLOSE.WRONG_CREATE_CODE, CLOSE.ROOM_EXISTS, CLOSE.TOO_LARGE]);
   function connect(opts) {
     const { keys } = opts;
