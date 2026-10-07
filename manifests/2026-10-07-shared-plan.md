@@ -1,6 +1,6 @@
 # Container: Shared plan
 
-**Status:** 🚧 ROUND 1 (packs 1 and 2) built; pack gate and targeted review running, then handover. Packs 3 and 4 drafted in outline.
+**Status:** 🚧 ROUND 1 (packs 1 and 2) built, reviewed and gated as 0.15.0. **Handed over for the owner's Test it yourself;** nothing is merged into `dev`. Packs 3 and 4 drafted in outline.
 **Date:** 2026-10-07
 **Branch:** round 1 builds on `claude/car-coordinator-encryption-c717c5` (cut from `dev` at bd379ee) and goes back to `dev` through one PR. Later rounds cut from `dev` and comes back to `dev` through a PR. `main` only after the owner has tested the combined update on `dev` and said go.
 **Scope:** Car Coordinator only. Breadify is untouched and nothing of it is synced.
@@ -179,6 +179,12 @@ Drafted in full while the owner tests round 1.
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: **pack gate on a frozen copy of c702444:**
+  - `npm test` exit 0: `VERSIONS OK`, `map checks passed`, `sync checks passed`, `sync-ui checks passed`; smoke `all checks passed` (3 groups skipped for the stored file handle, as before); breadify `all passed`.
+  - `npm run screens` exit 0: `no console errors, 4 warnings raised and asserted`.
+  - Relay `cargo test`: 48 passed, 0 failed.
+  - `npm run upgrade` from `origin/main`: `upgrade check passed: 0.14.1 to 0.15.0`, including "no network call and no WebSocket" for every old profile. One mixed-files check assumed the old build predates weekday templates; it was guarded in the commit after c702444, and the check was rerun.
+  - **Smoke in a real browser:** the dev server and the local relay; Create with code `dev` showed "Shared plan: Connected", the invite link and its QR, with no console errors.
 - 2026-10-08: **targeted review** (auth + live data, on e389251). The relay's auth, the crypto and the secret's storage were clean. Seven findings were fixed in c262cb6…2d03a86, each with a test that fails against the old code:
   - **Medium:** an older client could erase a newer room's live edits. It now never snapshots above what it has applied, and treats a room holding edits it can't apply as read-only.
   - **Medium-low:** a second tab with a stale plan could push it. While in a room, it now blocks with "Reload this tab".
