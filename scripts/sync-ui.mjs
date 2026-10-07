@@ -1,0 +1,188 @@
+// The shared plan in a real browser: the Data tab's Shared plan card, the
+// status in the bar, and what the app sends and refuses to send. Run:
+// node scripts/sync-ui.mjs
+//
+// The relay is scripts/sync-fakerelay.mjs, PROTOCOL.md in JS behind
+// Playwright's WebSocket routing, shared by every browser context here as
+// two managers' PCs share the real one. Bodies are sealed and opened on this
+// side with node's own crypto, never with sync.js, so a mistake there cannot
+// hide itself. All plans are made up.
+import { chromium } from 'playwright';
+import net from 'node:net';
+import nodeCrypto from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { startServer } from './serve.mjs';
+import { fakeRelay } from './sync-fakerelay.mjs';
+
+const server = await startServer();
+const base = server.base;
+const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
+const browser = await chromium.launch(EXECUTABLE ? { executablePath: EXECUTABLE } : {});
+
+const failures = [];
+const check = (name, ok, detail = '') => {
+  console.log(`${ok ? '  ok  ' : ' FAIL '} ${name}${detail && !ok ? ' — ' + detail : ''}`);
+  if (!ok) failures.push(name);
+};
+const same = (name, got, want) => check(name, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}`);
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Polls a condition in node, for what the relay saw.
+const until = async (fn, ms = 5000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (await fn()) return true; await wait(50); }
+  return false;
+};
+
+// --- PROTOCOL.md §1-2 with node's crypto ---
+const b64 = (bytes) => Buffer.from(bytes).toString('base64url');
+const hkdf = (secret, info, len) => Buffer.from(nodeCrypto.hkdfSync('sha256', Buffer.from(secret, 'base64url'), Buffer.alloc(0), info, len));
+const keysOf = (secret) => ({ roomId: b64(hkdf(secret, 'carsync room-id', 16)), token: b64(hkdf(secret, 'carsync auth-token', 32)), key: hkdf(secret, 'carsync enc-key', 32) });
+const newSecret = () => b64(nodeCrypto.randomBytes(32));
+const seal = (secret, kind, obj) => {
+  const { roomId, key } = keysOf(secret);
+  const iv = nodeCrypto.randomBytes(12);
+  const c = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+  c.setAAD(Buffer.from(`${roomId}:${kind}`, 'utf8'));
+  return b64(Buffer.concat([iv, c.update(JSON.stringify(obj), 'utf8'), c.final(), c.getAuthTag()]));
+};
+const unseal = (secret, kind, body) => {
+  const { roomId, key } = keysOf(secret);
+  const raw = Buffer.from(body, 'base64url');
+  const d = nodeCrypto.createDecipheriv('aes-256-gcm', key, raw.subarray(0, 12));
+  d.setAAD(Buffer.from(`${roomId}:${kind}`, 'utf8'));
+  d.setAuthTag(raw.subarray(raw.length - 16));
+  return JSON.parse(Buffer.concat([d.update(raw.subarray(12, raw.length - 16)), d.final()]).toString('utf8'));
+};
+
+// A port nothing listens on: a relay that is not there, reached for real.
+const deadPort = async () => {
+  const s = net.createServer();
+  await new Promise((r) => s.listen(0, '127.0.0.1', r));
+  const { port } = s.address();
+  await new Promise((r) => s.close(r));
+  return port;
+};
+
+// Made-up plans: dev-data.json is the repo's invented fleet.
+const DEV = await readFile(new URL('./fixtures/dev-data.json', import.meta.url), 'utf8');
+const ROUTED = 'ws://127.0.0.1:9';   // the fake relay's address; nothing listens there
+const relay = fakeRelay();
+
+/* One browser profile: its own localStorage, seeded once before the first
+   load (sessionStorage remembers it across reloads), and every way it could
+   reach the network counted: WebSocket constructions (counted inside the
+   page, so even one the page's policy blocks), real sockets, and requests to
+   anywhere but the app's own server. */
+async function profile({ items = {}, routed = true } = {}) {
+  const context = await browser.newContext();
+  if (routed) await relay.attach(context);
+  await context.addInitScript((seed) => {
+    if (!sessionStorage.getItem('seeded')) {
+      sessionStorage.setItem('seeded', '1');
+      localStorage.clear();
+      for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, v);
+    }
+    window.__sockets = 0;
+    const Real = window.WebSocket;
+    window.WebSocket = class extends Real { constructor(...a) { window.__sockets++; super(...a); } };
+  }, items);
+  const page = await context.newPage();
+  const errors = [];
+  const sockets = [];
+  const requests = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('websocket', (ws) => sockets.push(ws.url()));
+  page.on('request', (r) => { if (!r.url().startsWith(base) && !r.url().startsWith('data:')) requests.push(r.url()); });
+  await page.goto(base, { waitUntil: 'networkidle' });
+  return { context, page, errors, sockets, requests };
+}
+const pill = (pg) => pg.locator('#syncStatus');
+const pillSays = async (pg, text, ms = 5000) => {
+  try { await pg.waitForFunction((t) => document.getElementById('syncStatus')?.textContent === `Shared plan: ${t}`, text, { timeout: ms }); return true; } catch { return false; }
+};
+const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview'];
+
+// ---------------------------------------------------------------------------
+// No room: exactly as before, and not one connection.
+{
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done' } });
+  for (const t of TABS) await p.page.click(`[data-act="tab"][data-tab="${t}"]`);
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  await wait(2500);
+  same('no room: no WebSocket is ever made', await p.page.evaluate(() => window.__sockets), 0);
+  same('no room: no socket reaches the network', p.sockets, []);
+  same('no room: no request leaves the app\'s own server', p.requests, []);
+  check('no room: no status in the bar', (await pill(p.page).count()) === 0);
+  same('no room: the Data tab still says nothing is sent', await p.page.locator('#tab-data > .hint').first().innerText(), 'Everything you type stays on this PC. This page never sends it anywhere.');
+  check('no room: the Shared plan card is there, offering to start one', (await p.page.locator('#roomCard h3').innerText()).startsWith('Shared plan'));
+  same('no room: no console errors', p.errors, []);
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// In a room: connected, caught up, offline when the relay goes, and back.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  relay.makeRoom(k.roomId, k.token);
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
+  check('in a room: the bar says Connected', await pillSays(p.page, 'Connected'), await pill(p.page).textContent().catch(() => 'no pill'));
+  check('it said hello with the room\'s token', relay.sent('hello', k.roomId).some((f) => f.token === k.token));
+  check('and caught up', await until(() => relay.sent('catchup', k.roomId).length === 1));
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  same('the Data card says so', await p.page.locator('#roomStatus').innerText(), 'Connected to the shared plan.');
+  check('the Data tab no longer says nothing is ever sent', !(await p.page.locator('#tab-data > .hint').first().innerText()).includes('never sends'));
+
+  relay.down();
+  check('the relay gone: the bar says Offline', await pillSays(p.page, 'Offline'), await pill(p.page).textContent());
+  check('and the card says it is working locally', (await p.page.locator('#roomStatus').innerText()).startsWith('Offline, working locally.'));
+  await p.page.click('[data-act="tab"][data-tab="plan"]');
+  const box = p.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]');
+  await box.fill('Offline Olsen');
+  check('editing still works offline, and is saved on this PC', await p.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver === 'Offline Olsen'));
+  const hellos = relay.sent('hello', k.roomId).length;
+  relay.up();
+  check('the relay back: Connected again', await pillSays(p.page, 'Connected', 10000), await pill(p.page).textContent());
+  check('having said hello again', relay.sent('hello', k.roomId).length > hellos);
+  check('and caught up again', relay.sent('catchup', k.roomId).length >= 2);
+  same('in a room: no console errors', p.errors, []);
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// A relay that is really not there, through the page's real security policy.
+{
+  const port = await deadPort();
+  const secret = newSecret();
+  const p = await profile({ routed: false, items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': `ws://127.0.0.1:${port}`, 'carcoord:pref:room': secret } });
+  check('unreachable: the bar says Offline', await pillSays(p.page, 'Offline'), await pill(p.page).textContent().catch(() => 'no pill'));
+  check('the socket was really made, so the policy lets ws://127.0.0.1 through', p.sockets.length >= 1, JSON.stringify(p.sockets));
+  const box = p.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]');
+  await box.fill('Nowhere Nilsen');
+  check('editing still works', await p.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver === 'Nowhere Nilsen'));
+  // Chrome logs every failed socket as an error; that is the only one allowed.
+  const other = p.errors.filter((e) => !/WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rooms\/[A-Za-z0-9_-]{22}\/ws' failed/.test(e));
+  same('unreachable: nothing broke the policy, and no other console errors', other, []);
+  await p.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// A room the relay does not know: refused, and never knocked on again.
+{
+  const secret = newSecret();
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
+  check('an unknown room: the bar says Refused', await pillSays(p.page, 'Refused'), await pill(p.page).textContent().catch(() => 'no pill'));
+  const tries = relay.sent('hello', keysOf(secret).roomId).length;
+  await wait(2500);
+  same('and it does not try again', relay.sent('hello', keysOf(secret).roomId).length, tries);
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  check('the card says the relay does not know it, and the plan is still here', /does not know this shared plan.*still on this PC/.test(await p.page.locator('#roomStatus').innerText()));
+  same('an unknown room: no console errors', p.errors, []);
+  await p.context.close();
+}
+
+await browser.close();
+await server.close();
+console.log(failures.length ? `\n${failures.length} sync-ui check(s) failed` : '\nsync-ui checks passed');
+process.exit(failures.length ? 1 : 0);

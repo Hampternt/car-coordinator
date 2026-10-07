@@ -201,6 +201,118 @@ await block('readInvite', () => {
   same('and neither is stripped here', replaced.length, 0);
 });
 
+// --- connect(): pack 2's own checks, on a fake WebSocket ---
+// A second context with timers, so the one above still proves that loading
+// sync.js reaches for nothing. Each FakeSocket is one dial; the test plays the
+// relay by calling its open/frame/drop.
+{
+  const sockets = [];
+  class FakeSocket {
+    constructor(url) { this.url = url; this.sent = []; this.closed = null; sockets.push(this); }
+    send(text) { this.sent.push(JSON.parse(text)); }
+    close(code) { this.closed = code ?? 1005; }
+    open() { this.onopen && this.onopen({}); }
+    frame(obj) { this.onmessage && this.onmessage({ data: JSON.stringify(obj) }); }
+    drop(code) { this.onclose && this.onclose({ code }); }
+  }
+  const timed = vm.createContext({ crypto: globalThis.crypto, TextEncoder, TextDecoder, atob, btoa, location, history, localStorage, console, setTimeout, clearTimeout });
+  vm.runInContext(source, timed, { filename: 'docs/sync.js' });
+  const S = vm.runInContext('Sync', timed);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const retry = { first: 20, max: 40 };
+
+  await block('connect', async () => {
+    stored.clear();
+    const keys = await S.deriveKeys(VECTOR.secret);
+    sockets.length = 0;
+    const seen = [];
+    const c = S.connect({ keys, WebSocket: FakeSocket, retry });
+    c.on('status', (st, code) => seen.push(code ? `${st}:${code}` : st));
+    same('it dials the room on the default relay', sockets[0].url, `wss://portfolio.dblo.net/carsync/rooms/${VECTOR.roomId}/ws`);
+    same('and starts connecting', c.status, 'connecting');
+    check('send is refused before welcome', c.send({ type: 'catchup', since: 0 }) === false && sockets[0].sent.length === 0);
+    sockets[0].open();
+    same('its first frame is hello with the token', sockets[0].sent, [{ type: 'hello', token: VECTOR.token }]);
+    sockets[0].frame({ type: 'welcome', seq: 7 });
+    same('welcome makes it connected, at the room\'s seq', [c.status, c.seq, seen], ['connected', 7, ['connected']]);
+    const frames = [];
+    const off = c.on('frame', (f) => frames.push(f.type));
+    check('send works once connected', c.send({ type: 'catchup', since: 0 }) === true);
+    same('and puts the frame on the wire', sockets[0].sent[1], { type: 'catchup', since: 0 });
+    sockets[0].frame({ type: 'catchup', seq: 7, snapshot: null, ops: [], versions: [] });
+    off();
+    sockets[0].frame({ type: 'ack', seq: 1 });
+    same('frames after welcome reach on(\'frame\'), until unsubscribed', frames, ['catchup']);
+
+    for (const code of [1001, 1006, 4429, 4507]) {
+      const n = sockets.length;
+      sockets[n - 1].drop(code);
+      same(`${code}: offline`, [c.status, c.closeCode], ['offline', code]);
+      check(`${code}: send is refused while offline`, c.send({ type: 'catchup', since: 0 }) === false);
+      await wait(80);
+      check(`${code}: it dials again`, sockets.length === n + 1);
+      sockets[n].open();
+      same(`${code}: and says hello again`, sockets[n].sent, [{ type: 'hello', token: VECTOR.token }]);
+      sockets[n].frame({ type: 'welcome', seq: 7 });
+      same(`${code}: connected again`, c.status, 'connected');
+    }
+    const n = sockets.length;
+    c.close();
+    same('close() closes the socket and says closed', [sockets[n - 1].closed, c.status], [1000, 'closed']);
+    await wait(80);
+    check('and nothing dials after it', sockets.length === n);
+  });
+
+  for (const code of [4400, 4401, 4403, 4409, 4413]) {
+    await block(`connect refused ${code}`, async () => {
+      const keys = await S.deriveKeys(VECTOR.secret);
+      sockets.length = 0;
+      const c = S.connect({ keys, WebSocket: FakeSocket, retry });
+      sockets[0].open();
+      sockets[0].drop(code);
+      same(`${code}: refused, with its code`, [c.status, c.closeCode], ['refused', code]);
+      await wait(80);
+      check(`${code}: and it never dials again`, sockets.length === 1);
+    });
+  }
+
+  await block('connect: create', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    sockets.length = 0;
+    const c = S.connect({ keys, create: { createCode: 'test-code' }, url: 'ws://127.0.0.1:1/rooms/x/ws', WebSocket: FakeSocket, retry });
+    same('url overrides the address', sockets[0].url, 'ws://127.0.0.1:1/rooms/x/ws');
+    sockets[0].open();
+    same('the first frame is create, with the code', sockets[0].sent, [{ type: 'create', token: VECTOR.token, createCode: 'test-code' }]);
+    sockets[0].frame({ type: 'created' });
+    same('created alone is not connected yet', c.status, 'connecting');
+    sockets[0].frame({ type: 'welcome', seq: 0 });
+    same('welcome after it is', c.status, 'connected');
+    sockets[0].drop(1006);
+    await wait(80);
+    sockets[1].open();
+    same('a made room is rejoined with hello, never created twice', sockets[1].sent, [{ type: 'hello', token: VECTOR.token }]);
+    c.close();
+  });
+
+  await block('connect: a network error with no close', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    sockets.length = 0;
+    const c = S.connect({ keys, WebSocket: FakeSocket, retry });
+    sockets[0].onerror({});
+    await wait(1700);
+    same('an error that is never followed by a close still means offline', c.status, 'offline');
+    c.close();
+  });
+
+  await block('connect: a socket that cannot be made', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    class Throws { constructor() { throw new Error('SecurityError'); } }
+    const c = S.connect({ keys, WebSocket: Throws, retry });
+    same('a WebSocket that throws means offline, not a crash', c.status, 'offline');
+    c.close();
+  });
+}
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);

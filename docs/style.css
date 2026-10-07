@@ -175,6 +175,23 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
   .topbar .primary { margin-left: auto; }
 }
 
+/* The shared plan's status, in the bar only while this browser is in one.
+   It is wider than the 55px the bar keeps spare, so with it the tabs take
+   their own row sooner; without it the bar is exactly as before. */
+.sync-pill {
+  flex: none; padding: 5px 10px; border: 1px solid var(--bar-edge); background: none;
+  color: var(--on-bar); font: 600 13px var(--head); white-space: nowrap; cursor: pointer;
+}
+.sync-pill::before { content: '\25CF\00a0'; color: var(--muted); }
+.sync-pill.on::before { color: var(--ok); }
+.sync-pill.warn-status { border-color: var(--hivis); }
+.sync-pill.warn-status::before { color: var(--hivis); }
+@media (max-width: 1400px) {
+  .topbar:has(.sync-pill) { flex-wrap: wrap; gap: 10px 16px; }
+  .topbar:has(.sync-pill) .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
+  .topbar:has(.sync-pill) .primary { margin-left: auto; }
+}
+
 /* 1200 was right when the plan was a table with a narrow rail beside it. The
    rail is a working panel now and lives to the right of the table, so the page
    takes the width a desk monitor actually has — and stops well before a line

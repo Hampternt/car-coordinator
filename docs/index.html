@@ -10,8 +10,12 @@
        allowed because the label colours are written as style attributes;
        inline script is not, which is what turns any future markup injection
        from a hole into a blank. `ipc:` and `http://ipc.localhost` are how the
-       Tauri shell reaches its own print command, and reach nothing else. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; form-action 'none'; base-uri 'none'">
+       Tauri shell reaches its own print command, and reach nothing else.
+       The shared plan's relay is the one address beyond them, and only a
+       browser that has joined a shared plan ever connects to it: what it
+       carries is locked in this browser first. ws://127.0.0.1 is a relay on
+       this PC, for development and the tests. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost wss://portfolio.dblo.net ws://127.0.0.1:*; form-action 'none'; base-uri 'none'">
   <title>Car Coordinator</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%231a1c1e'/><rect y='48' width='64' height='16' fill='%23ffd400'/><path d='M8 36V20h26v16zm28-10h10l8 10H36z' fill='%23ffd400'/><circle cx='18' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/><circle cx='44' cy='40' r='5' fill='%231a1c1e' stroke='%23ffd400' stroke-width='3'/></svg>">
   <link rel="stylesheet" href="style.css?v=0.14.1">
@@ -73,6 +77,7 @@
   <script src="map.js?v=0.14.1"></script>
   <script src="updates.js?v=0.14.1"></script>
   <script src="help.js?v=0.14.1"></script>
+  <script src="sync.js?v=0.14.1"></script>
   <script src="app.js?v=0.14.1"></script>
 </body>
 </html>

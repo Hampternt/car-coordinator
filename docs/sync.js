@@ -42,7 +42,6 @@ const Sync = (() => {
     ROOM_EXISTS: 4409, TOO_LARGE: 4413, RATE_LIMITED: 4429, FULL: 4507,
   });
 
-  const notYet = (name) => { throw new Error(`Sync.${name}: not implemented`); };
 
   /* ---------- base64url (PROTOCOL.md §1: no padding) ---------- */
   const B64URL = /^[A-Za-z0-9_-]+$/;
@@ -184,7 +183,122 @@ const Sync = (() => {
   //   reconnects with backoff, saying hello again. On 4400, 4401, 4403, 4409
   //   or 4413: 'refused', with no retry. Pack 2 owns this shape; packs 3 and 4
   //   build on it.
-  function connect(opts) { return notYet('connect'); }
+  //
+  //   Also: .closeCode, the code of the last close (null while connected),
+  //   and opts.retry {first, max} in ms, the backoff (1 s doubling to 30 s),
+  //   which tests shorten. Any other close code reconnects, as a network
+  //   error does: only the codes that would fail the same way again stop it.
+  const REFUSED = new Set([CLOSE.BAD_FRAME, CLOSE.NOT_ALLOWED, CLOSE.WRONG_CREATE_CODE, CLOSE.ROOM_EXISTS, CLOSE.TOO_LARGE]);
+  function connect(opts) {
+    const { keys } = opts;
+    let create = opts.create || null;
+    const url = opts.url || roomUrl(keys.roomId);
+    const WS = opts.WebSocket || globalThis.WebSocket;
+    const first = (opts.retry && opts.retry.first) || 1000;
+    const max = (opts.retry && opts.retry.max) || 30000;
+    const listeners = { status: new Set(), frame: new Set() };
+    let ws = null;
+    let welcomed = false;
+    let stopped = false;
+    let attempt = 0;
+    let retryTimer = null;
+    let errorTimer = null;
+
+    const emit = (type, ...args) => {
+      for (const fn of [...listeners[type]]) {
+        try { fn(...args); } catch (e) { console.error('Sync listener failed', e); }
+      }
+    };
+    const setStatus = (status, code = null) => {
+      conn.status = status;
+      conn.closeCode = code;
+      emit('status', status, code);
+    };
+
+    function dial() {
+      retryTimer = null;
+      welcomed = false;
+      let sock = null;
+      try { sock = new WS(url); } catch { ws = {}; lost(ws, 1006); return; }
+      ws = sock;
+      sock.onopen = () => {
+        if (ws !== sock) return;
+        sock.send(JSON.stringify(create ? { type: 'create', token: keys.token, createCode: create.createCode } : { type: 'hello', token: keys.token }));
+      };
+      sock.onmessage = (e) => {
+        if (ws !== sock || typeof e.data !== 'string') return;
+        let frame;
+        try { frame = JSON.parse(e.data); } catch { return; }
+        if (!frame || typeof frame !== 'object' || typeof frame.type !== 'string') return;
+        if (!welcomed) {
+          // Once made, the room is joined like any other: a reconnect says hello.
+          if (frame.type === 'created') create = null;
+          else if (frame.type === 'welcome') {
+            welcomed = true;
+            attempt = 0;
+            conn.seq = Number.isInteger(frame.seq) ? frame.seq : 0;
+            setStatus('connected');
+          }
+          return;
+        }
+        emit('frame', frame);
+      };
+      sock.onclose = (e) => lost(sock, e && Number.isInteger(e.code) ? e.code : 1006);
+      // An error is followed by a close, except when the browser refused the
+      // address itself (the page's security policy): then no close may come.
+      sock.onerror = () => {
+        clearTimeout(errorTimer);
+        errorTimer = setTimeout(() => lost(sock, 1006), 1500);
+      };
+    }
+
+    function lost(sock, code) {
+      if (ws !== sock) return;
+      ws = null;
+      clearTimeout(errorTimer);
+      if (sock && typeof sock.close === 'function') {
+        sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
+        try { sock.close(); } catch { /* already gone */ }
+      }
+      if (stopped) return;
+      if (REFUSED.has(code)) { stopped = true; setStatus('refused', code); return; }
+      setStatus('offline', code);
+      const wait = Math.min(max, first * 2 ** attempt);
+      attempt++;
+      // A little jitter, so two browsers that lost the relay together do not
+      // knock on it together for ever.
+      retryTimer = setTimeout(dial, Math.round(wait * (0.8 + Math.random() * 0.4)));
+    }
+
+    const conn = {
+      status: 'connecting',
+      seq: 0,
+      closeCode: null,
+      on(type, fn) {
+        listeners[type].add(fn);
+        return () => listeners[type].delete(fn);
+      },
+      send(frame) {
+        if (conn.status !== 'connected' || !ws || typeof ws.send !== 'function') return false;
+        try { ws.send(JSON.stringify(frame)); return true; } catch { return false; }
+      },
+      close() {
+        if (stopped && conn.status === 'closed') return;
+        stopped = true;
+        clearTimeout(retryTimer);
+        clearTimeout(errorTimer);
+        const sock = ws;
+        ws = null;
+        if (sock && typeof sock.close === 'function') {
+          sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
+          try { sock.close(1000); } catch { /* already gone */ }
+        }
+        setStatus('closed');
+      },
+    };
+    dial();
+    return conn;
+  }
 
   return {
     RELAY, RELAY_PREF, ROOM_PREF, KINDS, INFO, CLOSE,

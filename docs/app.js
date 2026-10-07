@@ -2109,7 +2109,7 @@ function renderData() {
 
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
-    <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
+    <p class="hint">${room ? 'Everything you type is saved on this PC. Pushing a version sends it to the shared plan, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
 
     <div class="card" id="fileCard">
       <h3>Auto-save to a file${infoBtn('data-file')}</h3>
@@ -2124,6 +2124,8 @@ function renderData() {
     </div>
 
     <div class="card" id="shareCard"></div>
+
+    ${syncReady() ? '<div class="card" id="roomCard"></div>' : ''}
 
     <div class="card">
       <h3>Your own copy${infoBtn('data-copy')}</h3>
@@ -2242,7 +2244,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderRoom(); renderSheet();
   // The preview's hint is static markup; its ⓘ goes in a slot there. A cached
   // index.html without the slot gets none.
   const previewInfo = document.getElementById('previewInfo');
@@ -2500,6 +2502,136 @@ async function shareAction(act, b) {
 function openShare(share) {
   pending = { share, mode: 'day', addMissing: true };
   renderShareDialog();
+}
+
+/* ---------- the shared plan ----------
+   A room on the relay, opened with the secret in an invite link. sync.js
+   holds the keys, the encryption and the connection; this is what the app
+   does with them. Nothing about the room is ever put on `state`: the plan is
+   what Export, Backups and the save file write, and the secret lives only
+   under carcoord:pref:room. A browser that has joined no room never calls
+   roomStart(), so it never opens a connection at all.
+
+   Pack 2 never changes the plan on its own: only Take the shared plan and a
+   version's Restore replace it, each after a backup. Live edits are pack 3. */
+const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function';
+const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
+// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
+let room = null;
+
+// The schema the room's plans are written in, as far as this browser has
+// seen: the newest of its snapshot's and its versions'. Newer than this
+// build's means read-only, so an older normalise() can never drop a field
+// for both managers.
+const roomReadOnly = () => !!room && room.schema > Store.SCHEMA;
+
+async function roomStart(secret) {
+  roomStop();
+  if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null };
+  room = r;
+  try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
+  if (room !== r) return;   // left, or another room taken, while deriving
+  r.conn = Sync.connect({ keys: r.keys });
+  r.conn.on('status', (status) => {
+    // Catch up on every (re)connect: the version list, and the room's schema.
+    if (status === 'connected') r.conn.send({ type: 'catchup', since: r.conn.seq });
+    if (room === r) renderRoom();
+  });
+  r.conn.on('frame', (f) => { roomFrame(r, f).catch((e) => console.warn('shared plan: a frame could not be read', e)); });
+  renderRoom();
+}
+
+function roomStop() {
+  const r = room;
+  room = null;
+  if (r && r.conn) r.conn.close();
+}
+
+// A body this browser cannot open (a wrong key, a damaged frame) is skipped,
+// never fatal: the list shows what it can read.
+const openOr = async (r, kind, body, fallback = null) => {
+  try { return await Sync.open(r.keys, kind, body); } catch { return fallback; }
+};
+
+async function roomFrame(r, f) {
+  if (f.type === 'catchup') {
+    const snap = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(r, 'snapshot', f.snapshot.body) : null;
+    const versions = [];
+    for (const v of Array.isArray(f.versions) ? f.versions : []) {
+      const label = await openOr(r, 'label', v.label);
+      if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), schema: label.schema });
+    }
+    if (room !== r) return;
+    r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
+    r.versions = versions;
+    r.schema = Math.max(0, snap ? snap.schema : 0, ...versions.map((v) => v.schema));
+    renderRoom();
+  }
+}
+
+/* What the status says, in the words on screen. `cls` picks the Data tab's
+   mark: on (✓), off (○) or warn-status (!). */
+function roomSays() {
+  if (!room || !room.conn) return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
+  const { status, closeCode } = room.conn;
+  if (status === 'refused') {
+    const why = {
+      4401: 'The relay does not know this shared plan. The invite link may be wrong, or the plan was removed from the server.',
+      4403: 'The create code was not accepted.',
+      4409: 'A shared plan with this link already exists.',
+      4413: 'The plan is too large for the shared plan.',
+    }[closeCode] || 'The relay refused what this browser sent.';
+    return { short: 'Refused', text: `${why} Your plan is still on this PC.`, cls: 'warn-status' };
+  }
+  if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
+  if (status === 'connected') return { short: 'Connected', text: 'Connected to the shared plan.', cls: 'on' };
+  if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
+  return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
+}
+
+// The status in the top bar, so it shows on every tab: only while in a room.
+function renderRoomPill() {
+  let pill = document.getElementById('syncStatus');
+  if (!room) { if (pill) pill.remove(); return; }
+  if (!pill) {
+    pill = document.createElement('button');
+    pill.id = 'syncStatus';
+    pill.type = 'button';
+    pill.dataset.act = 'show-data';
+    const bar = document.querySelector('.topbar');
+    bar.insertBefore(pill, bar.querySelector('[data-act="print"]'));
+  }
+  const says = roomSays();
+  pill.className = `sync-pill ${says.cls}`;
+  pill.title = says.text;
+  pill.textContent = `Shared plan: ${says.short}`;
+}
+
+function roomCardHtml() {
+  if (!room) {
+    return `<h3>Shared plan${infoBtn('data-shared')}</h3>
+      <p class="hint">Work on one plan with another manager, from any PC.</p>`;
+  }
+  const says = roomSays();
+  return `<h3>Shared plan${infoBtn('data-shared')}</h3>
+    <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>`;
+}
+
+/* The card is drawn with the Data tab, and again on its own when the
+   connection changes, keeping the focus and what was typed in it. */
+function renderRoom() {
+  renderRoomPill();
+  const card = document.getElementById('roomCard');
+  if (!card) return;
+  const el = document.activeElement;
+  const focusId = el && card.contains(el) && el.id ? el.id : null;
+  const sel = focusId && 'selectionStart' in el ? [el.selectionStart, el.selectionEnd] : null;
+  card.innerHTML = roomCardHtml();
+  if (focusId) {
+    const again = document.getElementById(focusId);
+    if (again) { again.focus(); if (sel) try { again.setSelectionRange(...sel); } catch { /* not a text box */ } }
+  }
 }
 
 // After a hold is answered in the screen's favour: write it now and say what
@@ -4295,6 +4427,12 @@ function drawFooter() {
 }
 
 async function start() {
+  // An invite's secret leaves the address bar before anything else runs, so it
+  // stays in no history, whatever happens below. Stripped even when sync.js is
+  // missing (a cached older index.html), which cannot read it anyway.
+  let invite = null;
+  if (syncReady()) invite = Sync.readInvite(location.hash);
+  else if (/^#join=/.test(location.hash || '')) history.replaceState(null, '', location.pathname + location.search);
   clearTheBar();
   drawFooter();
   // Read before Share.readHash() clears it: an open by share link keeps the
@@ -4336,6 +4474,9 @@ async function start() {
   // After the note, which is what works out whether this is a first run.
   try { offerInfoHint(link); } catch (e) { console.warn('first-open hint skipped', e); }
   render();
+
+  // The shared plan this browser has joined, if any. None: no connection, ever.
+  if (syncReady()) { const secret = Store.pref('room'); if (SECRET_RE.test(String(secret || ''))) roomStart(secret); }
 
   const fromLink = Share.readHash();
   if (fromLink) {
