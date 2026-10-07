@@ -212,7 +212,8 @@ All close codes:
 | `4413` | `body` or `label` over its limit |
 | `4429` | rate limit |
 | `4507` | room cap or disk cap reached |
-| `1001` | relay shutting down |
+| `1001` | relay shutting down, or this connection fell too far behind (its 1024-frame queue filled) |
+| `1011` | storage error on the relay |
 | `1009` | frame over the frame limit (library) |
 
 Plus, before any upgrade: HTTP `403` (Origin) and `404` (path). The close
@@ -225,7 +226,8 @@ TCP connection, and the client can lose the close code.
 
 A client SHOULD NOT reconnect automatically after `4400`, `4401`, `4403`,
 `4409`, `4413` (they will fail the same way); it SHOULD reconnect with backoff
-after `4429`, `4507`, `1001`, `1006` and network errors.
+after `4429`, `4507`, `1001`, `1006`, `1011` and network errors, and catch up
+from its last seq on reconnect.
 
 ## 6. Keepalive
 
