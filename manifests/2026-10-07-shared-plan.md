@@ -62,6 +62,21 @@ These come from the repo's standing rule that an update never loses a user's dat
 
 <details><summary>Wire protocol (the contract)</summary>
 
+**`relay/PROTOCOL.md` is the contract from the scaffold (ea8f1f4) on.** It settles what the outline below left open:
+- **Version names:** a version frame carries a separately sealed `label` (`{schema, name}`, AAD kind `label`), so the list shows names without fetching bodies.
+- **Acks:** every snapshot, op and version is acked.
+- **Missing versions:** `getVersion` answers `noVersion` for a pruned or unknown id.
+- **Catchup** also carries the room's latest `seq`.
+- **Close codes:** `4408` when no hello arrives within 10 s; a wrong token and a missing room give the same `4401`, so rooms can't be probed.
+- **Version ids** are integers per room, never reused.
+- **Rate limit:** a token bucket, burst 120 and 30 per second.
+- **New settings:** `RELAY_MAX_ROOMS` and `RELAY_MAX_DISK_BYTES`.
+- **Allowed origins** default to `https://hampternt.github.io` and `http://tauri.localhost`.
+
+**Open for the auth review and the owner:** a connection with no `Origin` header is allowed. Every browser sends one, other clients can forge it anyway, and the token is the real gate. Refusing it instead is a one-line change.
+
+The outline as first drafted:
+
 **Keys.** The invite link is `…/#join=<secret>`, where `<secret>` is 32 random bytes, base64url. From it, HKDF-SHA256 derives:
 - `roomId` (16 bytes): names the room on the server;
 - `authToken` (32 bytes): proves the client holds the link; the server stores only `sha256(authToken)`;
@@ -112,7 +127,7 @@ Pack 2 uses snapshot, version, getVersion and catchup. Pack 3 adds op, pack 4 ad
 `Agent brief:` this manifest's Safety rules and Wire protocol, `docs/store.js` (`Store.snapshot()`, `pref`), `docs/share.js` (preview and `#d=` handling to match), `scripts/smoke.mjs` style. Depends on: the scaffold. Owns `docs/sync.js`, `scripts/sync.mjs`, `scripts/stub-relay.mjs` (a node implementation of the protocol, for tests until pack 1 merges), and its own edits to `docs/app.js`, `docs/index.html`, `docs/style.css` and `docs/store.js`. Pack 1 touches none of them.
 
 - [ ] **Crypto (`docs/sync.js`):** key generation, HKDF, AES-GCM with the AAD above, WebCrypto only. *Done when:* `scripts/sync.mjs` round-trips, and rejects a wrong key and a swapped `kind`.
-- [ ] **Connection and status:** connect, reconnect with backoff, catch up on reconnect; a status line (Connected / Offline, working locally / Update the app). CSP `connect-src` gains `wss://portfolio.dblo.net` (and `ws://localhost` for dev). *Done when:* killing the stub relay shows Offline and editing still works.
+- [ ] **Connection and status:** connect, reconnect with backoff, catch up on reconnect; a status line (Connected / Offline, working locally / Update the app). CSP `connect-src` gains `wss://portfolio.dblo.net` (and `ws://127.0.0.1:*` for dev and tests; a CSP source without a port matches only the default one). *Done when:* killing the stub relay shows Offline and editing still works.
 - [ ] **Create a room:** Data tab → Shared plan → Create (asks for the owner's create code once), seeds the room from this plan, shows the invite link and QR. *Done when:* the room holds a snapshot that decrypts back to the plan.
 - [ ] **Join:** open the invite link → the fragment is stripped → preview of what changes → **Take the shared plan** (Backup first) or Not now. *Done when:* smoke covers both choices and checks the Backup.
 - [ ] **Push a version:** a named version ("Monday final") from the current plan. *Done when:* the other browser sees it in the list.
@@ -157,5 +172,6 @@ Drafted in full while the owner tests round 1.
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-07: scaffold ea8f1f4. Relay: 35 tests compile, and 34 fail on `todo!()`. `sync.mjs`: 12 checks fail on "not implemented", 8 pass. `check.sh` OK. The relay tests have never run against an implementation, so a wrong test goes back through the contract, never edited.
 - 2026-10-07: owner said go on round 1 ("begin work on the manifest"). The WebSocket now carries room creation too, so the relay needs no CORS.
 - 2026-10-07: owner chose live by default and everything synced. Server facts read from drawingportfolio's `deploy/` (nginx, certbot, axum on :3000).
