@@ -163,9 +163,14 @@ async function open(profile, docs) {
   const errors = [];
   page.on('console', (m) => m.type() === 'error' && errors.push(`${m.text()}${m.location()?.url ? ` (${m.location().url})` : ''}`));
   page.on('pageerror', (e) => errors.push(String(e)));
+  // Anything that leaves this page's own address. A profile that never joined
+  // a shared plan must make none (the shared plan's "no room, no network").
+  const outside = [];
+  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(base) && !/^(data|blob):/.test(u)) outside.push(u); });
+  page.on('websocket', (ws) => outside.push(ws.url()));
   await page.goto(base, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300);   // start() awaits the save file's handle
-  return { context, page, errors, base };
+  return { context, page, errors, base, outside };
 }
 
 // Which build is on screen: the old one must not be this one, and this one
@@ -258,6 +263,7 @@ async function expectKeptAndNoted(label, profile, before, extra = async () => {}
   }
   await extra(now, note);
   check(`${label}: no console errors`, !now.errors.length, now.errors.join(' | '));
+  check(`${label}: no network call and no WebSocket beyond the page's own address`, !now.outside.length, now.outside.join(' | '));
   await now.page.reload({ waitUntil: 'networkidle' });
   await now.page.waitForTimeout(300);
   check(`${label}: a reload shows no note`, (await noteOn(now.page)).count === 0);
