@@ -44,23 +44,50 @@ const Sync = (() => {
 
   const notYet = (name) => { throw new Error(`Sync.${name}: not implemented`); };
 
+  /* ---------- base64url (PROTOCOL.md §1: no padding) ---------- */
+  const B64URL = /^[A-Za-z0-9_-]+$/;
+  const SECRET = /^[A-Za-z0-9_-]{43}$/;
+  function toB64url(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  // Checked before atob, which would take '+', '/' and '=' as well.
+  function fromB64url(text) {
+    if (typeof text !== 'string' || !B64URL.test(text)) throw new TypeError('not base64url');
+    const s = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+  const utf8 = (text) => new TextEncoder().encode(text);
+  const aad = (keys, kind) => utf8(`${keys.roomId}:${kind}`);
+  function checkKind(kind) {
+    if (!KINDS.includes(kind)) throw new TypeError(`Sync: unknown kind ${JSON.stringify(kind)}`);
+  }
+
   /* ---------- where ---------- */
 
   // relayUrl() -> string
   //   The pref carcoord:pref:relay when it holds a ws:// or wss:// address
   //   (trimmed, any trailing '/' dropped), else RELAY. Reads localStorage
   //   inside a try: a browser that refuses storage gets RELAY.
-  function relayUrl() { return notYet('relayUrl'); }
+  function relayUrl() {
+    let v = null;
+    try { v = localStorage.getItem(RELAY_PREF); } catch { return RELAY; }
+    const url = typeof v === 'string' ? v.trim().replace(/\/+$/, '') : '';
+    return /^wss?:\/\/\S+$/i.test(url) ? url : RELAY;
+  }
 
   // roomUrl(roomId) -> string
   //   `${relayUrl()}/rooms/${roomId}/ws`
-  function roomUrl(roomId) { return notYet('roomUrl'); }
+  function roomUrl(roomId) { return `${relayUrl()}/rooms/${roomId}/ws`; }
 
   /* ---------- keys ---------- */
 
   // newSecret() -> string
   //   32 bytes from crypto.getRandomValues, base64url without padding (43 chars).
-  function newSecret() { return notYet('newSecret'); }
+  function newSecret() { return toB64url(crypto.getRandomValues(new Uint8Array(32))); }
 
   // async deriveKeys(secret) -> {roomId, token, encKey}
   //   HKDF-SHA256 over the 32 decoded bytes of `secret`, empty salt:
@@ -68,7 +95,17 @@ const Sync = (() => {
   //     token   base64url of 32 bytes (43 chars), info 'carsync auth-token'
   //     encKey  a non-extractable AES-GCM-256 CryptoKey, info 'carsync enc-key'
   //   Rejects with a TypeError when `secret` is not 43 base64url characters.
-  async function deriveKeys(secret) { return notYet('deriveKeys'); }
+  async function deriveKeys(secret) {
+    if (typeof secret !== 'string' || !SECRET.test(secret)) throw new TypeError('Sync: a room secret is 43 base64url characters');
+    const ikm = await crypto.subtle.importKey('raw', fromB64url(secret), 'HKDF', false, ['deriveBits', 'deriveKey']);
+    const hkdf = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: utf8(info) });
+    const bits = async (info, bytes) => new Uint8Array(await crypto.subtle.deriveBits(hkdf(info), ikm, bytes * 8));
+    return {
+      roomId: toB64url(await bits(INFO.roomId, 16)),
+      token: toB64url(await bits(INFO.token, 32)),
+      encKey: await crypto.subtle.deriveKey(hkdf(INFO.encKey), ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']),
+    };
+  }
 
   /* ---------- ciphertext ---------- */
 
@@ -77,19 +114,37 @@ const Sync = (() => {
   //   aad = utf8(keys.roomId + ':' + kind))), a fresh random iv every call.
   //   Throws a TypeError for a kind not in KINDS, or an obj without an integer
   //   `schema`.
-  async function seal(keys, kind, obj) { return notYet('seal'); }
+  async function seal(keys, kind, obj) {
+    checkKind(kind);
+    if (!obj || typeof obj !== 'object' || !Number.isInteger(obj.schema)) throw new TypeError('Sync: a plaintext carries an integer schema');
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(keys, kind) }, keys.encKey, utf8(JSON.stringify(obj))));
+    const out = new Uint8Array(12 + sealed.length);
+    out.set(iv);
+    out.set(sealed, 12);
+    return toB64url(out);
+  }
 
   // async open(keys, kind, body) -> object
   //   The inverse of seal. Rejects on a wrong key, a different kind, any
   //   tampering or truncation, or a body that is not base64url. Throws a
   //   TypeError for a kind not in KINDS.
-  async function open(keys, kind, body) { return notYet('open'); }
+  async function open(keys, kind, body) {
+    checkKind(kind);
+    const raw = fromB64url(body);
+    // The iv and a whole tag, at the least; WebCrypto would refuse it anyway.
+    if (raw.length < 12 + 16) throw new TypeError('Sync: a body too short to be sealed');
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.subarray(0, 12), additionalData: aad(keys, kind) }, keys.encKey, raw.subarray(12));
+    const obj = JSON.parse(new TextDecoder().decode(plain));
+    if (!obj || typeof obj !== 'object' || !Number.isInteger(obj.schema)) throw new TypeError('Sync: a plaintext without a schema');
+    return obj;
+  }
 
   /* ---------- invite link ---------- */
 
   // inviteLink(secret) -> string
   //   `${location.origin}${location.pathname}#join=${secret}`
-  function inviteLink(secret) { return notYet('inviteLink'); }
+  function inviteLink(secret) { return `${location.origin}${location.pathname}#join=${secret}`; }
 
   // readInvite(hash) -> string | null
   //   `hash` is location.hash. For '#join=…' it first strips the fragment
@@ -97,7 +152,14 @@ const Sync = (() => {
   //   as Share.readHash does, whether or not the secret is well-formed, then
   //   returns the secret, or null when it is not 43 base64url characters.
   //   Any other hash: null, and nothing is stripped.
-  function readInvite(hash) { return notYet('readInvite'); }
+  function readInvite(hash) {
+    const m = /^#join=(.*)$/.exec(typeof hash === 'string' ? hash : '');
+    if (!m) return null;
+    // Gone from the address bar before anything else, well-formed or not: the
+    // secret must not stay in history or reach a synced browser history.
+    history.replaceState(null, '', location.pathname + location.search);
+    return SECRET.test(m[1]) ? m[1] : null;
+  }
 
   /* ---------- connection ---------- */
 

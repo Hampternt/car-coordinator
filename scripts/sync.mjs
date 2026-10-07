@@ -177,6 +177,10 @@ await block('what open refuses', async () => {
   await rejects('seal refuses an unknown kind', () => Sync.seal(keys, 'secret', plan));
   await rejects('open refuses an unknown kind', () => Sync.open(keys, 'secret', body));
   await rejects('seal refuses a plaintext without schema', () => Sync.seal(keys, 'snapshot', { plan: {} }));
+  // Pack 2's own: what the other side sealed must say its schema too, or an
+  // older build could not tell it is looking at a newer plan.
+  await rejects('open refuses a plaintext without schema', () => Sync.open(keys, 'snapshot', refSeal(VECTOR.secret, 'snapshot', { plan: {} })));
+  await rejects('open refuses a body shorter than an iv and a tag', () => Sync.open(keys, 'snapshot', b64(Buffer.alloc(27))));
 });
 
 // --- invite link ---
