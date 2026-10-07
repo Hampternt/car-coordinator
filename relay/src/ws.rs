@@ -15,6 +15,7 @@ use tokio::sync::{Notify, mpsc, watch};
 
 use crate::AppState;
 use crate::auth;
+use crate::limits::{RateLimiter, disk_usage};
 use crate::protocol::{self, ClientFrame, ServerFrame, close};
 
 /// Frames queued for one connection before it counts as too far behind.
@@ -33,6 +34,9 @@ const INTERNAL_ERROR: u16 = 1011;
 
 /// A close code and its short reason.
 type Refusal = (u16, &'static str);
+
+const RATE_LIMITED: Refusal = (close::RATE_LIMITED, "too many frames");
+const FULL: Refusal = (close::FULL, "relay full");
 
 /// The connections open per room, for fan-out. Writes to one room are
 /// sequenced under its entry so `op`s and `ack`s leave in `seq` order (§4.5).
@@ -209,6 +213,18 @@ async fn close(mut socket: WebSocket, (code, reason): Refusal, mut shutdown: wat
     }
 }
 
+/// PROTOCOL.md §5: checked before every write that stores something.
+fn check_disk(state: &AppState) -> Result<(), Refusal> {
+    match disk_usage(&state.config.data_dir) {
+        Ok(used) if used < state.config.limits.max_disk_bytes => Ok(()),
+        Ok(_) => Err(FULL),
+        Err(error) => {
+            eprintln!("carsync-relay: cannot measure the data directory: {error}");
+            Err((INTERNAL_ERROR, "storage error"))
+        }
+    }
+}
+
 fn storage_failed(error: crate::storage::StorageError) -> Refusal {
     // The error names the failing statement, never the values bound to it.
     eprintln!("carsync-relay: storage error: {error}");
@@ -240,11 +256,16 @@ async fn connection(mut socket: WebSocket, state: AppState, room_id: String) {
         Ok(Incoming::Binary) => return close(socket, (close::BAD_FRAME, "binary frame"), shutdown).await,
         Ok(Incoming::Text(text)) => text,
     };
+    // Every text frame costs a token, the opening one included.
+    let mut rate = RateLimiter::new(limits.rate_burst, limits.rate_per_sec, std::time::Instant::now());
+    if !rate.allow(std::time::Instant::now()) {
+        return close(socket, RATE_LIMITED, shutdown).await;
+    }
     let joined = match open(&state, &room_id, &text, &mut socket).await {
         Ok(joined) => joined,
         Err(refusal) => return close(socket, refusal, shutdown).await,
     };
-    serve(socket, &state, joined, shutdown).await;
+    serve(socket, &state, joined, rate, shutdown).await;
 }
 
 /// Handles the opening frame: `hello` or `create`, then joins the room.
@@ -279,6 +300,10 @@ fn create(state: &AppState, room_id: &str, hash: &[u8; 32]) -> Result<(), Refusa
     if state.storage.token_hash(room_id).map_err(storage_failed)?.is_some() {
         return Err((close::ROOM_EXISTS, "room exists"));
     }
+    if state.storage.room_count().map_err(storage_failed)? >= state.config.limits.max_rooms {
+        return Err(FULL);
+    }
+    check_disk(state)?;
     match state.storage.create_room(room_id, hash).map_err(storage_failed)? {
         crate::storage::CreateOutcome::Created => Ok(()),
         crate::storage::CreateOutcome::Exists => Err((close::ROOM_EXISTS, "room exists")),
@@ -327,7 +352,13 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
 
 /// After `welcome`: forwards the queue to the socket and handles frames,
 /// until either side closes.
-async fn serve(mut socket: WebSocket, state: &AppState, mut joined: Joined, mut shutdown: watch::Receiver<bool>) {
+async fn serve(
+    mut socket: WebSocket,
+    state: &AppState,
+    mut joined: Joined,
+    mut rate: RateLimiter,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let limits = &state.config.limits;
     let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
     let refusal = loop {
@@ -347,6 +378,9 @@ async fn serve(mut socket: WebSocket, state: &AppState, mut joined: Joined, mut 
                 Incoming::Gone => return leave(state, &joined),
                 Incoming::Binary => break (close::BAD_FRAME, "binary frame"),
                 Incoming::Text(text) => {
+                    if !rate.allow(std::time::Instant::now()) {
+                        break RATE_LIMITED;
+                    }
                     let handled = protocol::parse(&text, limits)
                         .map_err(|code| (code, "bad frame"))
                         .and_then(|frame| handle(state, &joined, frame));
@@ -378,6 +412,7 @@ fn handle(state: &AppState, joined: &Joined, frame: ClientFrame) -> Result<(), R
     match frame {
         ClientFrame::Hello { .. } | ClientFrame::Create { .. } => return Err((close::BAD_FRAME, "already in")),
         ClientFrame::Snapshot { seq, body } => {
+            check_disk(state)?;
             if seq > storage.latest_seq(room).map_err(storage_failed)? {
                 return Err((close::BAD_FRAME, "snapshot ahead of the room"));
             }
@@ -385,11 +420,13 @@ fn handle(state: &AppState, joined: &Joined, frame: ClientFrame) -> Result<(), R
             members.send(me, encode(&ServerFrame::AckSeq { seq: stored }));
         }
         ClientFrame::Op { body } => {
+            check_disk(state)?;
             let seq = storage.append_op(room, &body).map_err(storage_failed)?;
             members.send(me, encode(&ServerFrame::AckSeq { seq }));
             members.send_to_others(me, &encode(&ServerFrame::Op { seq, body }));
         }
         ClientFrame::Version { body, label } => {
+            check_disk(state)?;
             let at = crate::storage::now_ms();
             let keep = state.config.limits.max_versions;
             let meta = storage.add_version(room, &body, &label, at, keep).map_err(storage_failed)?;

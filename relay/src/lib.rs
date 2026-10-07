@@ -6,9 +6,6 @@
 //! `start` and `Relay`, plus the wire protocol. Everything inside the modules
 //! below is pack 1's own and may be reshaped freely.
 
-// Scaffold stubs: pack 1 removes this once the bodies are written.
-#![allow(unused_variables, dead_code)]
-
 pub mod auth;
 pub mod config;
 pub mod limits;
