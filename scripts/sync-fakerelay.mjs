@@ -23,6 +23,9 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   const log = [];               // [{ roomId, frame }] every frame a client sent, as parsed
   let down = false;
   let dialled = 0;
+  // While held, catchup replies wait here, to look at a client before it has
+  // heard what the room holds.
+  let hold = null;
 
   function attach(target) {
     return target.routeWebSocket(/\/rooms\/[^/]+\/ws$/, (ws) => {
@@ -102,16 +105,18 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
         send(c, v ? { type: 'version', id: v.id, at: v.at, label: v.label, body: v.body } : { type: 'noVersion', id: f.id });
         return;
       }
-      case 'catchup':
+      case 'catchup': {
         if (!isUint(f.since)) { shut(c, 4400); return; }
-        send(c, {
+        const reply = () => send(c, {
           type: 'catchup',
           seq: room.seq,
           snapshot: room.snapshot,
           ops: room.ops.filter((o) => o.seq > f.since),
           versions: room.versions.map(({ id, at, label }) => ({ id, at, label })),
         });
+        if (hold) hold.push(reply); else reply();
         return;
+      }
       case 'presence':
         if (!body(f.body)) { shut(c, 4400); return; }
         for (const o of others(c)) send(o, { type: 'presence', body: f.body });
@@ -132,6 +137,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     // Every open socket drops with 1006 and every new one is dropped until up().
     down() { down = true; for (const c of [...live]) shut(c, 1006); },
     up() { down = false; },
+    holdCatchup() { hold = hold || []; },
+    releaseCatchup() { const waiting = hold || []; hold = null; for (const reply of waiting) reply(); },
     // A room made directly, as if another browser had created it.
     makeRoom(roomId, token, { seq = 0, snapshot = null, versions = [] } = {}) {
       rooms.set(roomId, { hash: sha256(token), seq, snapshot, ops: [], versions: versions.map((v, i) => ({ id: i + 1, at: Date.now(), ...v })), nextId: versions.length + 1 });

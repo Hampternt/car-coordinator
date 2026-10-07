@@ -443,7 +443,16 @@ let pushed = null;   // { id, plan } for the Restore section
   same('and nothing changed', await kept(j.page), before);
   await j.context.close();
 
+  // Before the room has said what it holds, nothing can be pushed either.
+  relay.holdCatchup();
   const p = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(p.page, 'Connected');
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  check('connected but not caught up: Push is disabled', await p.page.locator('[data-act="room-push"]').isDisabled());
+  await p.page.evaluate(() => { document.getElementById('roomVersionName').value = 'Too early'; return roomPush(); });
+  check('and pushing anyway says to wait', await noticeSays(p.page, /still being read, so nothing was pushed/));
+  same('sending nothing', relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length, 0);
+  relay.releaseCatchup();
   check('in a newer room: the bar says Update the app', await pillSays(p.page, 'Update the app'), await pill(p.page).textContent().catch(() => 'no pill'));
   await p.page.click('[data-act="tab"][data-tab="data"]');
   check('and the card says why', /Update the app to edit the shared plan/.test(await p.page.locator('#roomStatus').innerText()));

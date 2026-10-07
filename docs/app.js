@@ -2535,13 +2535,16 @@ async function roomStart(secret) {
   // seq: the room's latest seq as last heard. acks: what was sent and not yet
   // answered, oldest first; the relay answers in the order it was sent.
   // fetches: version id -> the resolvers waiting for its body (getVersion).
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [], fetches: new Map() };
+  // caught: the catchup since the last (re)connect has been read. Until then
+  // the room's schema is unknown, so nothing is written to it.
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [], fetches: new Map(), caught: false };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
     // Catch up on every (re)connect: the version list, and the room's schema.
+    r.caught = false;
     if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
     // A connection that dropped will never answer what it was sent.
     let noted = false;
@@ -2587,6 +2590,7 @@ async function roomFrame(r, f) {
     r.versions = versions;
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
     r.schema = Math.max(0, snap ? snap.schema : 0, ...versions.map((v) => v.schema));
+    r.caught = true;
     renderRoom();
   } else if (f.type === 'ack') {
     const a = r.acks.shift();
@@ -2697,6 +2701,8 @@ async function roomPush() {
   const name = String(box?.value || '').replace(/\s+/g, ' ').trim();
   if (roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
   if (r.conn.status !== 'connected') { note('warn', 'The shared plan cannot be reached right now, so nothing was pushed. Your plan is saved on this PC; push again once it says Connected.'); render(); return; }
+  // Before the catchup the room could be a newer build's: wait for it.
+  if (!r.caught) { note('warn', 'The shared plan is still being read, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
   const plan = { schema: Store.SCHEMA, plan: state };
   const [body, label, snapshot] = await Promise.all([
@@ -2850,6 +2856,7 @@ function roomCardHtml() {
 function roomVersionsHtml() {
   const ro = roomReadOnly();
   const up = room.conn && room.conn.status === 'connected';
+  const canPush = up && room.caught && !ro;
   const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => {
     const sure = armed === `room-restore:${v.id}`;
     const newer = v.schema > Store.SCHEMA;
@@ -2863,7 +2870,7 @@ function roomVersionsHtml() {
     <p class="hint">Push saves the plan on screen as a named version in the shared plan, for either of you to go back to. The newest 50 are kept.</p>
     <div class="room-push">
       <input type="text" id="roomVersionName" placeholder="Name it, e.g. Monday final" maxlength="80" autocomplete="off"${ro ? ' disabled' : ''}>
-      <button class="btn primary-ish" data-act="room-push"${ro || !up ? ' disabled' : ''}>Push a version</button>
+      <button class="btn primary-ish" data-act="room-push"${canPush ? '' : ' disabled'}>Push a version</button>
     </div>
     ${rows ? `<ul class="room-versions">${rows}</ul>` : '<p class="empty">No versions pushed yet.</p>'}`;
 }

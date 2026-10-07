@@ -23,6 +23,8 @@ pack 1 (relay/); this unit commits only its own paths.
 
 - After the suite: PROTOCOL.md gained close code 1011 (storage error, reconnect) in 41d1851. The client already reconnects on every code but the five refusals; sync.mjs now checks 1011 too: 113 ok, 0 FAIL; check.sh OK.
 
+- Read-only gap closed after the suite: `welcome` made the card Connected one round trip before the catchup said what the room holds, so Push was briefly enabled in a newer build's room. A room is now `caught` only once its catchup since the last (re)connect is read; Push (button and function) needs it. `sync-fakerelay.mjs` gains `holdCatchup()`/`releaseCatchup()`; sync-ui.mjs shows Push disabled and a forced push sending zero frames before the catchup of a schema-7 room. Gate: check.sh OK; sync.mjs 113 ok, 0 FAIL; sync-ui.mjs 131 ok, 0 FAIL. The full suite ran on 96ce69d, before this change and baa1524; both are covered by check.sh, sync.mjs and sync-ui.mjs only.
+
 ## Decisions and deviations
 
 - The progress "now" file is `<git-dir>/progress-now-pack2.json`, not `progress-now.json`: both builders share one git dir, and pack 1 already writes that name.
@@ -44,7 +46,7 @@ pack 1 (relay/); this unit commits only its own paths.
 **Draft update note** (for docs/updates.js at the release bump; `must: true`, the saved data can change):
 - title: `A shared plan for two managers`
 - changed: `The Data tab has a Shared plan card: create one with the server's create code, send its invite link, push named versions, look at them first, restore them, or leave.`
-- affects: `The Data tab, and the Shared plan status in the top bar while this browser is in one. The printed sheet and share codes do not change. Older copies cannot open invite links.`
+- affects: `The Data tab, and the Shared plan status in the top bar while this browser is in one. The printed sheet and share codes do not change. Older copies cannot open invite links: update both PCs first.`
 - data: `Nothing changes unless you create or join a shared plan. Taking one, or restoring a version, replaces the plan and setup; what was on screen goes into Backups first.`
 
 **INVENTORY / HANDOFF** (not written by this unit): "Local only" becomes "Local unless you join a shared plan" (manifest decision).
@@ -55,10 +57,10 @@ pack 1 (relay/); this unit commits only its own paths.
 
 Needs pack 1's relay. Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) and `scripts/fixtures/shared-plan-other-pc.json` (another PC's made-up plan: cars ZZ 90001 and ZZ 90002, template Holiday rota, day group Night crew, position Back yard).
 
-1. Start the relay on this PC, allowing the dev server's origin:
-   `RELAY_DATA=/tmp/carsync RELAY_CREATE_CODE=try-me RELAY_ORIGINS=http://localhost:5173 cargo run --manifest-path relay/Cargo.toml` (it listens on 127.0.0.1:3010). Then `npm run dev` and open http://localhost:5173/ in a normal window (window 1) and in a private window (window 2).
+1. Start the relay on this PC as `relay/README.md` § Run it locally says, allowing the dev server's origin:
+   `RELAY_DATA=/tmp/carsync-dev RELAY_CREATE_CODE=dev RELAY_ORIGINS=https://hampternt.github.io,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173 cargo run --manifest-path relay/Cargo.toml` (it serves 127.0.0.1:3010; `curl http://127.0.0.1:3010/health` says ok). Then `npm run dev` and open http://localhost:5173/ in a normal window (window 1) and in a private window (window 2).
 2. In each window, point the app at the local relay: open the console (F12) and run `localStorage.setItem('carcoord:pref:relay', 'ws://127.0.0.1:3010')`, then reload. Until you create or join a shared plan, nothing changes and the top bar shows no Shared plan status.
-3. Window 1: Data tab → Import a copy… → `scripts/fixtures/dev-data.json`. In Shared plan, type `try-me` in Create code and press Create a shared plan. Expected: the top bar says "Shared plan: Connected", and the card shows the invite link and its QR. Try a wrong code first if you like: it says the code was not accepted, and nothing changes.
+3. Window 1: Data tab → Import a copy… → `scripts/fixtures/dev-data.json`. In Shared plan, type `dev` in Create code and press Create a shared plan. Expected: the top bar says "Shared plan: Connected", and the card shows the invite link and its QR. Try a wrong code first if you like: it says the code was not accepted, and nothing changes.
 4. Window 2: Import `scripts/fixtures/shared-plan-other-pc.json`. Copy window 1's invite link (Copy the invite link), paste it into window 2's address bar and press Enter. Expected: the address bar loses the `#join=…` at once, and a dialog "Join this shared plan?" says the plan holds 15 routes. It also lists what is only on this PC (Cars: ZZ 90001, ZZ 90002; Positions: Back yard; Day groups: Night crew; Templates: Holiday rota, and more) as kept in the Backup.
 5. Press Not now: nothing changes (same plan, Backups as before, no status in the bar). Paste the link again and press Take the shared plan. Expected: the plan is window 1's, the bar says Connected, and Data → Backups holds window 2's old plan (as "Before joining the shared plan", or as "Start of day" if that was the same plan).
 6. Window 1: change a driver, type `Test 1` in the version name, Push a version. Expected: "Pushed “Test 1”", and Test 1 appears in window 2's Versions list without a reload.
