@@ -1,6 +1,6 @@
 # Container: Shared plan
 
-**Status:** 🚧 ROUND 1 (packs 1 and 2) approved by the owner 2026-10-07 and building. Packs 3 and 4 drafted in outline.
+**Status:** 🚧 ROUND 1 (packs 1 and 2) built; pack gate and targeted review running, then handover. Packs 3 and 4 drafted in outline.
 **Date:** 2026-10-07
 **Branch:** round 1 builds on `claude/car-coordinator-encryption-c717c5` (cut from `dev` at bd379ee) and goes back to `dev` through one PR. Later rounds cut from `dev` and comes back to `dev` through a PR. `main` only after the owner has tested the combined update on `dev` and said go.
 **Scope:** Car Coordinator only. Breadify is untouched and nothing of it is synced.
@@ -114,37 +114,44 @@ Pack 2 uses snapshot, version, getVersion and catchup. Pack 3 adds op, pack 4 ad
 `Agents: scaffold 1 (medium, shared with pack 2) · build 1 (medium) · review: auth lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules and Wire protocol, `relay/PROTOCOL.md`, `/home/hampter/.claude/CLAUDE.md` § Builder worktrees (its own target dir). Depends on: the scaffold only.
 
-- [ ] **Crate and config:** axum + tokio, configured by env (`RELAY_BIND`, `RELAY_DATA`, `RELAY_CREATE_CODE`, `RELAY_ORIGINS`, the Pages origin plus `http://tauri.localhost`). *Done when:* `cargo run --manifest-path relay/Cargo.toml` answers `/health`.
-- [ ] **Rooms and auth:** create gated by the owner's create code; the token is checked against its stored hash, in constant time. *Done when:* tests for a wrong create code, a duplicate room, a bad token and the right token pass.
-- [ ] **Storage:** SQLite holding the snapshot, the op log after it, and versions (last 50). *Done when:* a snapshot drops older ops, and a restart keeps everything.
-- [ ] **WebSocket fan-out:** sequencing, acks, catchup, presence forwarded but never written. *Done when:* a two-client test sees each other's ops in order, and presence never appears in the database.
-- [ ] **Limits:** body size, rate, room count, disk cap, each refused with a clear close code. *Done when:* a test hits each one.
-- [ ] **Deploy files:** `relay/deploy/carsync.service` (its own `carsync` user, `/opt/carsync`, `EnvironmentFile`, binding `127.0.0.1:3010`) and an nginx `location /carsync/` for the existing `portfolio.dblo.net` server block, with the WebSocket upgrade headers, `proxy_read_timeout 1h` and its own `limit_req` zone. That way there is no new DNS record or certificate. `relay/README.md` gives the steps, following drawingportfolio's deploying skill: build for x86_64, `127.0.0.1` not `localhost`, `diff -u` against the live nginx file before copying, apply with a backup and `nginx -t`. **The owner runs them.** Claude does not touch the server without asking. *Done when:* the README steps work against a local build and nginx in a container passes `nginx -t` with the snippet.
+- [x] **Crate and config:** axum + tokio, configured by env (`RELAY_BIND`, `RELAY_DATA`, `RELAY_CREATE_CODE`, `RELAY_ORIGINS`, the Pages origin plus `http://tauri.localhost`). *Done when:* `cargo run --manifest-path relay/Cargo.toml` answers `/health`.
+- [x] **Rooms and auth:** create gated by the owner's create code; the token is checked against its stored hash, in constant time. *Done when:* tests for a wrong create code, a duplicate room, a bad token and the right token pass.
+- [x] **Storage:** SQLite holding the snapshot, the op log after it, and versions (last 50). *Done when:* a snapshot drops older ops, and a restart keeps everything.
+- [x] **WebSocket fan-out:** sequencing, acks, catchup, presence forwarded but never written. *Done when:* a two-client test sees each other's ops in order, and presence never appears in the database.
+- [x] **Limits:** body size, rate, room count, disk cap, each refused with a clear close code. *Done when:* a test hits each one.
+- [x] **Deploy files:** `relay/deploy/carsync.service` (its own `carsync` user, `/opt/carsync`, `EnvironmentFile`, binding `127.0.0.1:3010`) and an nginx `location /carsync/` for the existing `portfolio.dblo.net` server block, with the WebSocket upgrade headers, `proxy_read_timeout 1h` and its own `limit_req` zone. That way there is no new DNS record or certificate. `relay/README.md` gives the steps, following drawingportfolio's deploying skill: build for x86_64, `127.0.0.1` not `localhost`, `diff -u` against the live nginx file before copying, apply with a backup and `nginx -t`. **The owner runs them.** Claude does not touch the server without asking. *Done when:* the README steps work against a local build and nginx in a container passes `nginx -t` with the snippet.
 
 ### Pack 2: Join, Push and Pull
 
 `Agents: build 1 (medium) · review: auth + live-data lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules and Wire protocol, `docs/store.js` (`Store.snapshot()`, `pref`), `docs/share.js` (preview and `#d=` handling to match), `scripts/smoke.mjs` style. Depends on: the scaffold. Owns `docs/sync.js`, `scripts/sync.mjs`, `scripts/stub-relay.mjs` (a node implementation of the protocol, for tests until pack 1 merges), and its own edits to `docs/app.js`, `docs/index.html`, `docs/style.css` and `docs/store.js`. Pack 1 touches none of them.
 
-- [ ] **Crypto (`docs/sync.js`):** key generation, HKDF, AES-GCM with the AAD above, WebCrypto only. *Done when:* `scripts/sync.mjs` round-trips, and rejects a wrong key and a swapped `kind`.
-- [ ] **Connection and status:** connect, reconnect with backoff, catch up on reconnect; a status line (Connected / Offline, working locally / Update the app). CSP `connect-src` gains `wss://portfolio.dblo.net` (and `ws://127.0.0.1:*` for dev and tests; a CSP source without a port matches only the default one). *Done when:* killing the stub relay shows Offline and editing still works.
-- [ ] **Create a room:** Data tab → Shared plan → Create (asks for the owner's create code once), seeds the room from this plan, shows the invite link and QR. *Done when:* the room holds a snapshot that decrypts back to the plan.
-- [ ] **Join:** open the invite link → the fragment is stripped → preview of what changes → **Take the shared plan** (Backup first) or Not now. *Done when:* smoke covers both choices and checks the Backup.
-- [ ] **Push a version:** a named version ("Monday final") from the current plan. *Done when:* the other browser sees it in the list.
-- [ ] **Pull, look first, restore:** the version list with Look first (the existing preview) and Restore (Backup first); a client whose schema is older than the room's is read-only. *Done when:* smoke covers restore and the read-only case.
-- [ ] **Leave the room:** forgets the key on this PC; the local plan stays. *Done when:* after Leave, zero network calls and the plan unchanged.
+- [x] **Crypto (`docs/sync.js`):** key generation, HKDF, AES-GCM with the AAD above, WebCrypto only. *Done when:* `scripts/sync.mjs` round-trips, and rejects a wrong key and a swapped `kind`.
+- [x] **Connection and status:** connect, reconnect with backoff, catch up on reconnect; a status line (Connected / Offline, working locally / Update the app). CSP `connect-src` gains `wss://portfolio.dblo.net` (and `ws://127.0.0.1:*` for dev and tests; a CSP source without a port matches only the default one). *Done when:* killing the stub relay shows Offline and editing still works.
+- [x] **Create a room:** Data tab → Shared plan → Create (asks for the owner's create code once), seeds the room from this plan, shows the invite link and QR. *Done when:* the room holds a snapshot that decrypts back to the plan.
+- [x] **Join:** open the invite link → the fragment is stripped → preview of what changes → **Take the shared plan** (Backup first) or Not now. *Done when:* smoke covers both choices and checks the Backup.
+- [x] **Push a version:** a named version ("Monday final") from the current plan. *Done when:* the other browser sees it in the list.
+- [x] **Pull, look first, restore:** the version list with Look first (the existing preview) and Restore (Backup first); a client whose schema is older than the room's is read-only. *Done when:* smoke covers restore and the read-only case.
+- [x] **Leave the room:** forgets the key on this PC; the local plan stays. *Done when:* after Leave, zero network calls and the plan unchanged.
 
-<details><summary>Test it yourself (round 1)</summary>
+## Test it yourself (round 1)
 
-Filled in at handover with the exact commands. The outline:
-1. Start the relay locally and the dev server, then open two windows (a normal one and a private one).
-2. Window 1 loads the seed fixture (made-up cars and drivers, committed with the pack), creates a room and copies the invite.
-3. Window 2 opens the invite: check the preview, take the shared plan, and find its old plan in Backups.
-4. Push "Test 1" from window 1, then look at it and restore it from window 2.
-5. Stop the relay: both say Offline and keep working. Start it again: both reconnect.
-6. Open the invite in a third window holding a 0.14.1-era plan and press Not now: nothing changes.
+Everything runs on this PC; your Hetzner server is not involved yet. All test data is made up.
 
-</details>
+Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) and `scripts/fixtures/shared-plan-other-pc.json` (another PC's made-up plan: cars ZZ 90001 and ZZ 90002, template Holiday rota, day group Night crew, position Back yard).
+
+1. Start the relay on this PC as `relay/README.md` § Run it locally says, allowing the dev server's origin:
+   `RELAY_DATA=/tmp/carsync-dev RELAY_CREATE_CODE=dev RELAY_ORIGINS=https://hampternt.github.io,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173 cargo run --manifest-path relay/Cargo.toml` (it serves 127.0.0.1:3010; `curl http://127.0.0.1:3010/health` says ok). Then `npm run dev` and open http://localhost:5173/ in a normal window (window 1) and in a private window (window 2).
+2. In each window, point the app at the local relay: open the console (F12) and run `localStorage.setItem('carcoord:pref:relay', 'ws://127.0.0.1:3010')`, then reload. Until you create or join a shared plan, nothing changes and the top bar shows no Shared plan status.
+3. Window 1: Data tab → Import a copy… → `scripts/fixtures/dev-data.json`. In Shared plan, type `dev` in Create code and press Create a shared plan. Expected: the top bar says "Shared plan: Connected", and the card shows the invite link and its QR. Try a wrong code first if you like: it says the code was not accepted, and nothing changes.
+4. Window 2: Import `scripts/fixtures/shared-plan-other-pc.json`. Copy window 1's invite link (Copy the invite link), paste it into window 2's address bar and press Enter. Expected: the address bar loses the `#join=…` at once, and a dialog "Join this shared plan?" says the plan holds 15 routes. It also lists what is only on this PC (Cars: ZZ 90001, ZZ 90002; Positions: Back yard; Day groups: Night crew; Templates: Holiday rota, and more) as kept in the Backup.
+5. Press Not now: nothing changes (same plan, Backups as before, no status in the bar). Paste the link again and press Take the shared plan. Expected: the plan is window 1's, the bar says Connected, and Data → Backups holds window 2's old plan (as "Before joining the shared plan", or as "Start of day" if that was the same plan).
+6. Window 1: change a driver, type `Test 1` in the version name, Push a version. Expected: "Pushed “Test 1”", and Test 1 appears in window 2's Versions list without a reload.
+7. Window 2: Look first on Test 1 shows the same kind of preview and changes nothing on Close. Restore it (two presses in the list, or Restore it in Look first): window 1's changed driver is on screen, and the plan before it is in Backups.
+8. Stop the relay (Ctrl+C). Both bars say "Shared plan: Offline", and editing still works and is saved. Start it again (same command, same RELAY_DATA): both say Connected within about 30 seconds.
+9. Window 2: Leave the shared plan (two presses). The status disappears, the plan stays as it is, and after a reload nothing connects (F12 → Network → WS stays empty).
+10. Auth as a visitor: open the invite link with one character changed in a third browser profile (not another private window, which shares window 2's storage). Expected: "This invite link does not open a shared plan", Not now, nothing changes. A link cut short is stripped and ignored with no dialog.
+
 
 ---
 
@@ -172,6 +179,17 @@ Drafted in full while the owner tests round 1.
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: **round 1 built.** Both builders worked in this one worktree, as planned. Their unit ledgers are folded in below and kept in `manifests/archive/`.
+  - **Separation:** the relay's 8 commits touch only `relay/` and its own ledger. None of the client's 10 commits touches `relay/`.
+  - **Pack 1, the relay** (7c7224f…5c58d56): `cargo test` 45/45 (the 35 scaffold tests plus 10 new), five runs in a row; clippy clean; the README steps ran against a local release build. **`nginx -t` was not run:** this user can't reach Docker, so the owner runs the one-liner from the README. Close codes 1001 (too far behind) and 1011 (storage error) were added to the protocol in 41d1851.
+  - **Pack 2, the client** (28069e1…e389251): `sync.mjs` 113 ok, `sync-ui.mjs` 131 ok, both against a fake relay built on `routeWebSocket`. The full `npm test` passed on 96ce69d after four smoke fixes.
+    - Late fix e389251: Push now waits until the room has said what data version it holds, so an older build can never write to a newer room.
+    - Outside its listed paths: `docs/qr.js` brought back from `6c44bb3^` (it had been removed), loaded only when there is an invite QR to draw; `recover.js` hides the room secret; one line each in `smoke.mjs`, `help.js` and `colour-guard.mjs`; a made-up fixture.
+    - Decisions: Push also refreshes the room's snapshot; Restore stays local; read-only blocks only writes to the room; opening an invite connects before the answer, to show the preview; the create code is asked for every time and stored nowhere.
+  - **Open for the owner:**
+    - the Windows app cannot join yet, because its invite link would point at `tauri.localhost` and it has no address bar;
+    - whether loading the QR encoder for the invite fits the earlier "QR gone for good";
+    - a connection with no `Origin` header is allowed.
 - 2026-10-07: scaffold ea8f1f4. Relay: 35 tests compile, and 34 fail on `todo!()`. `sync.mjs`: 12 checks fail on "not implemented", 8 pass. `check.sh` OK. The relay tests have never run against an implementation, so a wrong test goes back through the contract, never edited.
 - 2026-10-07: owner said go on round 1 ("begin work on the manifest"). The WebSocket now carries room creation too, so the relay needs no CORS.
 - 2026-10-07: owner chose live by default and everything synced. Server facts read from drawingportfolio's `deploy/` (nginx, certbot, axum on :3000).
