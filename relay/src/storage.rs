@@ -131,25 +131,138 @@ impl Storage {
     /// with `seq <=` it. Returns the stored snapshot's seq afterwards. The
     /// caller has already refused a `seq` above the latest.
     pub fn put_snapshot(&self, room: &str, seq: u64, body: &str) -> Result<u64> {
-        todo!()
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let stored: Option<u64> =
+            tx.query_row("SELECT snapshot_seq FROM rooms WHERE id = ?1", [room], |row| row.get(0))?;
+        if let Some(stored) = stored.filter(|&stored| seq < stored) {
+            return Ok(stored);
+        }
+        tx.execute("UPDATE rooms SET snapshot_seq = ?2, snapshot_body = ?3 WHERE id = ?1", params![room, seq, body])?;
+        tx.execute("DELETE FROM ops WHERE room = ?1 AND seq <= ?2", params![room, seq])?;
+        tx.commit()?;
+        Ok(seq)
     }
 
     /// Stores the op under the next seq and returns it.
     pub fn append_op(&self, room: &str, body: &str) -> Result<u64> {
-        todo!()
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let seq: u64 = tx.query_row(
+            "UPDATE rooms SET latest_seq = latest_seq + 1 WHERE id = ?1 RETURNING latest_seq",
+            [room],
+            |row| row.get(0),
+        )?;
+        tx.execute("INSERT INTO ops (room, seq, body) VALUES (?1, ?2, ?3)", params![room, seq, body])?;
+        tx.commit()?;
+        Ok(seq)
     }
 
     /// Stores a version stamped `at_ms`, prunes to the newest `keep`, and
     /// returns its id and time.
     pub fn add_version(&self, room: &str, body: &str, label: &str, at_ms: u64, keep: usize) -> Result<VersionMeta> {
-        todo!()
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        // The counter lives on the room, so a pruned id is never handed out again.
+        let id: u64 = tx.query_row(
+            "UPDATE rooms SET next_version = next_version + 1 WHERE id = ?1 RETURNING next_version - 1",
+            [room],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "INSERT INTO versions (room, id, at, label, body) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![room, id, at_ms, label, body],
+        )?;
+        tx.execute(
+            "DELETE FROM versions WHERE room = ?1 AND id NOT IN
+                (SELECT id FROM versions WHERE room = ?1 ORDER BY id DESC LIMIT ?2)",
+            params![room, keep],
+        )?;
+        tx.commit()?;
+        Ok(VersionMeta { id, at: at_ms, label: label.to_string() })
     }
 
     pub fn get_version(&self, room: &str, id: u64) -> Result<Option<StoredVersion>> {
-        todo!()
+        self.conn()
+            .query_row("SELECT at, label, body FROM versions WHERE room = ?1 AND id = ?2", params![room, id], |row| {
+                Ok(StoredVersion { meta: VersionMeta { id, at: row.get(0)?, label: row.get(1)? }, body: row.get(2)? })
+            })
+            .optional()
     }
 
     pub fn catchup(&self, room: &str, since: u64) -> Result<CatchupData> {
-        todo!()
+        let mut conn = self.conn();
+        // One read transaction, so the parts agree with each other.
+        let tx = conn.transaction()?;
+        let (seq, snapshot_seq, snapshot_body): (u64, Option<u64>, Option<String>) = tx.query_row(
+            "SELECT latest_seq, snapshot_seq, snapshot_body FROM rooms WHERE id = ?1",
+            [room],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let snapshot = snapshot_seq.zip(snapshot_body).map(|(seq, body)| SnapshotOut { seq, body });
+        let ops = tx
+            .prepare("SELECT seq, body FROM ops WHERE room = ?1 AND seq > ?2 ORDER BY seq")?
+            .query_map(params![room, since], |row| Ok(OpOut { seq: row.get(0)?, body: row.get(1)? }))?
+            .collect::<Result<Vec<_>>>()?;
+        let versions = tx
+            .prepare("SELECT id, at, label FROM versions WHERE room = ?1 ORDER BY id")?
+            .query_map([room], |row| Ok(VersionMeta { id: row.get(0)?, at: row.get(1)?, label: row.get(2)? }))?
+            .collect::<Result<Vec<_>>>()?;
+        tx.commit()?;
+        Ok(CatchupData { seq, snapshot, ops, versions })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROOM: &str = "WC4euC74o8kDhATEpCnxOA";
+
+    fn ops(storage: &Storage, since: u64) -> Vec<(u64, String)> {
+        storage.catchup(ROOM, since).unwrap().ops.into_iter().map(|op| (op.seq, op.body)).collect()
+    }
+
+    #[test]
+    fn a_snapshot_drops_the_ops_it_covers_and_the_seq_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path()).unwrap();
+        assert!(matches!(storage.create_room(ROOM, &[7; 32]).unwrap(), CreateOutcome::Created));
+        for body in ["one", "two", "three"] {
+            storage.append_op(ROOM, body).unwrap();
+        }
+        assert_eq!(storage.put_snapshot(ROOM, 2, "snap").unwrap(), 2);
+        assert_eq!(ops(&storage, 0), vec![(3, "three".to_string())]);
+        assert_eq!(storage.put_snapshot(ROOM, 1, "stale").unwrap(), 2, "a stale snapshot is not stored");
+        assert_eq!(storage.put_snapshot(ROOM, 3, "all").unwrap(), 3);
+        assert_eq!(ops(&storage, 0), vec![]);
+        assert_eq!(storage.latest_seq(ROOM).unwrap(), 3);
+        assert_eq!(storage.append_op(ROOM, "four").unwrap(), 4);
+    }
+
+    #[test]
+    fn a_reopened_database_keeps_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let storage = Storage::open(dir.path()).unwrap();
+            storage.create_room(ROOM, &[7; 32]).unwrap();
+            storage.put_snapshot(ROOM, 0, "seed").unwrap();
+            storage.append_op(ROOM, "op").unwrap();
+            for n in 1..=3 {
+                storage.add_version(ROOM, &format!("body{n}"), &format!("label{n}"), 1000 + n, 2).unwrap();
+            }
+        }
+        let storage = Storage::open(dir.path()).unwrap();
+        assert_eq!(storage.room_count().unwrap(), 1);
+        assert_eq!(storage.token_hash(ROOM).unwrap(), Some([7; 32]));
+        assert!(matches!(storage.create_room(ROOM, &[8; 32]).unwrap(), CreateOutcome::Exists));
+        let caught = storage.catchup(ROOM, 0).unwrap();
+        assert_eq!(caught.seq, 1);
+        assert_eq!(caught.snapshot, Some(SnapshotOut { seq: 0, body: "seed".into() }));
+        assert_eq!(caught.ops, vec![OpOut { seq: 1, body: "op".into() }]);
+        assert_eq!(caught.versions.iter().map(|v| v.id).collect::<Vec<_>>(), vec![2, 3], "pruned to the newest 2");
+        assert!(storage.get_version(ROOM, 1).unwrap().is_none());
+        assert_eq!(storage.get_version(ROOM, 3).unwrap().unwrap().body, "body3");
+        assert_eq!(storage.add_version(ROOM, "b", "l", 2000, 2).unwrap().id, 4, "ids are never reused");
     }
 }
