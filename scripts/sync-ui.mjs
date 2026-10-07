@@ -14,6 +14,9 @@ import { readFile } from 'node:fs/promises';
 import { startServer } from './serve.mjs';
 import { fakeRelay } from './sync-fakerelay.mjs';
 
+// This build's version, so the seeded profiles have seen its update note.
+const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+
 const server = await startServer();
 const base = server.base;
 const EXECUTABLE = process.env.CHROMIUM_PATH || undefined;
@@ -119,7 +122,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
 // ---------------------------------------------------------------------------
 // No room: exactly as before, and not one connection.
 {
-  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done' } });
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done' } });
   for (const t of TABS) await p.page.click(`[data-act="tab"][data-tab="${t}"]`);
   await p.page.click('[data-act="tab"][data-tab="data"]');
   await wait(2500);
@@ -140,7 +143,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
   const secret = newSecret();
   const k = keysOf(secret);
   relay.makeRoom(k.roomId, k.token);
-  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
   check('in a room: the bar says Connected', await pillSays(p.page, 'Connected'), await pill(p.page).textContent().catch(() => 'no pill'));
   check('it said hello with the room\'s token', relay.sent('hello', k.roomId).some((f) => f.token === k.token));
   check('and caught up', await until(() => relay.sent('catchup', k.roomId).length === 1));
@@ -169,7 +172,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
 {
   const port = await deadPort();
   const secret = newSecret();
-  const p = await profile({ routed: false, items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': `ws://127.0.0.1:${port}`, 'carcoord:pref:room': secret } });
+  const p = await profile({ routed: false, items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': `ws://127.0.0.1:${port}`, 'carcoord:pref:room': secret } });
   check('unreachable: the bar says Offline', await pillSays(p.page, 'Offline'), await pill(p.page).textContent().catch(() => 'no pill'));
   check('the socket was really made, so the policy lets ws://127.0.0.1 through', p.sockets.length >= 1, JSON.stringify(p.sockets));
   const box = p.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]');
@@ -185,7 +188,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
 // A room the relay does not know: refused, and never knocked on again.
 {
   const secret = newSecret();
-  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
+  const p = await profile({ items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED, 'carcoord:pref:room': secret } });
   check('an unknown room: the bar says Refused', await pillSays(p.page, 'Refused'), await pill(p.page).textContent().catch(() => 'no pill'));
   const tries = relay.sent('hello', keysOf(secret).roomId).length;
   await wait(2500);
@@ -199,7 +202,7 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
 // ---------------------------------------------------------------------------
 // Create: a wrong code makes nothing; the right one seeds the room from this
 // plan, and the invite link and its QR are shown.
-const SEED = { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
+const SEED = { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
 // Every value this browser stores, but the room's own pref, joined: where the
 // secret and the token must never turn up.
 const elsewhere = (pg) => pg.evaluate(() => Object.keys(localStorage).filter((k) => k !== 'carcoord:pref:room').map((k) => `${k}=${localStorage.getItem(k)}`).join('\n'));
@@ -278,7 +281,7 @@ let created = null;   // { secret, plan }: the room the next sections join
 // Join: the other PC opens the invite. The fragment goes at once; Not now
 // changes nothing; Take backs this plan up and puts the room's in its place.
 const OTHER = await readFile(new URL('./fixtures/shared-plan-other-pc.json', import.meta.url), 'utf8');
-const OTHER_SEED = { 'carcoord:v1': OTHER, 'carcoord:pref:seenUpdate': '0.14.1', 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
+const OTHER_SEED = { 'carcoord:v1': OTHER, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': ROUTED };
 const kept = (pg) => pg.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), backups: localStorage.getItem('carcoord:backups'), room: localStorage.getItem('carcoord:pref:room') }));
 // An invite opened the way a link is: a fresh load of the page.
 const openInvite = async (pg, hash) => { await pg.goto('about:blank'); await pg.goto(`${base}${hash}`, { waitUntil: 'networkidle' }); };

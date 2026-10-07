@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.15.0',
+    must: true,
+    title: 'A shared plan for two managers',
+    changed: 'The Data tab has a Shared plan card: create one with the server\'s create code, send its invite link, push named versions, look at them first, restore them, or leave.',
+    affects: 'The Data tab, and a Shared plan status in the top bar while this browser is in one. The printed sheet and share codes do not change. Older copies cannot open invite links: update both first.',
+    data: 'Nothing changes unless you create or join a shared plan. Taking one, or restoring a version, replaces the plan and setup; what was on screen goes into Backups first.',
+  },
+  {
     version: '0.14.1',
     must: false,
     title: 'The date, its crew, and plainer templates',
