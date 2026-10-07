@@ -365,6 +365,109 @@ let pushed = null;   // { id, plan } for the Restore section
   await b.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// Pull: Look first shows the version without changing anything; Restore puts
+// it on screen after a backup, and sends nothing.
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const b = await profile({ items: inRoom(OTHER_SEED, secret) });
+  await pillSays(b.page, 'Connected');
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.waitForSelector('#roomCard [data-act="room-look"]');
+  const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+  const wrote = writes();
+  const before = await kept(b.page);
+  const screen = await b.page.evaluate(() => JSON.stringify(state));
+
+  await b.page.click(`#roomCard [data-act="room-look"][data-id="${pushed.id}"]`);
+  check('Look first opens the version, with the preview', await dialogSays(b.page, /Version \u201cMonday final\u201d[\s\S]*Restoring it replaces everything on screen/), await b.page.locator('#roomDlg').innerText().catch(() => ''));
+  check('naming what is only on this PC', /Cars: ZZ 90001, ZZ 90002/.test(await b.page.locator('#roomDlg').innerText()));
+  check('it fetched the version by id', relay.sent('getVersion', k.roomId).some((f) => f.id === pushed.id));
+  await b.page.click('[data-act="room-look-close"]');
+  same('Close: nothing changed', await kept(b.page), before);
+
+  // From the list it takes two presses.
+  await b.page.click(`#roomCard [data-act="room-restore"][data-id="${pushed.id}"]`);
+  check('Restore from the list asks Sure? first', (await b.page.locator(`#roomCard [data-act="room-restore"][data-id="${pushed.id}"]`).innerText()) === 'Sure?');
+  same('and has changed nothing yet', await kept(b.page), before);
+  await b.page.click(`#roomCard [data-act="room-restore"][data-id="${pushed.id}"]`);
+  check('Restore: said so', await noticeSays(b.page, /Restored the shared version \u201cMonday final\u201d/), await b.page.locator('#notices').innerText());
+  same('the version is the plan on screen', await b.page.evaluate(() => JSON.stringify(state)), JSON.stringify(pushed.plan));
+  const after = await kept(b.page);
+  const bk = JSON.parse(after.backups)[0];
+  check('and what was on screen is the newest Backup', bk.json === screen && /Before restoring the shared version|Start of day/.test(bk.label), bk.label);
+  same('Restore sent nothing to the room', writes(), wrote);
+
+  // Look first, then Restore it from the dialog: one press there.
+  await b.page.evaluate(() => { state.routes[0].driver = 'Changed again'; save(); render(); });
+  await b.page.click(`#roomCard [data-act="room-look"][data-id="${pushed.id}"]`);
+  await dialogSays(b.page, /Restoring it/);
+  await b.page.click('#roomDlg [data-act="room-restore"]');
+  check('Restore it from Look first: one press, and it is on screen', await b.page.evaluate(() => state.routes[0].driver) === pushed.plan.routes[0].driver && !(await b.page.evaluate(() => document.getElementById('roomDlg').open)));
+
+  // A version pruned since the list was drawn.
+  const room = relay.rooms.get(k.roomId);
+  const kept50 = room.versions;
+  room.versions = [];
+  const was = await kept(b.page);
+  await b.page.click(`#roomCard [data-act="room-look"][data-id="${pushed.id}"]`);
+  check('a version gone from the relay: said so', await noticeSays(b.page, /no longer in the shared plan/));
+  same('and nothing changed', await kept(b.page), was);
+  room.versions = kept50;
+  same('Pull: no console errors', b.errors, []);
+  await b.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// A room written by a newer build: this one only reads it.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  const newer = { ...created.plan, schemaVersion: 7, aFieldFromTheFuture: true };
+  const older = pushed.plan;
+  relay.makeRoom(k.roomId, k.token, {
+    snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 7, plan: newer }) },
+    versions: [
+      { label: seal(secret, 'label', { schema: 6, name: 'Old one' }), body: seal(secret, 'version', { schema: 6, plan: older }) },
+      { label: seal(secret, 'label', { schema: 7, name: 'From the future' }), body: seal(secret, 'version', { schema: 7, plan: newer }) },
+    ],
+  });
+  // Opened as an invite first: it cannot be taken.
+  const j = await profile({ items: OTHER_SEED });
+  const before = await kept(j.page);
+  await openInvite(j.page, `#join=${secret}`);
+  check('a newer room offered: Update the app, and no Take', await dialogSays(j.page, /newer version of Car Coordinator\. Update the app to join it/) && (await j.page.locator('[data-act="room-take"]').count()) === 0);
+  await j.page.click('[data-act="room-notnow"]');
+  same('and nothing changed', await kept(j.page), before);
+  await j.context.close();
+
+  const p = await profile({ items: inRoom(SEED, secret) });
+  check('in a newer room: the bar says Update the app', await pillSays(p.page, 'Update the app'), await pill(p.page).textContent().catch(() => 'no pill'));
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  check('and the card says why', /Update the app to edit the shared plan/.test(await p.page.locator('#roomStatus').innerText()));
+  check('Push is disabled', await p.page.locator('[data-act="room-push"]').isDisabled() && await p.page.locator('#roomVersionName').isDisabled());
+  await p.page.evaluate(() => { document.getElementById('roomVersionName').disabled = false; document.getElementById('roomVersionName').value = 'Sneaky'; return roomPush(); });
+  check('pushing anyway says to update, and', await noticeSays(p.page, /Update the app to push/));
+  same('not one snapshot, version or op is sent', relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length, 0);
+  const future = p.page.locator('#roomCard li', { hasText: 'From the future' });
+  check('a newer version cannot be restored', await future.locator('[data-act="room-restore"]').isDisabled() && /update the app to restore it/.test(await future.innerText()));
+  const was = await kept(p.page);
+  await p.page.evaluate(() => roomRestore(room.versions.find((v) => v.name === 'From the future').id));
+  check('even when asked directly', await noticeSays(p.page, /Update the app to restore \u201cFrom the future\u201d/));
+  same('and nothing changed', await kept(p.page), was);
+  await future.locator('[data-act="room-look"]').click();
+  check('Look first at it says to update, with no Restore', await dialogSays(p.page, /Update the app to restore it/) && (await p.page.locator('#roomDlg [data-act="room-restore"]').count()) === 0);
+  await p.page.click('[data-act="room-look-close"]');
+  const old = p.page.locator('#roomCard li', { hasText: 'Old one' });
+  await old.locator('[data-act="room-restore"]').click();
+  await old.locator('[data-act="room-restore"]').click();
+  check('an older version still restores on this PC', await noticeSays(p.page, /Restored the shared version \u201cOld one\u201d/) && await p.page.evaluate(() => state.routes[0].driver) === older.routes[0].driver);
+  same('and still nothing is sent', relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length, 0);
+  same('newer room: no console errors', p.errors, []);
+  await p.context.close();
+}
+
 await browser.close();
 await server.close();
 console.log(failures.length ? `\n${failures.length} sync-ui check(s) failed` : '\nsync-ui checks passed');

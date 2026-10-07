@@ -2532,7 +2532,8 @@ async function roomStart(secret) {
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
   // seq: the room's latest seq as last heard. acks: what was sent and not yet
   // answered, oldest first; the relay answers in the order it was sent.
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [] };
+  // fetches: version id -> the resolvers waiting for its body (getVersion).
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [], fetches: new Map() };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
@@ -2542,6 +2543,7 @@ async function roomStart(secret) {
     if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
     // A connection that dropped will never answer what it was sent.
     let noted = false;
+    if (status !== 'connected') roomFetchesEnd(r);
     if (status !== 'connected' && r.acks.length) {
       const lost = r.acks.filter((a) => a.kind === 'version').map((a) => a.name);
       r.acks = [];
@@ -2592,6 +2594,13 @@ async function roomFrame(r, f) {
       note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
       renderKeepingFocus();
     }
+  } else if (f.type === 'version' && typeof f.body === 'string') {
+    // getVersion's answer: the whole version, for Look first or Restore.
+    const plain = await openOr(r, 'version', f.body);
+    const label = await openOr(r, 'label', f.label);
+    roomFetched(r, f.id, plain && plain.plan && typeof plain.plan === 'object' ? { plain, name: String(label?.name || '') } : { unreadable: true });
+  } else if (f.type === 'noVersion') {
+    roomFetched(r, f.id, null);
   } else if (f.type === 'version' && typeof f.body !== 'string') {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
@@ -2600,6 +2609,80 @@ async function roomFrame(r, f) {
     r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
     renderRoom();
   }
+}
+
+/* ---------- versions: Look first and Restore ----------
+   A version's plan is fetched only when it is looked at. Restore is local:
+   the plan on screen goes into Backups, the version takes its place, and
+   nothing is sent. A version written by a newer build is never restored
+   here, so an older normalise() never drops what it does not know. */
+function roomFetched(r, id, result) {
+  const waiting = r.fetches.get(id) || [];
+  r.fetches.delete(id);
+  for (const done of waiting) done(result);
+}
+function roomFetchesEnd(r) {
+  for (const id of [...r.fetches.keys()]) roomFetched(r, id, { offline: true });
+}
+// -> { plain, name } | { unreadable } | { offline } | null (no such version)
+function roomFetch(id) {
+  const r = room;
+  if (!r || !r.conn) return Promise.resolve({ offline: true });
+  return new Promise((resolve) => {
+    const first = !r.fetches.has(id);
+    r.fetches.set(id, [...(r.fetches.get(id) || []), resolve]);
+    if (first && !r.conn.send({ type: 'getVersion', id })) roomFetched(r, id, { offline: true });
+  });
+}
+const roomVersion = (id) => room && room.versions.find((v) => v.id === id);
+
+// What a fetch that came back empty-handed says.
+function roomFetchFailed(got) {
+  if (!got) note('warn', 'That version is no longer in the shared plan: only the newest 50 are kept. Nothing was changed.');
+  else if (got.offline) note('warn', 'The shared plan cannot be reached right now, so the version could not be fetched. Nothing was changed.');
+  else note('warn', 'That version could not be read, so nothing was changed.');
+  renderKeepingFocus();
+}
+
+async function roomLookFirst(id) {
+  const v = roomVersion(id);
+  if (!v) return;
+  const got = await roomFetch(id);
+  if (!got || !got.plain) { roomFetchFailed(got); return; }
+  if (roomOffer) return;   // an invite's question came first
+  roomLook = { id, name: v.name, at: v.at, plain: got.plain };
+  renderRoomLook();
+}
+
+function renderRoomLook() {
+  const l = roomLook;
+  if (!l) return;
+  const dlg = roomDialog();
+  const newer = l.plain.schema > Store.SCHEMA;
+  dlg.innerHTML = `
+    <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
+    <p class="hint">Pushed ${esc(when(l.at))}.</p>
+    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it')}
+    <div class="bar" style="margin:16px 0 0">
+      ${newer ? '' : `<button class="btn primary-ish" data-act="room-restore" data-id="${esc(l.id)}" data-sure="1">Restore it</button>`}
+      <button class="btn" data-act="room-look-close">Close</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+async function roomRestore(id, plain) {
+  const v = roomVersion(id);
+  let got = plain ? { plain, name: v ? v.name : '' } : await roomFetch(id);
+  if (!got || !got.plain) { roomFetchFailed(got); return; }
+  const name = got.name || (v && v.name) || 'Unnamed';
+  if (got.plain.schema > Store.SCHEMA) { note('warn', `Update the app to restore \u201c${name}\u201d: it was saved by a newer version of Car Coordinator. Nothing was changed.`); renderKeepingFocus(); return; }
+  const { state: next, error } = Store.parseImport(JSON.stringify(got.plain.plan), defaults);
+  if (error || !next) { note('warn', 'That version could not be read, so nothing was changed.'); renderKeepingFocus(); return; }
+  if (!Store.snapshot(state, `Before restoring the shared version \u201c${name}\u201d`)) { render(); return; }   // the warning says why
+  state = next;
+  save();
+  note('info', `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
+  render();
 }
 
 /* Push: a named version of the plan on screen, to go back to. It also
@@ -2751,9 +2834,15 @@ function roomCardHtml() {
 function roomVersionsHtml() {
   const ro = roomReadOnly();
   const up = room.conn && room.conn.status === 'connected';
-  const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => `<li data-version="${esc(v.id)}">
-      <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}</span>
-    </li>`).join('');
+  const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => {
+    const sure = armed === `room-restore:${v.id}`;
+    const newer = v.schema > Store.SCHEMA;
+    return `<li data-version="${esc(v.id)}">
+      <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}${newer ? ' \u00b7 saved by a newer version: update the app to restore it' : ''}</span>
+      <button class="btn" data-act="room-look" data-id="${esc(v.id)}"${up ? '' : ' disabled'}>Look first</button>
+      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>
+    </li>`;
+  }).join('');
   return `<h4>Versions</h4>
     <p class="hint">Push saves the plan on screen as a named version in the shared plan, for either of you to go back to. The newest 50 are kept.</p>
     <div class="room-push">
@@ -2896,12 +2985,29 @@ function roomTake() {
   render();
 }
 
-async function roomAction(act) {
+async function roomAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'room-take': roomTake(); return;
     case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
+    case 'room-look': await roomLookFirst(Number(b.dataset.id)); return;
+    case 'room-look-close': { roomLook = null; const dlg = document.getElementById('roomDlg'); if (dlg && dlg.open) dlg.close(); return; }
+    case 'room-restore': {
+      const id = Number(b.dataset.id);
+      // From Look first, the dialog's button is the second press; from the
+      // list it takes two, as a backup's Restore does.
+      if (b.dataset.sure === '1' && roomLook && roomLook.id === id) {
+        const { plain } = roomLook;
+        roomLook = null;
+        document.getElementById('roomDlg')?.close();
+        await roomRestore(id, plain);
+        return;
+      }
+      if (!confirmTwice(`room-restore:${id}`, fromKeyboard)) return;
+      await roomRestore(id);
+      return;
+    }
     case 'room-copy': {
       if (!room) return;
       try { await navigator.clipboard.writeText(Sync.inviteLink(room.secret)); note('info', 'Copied the invite link.'); } catch { note('warn', 'The clipboard did not take it. Select the link on the Data tab and copy it from there.'); }
@@ -4660,7 +4766,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
