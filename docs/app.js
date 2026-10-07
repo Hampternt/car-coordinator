@@ -2530,18 +2530,32 @@ const roomReadOnly = () => !!room && room.schema > Store.SCHEMA;
 async function roomStart(secret) {
   roomStop();
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null };
+  // seq: the room's latest seq as last heard. acks: what was sent and not yet
+  // answered, oldest first; the relay answers in the order it was sent.
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, acks: [] };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
     // Catch up on every (re)connect: the version list, and the room's schema.
-    if (status === 'connected') r.conn.send({ type: 'catchup', since: r.conn.seq });
-    if (room === r) renderRoom();
+    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
+    // A connection that dropped will never answer what it was sent.
+    let noted = false;
+    if (status !== 'connected' && r.acks.length) {
+      const lost = r.acks.filter((a) => a.kind === 'version').map((a) => a.name);
+      r.acks = [];
+      if (lost.length && room === r) {
+        note('warn', `The connection dropped while pushing \u201c${lost.join('\u201d, \u201c')}\u201d. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
+        noted = true;
+      }
+    }
+    // A note is drawn with everything else; a status alone redraws only its own.
+    if (room === r) { if (noted) renderKeepingFocus(); else renderRoom(); }
   });
   r.conn.on('frame', (f) => { roomFrame(r, f).catch((e) => console.warn('shared plan: a frame could not be read', e)); });
-  renderRoom();
+  // The Data tab's words change with it, not only the card.
+  renderKeepingFocus();
 }
 
 function roomStop() {
@@ -2567,9 +2581,48 @@ async function roomFrame(r, f) {
     if (room !== r) return;
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
     r.versions = versions;
+    if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
     r.schema = Math.max(0, snap ? snap.schema : 0, ...versions.map((v) => v.schema));
     renderRoom();
+  } else if (f.type === 'ack') {
+    const a = r.acks.shift();
+    if (!a || room !== r) return;
+    if (a.kind === 'version' && Number.isInteger(f.id)) {
+      if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, schema: Store.SCHEMA });
+      note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
+      renderKeepingFocus();
+    }
+  } else if (f.type === 'version' && typeof f.body !== 'string') {
+    // Pushed from the other browser: its name, and nothing else yet.
+    const label = await openOr(r, 'label', f.label);
+    if (!label || room !== r || r.versions.some((v) => v.id === f.id)) return;
+    r.versions.push({ id: f.id, at: f.at, name: String(label.name || ''), schema: label.schema });
+    r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
+    renderRoom();
   }
+}
+
+/* Push: a named version of the plan on screen, to go back to. It also
+   becomes the plan a newcomer's Take gets, so a join a week later starts
+   from the last pushed plan rather than the one the room was made with. */
+async function roomPush() {
+  const r = room;
+  if (!r || !r.conn) return;
+  const box = document.getElementById('roomVersionName');
+  const name = String(box?.value || '').replace(/\s+/g, ' ').trim();
+  if (roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
+  if (r.conn.status !== 'connected') { note('warn', 'The shared plan cannot be reached right now, so nothing was pushed. Your plan is saved on this PC; push again once it says Connected.'); render(); return; }
+  if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
+  const plan = { schema: Store.SCHEMA, plan: state };
+  const [body, label, snapshot] = await Promise.all([
+    Sync.seal(r.keys, 'version', plan),
+    Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name }),
+    Sync.seal(r.keys, 'snapshot', plan),
+  ]);
+  if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
+  r.acks.push({ kind: 'version', name });
+  if (r.conn.send({ type: 'snapshot', seq: r.seq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
+  if (box) box.value = '';
 }
 
 /* What the status says, in the words on screen. `cls` picks the Data tab's
@@ -2690,7 +2743,24 @@ function roomCardHtml() {
       <div><textarea id="roomInvite" class="code" readonly rows="2">${esc(link)}</textarea>
       <button class="btn" data-act="room-copy">Copy the invite link</button></div>
       ${qr ? `<div class="room-qr">${qr}</div>` : ''}
-    </div>`;
+    </div>
+    ${roomVersionsHtml()}`;
+}
+
+// Push, and the versions pushed so far, newest first.
+function roomVersionsHtml() {
+  const ro = roomReadOnly();
+  const up = room.conn && room.conn.status === 'connected';
+  const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => `<li data-version="${esc(v.id)}">
+      <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}</span>
+    </li>`).join('');
+  return `<h4>Versions</h4>
+    <p class="hint">Push saves the plan on screen as a named version in the shared plan, for either of you to go back to. The newest 50 are kept.</p>
+    <div class="room-push">
+      <input type="text" id="roomVersionName" placeholder="Name it, e.g. Monday final" maxlength="80" autocomplete="off"${ro ? ' disabled' : ''}>
+      <button class="btn primary-ish" data-act="room-push"${ro || !up ? ' disabled' : ''}>Push a version</button>
+    </div>
+    ${rows ? `<ul class="room-versions">${rows}</ul>` : '<p class="empty">No versions pushed yet.</p>'}`;
 }
 
 /* ---------- joining: an offer, never forced ----------
@@ -2831,6 +2901,7 @@ async function roomAction(act) {
     case 'room-take': roomTake(); return;
     case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
+    case 'room-push': await roomPush(); return;
     case 'room-copy': {
       if (!room) return;
       try { await navigator.clipboard.writeText(Sync.inviteLink(room.secret)); note('info', 'Copied the invite link.'); } catch { note('warn', 'The clipboard did not take it. Select the link on the Data tab and copy it from there.'); }
@@ -4572,7 +4643,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag', roomCode: 'room-create' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag', roomCode: 'room-create', roomVersionName: 'room-push' };
   // The rail's own boxes press their own buttons, not the tabs' — they add to
   // the same lists, but from a different box.
   const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];
@@ -4589,7 +4660,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

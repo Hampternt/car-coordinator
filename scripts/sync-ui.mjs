@@ -313,6 +313,58 @@ const dialogSays = async (pg, re, ms = 5000) => {
   await p.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// Push: a named version from one browser shows in the other's list at once,
+// and becomes the plan a later Take gets.
+const inRoom = (seed, secret) => ({ ...seed, 'carcoord:pref:room': secret });
+const versionNames = (pg) => pg.locator('#roomCard .room-versions .room-v-name').allInnerTexts();
+let pushed = null;   // { id, plan } for the Restore section
+{
+  const { secret } = created;
+  const k = keysOf(secret);
+  const a = await profile({ items: inRoom(SEED, secret) });
+  const b = await profile({ items: inRoom({ ...OTHER_SEED, 'carcoord:v1': JSON.stringify(created.plan) }, secret) });
+  for (const x of [a, b]) { await pillSays(x.page, 'Connected'); await x.page.click('[data-act="tab"][data-tab="data"]'); }
+  same('no versions yet', await a.page.locator('#roomCard .empty').innerText(), 'No versions pushed yet.');
+
+  await a.page.click('[data-act="room-push"]');
+  check('Push with no name asks for one, and sends nothing', await noticeSays(a.page, /Name the version first/) && relay.sent('version', k.roomId).length === 0);
+
+  // An edit, so the version is this browser's plan and not the room's.
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
+  await a.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Pushed Pedersen');
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  await a.page.fill('#roomVersionName', '  Monday   final ');
+  await a.page.press('#roomVersionName', 'Enter');
+  check('Push: said so', await noticeSays(a.page, /Pushed \u201cMonday final\u201d to the shared plan/), await a.page.locator('#notices').innerText());
+  same('and it is in this browser\'s list', await versionNames(a.page), ['Monday final']);
+  const room = relay.rooms.get(k.roomId);
+  const v = room.versions[room.versions.length - 1];
+  const aPlan = await a.page.evaluate(() => JSON.stringify(state));
+  same('the relay holds its name sealed as a label', unseal(secret, 'label', v.label), { schema: 6, name: 'Monday final' });
+  check('and its plan sealed as a version, as it is on screen', JSON.stringify(unseal(secret, 'version', v.body)) === JSON.stringify({ schema: 6, plan: JSON.parse(aPlan) }));
+  check('which a snapshot key does not open', (() => { try { unseal(secret, 'snapshot', v.body); return false; } catch { return true; } })());
+  check('the room\'s snapshot is now the pushed plan, so a later Take gets it', JSON.stringify(unseal(secret, 'snapshot', room.snapshot.body).plan) === aPlan);
+  check('the other browser sees it in its list, without a reload', await b.page.waitForFunction(() => [...document.querySelectorAll('#roomCard .room-v-name')].some((n) => n.textContent === 'Monday final'), null, { timeout: 5000 }).then(() => true, () => false));
+  check('and its plan is untouched by it', !(await b.page.evaluate(() => JSON.stringify(state))).includes('Pushed Pedersen'));
+  const rest = await elsewhere(a.page);
+  check('Push: the secret is still nowhere else', !rest.includes(secret) && !rest.includes(k.token));
+
+  relay.down();
+  await pillSays(a.page, 'Offline');
+  check('offline, Push is disabled', await a.page.locator('[data-act="room-push"]').isDisabled());
+  const sent = relay.sent('version', k.roomId).length;
+  await a.page.fill('#roomVersionName', 'Not sent');
+  await a.page.evaluate(() => roomPush());
+  check('and pushing anyway says so and sends nothing', await noticeSays(a.page, /cannot be reached right now, so nothing was pushed/) && relay.sent('version', k.roomId).length === sent);
+  relay.up();
+  check('back online, the list is caught up again', await pillSays(a.page, 'Connected', 10000) && JSON.stringify(await versionNames(a.page)) === JSON.stringify(['Monday final']));
+  same('Push: no console errors', [...a.errors, ...b.errors], []);
+  pushed = { id: v.id, plan: JSON.parse(aPlan) };
+  await a.context.close();
+  await b.context.close();
+}
+
 await browser.close();
 await server.close();
 console.log(failures.length ? `\n${failures.length} sync-ui check(s) failed` : '\nsync-ui checks passed');

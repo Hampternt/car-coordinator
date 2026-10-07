@@ -201,6 +201,12 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .room-invite > div:first-child { flex: 1 1 360px; }
 .room-qr { width: 132px; flex: none; }
 .room-qr svg { width: 132px; height: 132px; display: block; }
+.room-push { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.room-push input { width: 20em; max-width: 100%; }
+.room-versions { list-style: none; margin: 0; padding: 0; max-width: 760px; }
+.room-versions li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.room-v-name { font-weight: 600; }
+.room-v-when { color: var(--muted); margin-right: auto; }
 
 /* 1200 was right when the plan was a table with a narrow rail beside it. The
    rail is a working panel now and lives to the right of the table, so the page
