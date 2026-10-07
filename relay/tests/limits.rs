@@ -125,6 +125,39 @@ async fn the_disk_cap_is_4507() {
 }
 
 #[tokio::test]
+async fn a_snapshot_is_stored_over_the_disk_cap_and_frees_the_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(dir.path());
+    config.limits.max_disk_bytes = 256 * 1024;
+    let relay = start_with(config).await;
+    let mut a = create(relay.addr, &room(1), &token(1)).await;
+    let mut acked = 0;
+    loop {
+        a.send(json!({"type": "op", "body": sized_body(100_000)})).await;
+        match a.recv_or_close().await {
+            Ok(frame) => {
+                assert_eq!(frame["type"], "ack", "{frame}");
+                acked += 1;
+                assert!(acked < 20, "the cap never refused an op");
+            }
+            Err(code) => {
+                assert_eq!(code, 4507, "an op past the cap is refused");
+                break;
+            }
+        }
+    }
+    // Over the cap, the snapshot that covers every op still goes in: refusing
+    // it would wedge the room, since it is what frees the space.
+    let (mut b, welcome) = hello(relay.addr, &room(1), &token(1)).await;
+    assert_eq!(welcome, acked);
+    b.send(json!({"type": "snapshot", "seq": acked, "body": "c25hcA"})).await;
+    assert_eq!(b.recv().await, json!({"type": "ack", "seq": acked}));
+    b.send(json!({"type": "op", "body": sized_body(100_000)})).await;
+    assert_eq!(b.recv().await, json!({"type": "ack", "seq": acked + 1}), "the ops' space is free again");
+    relay.shutdown().await;
+}
+
+#[tokio::test]
 async fn no_hello_in_time_is_4408() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = config(dir.path());

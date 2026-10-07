@@ -13,11 +13,19 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 
 pub const DB_FILE: &str = "carsync.db";
 
+/// One schema step. Most run in a transaction; `Alone` is for what cannot,
+/// VACUUM among them, and must be safe to run again if cut short.
+enum Step {
+    InTransaction(&'static str),
+    Alone(&'static str),
+}
+
 /// Schema, by `PRAGMA user_version`. A database is moved forward one step at a
 /// time and never back; append new steps, never edit an old one.
-const MIGRATIONS: &[&str] = &[
+const MIGRATIONS: &[Step] = &[
     // 1: rooms, the op log after each room's snapshot, and versions.
-    "CREATE TABLE rooms (
+    Step::InTransaction(
+        "CREATE TABLE rooms (
         id TEXT PRIMARY KEY,
         token_hash BLOB NOT NULL,
         latest_seq INTEGER NOT NULL DEFAULT 0,
@@ -40,6 +48,11 @@ const MIGRATIONS: &[&str] = &[
         body TEXT NOT NULL,
         PRIMARY KEY (room, id)
     );",
+    ),
+    // 2: pages freed by a snapshot's dropped ops go back to the disk
+    // (`reclaim`), so a room that reached the disk cap can get under it again.
+    // An existing database takes the setting only through a VACUUM.
+    Step::Alone("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;"),
 ];
 
 pub fn now_ms() -> u64 {
@@ -49,13 +62,33 @@ pub fn now_ms() -> u64 {
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
     let current: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    for (step, sql) in MIGRATIONS.iter().enumerate().skip(current) {
-        let tx = conn.unchecked_transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", step + 1)?;
-        tx.commit()?;
+    for (step, migration) in MIGRATIONS.iter().enumerate().skip(current) {
+        match migration {
+            Step::InTransaction(sql) => {
+                let tx = conn.unchecked_transaction()?;
+                tx.execute_batch(sql)?;
+                tx.pragma_update(None, "user_version", step + 1)?;
+                tx.commit()?;
+            }
+            Step::Alone(sql) => {
+                conn.execute_batch(sql)?;
+                conn.pragma_update(None, "user_version", step + 1)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Moves the database's free pages to its end and cuts them off, then
+/// checkpoints the WAL into it and empties the WAL: until then the freed pages
+/// and the vacuum itself are still in `-wal`, which the disk cap counts too.
+fn reclaim(conn: &rusqlite::Connection) -> Result<()> {
+    // Stepped until done: a single step (all execute_batch gives it) frees
+    // one page, not all of them.
+    let mut freeing = conn.prepare("PRAGMA incremental_vacuum")?;
+    let mut rows = freeing.query([])?;
+    while rows.next()?.is_some() {}
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
 }
 
 pub struct Storage {
@@ -128,8 +161,9 @@ impl Storage {
     }
 
     /// Stores the snapshot unless `seq` is below the stored one, dropping ops
-    /// with `seq <=` it. Returns the stored snapshot's seq afterwards. The
-    /// caller has already refused a `seq` above the latest.
+    /// with `seq <=` it, and gives the space they held back to the disk.
+    /// Returns the stored snapshot's seq afterwards. The caller has already
+    /// refused a `seq` above the latest.
     pub fn put_snapshot(&self, room: &str, seq: u64, body: &str) -> Result<u64> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -141,6 +175,10 @@ impl Storage {
         tx.execute("UPDATE rooms SET snapshot_seq = ?2, snapshot_body = ?3 WHERE id = ?1", params![room, seq, body])?;
         tx.execute("DELETE FROM ops WHERE room = ?1 AND seq <= ?2", params![room, seq])?;
         tx.commit()?;
+        // The snapshot is stored either way: a failure here costs disk, not data.
+        if let Err(error) = reclaim(&conn) {
+            eprintln!("carsync-relay: could not give freed space back: {error}");
+        }
         Ok(seq)
     }
 
@@ -238,6 +276,47 @@ mod tests {
         assert_eq!(ops(&storage, 0), vec![]);
         assert_eq!(storage.latest_seq(ROOM).unwrap(), 3);
         assert_eq!(storage.append_op(ROOM, "four").unwrap(), 4);
+    }
+
+    fn auto_vacuum(storage: &Storage) -> i64 {
+        storage.conn().query_row("PRAGMA auto_vacuum", [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn auto_vacuum_is_incremental_in_a_new_database_and_an_upgraded_one() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(auto_vacuum(&Storage::open(dir.path()).unwrap()), 2, "new");
+        let dir = tempfile::tempdir().unwrap();
+        {
+            // A database as the first release left it: step 1 only.
+            let conn = rusqlite::Connection::open(dir.path().join(DB_FILE)).unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            let Step::InTransaction(first) = &MIGRATIONS[0] else { panic!("step 1 runs in a transaction") };
+            conn.execute_batch(first).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute("INSERT INTO rooms (id, token_hash, created_at) VALUES (?1, ?2, 0)", params![ROOM, &[7u8; 32][..]])
+                .unwrap();
+        }
+        let storage = Storage::open(dir.path()).unwrap();
+        assert_eq!(auto_vacuum(&storage), 2, "upgraded");
+        assert_eq!(storage.token_hash(ROOM).unwrap(), Some([7; 32]), "and kept its rooms");
+        let version: usize = storage.conn().query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, MIGRATIONS.len());
+    }
+
+    #[test]
+    fn a_snapshot_gives_the_space_its_ops_held_back_to_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::open(dir.path()).unwrap();
+        storage.create_room(ROOM, &[7; 32]).unwrap();
+        let empty = crate::limits::disk_usage(dir.path()).unwrap();
+        for _ in 0..10 {
+            storage.append_op(ROOM, &"A".repeat(100_000)).unwrap();
+        }
+        assert!(crate::limits::disk_usage(dir.path()).unwrap() > empty + 900_000);
+        storage.put_snapshot(ROOM, 10, "snap").unwrap();
+        let after = crate::limits::disk_usage(dir.path()).unwrap();
+        assert!(after < empty + 100_000, "{after} bytes left after the snapshot, {empty} when empty");
     }
 
     #[test]

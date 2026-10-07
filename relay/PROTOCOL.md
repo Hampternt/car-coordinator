@@ -210,7 +210,7 @@ Defaults; every one is a field of the relay's `Limits` so tests can lower it.
 | frame | 1 048 576 | the whole text frame; bigger frames are cut by the WebSocket library | `1009` |
 | rate | burst 120, refill 30/s | token bucket per connection; every text frame costs 1, `hello`/`create` included | `4429` |
 | rooms | 20 | rooms in the database, checked on `create` | `4507` |
-| disk | 2 GiB | summed size of the regular files directly in `RELAY_DATA` (database, `-wal`, `-shm`), checked before every storing write (`create`, `snapshot`, `op`, `version`) | `4507` |
+| disk | 2 GiB | summed size of the regular files directly in `RELAY_DATA` (database, `-wal`, `-shm`), checked before every storing write (`create`, `op`, `version`) but never a `snapshot`: one replaces another and drops the ops it covers, and the relay gives the space they held back to the disk, so it is how a room at the cap gets under it again | `4507` |
 | versions | 50 | per room; the oldest are pruned, not refused | — |
 | hello timeout | 10 s | from upgrade to the first frame | `4408` |
 

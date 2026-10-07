@@ -412,7 +412,8 @@ fn handle(state: &AppState, joined: &Joined, frame: ClientFrame) -> Result<(), R
     match frame {
         ClientFrame::Hello { .. } | ClientFrame::Create { .. } => return Err((close::BAD_FRAME, "already in")),
         ClientFrame::Snapshot { seq, body } => {
-            check_disk(state)?;
+            // No disk check: a snapshot replaces one and drops ops, so it is
+            // how a room that reached the cap gets under it again (§5).
             if seq > storage.latest_seq(room).map_err(storage_failed)? {
                 return Err((close::BAD_FRAME, "snapshot ahead of the room"));
             }
