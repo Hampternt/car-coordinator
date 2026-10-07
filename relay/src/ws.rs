@@ -184,19 +184,29 @@ async fn stopping(shutdown: &mut watch::Receiver<bool>) {
 }
 
 /// Sends a close frame, then reads and discards until the client's close
-/// reply or `wait`, so the close is not lost to a TCP reset (PROTOCOL.md §5).
-async fn close(mut socket: WebSocket, (code, reason): Refusal, wait: Duration) {
+/// reply or `CLOSE_WAIT`, so the close is not lost to a TCP reset (PROTOCOL.md
+/// §5). Once the relay is shutting down the wait is cut to
+/// `SHUTDOWN_CLOSE_WAIT`, so a client that never replies cannot hold it up.
+async fn close(mut socket: WebSocket, (code, reason): Refusal, mut shutdown: watch::Receiver<bool>) {
     let frame = CloseFrame { code, reason: Utf8Bytes::from_static(reason) };
+    if !send(&mut socket, Message::Close(Some(frame))).await {
+        return;
+    }
     let drain = async {
-        socket.send(Message::Close(Some(frame))).await.ok()?;
         while let Some(Ok(message)) = socket.recv().await {
             if matches!(message, Message::Close(_)) {
                 break;
             }
         }
-        Some(())
     };
-    let _ = tokio::time::timeout(wait, drain).await;
+    let cut_short = async {
+        stopping(&mut shutdown).await;
+        tokio::time::sleep(SHUTDOWN_CLOSE_WAIT).await;
+    };
+    tokio::select! {
+        _ = tokio::time::timeout(CLOSE_WAIT, drain) => {}
+        _ = cut_short => {}
+    }
 }
 
 fn storage_failed(error: crate::storage::StorageError) -> Refusal {
@@ -220,19 +230,19 @@ async fn connection(mut socket: WebSocket, state: AppState, room_id: String) {
     // §4.1: the first frame must arrive within the hello timeout.
     let first = tokio::select! {
         _ = stopping(&mut shutdown) => {
-            return close(socket, (close::GOING_AWAY, "relay shutting down"), SHUTDOWN_CLOSE_WAIT).await;
+            return close(socket, (close::GOING_AWAY, "relay shutting down"), shutdown).await;
         }
         first = tokio::time::timeout(limits.hello_timeout, next_frame(&mut socket)) => first,
     };
     let text = match first {
-        Err(_) => return close(socket, (close::HELLO_TIMEOUT, "no hello in time"), CLOSE_WAIT).await,
+        Err(_) => return close(socket, (close::HELLO_TIMEOUT, "no hello in time"), shutdown).await,
         Ok(Incoming::Gone) => return,
-        Ok(Incoming::Binary) => return close(socket, (close::BAD_FRAME, "binary frame"), CLOSE_WAIT).await,
+        Ok(Incoming::Binary) => return close(socket, (close::BAD_FRAME, "binary frame"), shutdown).await,
         Ok(Incoming::Text(text)) => text,
     };
     let joined = match open(&state, &room_id, &text, &mut socket).await {
         Ok(joined) => joined,
-        Err(refusal) => return close(socket, refusal, CLOSE_WAIT).await,
+        Err(refusal) => return close(socket, refusal, shutdown).await,
     };
     serve(socket, &state, joined, shutdown).await;
 }
@@ -320,10 +330,10 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
 async fn serve(mut socket: WebSocket, state: &AppState, mut joined: Joined, mut shutdown: watch::Receiver<bool>) {
     let limits = &state.config.limits;
     let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
-    let (refusal, wait) = loop {
+    let refusal = loop {
         tokio::select! {
             biased;
-            _ = stopping(&mut shutdown) => break ((close::GOING_AWAY, "relay shutting down"), SHUTDOWN_CLOSE_WAIT),
+            _ = stopping(&mut shutdown) => break (close::GOING_AWAY, "relay shutting down"),
             queued = joined.outbox.recv() => match queued {
                 Some(message) => {
                     if !send(&mut socket, message).await {
@@ -331,17 +341,17 @@ async fn serve(mut socket: WebSocket, state: &AppState, mut joined: Joined, mut 
                     }
                 }
                 // Dropped from the room for not reading: reconnect and catch up.
-                None => break ((close::GOING_AWAY, "too far behind"), CLOSE_WAIT),
+                None => break (close::GOING_AWAY, "too far behind"),
             },
             incoming = next_frame(&mut socket) => match incoming {
                 Incoming::Gone => return leave(state, &joined),
-                Incoming::Binary => break ((close::BAD_FRAME, "binary frame"), CLOSE_WAIT),
+                Incoming::Binary => break (close::BAD_FRAME, "binary frame"),
                 Incoming::Text(text) => {
                     let handled = protocol::parse(&text, limits)
                         .map_err(|code| (code, "bad frame"))
                         .and_then(|frame| handle(state, &joined, frame));
                     if let Err(refusal) = handled {
-                        break (refusal, CLOSE_WAIT);
+                        break refusal;
                     }
                 }
             },
@@ -353,18 +363,55 @@ async fn serve(mut socket: WebSocket, state: &AppState, mut joined: Joined, mut 
         }
     };
     leave(state, &joined);
-    close(socket, refusal, wait).await;
+    close(socket, refusal, shutdown).await;
 }
 
 /// One frame after `welcome` (§4.2). Runs under the room's lock and never
 /// awaits, so its writes and the frames they queue keep one order.
 fn handle(state: &AppState, joined: &Joined, frame: ClientFrame) -> Result<(), Refusal> {
-    let members = lock(&joined.room);
-    if !members.peers.contains_key(&joined.peer) {
+    let storage = &state.storage;
+    let (room, me) = (joined.room_id.as_str(), joined.peer);
+    let mut members = lock(&joined.room);
+    if !members.peers.contains_key(&me) {
         return Err((close::GOING_AWAY, "too far behind"));
     }
     match frame {
-        ClientFrame::Hello { .. } | ClientFrame::Create { .. } => Err((close::BAD_FRAME, "already in")),
-        _ => todo!("pack 1, item 4: fan-out"),
+        ClientFrame::Hello { .. } | ClientFrame::Create { .. } => return Err((close::BAD_FRAME, "already in")),
+        ClientFrame::Snapshot { seq, body } => {
+            if seq > storage.latest_seq(room).map_err(storage_failed)? {
+                return Err((close::BAD_FRAME, "snapshot ahead of the room"));
+            }
+            let stored = storage.put_snapshot(room, seq, &body).map_err(storage_failed)?;
+            members.send(me, encode(&ServerFrame::AckSeq { seq: stored }));
+        }
+        ClientFrame::Op { body } => {
+            let seq = storage.append_op(room, &body).map_err(storage_failed)?;
+            members.send(me, encode(&ServerFrame::AckSeq { seq }));
+            members.send_to_others(me, &encode(&ServerFrame::Op { seq, body }));
+        }
+        ClientFrame::Version { body, label } => {
+            let at = crate::storage::now_ms();
+            let keep = state.config.limits.max_versions;
+            let meta = storage.add_version(room, &body, &label, at, keep).map_err(storage_failed)?;
+            members.send(me, encode(&ServerFrame::AckVersion { id: meta.id, at: meta.at }));
+            let announce = ServerFrame::Version { id: meta.id, at: meta.at, label: meta.label, body: None };
+            members.send_to_others(me, &encode(&announce));
+        }
+        ClientFrame::GetVersion { id } => {
+            let reply = match storage.get_version(room, id).map_err(storage_failed)? {
+                Some(v) => ServerFrame::Version { id, at: v.meta.at, label: v.meta.label, body: Some(v.body) },
+                None => ServerFrame::NoVersion { id },
+            };
+            members.send(me, encode(&reply));
+        }
+        ClientFrame::Catchup { since } => {
+            let data = storage.catchup(room, since).map_err(storage_failed)?;
+            let reply =
+                ServerFrame::Catchup { seq: data.seq, snapshot: data.snapshot, ops: data.ops, versions: data.versions };
+            members.send(me, encode(&reply));
+        }
+        // Forwarded only: never stored, never logged.
+        ClientFrame::Presence { body } => members.send_to_others(me, &encode(&ServerFrame::Presence { body })),
     }
+    Ok(())
 }
