@@ -951,6 +951,57 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   await b.context.close();
 }
 
+// Collisions: both change one field at once. The last to reach the relay
+// wins on both screens; both show the same flag, on the field and on the card.
+{
+  const { secret } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  // Two cars neither of which is on route 2 yet.
+  const cars = await a.page.evaluate(() => state.cars.filter((c) => c.id !== state.routes.find((r) => r.id === 'rt-02').carId).slice(0, 2).map((c) => ({ id: c.id, reg: c.reg })));
+  relay.holdWrites();
+  await routeRow(a.page, 'rt-02').locator('[data-field="carId"]').selectOption(cars[0].id);
+  await routeRow(b.page, 'rt-02').locator('[data-field="carId"]').selectOption(cars[1].id);
+  await wait(600);
+  relay.releaseWrites();
+  check('both pick a car for one route at once: one plan on both', await converged(a.page, b.page));
+  same('the last to reach the relay wins', JSON.parse(await planOf(a.page)).routes.find((r) => r.id === 'rt-02').carId, cars[1].id);
+  const want = [{ type: 'set', kind: 'route', id: 'rt-02', field: 'carId', kept: cars[1].id, lost: cars[0].id }];
+  same('both screens hold the same flag', [await flagsOf(a.page), await flagsOf(b.page)], [want, want]);
+  const markOn = (pg) => routeRow(pg, 'rt-02').locator('[data-field="carId"]').evaluate((el) => el.classList.contains('room-collided') && el.title);
+  const ma = await markOn(a.page);
+  check('a quiet mark on the field, saying what was kept and what was lost', !!ma && ma.includes(`Kept “${cars[1].reg}”`) && ma.includes(`the other was “${cars[0].reg}”`), String(ma));
+  same('the same mark on the other screen', await markOn(b.page), ma);
+  const line = async (pg) => { await pg.click('[data-act="tab"][data-tab="data"]'); return pg.locator('#roomCard .room-flags li').allInnerTexts(); };
+  const la = await line(a.page);
+  check('and one line on the Shared plan card, with both values', la.length === 1 && la[0].includes(`Route 2's car was changed by both of you at once. Kept “${cars[1].reg}”; the other was “${cars[0].reg}”.`), JSON.stringify(la));
+  same('the same line on the other screen', await line(b.page), la);
+  check('no dialog for it, anywhere', !(await a.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open))) && !(await b.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open))));
+  await a.page.locator('#roomCard .room-flags [data-act="room-putback"]').click();
+  check('Put it back: the lost car is on the route again, on both', await b.page.waitForFunction((id) => state.routes.find((r) => r.id === 'rt-02').carId === id, cars[0].id, { timeout: 3000 }).then(() => true, () => false) && await converged(a.page, b.page));
+  check('and the flag has gone from both, with nothing new flagged', await until(async () => (await flagsOf(a.page)).length === 0 && (await flagsOf(b.page)).length === 0));
+
+  // Text, typed by both and left before the other's arrived: the same flag.
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
+  await b.page.click('[data-act="tab"][data-tab="plan"]');
+  relay.holdWrites();
+  await routeRow(a.page, 'rt-03').locator('[data-field="round"]').fill('4');
+  await a.page.keyboard.press('Tab');
+  await routeRow(b.page, 'rt-03').locator('[data-field="round"]').fill('6');
+  await b.page.keyboard.press('Tab');
+  await wait(600);
+  relay.releaseWrites();
+  await converged(a.page, b.page);
+  const want2 = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'round', kept: '6', lost: '4' }];
+  same('a round typed in both at once: the same flag on both', [await flagsOf(a.page), await flagsOf(b.page)], [want2, want2]);
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.locator('#roomCard .room-flags [data-act="room-dismiss"]').click();
+  same('Dismiss: gone from that screen, the value as it was', [(await flagsOf(b.page)).length, JSON.parse(await planOf(b.page)).routes.find((r) => r.id === 'rt-03').round, (await flagsOf(a.page)).length], [0, '6', 1]);
+  same('collisions: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close();
+  await b.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {

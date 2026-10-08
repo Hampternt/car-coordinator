@@ -3035,10 +3035,10 @@ function roomMarks() {
       el.title = title;
     }
   };
-  for (const x of r.flags) if (x.type === 'set') put(x.kind, x.id, x.field, 'room-collided', `Changed by both of you at once. Kept ${shown(x.kept)}; the other was ${shown(x.lost)}. The Shared plan card on the Data tab can put it back.`);
+  for (const x of r.flags) if (x.type === 'set') put(x.kind, x.id, x.field, 'room-collided', `Changed by both of you at once. Kept ${flagValue(x.field, x.kept)}; the other was ${flagValue(x.field, x.lost)}. The Shared plan card on the Data tab can put it back.`);
   for (const h of r.holds.values()) {
     const there = r.rep ? fieldIn(r.rep.shadow, h.kind, h.id, h.field) : { has: false };
-    put(h.kind, h.id, h.field, 'room-held', `The other manager changed this to ${shown(there.value)} while you were typing. What you type is kept when you leave the box; the other value is noted on the Data tab.`);
+    put(h.kind, h.id, h.field, 'room-held', `The other manager changed this to ${flagValue(h.field, there.value)} while you were typing. What you type is kept when you leave the box; the other value is noted on the Data tab.`);
   }
 }
 
