@@ -2174,7 +2174,7 @@ function renderNotices() {
     const q = templateQuestion(t, n.parts);
     const ticks = TEMPLATE_PARTS.map(([k, name]) =>
       `<label><input type="checkbox" data-act="tpl-part" data-index="${i}" data-part="${k}"${n.parts[k] ? ' checked' : ''}> ${name}</label>`).join('');
-    return { say: `${esc(n.text)}<div class="tpl-parts" role="group" aria-label="What to take from ${esc(t.name)}">${ticks}</div><p class="tpl-says">${esc(q.text)}</p>`, button: q.button };
+    return { say: `${esc(n.text)}${staleSince(n.tick) ? ' The plan changed while this was open; what it says below is drawn from the plan as it is now.' : ''}<div class="tpl-parts" role="group" aria-label="What to take from ${esc(t.name)}">${ticks}</div><p class="tpl-says">${esc(q.text)}</p>`, button: q.button };
   };
   $('#notices').innerHTML = notices.map((n, i) => {
     const q = loading(n, i);
@@ -2265,6 +2265,7 @@ function render() {
   renderCtxMenu();
   placeInfoBubble();
   drawTplPeek();
+  roomMarks();
 }
 
 /* ---------- events ---------- */
@@ -2363,7 +2364,9 @@ function confirmTwice(key, fromKeyboard = false) {
    found by what it is rather than which element it was — the redraw replaces
    them all. Looked for in the same part of the page it was in: the rail and
    the Drivers tab both have a ✕ for driver d3, and only one is showing. */
-function renderKeepingFocus() {
+function renderKeepingFocus() { keepingFocus(render); }
+// The same around any redraw: the shared plan's also redraws open dialogs.
+function keepingFocus(draw) {
   const el = document.activeElement;
   const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, #ctxMenu, #ctxSub, dialog');
   // The tag menu, the route picker and the right-click menu put their own
@@ -2385,7 +2388,7 @@ function renderKeepingFocus() {
   // name — holds what is typed in it until it is added, and the redraw
   // rebuilds it empty. Carry the words across along with the focus.
   const loose = el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !d.field ? el.value : null;
-  render();
+  draw();
   if (!what) return;
   const again = el.id ? document.querySelector(what) : document.querySelector(`#${area.id} ${what}`);
   if (!again) return;
@@ -2451,6 +2454,7 @@ function renderShareDialog() {
 
   dlg.innerHTML = `
     <h2>Load this list?</h2>
+    ${staleSince(pending.tick) ? STALE_LINE : ''}
     <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels${sum.drivers ? `, and ${sum.drivers} drivers with their groups` : ''}` : ''}.</p>
     ${missing.length ? `<p class="status warn-status">It mentions ${missing.join(' and ')}.</p>` : ''}
     <p class="status warn-status"><b>This replaces the day plan on screen.</b> A backup is taken first, so you can undo it from Backups.</p>
@@ -2510,7 +2514,8 @@ async function shareAction(act, b) {
    the radio offers "everything" and the dialog says what it costs, but the
    option that is pre-selected should be the one that replaces least. */
 function openShare(share) {
-  pending = { share, mode: 'day', addMissing: true };
+  // tick: the shared plan's changes so far, to tell when this goes stale.
+  pending = { share, mode: 'day', addMissing: true, tick: roomTick() };
   renderShareDialog();
 }
 
@@ -2940,7 +2945,7 @@ function roomRelease(r) {
       roomEdited();
     }
   }
-  if (changed) { Store.save(state); r.tick++; renderKeepingFocus(); } else renderRoom();
+  if (changed) { Store.save(state); r.tick++; renderKeepingFocus(); } else { renderRoom(); roomMarks(); }
 }
 document.addEventListener('focusout', () => {
   const r = room;
@@ -2961,15 +2966,90 @@ function roomPatch(next) {
   return changed;
 }
 function roomShow(r, next) {
-  if (!roomPatch(next)) { renderRoom(); return; }
+  const was = JSON.parse(JSON.stringify(state));
+  const sig = liveSig();
+  // Nothing on screen changed (a field held, say): only its marks.
+  if (!roomPatch(next)) { renderRoom(); roomMarks(); return; }
   // Saved as any edit is, but not sent back: it came from the room.
   if (Store.save(state) !== false) roomBaseWrite(r);
   r.tick++;
-  roomRedraw(r);
+  roomRedraw(was, sig);
 }
-// A change from the room, on screen without disturbing the person working.
-function roomRedraw() {
-  renderKeepingFocus();
+
+/* A change from the room, on screen without disturbing the person working:
+   the focus, the caret and the selection, the scroll, an open picker or
+   menu and an armed button all stay as they were.
+   - A route's name, driver or round, or a note, changed in a box that is not
+     being typed in, is put straight into its box, with the sheet, the map
+     and the picker redrawn: what typing it here redraws, as long as no
+     warning or driver on the rail moves with it (liveSig, as typing checks).
+   - Anything else redraws the lot through keepingFocus, which finds the
+     focused control again by what it is, and puts its caret back.
+   An open dialog drawn from the plan (a list to load, a version's preview, an
+   invite) is drawn again with its counts as they are now, and says the plan
+   changed while it was open. */
+const PATCHABLE = new Set(['route\u0000name', 'route\u0000driver', 'route\u0000round', 'car\u0000note', 'position\u0000note', 'driver\u0000note']);
+function roomRedraw(was, sig) {
+  const changes = Sync.diff(was, state);
+  const boxes = [];
+  const quiet = liveSig() === sig && changes.every((c) => {
+    if (c.op !== 'set' || c.kind === 'meta' || typeof c.value !== 'string' || !PATCHABLE.has(`${c.kind}\u0000${c.field}`)) return false;
+    const els = [...document.querySelectorAll(`[data-kind="${c.kind}"][data-id="${CSS.escape(c.id)}"][data-field="${CSS.escape(c.field)}"]`)];
+    if (!els.every((el) => el.tagName === 'INPUT' && el.type === 'text')) return false;
+    for (const el of els) boxes.push([el, c.value]);
+    return true;
+  });
+  const x = window.scrollX, y = window.scrollY;
+  if (quiet) {
+    // The box being typed in holds what is typed (roomHold), never this.
+    for (const [el, value] of boxes) if (el !== document.activeElement && el.value !== value) el.value = value;
+    renderSheet(); renderPicker(); renderMap();
+    renderRoom();
+  } else keepingFocus(() => { render(); roomStaleDialogs(); });
+  if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+  if (quiet) roomStaleDialogs();
+  roomMarks();
+}
+/* The quiet marks on the boxes the shared plan has something to say about:
+   one the room changed while it was being typed in (held), and one both
+   managers changed at once (a flag; the card lists it, with Put it back).
+   An outline and a tooltip, nothing that moves the page. The title a box
+   had is kept aside (never as a data-* attribute: keepingFocus finds the
+   focused box again by those) and put back when the mark goes. */
+const markTitles = new WeakMap();
+const fieldBoxes = (kind, id, field) => document.querySelectorAll(kind === 'meta'
+  ? `[data-kind="meta"][data-field="${CSS.escape(field)}"]`
+  : `[data-kind="${CSS.escape(kind)}"][data-id="${CSS.escape(String(id))}"][data-field="${CSS.escape(field)}"]`);
+const shown = (v) => (v === undefined || v === null || v === '' ? 'empty' : typeof v === 'boolean' ? (v ? 'on' : 'off') : `\u201c${String(Array.isArray(v) ? v.join(', ') : v)}\u201d`);
+function roomMarks() {
+  for (const el of document.querySelectorAll('.room-held, .room-collided')) {
+    el.classList.remove('room-held', 'room-collided');
+    if (markTitles.has(el)) { el.title = markTitles.get(el); markTitles.delete(el); }
+  }
+  const r = room;
+  if (!r) return;
+  const put = (kind, id, field, cls, title) => {
+    for (const el of fieldBoxes(kind, id, field)) {
+      if (!markTitles.has(el)) markTitles.set(el, el.title);
+      el.classList.add(cls);
+      el.title = title;
+    }
+  };
+  for (const x of r.flags) if (x.type === 'set') put(x.kind, x.id, x.field, 'room-collided', `Changed by both of you at once. Kept ${shown(x.kept)}; the other was ${shown(x.lost)}. The Shared plan card on the Data tab can put it back.`);
+  for (const h of r.holds.values()) {
+    const there = r.rep ? fieldIn(r.rep.shadow, h.kind, h.id, h.field) : { has: false };
+    put(h.kind, h.id, h.field, 'room-held', `The other manager changed this to ${shown(there.value)} while you were typing. What you type is kept when you leave the box; the other value is noted on the Data tab.`);
+  }
+}
+
+// Whether the plan changed from the room since `tick` was taken.
+const staleSince = (tick) => !!room && Number.isInteger(tick) && room.tick !== tick;
+const roomTick = () => (room ? room.tick : 0);
+const STALE_LINE = '<p class="status warn-status stale-line">The plan changed while this was open. What it says now is drawn from the plan as it is.</p>';
+function roomStaleDialogs() {
+  if (pending.share && $('#shareDlg')?.open) renderShareDialog();
+  if (roomLook) renderRoomLook();
+  if (roomOffer && roomOffer.caught) renderRoomOffer();
 }
 
 // Collisions found, kept for the marks and the card: one per field (or per
@@ -3028,7 +3108,7 @@ async function roomLookFirst(id) {
   if (got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
   if (!got || !got.plain) { roomFetchFailed(got); return; }
   if (roomOffer) return;   // an invite's question came first
-  roomLook = { id, name: got.name, at: v.at, plain: got.plain };
+  roomLook = { id, name: got.name, at: v.at, plain: got.plain, tick: roomTick() };
   renderRoomLook();
 }
 
@@ -3039,6 +3119,7 @@ function renderRoomLook() {
   const newer = planSchema(l.plain) > Store.SCHEMA;
   dlg.innerHTML = `
     <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
+    ${staleSince(l.tick) ? STALE_LINE : ''}
     <p class="hint">Pushed ${esc(when(l.at))}.</p>
     ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it')}
     <div class="bar" style="margin:16px 0 0">
@@ -3342,6 +3423,7 @@ async function roomOfferStart(secret) {
     o.room = o.plain && o.schema <= Store.SCHEMA ? roomPlanOf(f, o.plain, ops) : null;
     o.ahead = !!o.plain && !o.room;
     o.caught = true;
+    o.tick = roomTick();
     // Only one look: the offer shows what the room held when it was opened.
     o.conn.close();
     renderRoomOffer();
@@ -3447,6 +3529,7 @@ function renderRoomOffer() {
   const canTake = o.caught && o.room && o.schema <= Store.SCHEMA && !o.ahead;
   dlg.innerHTML = `
     <h2>Join this shared plan?</h2>
+    ${staleSince(o.tick) ? STALE_LINE : ''}
     ${body}
     <div class="bar" style="margin:16px 0 0">
       ${canTake ? '<button class="btn primary-ish" data-act="room-take">Take the shared plan</button>' : ''}
@@ -4060,6 +4143,7 @@ function askTemplate(t) {
   const n = note('warn', `Load the ${t.name} template over the plan on screen? Untick what the plan should keep.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
   n.parts = allParts();
+  n.tick = roomTick();
 }
 
 function applyImport(text, source) {

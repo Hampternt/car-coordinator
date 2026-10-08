@@ -206,6 +206,9 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .room-versions { list-style: none; margin: 0; padding: 0; max-width: 760px; }
 .room-versions li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 0; border-top: 1px solid var(--line); }
 .room-v-name { font-weight: 600; }
+/* The shared plan's quiet marks on a box: changed by the room while typed in,
+   or changed by both managers at once. An outline only, so nothing moves. */
+.room-held, .room-collided { outline: 2px dashed var(--hivis); outline-offset: 1px; }
 .room-v-when { color: var(--muted); margin-right: auto; }
 
 /* 1200 was right when the plan was a table with a narrow rail beside it. The

@@ -718,6 +718,174 @@ const flagsOf = (pg) => pg.evaluate(() => (room ? room.flags.map((f) => ({ type:
   for (const x of [a, b, c]) await x.context.close();
 }
 
+// Remote changes never disturb the person working: focus, caret, selection,
+// scroll, an open picker or menu, an armed button and an open dialog stay.
+const focusOf = (pg) => pg.evaluate(() => {
+  const el = document.activeElement;
+  return el && el.dataset ? { id: el.dataset.id || el.id || null, field: el.dataset.field || null, value: el.value ?? null, sel: typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd] : null } : null;
+});
+const routeRow = (pg, id) => pg.locator(`#tab-plan tbody tr[data-route="${id}"]`);
+{
+  const { secret } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+
+  // Typing on and on in route 3's driver while the other edits the same
+  // route, the one below it, the order, and adds a route.
+  const start = await routeRow(a.page, 'rt-03').locator('[data-field="driver"]').inputValue();
+  await routeRow(a.page, 'rt-03').locator('[data-field="driver"]').click();
+  await a.page.keyboard.press('End');
+  const typed = ' Continuous Kari Karlsen';
+  const typing = a.page.keyboard.type(typed, { delay: 70 });
+  const other = (async () => {
+    await wait(250);
+    await routeRow(b.page, 'rt-03').locator('[data-field="round"]').fill('5');
+    await wait(250);
+    await routeRow(b.page, 'rt-04').locator('[data-field="driver"]').fill('Neighbour Nina');
+    await wait(250);
+    await routeRow(b.page, 'rt-01').locator('[data-act="down"]').click();
+    await wait(250);
+    await b.page.click('[data-act="add-route"]');
+    await wait(250);
+    await routeRow(b.page, 'rt-02').locator('[data-act="toggle"][data-field="highlight"]').click();
+  })();
+  await Promise.all([typing, other]);
+  await wait(800);
+  const f = await focusOf(a.page);
+  same('typing on while the other edits the same route, the next one and the order: not a keystroke lost', f && f.value, start + typed);
+  check('the focus stayed in the box', f && f.id === 'rt-03' && f.field === 'driver', JSON.stringify(f));
+  same('and the caret stayed at the end of what was typed', f && f.sel, [(start + typed).length, (start + typed).length]);
+  const aPlan = JSON.parse(await planOf(a.page));
+  check('every one of the other\'s edits is on this screen', aPlan.routes.find((r) => r.id === 'rt-03').round === '5' && aPlan.routes.find((r) => r.id === 'rt-04').driver === 'Neighbour Nina'
+    && aPlan.routes[1].id === 'rt-01' && aPlan.routes.length === 16 && aPlan.routes.find((r) => r.id === 'rt-02').highlight === true, JSON.stringify(aPlan.routes.map((r) => r.id)));
+  await a.page.keyboard.press('Escape');
+  check('and both end on one plan', await converged(a.page, b.page));
+
+  // Two routes added at once: both kept, in the relay's order.
+  relay.holdWrites();
+  await a.page.click('[data-act="add-route"]');
+  await b.page.click('[data-act="add-route"]');
+  await wait(600);
+  relay.releaseWrites();
+  check('two routes added at once: both kept, in the same order on both', await converged(a.page, b.page) && JSON.parse(await planOf(a.page)).routes.length === 18);
+
+  // The same field: typed in here, changed there. The box is never rewritten;
+  // what is typed wins on leaving it, and the other value goes into the mark.
+  const box = routeRow(a.page, 'rt-05').locator('[data-field="driver"]');
+  await box.click();
+  await box.fill('');
+  await a.page.keyboard.type('Mine', { delay: 30 });
+  await wait(800);
+  await routeRow(b.page, 'rt-05').locator('[data-field="driver"]').fill('Theirs');
+  await b.page.keyboard.press('Tab');
+  await wait(800);
+  same('the other changes the field being typed in: the box keeps what is typed', await box.inputValue(), 'Mine');
+  check('the focus and caret stay', JSON.stringify(await focusOf(a.page)) === JSON.stringify({ id: 'rt-05', field: 'driver', value: 'Mine', sel: [4, 4] }), JSON.stringify(await focusOf(a.page)));
+  check('and a quiet mark says what the other wrote', await box.evaluate((el) => el.classList.contains('room-held') && /changed this to “Theirs”/.test(el.title)));
+  await a.page.keyboard.type(' too', { delay: 30 });
+  await wait(600);
+  same('while it is being typed in, the other screen keeps the other value', await b.page.evaluate(() => state.routes.find((r) => r.id === 'rt-05').driver), 'Theirs');
+  await a.page.keyboard.press('Escape');
+  await a.page.keyboard.press('Tab');
+  check('on leaving it, the typed text wins on both screens', await b.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-05').driver === 'Mine too', null, { timeout: 3000 }).then(() => true, () => false) && await converged(a.page, b.page));
+  const want = [{ type: 'set', kind: 'route', id: 'rt-05', field: 'driver', kept: 'Mine too', lost: 'Theirs' }];
+  same('and the other value is in the same flag on both', [await flagsOf(a.page), await flagsOf(b.page)], [want, want]);
+  check('marked on the box on both screens', await routeRow(a.page, 'rt-05').locator('[data-field="driver"]').evaluate((el) => el.classList.contains('room-collided'))
+    && await routeRow(b.page, 'rt-05').locator('[data-field="driver"]').evaluate((el) => el.classList.contains('room-collided') && /the other was “Theirs”/.test(el.title)));
+
+  // Only in the box, never typed in: on leaving it takes the other's value.
+  const idle = routeRow(a.page, 'rt-06').locator('[data-field="driver"]');
+  const idleWas = await idle.inputValue();
+  await idle.click();
+  await routeRow(b.page, 'rt-06').locator('[data-field="driver"]').fill('Taken Over');
+  await b.page.keyboard.press('Tab');
+  await wait(800);
+  same('a box only clicked into keeps its text while it has the focus', await idle.inputValue(), idleWas);
+  await a.page.keyboard.press('Escape');
+  await a.page.keyboard.press('Tab');
+  check('and takes the other\'s value on leaving, with nothing flagged', await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-06').driver === 'Taken Over', null, { timeout: 3000 }).then(() => true, () => false)
+    && (await flagsOf(a.page)).length === 1 && await converged(a.page, b.page));
+
+  // The driver picker, opened by typing a name the roster has more than one of.
+  const pick = routeRow(a.page, 'rt-10').locator('[data-field="driver"]');
+  await pick.click();
+  await pick.fill('');
+  await a.page.keyboard.type('a', { delay: 30 });
+  const pickerOpen = () => a.page.evaluate(() => !!picking && picking.routeId === 'rt-10' && !document.getElementById('picker').hidden);
+  check('the driver picker is open while a name is typed', await pickerOpen());
+  await routeRow(b.page, 'rt-04').locator('[data-field="round"]').fill('8');
+  await b.page.keyboard.press('Tab');
+  await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-04').round === '8', null, { timeout: 3000 });
+  check('the driver picker stays open through a change from the room', await pickerOpen());
+  same('with the box as typed, caret and all', await focusOf(a.page), { id: 'rt-10', field: 'driver', value: 'a', sel: [1, 1] });
+  await a.page.keyboard.press('Backspace');
+  await a.page.keyboard.type('Jonas', { delay: 20 });
+  await a.page.keyboard.press('Escape');
+  await a.page.keyboard.press('Tab');
+  await converged(a.page, b.page);
+
+  // Menus, an armed button, a selection and the scroll.
+  await a.page.evaluate(() => window.scrollTo(0, 260));
+  const y = await a.page.evaluate(() => window.scrollY);
+  await routeRow(a.page, 'rt-09').locator('[data-act="del"]').click();
+  check('armed: Delete says Sure?', (await routeRow(a.page, 'rt-09').locator('[data-act="del"]').innerText()) === 'Sure?');
+  await routeRow(b.page, 'rt-02').locator('[data-field="driver"]').fill('While Armed');
+  await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-02').driver === 'While Armed', null, { timeout: 3000 });
+  check('an armed Sure? stays armed through a change from the room', (await routeRow(a.page, 'rt-09').locator('[data-act="del"]').innerText()) === 'Sure?');
+  same('and the page did not scroll', await a.page.evaluate(() => window.scrollY), y);
+  await wait(3200);
+
+  const nameBox = routeRow(a.page, 'rt-11').locator('[data-field="name"]');
+  await nameBox.click({ button: 'right' });
+  const menuOpen = () => a.page.evaluate(() => !!ctx && !!document.getElementById('ctxMenu') && !document.getElementById('ctxMenu').hidden);
+  check('the right-click menu is open', await menuOpen());
+  await routeRow(b.page, 'rt-12').locator('[data-field="driver"]').fill('While Menu');
+  await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-12').driver === 'While Menu', null, { timeout: 3000 });
+  check('a right-click menu stays open through a change from the room', await menuOpen());
+  await a.page.keyboard.press('Escape');
+
+  await a.page.locator('#tab-plan [data-act="tag"]').first().click();
+  const tagOpen = () => a.page.evaluate(() => !!tagFor && !!document.querySelector('.tag-menu'));
+  check('the tag menu is open', await tagOpen());
+  await routeRow(b.page, 'rt-hau1').locator('[data-field="driver"]').fill('While Tags');
+  await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-hau1').driver === 'While Tags', null, { timeout: 3000 });
+  check('a tag menu stays open through a change from the room', await tagOpen());
+  await a.page.keyboard.press('Escape');
+  await a.page.mouse.click(5, 5);
+
+  await nameBox.click();
+  await nameBox.evaluate((el) => el.setSelectionRange(0, 1));
+  await routeRow(b.page, 'rt-14').locator('[data-field="driver"]').fill('While Selected');
+  await a.page.waitForFunction(() => state.routes.find((r) => r.id === 'rt-14').driver === 'While Selected', null, { timeout: 3000 });
+  same('selected text stays selected through a change from the room', await focusOf(a.page), { id: 'rt-11', field: 'name', value: '11', sel: [0, 1] });
+
+  // A note changed there is put straight into its box here, with no redraw.
+  await a.page.evaluate(() => { window.__renders = 0; const real = render; window.render = (...x) => { window.__renders++; return real(...x); }; });
+  await b.page.click('[data-act="tab"][data-tab="cars"]');
+  const carId = await b.page.evaluate(() => state.cars[0].id);
+  await b.page.locator(`#tab-cars [data-kind="car"][data-id="${carId}"][data-field="note"]`).fill('Patched in place');
+  await a.page.waitForFunction((id) => state.cars.find((c) => c.id === id).note === 'Patched in place', carId, { timeout: 3000 });
+  same('a note changed there: only its box is redrawn here', [await a.page.evaluate(() => window.__renders), await a.page.locator(`#tab-cars [data-kind="car"][data-id="${carId}"][data-field="note"]`).inputValue()], [0, 'Patched in place']);
+
+  // An open dialog that goes stale says so, and is drawn from the plan as it is.
+  const code = await a.page.evaluate(() => Share.encode(state, 'day'));
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.fill('#shareIn', code);
+  await b.page.click('[data-act="share-read"]');
+  await b.page.waitForFunction(() => document.getElementById('shareDlg').open);
+  check('a list to load, before any change: no stale line', !(await b.page.locator('#shareDlg').innerText()).includes('changed while this was open'));
+  await routeRow(a.page, 'rt-07').locator('[data-field="driver"]').fill('Stale Maker');
+  check('it says the plan changed while it was open', await b.page.waitForFunction(() => /The plan changed while this was open/.test(document.getElementById('shareDlg').innerText), null, { timeout: 3000 }).then(() => true, () => false));
+  await b.page.click('[data-act="share-cancel"]');
+  await b.page.click('[data-act="tab"][data-tab="plan"]');
+  await b.page.evaluate(() => { askTemplate(state.templates.find((t) => t.routes.length)); render(); });
+  await routeRow(a.page, 'rt-08').locator('[data-field="driver"]').fill('Stale Again');
+  check('so does a template\'s load question', await b.page.waitForFunction(() => /changed while this was open/.test(document.getElementById('notices').innerText), null, { timeout: 3000 }).then(() => true, () => false));
+  same('never disturbed: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close();
+  await b.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {
