@@ -2005,7 +2005,7 @@ function fileStatus() {
     return `<p class="status off">Not saving to a file yet.</p>
       <p class="hint">Pick a file once (OneDrive, a network drive, a memory stick) and every change writes straight to it. Nothing is uploaded anywhere \u2014 the file is written by your browser, on your PC.</p>
       <button class="btn primary-ish" data-act="link-file">Choose save file\u2026</button>
-      <button class="btn" data-act="open-file">Open an existing file\u2026</button>`;
+      <button class="btn" data-act="open-file">Open an existing file\u2026</button>${fileBothLine()}`;
   }
   // A hold: the file was not written because it may hold the only good copy,
   // or could not be looked at. Nothing reaches it until one of these is used.
@@ -2019,7 +2019,7 @@ function fileStatus() {
         <p class="hint">In the file${f.hold.modified ? ` (last changed ${esc(when(f.hold.modified))})` : ''}: ${esc(sum(f.hold.state))}.<br>On screen: ${esc(sum(state))}.${f.hold.differ ? `<br>${esc(n(f.hold.differ, 'route'))} ${f.hold.differ === 1 ? 'differs' : 'differ'} between the two.` : ''}</p>
         <button class="btn" data-act="file-keep-file">Load the file</button>
         <button class="btn" data-act="file-keep-screen">Write this screen to the file</button>
-        ${stop}
+        ${stop}${roomLive() ? `<p class="hint both-line">Loading the file replaces everything on screen. ${BOTH_WORDS}</p>` : ''}
         <p class="hint">Whichever one you replace is put in Backups first, so either choice can be undone there.</p>`;
     }
     const why = f.hold.kind === 'notPlan'
@@ -2040,8 +2040,11 @@ function fileStatus() {
   return `<p class="status on">Saving to <b>${esc(f.name)}</b>${f.lastSaved ? ` \u2014 last written ${esc(when(f.lastSaved))}` : ''}.</p>
     ${f.error ? `<p class="status warn-status">${esc(f.error)}</p>` : ''}
     <button class="btn" data-act="open-file">Open a different file\u2026</button>
-    <button class="btn" data-act="unlink-file">Stop using this file</button>`;
+    <button class="btn" data-act="unlink-file">Stop using this file</button>${fileBothLine()}`;
 }
+// Opening a file replaces everything, and its only confirm is the picker: in
+// a shared plan, the card says what that does, as Import's does.
+const fileBothLine = () => (roomLive() ? `<p class="hint both-line">Opening a file replaces everything on screen. ${BOTH_WORDS}</p>` : '');
 
 /* Every note there has been, newest first: the newest three in full, the
    older ones a line each, keeping what a `must` entry says it affects. */
@@ -3927,7 +3930,11 @@ async function dataAction(act, b, fromKeyboard = false) {
       if (!Store.snapshot(state, 'Before loading the save file')) break;   // render() shows why
       Store.release();
       state = h.state;
-      Store.saveLocal(state);
+      // This browser only (the file holds it already), and, in a shared
+      // plan, to the room now as any edit is, not at some later capture.
+      if (planElsewhere) roomFrozenBackup();
+      else { Store.saveLocal(state); savedHere = true; roomBaseWrite(room); }
+      roomEdited();
       note('info', `Loaded the plan from ${Store.file.name}. What was on screen before is in Backups.`);
       break;
     }

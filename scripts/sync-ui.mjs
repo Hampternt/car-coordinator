@@ -1598,6 +1598,34 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('typed then held: no console errors', [...b.errors, ...c.errors], []);
   for (const x of [b, c]) await x.context.close();
 }
+
+// The save file replaces everything too: "Open an existing file…" says it
+// changes the shared plan for both where it is confirmed (the picker, so on
+// its card), and "Load the file" sends the change to the room at once.
+{
+  const { secret } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  const BOTH = 'This changes the shared plan for both of you.';
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  const card = () => a.page.locator('[data-act="open-file"]').first().locator('xpath=..').innerText();
+  check('the save-file card says it beside Open an existing file…', (await a.page.locator('[data-act="open-file"]').count()) > 0 && (await card()).includes(BOTH), await card().catch(() => 'no open-file button'));
+  // A save file linked, holding another plan: the hold's question.
+  const fromFile = JSON.parse(await planOf(a.page));
+  fromFile.routes[0].driver = 'From The File';
+  await a.page.evaluate((plan) => {
+    Object.assign(Store.file, { handle: { name: 'plan.json' }, name: 'plan.json', permission: 'granted', hold: { kind: 'differs', state: plan, raw: JSON.stringify(plan), differ: 1 } });
+    render();
+  }, fromFile);
+  const holdCard = await a.page.locator('[data-act="file-keep-file"]').locator('xpath=..').innerText();
+  check('and beside the hold\'s Load the file', holdCard.includes(BOTH), holdCard);
+  await a.page.click('[data-act="file-keep-file"]');
+  check('Load the file: the other screen has the file\'s plan within a second or so', await b.page.waitForFunction(() => state.routes[0].driver === 'From The File', null, { timeout: 1500 }).then(() => true, () => false));
+  check('Backups first, as before', /Before loading the save file/.test(JSON.parse(await a.page.evaluate(() => localStorage.getItem('carcoord:backups')))[0].label));
+  await a.page.evaluate(() => Object.assign(Store.file, { handle: null, name: '', hold: null }));
+  same('save file in a room: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------
