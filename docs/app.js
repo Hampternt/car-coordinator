@@ -2928,15 +2928,16 @@ function roomApply(r, mutate) {
   if (!r.rep.queue.length) r.waitingSince = null;
   roomFlags(r, res.flags);
   if (res.applied) roomCompact(r);
-  // Only this browser's own edits confirmed: the screen already has them.
-  // The base is not written here: another tab may have saved a plan without
-  // them meanwhile, and a base ahead of the plan reads as edits undoing them.
-  // It moves with the next save; one that lags only resends what is there.
-  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
-  let next = Sync.applyAll(r.rep.shadow, local);
-  next = roomHold(r, next);
-  roomShow(r, next);
+  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); }
+  else roomShow(r, roomHold(r, Sync.applyAll(r.rep.shadow, local)));
+  // This browser's own edits confirmed: the base moves with them, or a reopen
+  // would rebuild them from a base that lacks them and send them again, over
+  // whatever the other manager did since (a route put back after its removal,
+  // say). Only while the plan stored is this screen: another tab may have
+  // saved one without them, and a base ahead of the plan reads as an undo.
+  if (res.applied && storedIsScreen()) roomBaseWrite(r);
 }
+const storedIsScreen = () => { try { return localStorage.getItem('carcoord:v1') === JSON.stringify(state); } catch { return false; } };
 
 /* The field being typed in is never rewritten under the caret. When the room
    changes it, the box keeps what is in it and the field is held: on leaving

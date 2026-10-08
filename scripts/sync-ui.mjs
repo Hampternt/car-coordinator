@@ -1312,6 +1312,39 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   await p.context.close();
 }
 
+// >>> review fixes: the concurrency and live-data review of round 2 (each
+// section failed on 7ff16fc before its fix).
+// The pair a browser keeps, as a profile reopening it would find it.
+const keptPair = (pg) => pg.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), base: localStorage.getItem('carcoord:roomBase') }));
+const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
+
+// The base moves with this browser's own edits once they are confirmed: a
+// browser closed after its edit was acked, reopened after the other removed
+// what it added, never sends that edit again over the removal.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  await a.page.click('[data-act="add-route"]');
+  const added = await a.page.evaluate(() => state.routes.at(-1).id);
+  check('own edit: the added route reaches the other browser', await b.page.waitForFunction((id) => state.routes.some((r) => r.id === id), added, { timeout: 3000 }).then(() => true, () => false));
+  await a.page.waitForFunction(() => room.rep.queue.length === 0 && room.rep.seq === 1, null, { timeout: 3000 });
+  await wait(300);
+  const pair = await keptPair(a.page);
+  await a.context.close();
+  await removeRoute(b.page, added);
+  await until(() => ops().length === 2);
+  const removedAt = ops().at(-1).seq;
+  const a2 = await profile({ items: inRoom({ ...SEED, 'carcoord:v1': pair.plan, 'carcoord:roomBase': pair.base }, secret) });
+  await a2.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
+  await wait(1000);
+  same('reopened after the other removed what it added: nothing is sent again', opsAfter(ops, removedAt).map((o) => o.changes), []);
+  check('and the route stays removed on both screens', !(await hasRoute(a2.page, added)) && !(await hasRoute(b.page, added)) && await converged(a2.page, b.page));
+  same('base after own ack: no console errors', [...a2.errors, ...b.errors], []);
+  for (const x of [a2, b]) await x.context.close();
+}
+// <<< review fixes
+
 // ---------------------------------------------------------------------------
 // Push seals first, which takes a moment: what the room says meanwhile still
 // counts, and a push that is no longer allowed sends nothing.
