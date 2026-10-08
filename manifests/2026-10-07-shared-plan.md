@@ -182,12 +182,34 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 </details>
 
+<details open><summary>Two people at once: what must hold (owner, 2026-10-08)</summary>
+
+Raised by the owner: overwriting each other, and a redraw taking away the spot you are typing in. Every case below is a test in `sync-ui.mjs`, run with two browsers editing together.
+
+| Situation | What happens |
+|---|---|
+| Both edit **different** fields or routes | Both kept. Changes are per field, never whole-plan. |
+| Both edit the **same** field | The last to reach the server wins on both screens. The other value is kept in a quiet mark on the field and a line on the card ("Also changed by the other manager: was X"), one click to put it back. |
+| You are **typing** in a field the other changes | Your box is never rewritten under your cursor. Your text wins when you leave the field, and the other value goes into the mark. |
+| Any incoming change while you work | Focus, caret, selected text, scroll position, an open driver picker, right-click menu or tag menu, and an armed "Sure?" button all stay as they were. Only the rows that changed are redrawn; a full redraw goes through `renderKeepingFocus` (`docs/app.js:2362`), which already keeps focus, selection and typed-but-unsaved text. |
+| The other **removes** a route you are editing | Your edit is not lost silently. The route is gone and the mark says so, with one click to put the route back with your edit. |
+| The other **reorders** or **adds** routes | Your field stays focused, because ids are stable. Two routes added at once are both kept, in the server's order. |
+| An open dialog (template load, a preview) goes **stale** | It says "The plan changed while this was open" and redraws its counts. It never acts on the old numbers. |
+| Both put **one car on two routes** at once | The existing clash warning (amber box and stripe) shows on both screens, a warning not a block, as today. |
+| **Slow** or dropped connection | Edits apply on your screen at once. The pill quietly says "Sending…" until the server has them, then they are sent on reconnect. Nothing is blocked. |
+
+**Round 3 cuts collisions at the source:** seeing that the other person is in Route 7's Car box (outlined, with a name tag) means you rarely type in the same field at once.
+
+</details>
+
 **Items** (one commit each, item gate `check.sh` + `sync.mjs` + `sync-ui.mjs`; the full suite once at the end):
 - [ ] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
 - [ ] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
 - [ ] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
 - [ ] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
 - [ ] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
+- [ ] **Remote changes never disturb you:** patch only the rows and cards that changed; keep focus, caret, selection, scroll, open picker, menus and armed buttons; flag open dialogs gone stale. *Done when:* `sync-ui` types continuously in one browser while the other edits the same route, a neighbouring route and the order, and the typing browser loses no keystroke, caret or open menu.
+- [ ] **Removed while you edit:** an edit to a route the other removed is kept in a mark with "Put it back". *Done when:* `sync-ui` covers remove-while-typing in both orders.
 - [ ] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
 - [ ] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
 - [ ] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
