@@ -1,6 +1,6 @@
 # Container: Shared plan
 
-**Status:** 🚧 ROUND 1 (packs 1 and 2) built, reviewed and gated as 0.15.0. **Handed over for the owner's Test it yourself;** nothing is merged into `dev`. Packs 3 and 4 drafted in outline.
+**Status:** 🚧 ROUND 1 (packs 1 and 2) built, reviewed and gated as 0.15.0. Merged into `dev` on the owner's go (2026-10-08) through a PR; round 2 is drafted. Packs 3 and 4 drafted in outline.
 **Date:** 2026-10-07
 **Branch:** round 1 builds on `claude/car-coordinator-encryption-c717c5` (cut from `dev` at bd379ee) and goes back to `dev` through one PR. Later rounds cut from `dev` and comes back to `dev` through a PR. `main` only after the owner has tested the combined update on `dev` and said go.
 **Scope:** Car Coordinator only. Breadify is untouched and nothing of it is synced.

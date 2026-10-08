@@ -40,7 +40,8 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## Sharing
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
-- 🚧 **Shared plan** — two managers on one plan from any PC, live, with who-is-editing and pushed versions; end-to-end encrypted through a relay on the owner's server. `manifests/2026-10-07-shared-plan.md`.
+- ✅ **Shared plan, round 1 (0.15.0)** — create a shared plan with the server's create code, send its invite link (and QR), take it on another PC with a preview and Backups first, push named versions, look at them first, restore them, or leave. End-to-end encrypted: the relay on the owner's server holds only what it cannot read. Not in the Windows app yet.
+- 🚧 **Shared plan, live updates and who is editing** — rounds 2 and 3. `manifests/2026-10-07-shared-plan.md`.
 
 ## Data
 - ✅ **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white.
