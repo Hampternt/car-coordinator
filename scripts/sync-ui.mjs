@@ -1411,6 +1411,35 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('restored relay with ops: no console errors', a.errors, []);
   await a.context.close();
 }
+
+// An edit to a route the other removed and then reloaded over: the remover
+// has no record of the route left, and still says what arrived for it.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  // b loses its connection and edits route 5 meanwhile.
+  await b.page.evaluate(() => room.conn.close());
+  await routeRow(b.page, 'rt-05').locator('[data-field="driver"]').fill('Edited Away');
+  await b.page.keyboard.press('Tab');
+  await removeRoute(a.page, 'rt-05');
+  await until(() => ops().length === 1);
+  await a.page.waitForFunction(() => room.rep.seq === 1 && !room.rep.queue.length, null, { timeout: 3000 });
+  await a.page.reload({ waitUntil: 'networkidle' });
+  await a.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 });
+  await b.page.evaluate(() => roomStart(Store.pref('room')));
+  await until(() => ops().length >= 2);
+  const flagA = () => a.page.evaluate(() => (room ? room.flags.filter((f) => f.type === 'removed' && f.id === 'rt-05').map((f) => ({ item: f.item, field: f.field, value: f.value })) : []));
+  check('the remover, reloaded since, still flags the edit that arrived for the route', await until(async () => (await flagA()).length === 1), JSON.stringify(await flagA()));
+  same('with what was set, and no route to put back', await flagA(), [{ item: null, field: 'driver', value: 'Edited Away' }]);
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  const card = await a.page.locator('#roomCard').innerText();
+  check('its card says so, offering only Dismiss', /removed[\s\S]*Edited Away/.test(card) && (await a.page.locator('#roomCard [data-act="room-putback"]').count()) === 0 && (await a.page.locator('#roomCard [data-act="room-dismiss"]').count()) === 1, card);
+  check('the editor offers it back with the edit', (await removedFlag(b.page, 'rt-05')).some((f) => f.driver === 'Edited Away'));
+  check('and the route stays removed on both', !(await hasRoute(a.page, 'rt-05')) && !(await hasRoute(b.page, 'rt-05')) && await converged(a.page, b.page));
+  same('edit to a route gone without a record: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------

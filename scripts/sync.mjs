@@ -648,6 +648,30 @@ await block('replica: a snapshot past it, with edits of its own queued', () => {
   same('and still to send', B.unsent().length, 1);
 });
 
+await block('replica: an edit to an item gone with no record of its removal', () => {
+  const base = samplePlan();
+  const without = (plan, id) => ({ ...JSON.parse(J(plan)), routes: plan.routes.filter((r) => r.id !== id) });
+  // The remover reloaded since: its replica starts without r2, and nothing
+  // in it says r2 was ever there. The other's edit to r2 arrives late.
+  const A = Sync.replica(1, without(base, 'r2'));
+  A.take(2, [{ op: 'set', kind: 'route', id: 'r2', field: 'driver', value: 'Late', was: '' }], 'b'.repeat(16));
+  const fa = A.drain().flags;
+  same('a late edit to an item removed before a reload is still flagged, with what it set', fa.map((f) => [f.type, f.kind, f.id, f.field, f.value, f.item]), [['removed', 'route', 'r2', 'driver', 'Late', null]]);
+
+  // A snapshot past this browser drops the item it has an edit queued for:
+  // the edit is flagged at once, with the item as this browser had it.
+  const B = Sync.replica(0, base);
+  const mine = JSON.parse(J(base)); mine.routes[1].driver = 'Mine';
+  const bb = B.capture(mine);
+  B.reset(1, without(base, 'r2'));
+  const fb = B.drain().flags;
+  same('reset to a snapshot without an item this browser edited: flagged, with its edit and place', fb.map((f) => [f.type, f.id, f.field, f.item && f.item.driver, f.after]), [['removed', 'r2', 'driver', 'Mine', 'r1']]);
+  same('and the item is gone from the screen\'s plan', B.shadow.routes.some((r) => r.id === 'r2'), false);
+  B.take(2, bb.changes, bb.oid);
+  const fb2 = B.drain().flags;
+  same('its own edit coming back still carries the item, to put back', fb2.map((f) => [f.type, f.id, f.item && f.item.driver]), [['removed', 'r2', 'Mine']]);
+});
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);

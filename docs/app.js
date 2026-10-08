@@ -3150,6 +3150,7 @@ function flagThing(x) {
   const name = item ? String(item.reg ?? item.name ?? '').trim() : '';
   if (x.kind === 'meta') return 'The plan';
   const what = { route: 'Route', car: 'Car', position: 'Position', label: 'Status', driver: 'Driver', driverTag: 'Driver tag', driverGroup: 'Day group', template: 'Template' }[x.kind] || 'An item';
+  if (x.type === 'removed' && !x.item) return `A ${what.toLowerCase()}`;
   return name ? `${what} ${name}` : `A ${what.toLowerCase()} with no name`;
 }
 function flagValue(field, v) {
@@ -3161,6 +3162,11 @@ function flagValue(field, v) {
 }
 function flagText(x) {
   const word = FIELD_WORDS[x.field] || x.field;
+  if (x.type === 'removed' && !x.item) {
+    // Removed before this browser could keep a copy (a reload since): what
+    // arrived for it is said, and there is nothing here to put back.
+    return `${flagThing(x)} that was removed was changed after (its ${word}: ${flagValue(x.field, x.value)}). It stays removed.`;
+  }
   if (x.type === 'removed') {
     const edit = x.field && x.item && x.field in x.item ? ` (its ${word}: ${flagValue(x.field, x.item[x.field])})` : '';
     return `${flagThing(x)} was removed while it was being changed${edit}. Put it back to keep it, with that change.`;
@@ -3171,7 +3177,7 @@ function roomFlagsHtml() {
   roomFlagsPrune(room);
   if (!room.flags.length) return '';
   const rows = room.flags.slice().reverse().map((x) => `<li>${esc(flagText(x))}
-      <span class="room-flag-acts">${actBtn('room-putback', '', x.n, 'Put it back')}${actBtn('room-dismiss', '', x.n, 'Dismiss')}</span></li>`).join('');
+      <span class="room-flag-acts">${x.type === 'removed' && !x.item ? '' : actBtn('room-putback', '', x.n, 'Put it back')}${actBtn('room-dismiss', '', x.n, 'Dismiss')}</span></li>`).join('');
   return `<h4>Changed by both of you</h4><ul class="room-flags">${rows}</ul>`;
 }
 // Put it back: the value that lost, or the item that was removed with its
@@ -3179,7 +3185,7 @@ function roomFlagsHtml() {
 function roomPutBack(n) {
   const r = room;
   const x = r && r.flags.find((y) => y.n === n);
-  if (!x) return;
+  if (!x || (x.type === 'removed' && !x.item)) return;
   r.flags = r.flags.filter((y) => y !== x);
   if (x.type === 'removed') {
     const list = state[Sync.LISTS[x.kind]];

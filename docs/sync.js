@@ -575,9 +575,19 @@ const Sync = (() => {
      the queue is replayed on top, so a browser's own unsequenced edits stay
      on its screen, and once every batch is sequenced every replica holds
      the same plan. drain() returns the collisions it met, the same on every
-     replica that applied the same ops. Nothing here touches the network. */
+     replica that applied the same ops, and an edit that arrived for an item
+     already removed: a `removed` flag with the item to put back, or with
+     item null and the value set when this replica kept no copy of it.
+     Nothing here touches the network. */
   const newOid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
   function replica(seq, plan) {
+    // Keeps list[i], removed, with the id it followed.
+    const bury = (kind, id, list, i) => {
+      const dead = { item: clone(list[i]), after: i > 0 && isObj(list[i - 1]) ? list[i - 1].id : null };
+      R.graveyard.set(`${kind}\u0000${id}`, dead);
+      if (R.graveyard.size > 100) R.graveyard.delete(R.graveyard.keys().next().value);
+      return dead;
+    };
     const R = {
       seq,
       confirmed: clone(plan),
@@ -587,6 +597,8 @@ const Sync = (() => {
       // `${kind}\u0000${id}` -> {item, after}: what removes took away, so an
       // edit arriving for one afterwards can be offered back with the item.
       graveyard: new Map(),
+      // Flags a reset found, for the next drain to return.
+      later: [],
       // capture(screen, {skip, was}) -> batch | null
       //   skip(change): leave it out, on the screen only, for now (a field
       //   being typed in); was: Map fieldKey -> the value its `was` says.
@@ -614,7 +626,8 @@ const Sync = (() => {
       // holds a change this build does not know.
       drain() {
         let applied = 0;
-        const flags = [];
+        // What a reset found, first: it came before these ops.
+        const flags = R.later.splice(0);
         while (R.inbox.has(R.seq + 1)) {
           const { changes, oid } = R.inbox.get(R.seq + 1);
           if (!Array.isArray(changes)) throw new TypeError('Sync: an op without changes');
@@ -630,15 +643,17 @@ const Sync = (() => {
                 if (c.del) delete item[c.field]; else item[c.field] = clone(c.value);
                 dead.item = item;
                 flags.push({ type: 'removed', kind: c.kind, id: c.id, item: clone(item), after: dead.after, field: c.field });
+              } else {
+                // Removed before anything here could keep it (a reload since,
+                // or long ago): there is no item to offer back, but the edit
+                // is not dropped without a word.
+                flags.push({ type: 'removed', kind: c.kind, id: c.id, item: null, after: null, field: c.field, value: hit.value });
               }
             } else if (hit) flags.push(hit);
             if (c.op === 'remove') {
               const list = R.confirmed[LISTS[c.kind]];
               const i = Array.isArray(list) ? list.findIndex((x) => isObj(x) && x.id === c.id) : -1;
-              if (i >= 0) {
-                R.graveyard.set(`${c.kind}\u0000${c.id}`, { item: clone(list[i]), after: i > 0 && isObj(list[i - 1]) ? list[i - 1].id : null });
-                if (R.graveyard.size > 100) R.graveyard.delete(R.graveyard.keys().next().value);
-              }
+              if (i >= 0) bury(c.kind, c.id, list, i);
             }
             R.confirmed = apply(R.confirmed, c);
           }
@@ -651,12 +666,29 @@ const Sync = (() => {
         return { applied, flags };
       },
       // A snapshot past what this browser has applied: start again from it.
-      // The queue stays, to be replayed and sent.
+      // The queue stays, to be replayed and sent. An item this browser has an
+      // edit queued for that the snapshot no longer holds was removed in the
+      // ops it skipped: flagged now (the next drain returns it), with the
+      // item as this browser had it, so it can be put back with the edit.
       reset(at, plan) {
+        const before = R.shadow;
         R.seq = at;
         R.confirmed = clone(plan);
         for (const k of [...R.inbox.keys()]) if (k <= at) R.inbox.delete(k);
         R.replay();
+        const seen = new Set();
+        for (const c of R.queue.flatMap((b) => b.changes)) {
+          if (c.op !== 'set' || c.kind === 'meta' || !own(LISTS, c.kind)) continue;
+          const k = `${c.kind}\u0000${c.id}`;
+          const now = R.shadow[LISTS[c.kind]];
+          if (seen.has(k) || (Array.isArray(now) && now.some((x) => isObj(x) && x.id === c.id))) continue;
+          seen.add(k);
+          const old = before[LISTS[c.kind]];
+          const i = Array.isArray(old) ? old.findIndex((x) => isObj(x) && x.id === c.id) : -1;
+          if (i < 0) continue;
+          const dead = bury(c.kind, c.id, old, i);
+          R.later.push({ type: 'removed', kind: c.kind, id: c.id, item: clone(dead.item), after: dead.after, field: c.field });
+        }
       },
       replay() { R.shadow = applyAll(R.confirmed, R.queue.flatMap((b) => b.changes)); },
       // The connection dropped: whether the relay stored what was sent is
