@@ -1626,6 +1626,107 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('save file in a room: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
 }
+
+// The small ones: a base that could not be written, Push waiting while the
+// room's record is dropped, and a plan too large to push.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+
+  // A base write the browser refuses (storage full) forgets the base, rather
+  // than leave an older one beside a newer plan.
+  await a.page.evaluate(() => {
+    const real = Storage.prototype.setItem;
+    window.__realSetItem = real;
+    Storage.prototype.setItem = function (k, v) { if (k === 'carcoord:roomBase') throw new Error('full'); return real.call(this, k, v); };
+  });
+  await routeBox(a.page, 0, 'driver').fill('Base Refused');
+  await a.page.keyboard.press('Tab');
+  await a.page.waitForFunction(() => room.rep.seq === 1 && !room.rep.queue.length, null, { timeout: 3000 }).catch(() => {});
+  await wait(300);
+  same('a base that could not be written is forgotten, not left behind the plan', await a.page.evaluate(() => localStorage.getItem('carcoord:roomBase')), null);
+  await a.page.evaluate(() => { Storage.prototype.setItem = window.__realSetItem; });
+
+  // Push waits for the edits on screen to be confirmed; the room dropped
+  // meanwhile (a change too large, say) must not throw.
+  let pushError = null;
+  try {
+    relay.holdWrites();
+    await routeBox(a.page, 1, 'driver').fill('Waiting Push');
+    await a.page.keyboard.press('Tab');
+    await wait(500);
+    await a.page.evaluate(async () => {
+      document.getElementById('roomVersionName') || (tab = 'data', render());
+      document.getElementById('roomVersionName').value = 'Dropped meanwhile';
+      setTimeout(() => { room.rep = null; room.legacy = true; }, 150);
+      await roomPush();
+    }).catch((e) => { pushError = String(e); });
+  } finally { relay.releaseWrites(); }
+  same('Push waiting while the room\'s record is dropped does not throw', pushError, null);
+  await a.context.close();
+
+  // A plan over the relay's body limit: Push says so quietly and sends no
+  // body the relay would close the connection over (4413).
+  const big = 'x'.repeat(220 * 1024);
+  for (const i of [0, 1]) {
+    await b.page.evaluate(([k, text]) => { state.cars[k].note = text; save(); roomFlush(room); }, [i, big]);
+    await b.page.waitForFunction(() => !room.rep.queue.length, null, { timeout: 5000 }).catch(() => {});
+  }
+  const sentBefore = relay.log.length;
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.fill('#roomVersionName', 'Too big');
+  await b.page.press('#roomVersionName', 'Enter');
+  await wait(800);
+  const over = relay.log.slice(sentBefore).filter((x) => (typeof x.frame.body === 'string' && x.frame.body.length > 524288) || (typeof x.frame.label === 'string' && x.frame.label.length > 1024));
+  same('a plan too large to push sends no body over the relay\'s limit', over.map((x) => x.frame.type), []);
+  check('and says so, quietly, with no dialog', await noticeSays(b.page, /too large/) && !(await b.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open))));
+  check('still connected and following', await pillSays(b.page, 'Connected', 1000) && await b.page.evaluate(() => roomLive()), await pill(b.page).textContent());
+  await b.page.evaluate(() => { state.cars[0].note = ''; state.cars[1].note = ''; save(); });
+  await b.page.waitForFunction(() => !room.rep.queue.length, null, { timeout: 5000 }).catch(() => {});
+  await b.page.click('[data-act="tab"][data-tab="plan"]');
+
+  same('the small ones: no console errors', [...a.errors, ...b.errors], []);
+  await b.context.close();
+}
+
+// The last edit, made just before the page goes: it cannot be sealed and sent
+// as the page goes (tried on pagehide; the page is gone first), so it goes
+// out the next time the page is opened, from the stored plan and base.
+{
+  const { secret, ops } = liveRoom();
+  const b = await live(SEED, secret);
+  const n = ops().length;
+  await routeBox(b.page, 2, 'driver').fill('Sent On Leaving');
+  await b.page.goto('about:blank');
+  const again = await b.context.newPage();
+  const againErrors = [];
+  again.on('pageerror', (e) => againErrors.push(String(e)));
+  await again.goto(base, { waitUntil: 'networkidle' });
+  check('an edit made just before the page went reaches the room when it is next opened', await until(() => ops().slice(n).some((o) => o.changes.some((x) => x.value === 'Sent On Leaving')), 5000));
+  same('the last edit: no console errors', [...b.errors, ...againErrors], []);
+  await b.context.close();
+}
+
+// Leave in one tab while another tab of the browser follows the room live:
+// no base is left behind for a later join to rebuild edits from.
+{
+  const { secret } = liveRoom();
+  const t1 = await live(SEED, secret);
+  const t2 = { page: await t1.context.newPage() };
+  await t2.page.goto(base, { waitUntil: 'networkidle' });
+  await t2.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 });
+  // The second tab writes its base again in between (an ack landing then).
+  await t2.page.evaluate(() => window.addEventListener('storage', (e) => { if (e.key === 'carcoord:roomBase' && e.newValue === null && room) roomBaseWrite(room); }));
+  await t1.page.click('[data-act="tab"][data-tab="data"]');
+  await t1.page.click('[data-act="room-leave"]');
+  await t1.page.click('[data-act="room-leave"]');
+  await t2.page.waitForFunction(() => !room, null, { timeout: 3000 }).catch(() => {});
+  await wait(300);
+  same('Leave against a second live tab leaves no base behind', await t1.page.evaluate(() => localStorage.getItem('carcoord:roomBase')), null);
+  same('Leave with two tabs: no console errors', t1.errors, []);
+  await t1.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------

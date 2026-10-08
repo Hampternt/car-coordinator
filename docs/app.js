@@ -2557,6 +2557,9 @@ const ROOM_BATCH_MS = 300;
 // After this many ops past the room's snapshot, a browser that has applied
 // them sends a new snapshot, so the relay can drop them (PROTOCOL.md §4.3).
 const ROOM_COMPACT_AFTER = 200;
+// The relay's limit on a body (PROTOCOL.md §5): over it, it closes the
+// connection for good (4413), so nothing that size is ever sent.
+const BODY_LIMIT = 512 * 1024;
 
 // The schema the room's plans are written in, as far as this browser has
 // seen: the newest of its snapshot's, its versions' and its ops'. Newer than
@@ -2615,7 +2618,12 @@ function roomBaseWrite(r) {
     const now = localStorage.getItem(BASE_KEY);
     if (now && now.startsWith(head)) return;
     localStorage.setItem(BASE_KEY, `${head}"plan":${JSON.stringify(r.rep.confirmed)}}`);
-  } catch (e) { console.warn('shared plan: its base could not be kept', e); }
+  } catch (e) {
+    // Not kept (storage full): the one stored is older than the plan beside
+    // it, and would read as edits undoing the room's. None is safer.
+    console.warn('shared plan: its base could not be kept', e);
+    roomBaseForget();
+  }
 }
 function roomBaseRead(roomId) {
   try {
@@ -2640,7 +2648,7 @@ function roomHoldsKeep(r) {
     const holds = roomHoldsOf(r);
     if (JSON.stringify(b.holds || []) === JSON.stringify(holds)) return;
     localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, holds)}"plan":${JSON.stringify(b.plan)}}`);
-  } catch (e) { console.warn('shared plan: its base could not be kept', e); }
+  } catch (e) { console.warn('shared plan: its base could not be kept', e); roomBaseForget(); }
 }
 /* Opening with holds kept: one held when the page went whose box was not
    typed in takes the room's value, as leaving it would have; any other (typed
@@ -2683,7 +2691,7 @@ async function roomStart(secret, base = null) {
   const r = {
     secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, snapSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false,
     rep: base ? Sync.replica(base.seq, base.plan) : null, legacy: false, frames: Promise.resolve(), sending: Promise.resolve(), epoch: 0,
-    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0, compacting: false,
+    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0, compacting: false, toldTooLarge: false,
     // heldOut: holds let go with typing, until the room confirms their batch;
     // wasKept: holds kept from before a reload, for the first capture.
     heldOut: new Map(), wasKept: new Map(),
@@ -2943,7 +2951,7 @@ function roomFlush(r) {
       // Over the relay's limit it would close the connection for good. This
       // browser stops following instead (as one with no record of the room:
       // it follows again if the plans agree, or offers to take it), and says so.
-      if (body.length > 512 * 1024) {
+      if (body.length > BODY_LIMIT) {
         r.rep = null;
         r.legacy = true;
         r.holds.clear();
@@ -2971,7 +2979,12 @@ async function roomCompact(r) {
   const epoch = r.epoch;
   try {
     const body = await Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan });
-    if (room === r && r.epoch === epoch && roomLive(r) && r.conn.send({ type: 'snapshot', seq: at, body })) {
+    if (body.length > BODY_LIMIT) {
+      // Too large to keep whole on the relay: the ops stay there instead, and
+      // this is not tried again after every op. Said once.
+      r.snapSeq = Math.max(r.snapSeq, at);
+      if (!r.toldTooLarge) { r.toldTooLarge = true; note('warn', 'The shared plan is too large for its server to keep a whole copy, so it keeps your changes one by one instead. Edits still reach the other manager; pushing a version will not work until the plan is smaller.'); renderKeepingFocus(); }
+    } else if (room === r && r.epoch === epoch && roomLive(r) && r.conn.send({ type: 'snapshot', seq: at, body })) {
       r.acks.push({ kind: 'snapshot' });
       r.snapSeq = Math.max(r.snapSeq, at);
       roomMarkSnapshot(r);
@@ -3392,7 +3405,7 @@ async function roomPush() {
   // (the plan it has confirmed, never one with edits it has not) holds them.
   if (roomLive(r)) {
     roomFlush(r);
-    for (let i = 0; i < 40 && room === r && r.rep.queue.length && r.conn.status === 'connected'; i++) await new Promise((go) => setTimeout(go, 75));
+    for (let i = 0; i < 40 && room === r && r.rep && r.rep.queue.length && r.conn.status === 'connected'; i++) await new Promise((go) => setTimeout(go, 75));
   }
   if (room !== r) return;
   // The snapshot is the room's plan at the seq this browser has applied, and
@@ -3405,6 +3418,8 @@ async function roomPush() {
     Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name, nonce }),
     snapPlan ? Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: snapPlan }) : null,
   ]);
+  // Over the relay's limit, the relay would close the connection for good.
+  if ([body, label, snapshot].some((x) => x && x.length > BODY_LIMIT)) { note('warn', `\u201c${name}\u201d was not pushed: the plan is too large for the shared plan's server. Your plan is unchanged; edits still reach the other manager.`); render(); return; }
   // Sealing takes a moment, in which the room can reconnect (and not be caught
   // up again yet), turn out read-only, or this tab's plan go stale.
   if (room === r && roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
@@ -3720,6 +3735,9 @@ function roomFrozenBackup(now = false) {
   };
   if (now) take(); else frozenTimer = setTimeout(take, 1500);
 }
+// Edits still being gathered when the page goes are not sent from here:
+// sealing is asynchronous and the page is gone before it resolves. They are
+// in the stored plan and base, and go out the next time the page is opened.
 window.addEventListener('pagehide', () => { if (frozenTimer) roomFrozenBackup(true); });
 
 // Another tab of this browser joined or left: this one follows, so a Leave
@@ -3727,7 +3745,10 @@ window.addEventListener('pagehide', () => { if (frozenTimer) roomFrozenBackup(tr
 window.addEventListener('storage', (e) => {
   if (!syncReady() || (e.key !== null && e.key !== 'carcoord:pref:room')) return;
   const secret = Store.pref('room');
-  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); renderKeepingFocus(); } }
+  // Left there: this tab may have written the base again since that tab
+  // forgot it, and a base left behind would be rebuilt into edits on a later
+  // join. Forgotten here too.
+  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); roomBaseForget(); renderKeepingFocus(); } }
   else if (!room || room.secret !== secret) roomStart(secret);
 });
 
