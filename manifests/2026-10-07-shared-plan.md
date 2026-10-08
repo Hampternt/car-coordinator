@@ -31,6 +31,7 @@ These come from the repo's standing rule that an update never loses a user's dat
 - **Joining is a migration, offered, never forced.** Ids are random per PC, so joining means one side's ids win. The room's creator seeds it from their plan. A joiner chooses **Take the shared plan**, sees a preview of what changes (reusing `share.js`'s name-matching preview), and their own plan goes to Backups first. Templates, crews and cars that exist only on the joiner's PC are named in the preview as staying in that Backup.
 - **Version skew is read-only, not lossy.** Every snapshot, version and change carries the schema version. A client older than the room's shows "Update the app to edit the shared plan" and never writes, so an older `normalise()` can never drop fields for both people.
 - **Offline keeps working.** If the relay is unreachable the app works locally and says so; it never blocks editing.
+- **Quiet by default** (owner, 2026-10-08: data safety without disruptive or annoying interruptions). Being offline, reconnecting, catching up, a collision and a read-only room show as the status pill and small marks, never as a dialog. A dialog appears only before something replaces the whole plan, and that is the dialog such an action already has, with one more line, never a second step. Every replacement still goes to Backups first, and nothing is dropped without a mark saying so.
 - **Never synced:** per-browser preferences, Backups, Archives, the save-file link, and anything Breadify.
 
 ## Packs, in order
@@ -188,13 +189,14 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 - [ ] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
 - [ ] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
 - [ ] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
-- [ ] **Replace-everything in a room asks first:** Import, Restore from Backups, Load a share code and Restore a version say "This changes the shared plan for both of you" before going ahead (each still Backups first). *Done when:* sync-ui covers each one, and Cancel sends nothing.
+- [ ] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
+- [ ] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
 - [ ] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
 - [ ] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
 
-**Decisions for the owner before building:**
-- **Replace-everything:** in a room, Import, Restore from Backups, a share code and Restore a version change the plan for both of you, after asking (recommended). The alternative is to leave the room first.
-- **Collision rule:** the last change to reach the server wins, flagged on both screens with the losing value (recommended), or the first one wins.
+**Decided under "Quiet by default"** (owner, 2026-10-08):
+- **Replace-everything** (Import, Restore from Backups, a share code, Restore a version) changes the plan for both of you. The confirm each already has gains the line "This changes the shared plan for both of you"; there is no extra dialog.
+- **Collisions:** the last change to reach the server wins. It shows as a small mark on the field plus a line in the Shared plan card holding the losing value, with no popup.
 
 **Test it yourself (round 2), outline:** two windows in the room; type in both at once; stop the relay, edit, restart; edit the same driver in both within a second and read the flag.
 
