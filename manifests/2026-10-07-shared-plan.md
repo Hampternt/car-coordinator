@@ -158,7 +158,7 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 ## Round 2: Live updates (pack 3)
 
-**Status:** 🚧 building: the owner said go on 2026-10-08. Runs on `claude/car-coordinator-encryption-c717c5` after merging `dev` (148b443).
+**Status:** 🚧 built, reviewed, fixed and tested against the owner's server as 0.16.0; handed over for the owner's Test it yourself. Not merged into `dev`.
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules, `relay/PROTOCOL.md` (§4.3 snapshot rule, op frames), `docs/sync.js`, the Shared plan code in `docs/app.js` (roomPush, roomFrame, catchup, read-only, `planElsewhere`), `save()` at `docs/app.js:366`, the `input` handler at `docs/app.js:2268`, `scripts/sync-ui.mjs` and `scripts/sync-fakerelay.mjs`. Depends on: round 1 merged into `dev`.
 **Runs serial:** one unit, and every item writes `docs/app.js`.
@@ -203,24 +203,33 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 </details>
 
 **Items** (one commit each, item gate `check.sh` + `sync.mjs` + `sync-ui.mjs`; the full suite once at the end):
-- [ ] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
-- [ ] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
-- [ ] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
-- [ ] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
-- [ ] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
-- [ ] **Remote changes never disturb you:** patch only the rows and cards that changed; keep focus, caret, selection, scroll, open picker, menus and armed buttons; flag open dialogs gone stale. *Done when:* `sync-ui` types continuously in one browser while the other edits the same route, a neighbouring route and the order, and the typing browser loses no keystroke, caret or open menu.
-- [ ] **Removed while you edit:** an edit to a route the other removed is kept in a mark with "Put it back". *Done when:* `sync-ui` covers remove-while-typing in both orders.
-- [ ] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
-- [ ] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
-- [ ] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
-- [ ] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
-- [ ] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
+- [x] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
+- [x] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
+- [x] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
+- [x] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
+- [x] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
+- [x] **Remote changes never disturb you:** patch only the rows and cards that changed; keep focus, caret, selection, scroll, open picker, menus and armed buttons; flag open dialogs gone stale. *Done when:* `sync-ui` types continuously in one browser while the other edits the same route, a neighbouring route and the order, and the typing browser loses no keystroke, caret or open menu.
+- [x] **Removed while you edit:** an edit to a route the other removed is kept in a mark with "Put it back". *Done when:* `sync-ui` covers remove-while-typing in both orders.
+- [x] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
+- [x] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
+- [x] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
+- [x] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
+- [x] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
 
 **Decided under "Quiet by default"** (owner, 2026-10-08):
 - **Replace-everything** (Import, Restore from Backups, a share code, Restore a version) changes the plan for both of you. The confirm each already has gains the line "This changes the shared plan for both of you"; there is no extra dialog.
 - **Collisions:** the last change to reach the server wins. It shows as a small mark on the field plus a line in the Shared plan card holding the losing value, with no popup.
 
 **Test it yourself (round 2), outline:** two windows in the room; type in both at once; stop the relay, edit, restart; edit the same driver in both within a second and read the flag.
+
+**Test it yourself (round 2):** two windows on `http://localhost:5173` in one shared plan (the owner's server, or the `carsync-relay-dev` launch config with create code `dev`). Check that:
+- a driver typed in one appears in the other within a second;
+- edits to different routes at once are both kept;
+- when you type in route 4's driver while the other changes it, your box isn't rewritten, and when you leave it your text is on both screens with the same flag on both Data cards and Put it back;
+- when the other deletes a route you're typing in, the route goes on both and Put it back returns it with your edit;
+- with the relay stopped, edits are kept, and when it's back both reconnect and end identical, with the shared field flagged;
+- a second tab of the same window follows quietly, with no dialog;
+- each replace-everything action (a share code, Backups' Restore, a version's Restore, Import, Open an existing file) carries the line "This changes the shared plan for both of you".
 
 ## Round 3: Who is editing (pack 4)
 
@@ -238,6 +247,26 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-09: **round 2 built and handed over as 0.16.0.** Ledgers: `manifests/archive/2026-10-08-shared-plan-round2*.ledger.md`.
+  - **Build** (8a3cbef…7ff16fc, 77 min for 12 items): `sync.mjs` 159 ok, `sync-ui.mjs` 348 ok, full `npm test` and `screens` green.
+  - **Targeted review** (concurrency + live data, on 7ff16fc) found three blocking problems:
+    - reopening resent stale edits;
+    - an edit to a removed item was lost without a mark;
+    - a tab that had stopped saving could lose edits.
+
+    It also found five lower ones. A test on the owner's server added two more: a held box did not win when left, and the flag was missing on the holding side.
+  - **Fixes** (ad9fad0…5472d0a): all ten had a test that failed first. Nine are fixed; the pagehide flush was not possible because WebCrypto finishes after the page has gone, so a guarantee test covers it instead. Decisions:
+    - a tab that has stopped saving keeps following and sending, with one Backups copy updated in place;
+    - a box you typed in wins when you leave it;
+    - after every snapshot a no-change op follows, so a 0.15.0 copy stays read-only.
+  - **Gates:**
+    - `npm test` exit 0 (`sync` 163 ok, `sync-ui` 410 ok, the 0.15.0 sections from git; smoke and breadify green); `screens` clean.
+    - `npm run upgrade` on a frozen 5472d0a: `upgrade check passed: 0.14.1 to 0.16.0`.
+    - Relay `cargo test` 48/48 (relay unchanged).
+  - **Against the owner's server** (two Playwright browsers plus the owner's window 1): 13/13 on the final run.
+    - A typed driver reached the other browser in 353 ms; the reconnect took 1.3 s.
+    - In one run just before that, the collision flag read empty on one screen. It did not reproduce in 13 tries since (both orders of arrival); it is noted as a possible timing flake in reading.
+  - CI fetches full history so the 0.15.0 test runs there (1a02443).
 - 2026-10-08: **tested against the real server** from a local copy (the owner typed the create code; Claude drove the rest, with window 2 as a separate Playwright profile):
   - **Create:** Connected through `wss://portfolio.dblo.net/carsync`.
   - **Join:** the invite is cleared from the address bar, and the offer names 15 routes. Take brought window 1's drivers across, with the old plan in Backups.
