@@ -18,7 +18,8 @@
    one version's label with another's body. Each push puts the same name and
    a fresh random nonce in both, and the app refuses a body whose name or
    nonce is not its label's ("This version does not match its name").
-     op                  pack 3
+     op                  {schema, oid, changes}  one batch of edits; see
+                         "changes" below for what `changes` holds
      presence            pack 4
 
    The secret is kept per browser under carcoord:pref:room (Store.pref('room')),
@@ -346,9 +347,330 @@ const Sync = (() => {
     };
   }
 
+  /* ---------- changes: what an edit is, on the wire ----------
+     Live edits travel as small changes worked out by comparing two plans, so
+     no edit site in the app has to remember to send anything. An op's
+     plaintext is {schema, oid, changes}; `oid` is a random id the sender
+     knows its own op by when it comes back in a catchup. `changes` is a list,
+     applied in order:
+       {op:'set', kind, id, field, value, was}  one field of one item. kind
+                       'meta' (and no id) is a top-level field, such as the
+                       date. `del: true` in place of value: the field is gone.
+       {op:'add', kind, item, after}             after: the id it follows,
+                       null for the top of the list
+       {op:'remove', kind, id, was}              was: the item as its sender
+                       last saw it
+       {op:'order', kind, ids}                   the list's order
+     kind names one of the plan's lists (LISTS). `was` is what the sender saw
+     before its change, so a browser applying it can tell when it overwrites
+     something its sender never saw: a collision, and every browser applying
+     the same ops in the relay's order finds the same ones.
+
+     A list with an item lacking a string id, or two items sharing one, cannot
+     be told apart item by item; it travels whole, as a meta set. A template's
+     routes and a day group's drivers are single fields, set whole. */
+  const LISTS = Object.freeze({
+    route: 'routes', car: 'cars', position: 'positions', label: 'labels',
+    driver: 'drivers', driverTag: 'driverTags', driverGroup: 'driverGroups', template: 'templates',
+  });
+  const KIND_OF = Object.freeze(Object.fromEntries(Object.entries(LISTS).map(([k, v]) => [v, k])));
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // Plans are JSON, so a JSON copy is a whole copy.
+  const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  // Equal as data: objects in any key order, arrays in theirs. A missing field
+  // and an undefined one are the same thing, as JSON has it.
+  function equal(a, b) {
+    if (a === b) return true;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((x, i) => equal(x, b[i]));
+    if (isObj(a) && isObj(b)) {
+      const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+      const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+      return ka.length === kb.length && ka.every((k) => own(b, k) && equal(a[k], b[k]));
+    }
+    return false;
+  }
+  // A field name a change may carry: never one that would reach a prototype.
+  const FIELD = (f) => typeof f === 'string' && f !== '' && f !== '__proto__' && f !== 'constructor' && f !== 'prototype';
+  const byIdable = (list) => {
+    if (!Array.isArray(list)) return false;
+    const seen = new Set();
+    for (const x of list) {
+      if (!isObj(x) || typeof x.id !== 'string' || !x.id || seen.has(x.id)) return false;
+      seen.add(x.id);
+    }
+    return true;
+  };
+  const fieldKey = (kind, id, field) => `${kind}\u0000${kind === 'meta' ? '' : id}\u0000${field}`;
+
+  // diff(prev, next) -> changes, so that applyAll(prev, changes) is next.
+  // Removes first, then adds in the new order (each after the one before it),
+  // then the order if the items both hold were moved, then the fields.
+  function diff(prev, next) {
+    const out = [];
+    const keys = [...Object.keys(next || {}), ...Object.keys(prev || {}).filter((k) => !own(next || {}, k))];
+    for (const key of keys) {
+      const a = prev ? prev[key] : undefined;
+      const b = next ? next[key] : undefined;
+      const kind = own(KIND_OF, key) ? KIND_OF[key] : null;
+      if (kind && byIdable(a) && byIdable(b)) listDiff(kind, a, b, out);
+      else if (!equal(a, b) && FIELD(key)) out.push(setChange('meta', null, key, a, b, next || {}));
+    }
+    return out;
+  }
+  function setChange(kind, id, field, a, b, holder) {
+    const c = kind === 'meta' ? { op: 'set', kind, field } : { op: 'set', kind, id, field };
+    if (own(holder, field) && b !== undefined) c.value = clone(b); else c.del = true;
+    if (a !== undefined) c.was = clone(a);
+    return c;
+  }
+  function listDiff(kind, a, b, out) {
+    const inA = new Map(a.map((x) => [x.id, x]));
+    const inB = new Map(b.map((x) => [x.id, x]));
+    for (const x of a) if (!inB.has(x.id)) out.push({ op: 'remove', kind, id: x.id, was: clone(x) });
+    let after = null;
+    for (const x of b) {
+      if (!inA.has(x.id)) out.push({ op: 'add', kind, item: clone(x), after });
+      after = x.id;
+    }
+    const keptA = a.filter((x) => inB.has(x.id)).map((x) => x.id);
+    const keptB = b.filter((x) => inA.has(x.id)).map((x) => x.id);
+    if (keptA.some((id, i) => id !== keptB[i])) out.push({ op: 'order', kind, ids: b.map((x) => x.id) });
+    for (const x of b) {
+      const y = inA.get(x.id);
+      if (!y) continue;
+      const fields = [...Object.keys(x), ...Object.keys(y).filter((k) => !own(x, k))];
+      for (const f of fields) if (f !== 'id' && FIELD(f) && !equal(y[f], x[f])) out.push(setChange(kind, x.id, f, y[f], x[f], x));
+    }
+  }
+
+  // check(change): throws a TypeError unless this build knows how to apply it.
+  // An op holding one it does not know was written by a newer build.
+  function check(c) {
+    if (!isObj(c)) throw new TypeError('Sync: a change is an object');
+    const list = c.kind === 'meta' ? null : own(LISTS, c.kind) ? LISTS[c.kind] : undefined;
+    if (list === undefined) throw new TypeError(`Sync: unknown kind ${JSON.stringify(c.kind)}`);
+    const idOk = typeof c.id === 'string' && c.id !== '';
+    switch (c.op) {
+      case 'set':
+        if (!FIELD(c.field) || (list && (c.field === 'id' || !idOk)) || (!c.del && !own(c, 'value'))) throw new TypeError('Sync: a malformed set');
+        return;
+      case 'add':
+        if (!list || !isObj(c.item) || typeof c.item.id !== 'string' || !c.item.id || !(c.after === null || typeof c.after === 'string')) throw new TypeError('Sync: a malformed add');
+        return;
+      case 'remove':
+        if (!list || !idOk) throw new TypeError('Sync: a malformed remove');
+        return;
+      case 'order':
+        if (!list || !Array.isArray(c.ids) || !c.ids.every((x) => typeof x === 'string')) throw new TypeError('Sync: a malformed order');
+        return;
+      default:
+        throw new TypeError(`Sync: unknown change ${JSON.stringify(c.op)}`);
+    }
+  }
+
+  // apply(plan, change) -> plan. Never changes its input. Safe to apply twice:
+  // an add whose id is there already, a remove or set of one that is gone,
+  // and an order naming ids that are gone all leave the plan as it is (or as
+  // the first time), because a catchup can repeat what arrived live.
+  function apply(plan, c) {
+    check(c);
+    if (c.kind === 'meta') {
+      const next = { ...plan };
+      if (c.del) delete next[c.field]; else next[c.field] = clone(c.value);
+      return next;
+    }
+    const key = LISTS[c.kind];
+    const list = plan[key];
+    if (!Array.isArray(list)) return plan;
+    const at = (id) => list.findIndex((x) => isObj(x) && x.id === id);
+    let out;
+    switch (c.op) {
+      case 'set': {
+        const i = at(c.id);
+        if (i < 0) return plan;
+        const item = { ...list[i] };
+        if (c.del) delete item[c.field]; else item[c.field] = clone(c.value);
+        out = list.slice();
+        out[i] = item;
+        break;
+      }
+      case 'add': {
+        if (at(c.item.id) >= 0) return plan;
+        // After the item it followed; at the end when that one is gone.
+        const i = c.after === null ? 0 : at(c.after) + 1 || list.length;
+        out = list.slice();
+        out.splice(i, 0, clone(c.item));
+        break;
+      }
+      case 'remove': {
+        const i = at(c.id);
+        if (i < 0) return plan;
+        out = list.slice();
+        out.splice(i, 1);
+        break;
+      }
+      case 'order': {
+        // The ids named, in that order; one not named (added meanwhile by the
+        // other browser) stays after the item it followed.
+        const named = new Set();
+        out = [];
+        for (const id of c.ids) {
+          const i = at(id);
+          if (i >= 0 && !named.has(id)) { named.add(id); out.push(list[i]); }
+        }
+        list.forEach((x, i) => {
+          if (isObj(x) && named.has(x.id)) return;
+          const before = i > 0 ? out.indexOf(list[i - 1]) : -1;
+          out.splice(before + 1, 0, x);
+        });
+        break;
+      }
+      default:
+        return plan;
+    }
+    return { ...plan, [key]: out };
+  }
+  const applyAll = (plan, changes) => changes.reduce(apply, plan);
+
+  // collision(plan, change) -> null | what applying `change` to `plan` would
+  // overwrite that its sender had not seen:
+  //   {type:'set', kind, id, field, kept, lost}  a field both changed
+  //   {type:'removed', kind, id, item, after}     an item removed with changes
+  //                                               its remover never saw
+  //   {type:'gone', kind, id, field, value}       a field set on an item that
+  //                                               was removed before it arrived
+  function collision(plan, c) {
+    if (c.op === 'set') {
+      let holder = plan;
+      if (c.kind !== 'meta') {
+        const list = plan[LISTS[c.kind]];
+        holder = Array.isArray(list) ? list.find((x) => isObj(x) && x.id === c.id) : null;
+        if (!holder) return { type: 'gone', kind: c.kind, id: c.id, field: c.field, value: c.del ? undefined : clone(c.value) };
+      }
+      const now = holder[c.field];
+      const value = c.del ? undefined : c.value;
+      if (equal(now, c.was) || equal(now, value)) return null;
+      return { type: 'set', kind: c.kind, id: c.kind === 'meta' ? null : c.id, field: c.field, kept: clone(value), lost: clone(now) };
+    }
+    if (c.op === 'remove' && own(c, 'was')) {
+      const list = plan[LISTS[c.kind]];
+      const i = Array.isArray(list) ? list.findIndex((x) => isObj(x) && x.id === c.id) : -1;
+      if (i < 0 || equal(list[i], c.was)) return null;
+      return { type: 'removed', kind: c.kind, id: c.id, item: clone(list[i]), after: i > 0 && isObj(list[i - 1]) ? list[i - 1].id : null };
+    }
+    return null;
+  }
+
+  /* ---------- a replica: one browser's view of the room ----------
+     confirmed  the plan after every op the relay has sequenced, up to `seq`
+     queue      this browser's own batches the relay has not sequenced yet,
+                oldest first: {oid, changes, sent}
+     shadow     confirmed with the queue on top: the plan this browser has
+                said it holds
+
+     capture(screen) turns what the screen holds beyond the shadow into a
+     batch. take() and drain() fold sequenced ops (anyone's, this browser's
+     own included) into confirmed strictly in seq order, waiting at a gap;
+     the queue is replayed on top, so a browser's own unsequenced edits stay
+     on its screen, and once every batch is sequenced every replica holds
+     the same plan. drain() returns the collisions it met, the same on every
+     replica that applied the same ops. Nothing here touches the network. */
+  const newOid = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
+  function replica(seq, plan) {
+    const R = {
+      seq,
+      confirmed: clone(plan),
+      shadow: clone(plan),
+      queue: [],
+      inbox: new Map(),
+      // `${kind}\u0000${id}` -> {item, after}: what removes took away, so an
+      // edit arriving for one afterwards can be offered back with the item.
+      graveyard: new Map(),
+      // capture(screen, {skip, was}) -> batch | null
+      //   skip(change): leave it out, on the screen only, for now (a field
+      //   being typed in); was: Map fieldKey -> the value its `was` says.
+      capture(screen, opts = {}) {
+        let changes = diff(R.shadow, screen);
+        if (opts.skip) changes = changes.filter((c) => !opts.skip(c));
+        if (!changes.length) return null;
+        if (opts.was) {
+          for (const c of changes) {
+            const k = c.op === 'set' ? fieldKey(c.kind, c.id, c.field) : null;
+            if (k && opts.was.has(k)) { const w = opts.was.get(k); if (w === undefined) delete c.was; else c.was = clone(w); }
+          }
+        }
+        R.shadow = applyAll(R.shadow, changes);
+        const batch = { oid: newOid(), changes, sent: false };
+        R.queue.push(batch);
+        return batch;
+      },
+      // A sequenced op: anyone's, held until every seq before it is here.
+      take(at, changes, oid = null) {
+        if (!Number.isInteger(at) || at <= R.seq) return;
+        R.inbox.set(at, { changes, oid });
+      },
+      // -> {applied, flags}; throws (applying nothing of that op) when an op
+      // holds a change this build does not know.
+      drain() {
+        let applied = 0;
+        const flags = [];
+        while (R.inbox.has(R.seq + 1)) {
+          const { changes, oid } = R.inbox.get(R.seq + 1);
+          if (!Array.isArray(changes)) throw new TypeError('Sync: an op without changes');
+          changes.forEach(check);
+          R.inbox.delete(R.seq + 1);
+          for (const c of changes) {
+            const hit = collision(R.confirmed, c);
+            if (hit && hit.type === 'gone') {
+              const k = `${c.kind}\u0000${c.id}`;
+              const dead = R.graveyard.get(k);
+              if (dead) {
+                const item = { ...dead.item };
+                if (c.del) delete item[c.field]; else item[c.field] = clone(c.value);
+                dead.item = item;
+                flags.push({ type: 'removed', kind: c.kind, id: c.id, item: clone(item), after: dead.after, field: c.field });
+              }
+            } else if (hit) flags.push(hit);
+            if (c.op === 'remove') {
+              const list = R.confirmed[LISTS[c.kind]];
+              const i = Array.isArray(list) ? list.findIndex((x) => isObj(x) && x.id === c.id) : -1;
+              if (i >= 0) {
+                R.graveyard.set(`${c.kind}\u0000${c.id}`, { item: clone(list[i]), after: i > 0 && isObj(list[i - 1]) ? list[i - 1].id : null });
+                if (R.graveyard.size > 100) R.graveyard.delete(R.graveyard.keys().next().value);
+              }
+            }
+            R.confirmed = apply(R.confirmed, c);
+          }
+          R.seq++;
+          applied++;
+          if (oid) R.queue = R.queue.filter((b) => b.oid !== oid);
+        }
+        for (const k of [...R.inbox.keys()]) if (k <= R.seq) R.inbox.delete(k);
+        if (applied) R.replay();
+        return { applied, flags };
+      },
+      // A snapshot past what this browser has applied: start again from it.
+      // The queue stays, to be replayed and sent.
+      reset(at, plan) {
+        R.seq = at;
+        R.confirmed = clone(plan);
+        for (const k of [...R.inbox.keys()]) if (k <= at) R.inbox.delete(k);
+        R.replay();
+      },
+      replay() { R.shadow = applyAll(R.confirmed, R.queue.flatMap((b) => b.changes)); },
+      // The connection dropped: whether the relay stored what was sent is
+      // unknown until the catchup, so all of it counts as unsent again.
+      lost() { for (const b of R.queue) b.sent = false; },
+      unsent() { return R.queue.filter((b) => !b.sent); },
+    };
+    return R;
+  }
+
   return {
     RELAY, RELAY_PREF, ROOM_PREF, KINDS, INFO, CLOSE,
     relayUrl, roomUrl, newSecret, deriveKeys, seal, open, inviteLink, readInvite, connect,
     joinPreview,
+    LISTS, equal, diff, apply, applyAll, collision, check, replica, fieldKey,
   };
 })();
