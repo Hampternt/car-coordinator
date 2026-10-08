@@ -1197,6 +1197,28 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   }
 }
 
+// A relay restored from an older copy: its seqs are behind this browser's.
+// It never sends on top of numbers that now mean something else; it starts
+// over, and with its plan differing from the room's, offers to take it.
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  await routeBox(a.page, 0, 'driver').fill('Lost In Restore');
+  await until(() => ops().length === 1);
+  await a.page.waitForFunction(() => room.rep.seq === 1, null, { timeout: 3000 });
+  relay.makeRoom(k.roomId, k.token, { snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan: created.plan }) } });
+  relay.down();
+  await pillSays(a.page, 'Offline');
+  relay.up();
+  check('a room behind this browser: Not live, offering to take it', await pillSays(a.page, 'Not live', 10000), await pill(a.page).textContent().catch(() => 'no pill'));
+  await routeBox(a.page, 1, 'driver').fill('Not Over Old Seqs');
+  await wait(800);
+  same('and nothing is sent to it', ops().length, 0);
+  same('the plan here is kept as it was', await a.page.evaluate(() => state.routes[0].driver), 'Lost In Restore');
+  same('restored relay: no console errors', a.errors, []);
+  await a.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {

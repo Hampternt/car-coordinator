@@ -2784,6 +2784,11 @@ async function roomFrame(r, f) {
    otherwise send every difference as an edit and write over the other
    manager's plan, so it waits to take the shared plan again. */
 function roomCatchUp(r, f, snap, ops) {
+  // The room is behind what this browser applied (its server restored from
+  // an older copy, say): its seqs mean other things now. Start over as a
+  // browser with no record of it: follow it if the plans agree, else offer
+  // to take it.
+  if (r.rep && Number.isInteger(f.seq) && f.seq < r.rep.seq) { r.rep = null; r.holds.clear(); roomBaseForget(); }
   if (!r.rep) {
     const now = roomPlanOf(f, snap, ops);
     if (!now) { r.ahead = !!(snap && snap.plan) || opsAhead(f); return; }
