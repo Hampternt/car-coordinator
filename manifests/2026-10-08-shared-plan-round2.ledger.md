@@ -63,3 +63,10 @@ passed (about 44 s for the three).
 - Item 11: any browser following live, caught up and connected sends the snapshot once 200 ops have passed the room's snapshot as it last heard it: its confirmed plan at the seq it has applied. Two browsers may send one at the same seq; they hold the same plan, and the relay keeps either. Push sends one too (item 2-4 commit). The test skips the 300 ms gathering to make 250 ops at once; the app itself sends at most about three ops a second per browser, well inside the relay's 30 a second.
 - Item 4, follow-up commit (test only): the copy shipped as 0.15.0 (b26529f, served from `git archive` into a temp dir) in a room holding a live op from this build: pill Update the app, Push disabled and sending nothing when forced, the op still in the room, and a 0.15.0 joiner offered the room gets Update the app to join it with no Take. sync-ui 330 ok / 0 FAIL (7 new). In a clone without that commit (CI's shallow checkout) the section prints a `skip` line instead of failing; `fetch-depth: 0` on the test job's checkout would make it run in CI too (not changed here: flag for the main session).
 - Fix after item 11: a relay restored from an older copy answers a catchup with a seq below what this browser applied. Its seqs now mean other ops, so building on them would skip the room's new ops and never see this browser's own confirmed. The browser drops its base and starts over as one with no record of the room (follow if the plans agree, else Not live with Take). sync-ui 334 ok / 0 FAIL (4 new).
+
+## Final gates (on b3f9e19)
+
+- `npm test` exit 0 (9.5 min): `VERSIONS OK`, `map checks passed`, `sync checks passed` (159 ok), `sync-ui checks passed` (334 ok, the 0.15.0 section ran from git), smoke `all checks passed` (3 groups skipped for the stored file handle, as before), breadify `all passed`.
+- `npm run screens` exit 0: `no console errors, 4 warnings raised and asserted`.
+- Not run here: `npm run upgrade` from an older checkout, the relay's `cargo test` (relay/ untouched), and the browser smoke check (main session's).
+- Measured: fd1f914 to b3f9e19, 15 commits over 77 min (`wave-times.sh 2026-10-08T09:00`).
