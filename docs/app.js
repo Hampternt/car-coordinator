@@ -368,8 +368,10 @@ const save = () => {
   // this one's is stale until reloaded, and writing it would undo that change.
   if (planElsewhere) return;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
-  Store.save(state);
-  // In a shared plan, the change goes to the room too (roomEdited, there).
+  const kept = Store.save(state);
+  // In a shared plan, the change goes to the room too, and the room's plan as
+  // confirmed is kept beside it (roomEdited and roomBaseWrite, there).
+  if (kept !== false) roomBaseWrite(room);
   roomEdited();
 };
 const isKeep = (n) => !!(n.offer && n.offer.act === 'keep-date');
@@ -2572,8 +2574,36 @@ const opSchema = (plain) => (plain && Number.isInteger(plain.schema) ? plain.sch
 const versionNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.nonce : null);
 
+/* The room's plan as this browser last had it confirmed, kept beside the plan
+   so that edits made offline, or before a reload, are worked out against it
+   and sent later: carcoord:roomBase, {room, seq, plan}. Never in carcoord:v1,
+   so Backups, Export, Archives and the save file never hold it. Written only
+   just after the plan itself (save(), roomShow()), or when what it adds is
+   already in the plan (an ack), so the two always belong together: a base
+   ahead of the plan would read as edits undoing the room's. Every tab of
+   the room holds the same plan at the same seq, so one already written at
+   this seq is not written again. */
+const BASE_KEY = 'carcoord:roomBase';
+function roomBaseWrite(r) {
+  if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r)) return;
+  const head = `{"room":${JSON.stringify(r.keys.roomId)},"seq":${r.rep.seq},`;
+  try {
+    const now = localStorage.getItem(BASE_KEY);
+    if (now && now.startsWith(head)) return;
+    localStorage.setItem(BASE_KEY, `${head}"plan":${JSON.stringify(r.rep.confirmed)}}`);
+  } catch (e) { console.warn('shared plan: its base could not be kept', e); }
+}
+function roomBaseRead(roomId) {
+  try {
+    const b = JSON.parse(localStorage.getItem(BASE_KEY));
+    if (b && b.room === roomId && Number.isInteger(b.seq) && b.seq >= 0 && b.plan && typeof b.plan === 'object' && !Array.isArray(b.plan)) return { seq: b.seq, plan: b.plan };
+  } catch { /* none kept, or unreadable: none */ }
+  return null;
+}
+const roomBaseForget = () => { try { localStorage.removeItem(BASE_KEY); } catch { /* storage refused: nothing kept anyway */ } };
+
 // base: {seq, plan}, the room's plan as this browser last had it confirmed,
-// when it has one (from Create, Take, or kept from before).
+// when it has one (from Create or Take); otherwise the one kept, if any.
 async function roomStart(secret, base = null) {
   roomStop();
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
@@ -2600,6 +2630,8 @@ async function roomStart(secret, base = null) {
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
+  if (r.rep) roomBaseWrite(r);
+  else { const kept = roomBaseRead(r.keys.roomId); if (kept) r.rep = Sync.replica(kept.seq, kept.plan); }
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
     // Catch up on every (re)connect: the version list, the room's schema, and
@@ -2750,7 +2782,7 @@ function roomCatchUp(r, f, snap, ops) {
     const { state: theirs } = Store.parseImport(JSON.stringify(now.confirmed), defaults);
     const text = theirs ? JSON.stringify(theirs) : null;
     const same = text === JSON.stringify(state) || (dateMove && state === dateMove.plan && !dateMove.saved && text === JSON.stringify({ ...state, date: dateMove.from }));
-    if (same) { r.rep = Sync.replica(now.seq, now.confirmed); r.legacy = false; } else r.legacy = true;
+    if (same) { r.rep = Sync.replica(now.seq, now.confirmed); r.legacy = false; roomBaseWrite(r); } else r.legacy = true;
     return;
   }
   const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
@@ -2856,7 +2888,8 @@ function roomApply(r, mutate) {
   }
   if (!r.rep.queue.length) r.waitingSince = null;
   roomFlags(r, res.flags);
-  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
+  // Only this browser's own edits confirmed: the screen already has them.
+  if (r.rep.shadow === before) { if (res.applied) roomBaseWrite(r); if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
   let next = Sync.applyAll(r.rep.shadow, local);
   next = roomHold(r, next);
   roomShow(r, next);
@@ -2930,7 +2963,7 @@ function roomPatch(next) {
 function roomShow(r, next) {
   if (!roomPatch(next)) { renderRoom(); return; }
   // Saved as any edit is, but not sent back: it came from the room.
-  Store.save(state);
+  if (Store.save(state) !== false) roomBaseWrite(r);
   r.tick++;
   roomRedraw(r);
 }
@@ -3078,7 +3111,7 @@ async function roomPush() {
   if (snapshot && r.conn.send({ type: 'snapshot', seq: snapAt, body: snapshot })) {
     r.acks.push({ kind: 'snapshot' });
     // A room that had no plan has this one now, and this browser follows it.
-    if (!r.rep) r.rep = Sync.replica(snapAt, snapPlan);
+    if (!r.rep) { r.rep = Sync.replica(snapAt, snapPlan); roomBaseWrite(r); }
   }
   if (box) box.value = '';
 }
@@ -3458,6 +3491,7 @@ async function roomAction(act, b, fromKeyboard = false) {
     case 'room-leave': {
       if (!room || !confirmTwice('room-leave', fromKeyboard)) return;
       roomStop();
+      roomBaseForget();
       if (Store.setPref('room', null)) note('info', 'Left the shared plan. Your plan stays on this PC as it is. The invite link would open the shared plan again.');
       else note('warn', 'Left the shared plan for now, but this browser would not forget its link, so it may join again when the page is next opened.');
       render();

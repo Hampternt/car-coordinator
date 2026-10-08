@@ -659,6 +659,65 @@ const live = async (seed, secret) => {
   for (const x of [a, b, j]) await x.context.close();
 }
 
+// Offline and reload: the room's plan as confirmed is kept beside the plan,
+// so an edit made with the relay down survives a reload and still goes out,
+// and a field both changed meanwhile is flagged on both screens.
+const flagsOf = (pg) => pg.evaluate(() => (room ? room.flags.map((f) => ({ type: f.type, kind: f.kind, id: f.id, field: f.field, kept: f.kept, lost: f.lost })) : []));
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  const base = JSON.parse(await a.page.evaluate(() => localStorage.getItem('carcoord:roomBase')));
+  check('the room\'s plan is kept under carcoord:roomBase, for this room, at its seq', base && base.room === k.roomId && base.seq === 0 && JSON.stringify(base.plan) === JSON.stringify(created.plan));
+  const others = await elsewhere(a.page);
+  check('and is in no other key: not the plan, not Backups', !others.replace(/carcoord:roomBase=.*/, '').includes(k.roomId) && !JSON.parse(await planOf(a.page)).room);
+
+  relay.down();
+  await pillSays(a.page, 'Offline');
+  await pillSays(b.page, 'Offline');
+  await routeBox(a.page, 1, 'driver').fill('Offline Ola');
+  await routeBox(a.page, 2, 'driver').fill('From A');
+  await routeBox(b.page, 2, 'driver').fill('From B');
+  await routeBox(b.page, 4, 'round').fill('7');
+  await wait(600);
+  same('offline, nothing reaches the relay', ops().length, 0);
+  await a.page.reload({ waitUntil: 'networkidle' });
+  check('after a reload the offline edit is still on screen', (await routeBox(a.page, 1, 'driver').inputValue()) === 'Offline Ola');
+  check('and the base it was made on is still kept', await a.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:roomBase')).seq) === 0);
+  relay.up();
+  check('back: both Connected', await pillSays(a.page, 'Connected', 10000) && await pillSays(b.page, 'Connected', 10000));
+  check('the edit made offline, then reloaded, reaches the other browser', await b.page.waitForFunction(() => state.routes[1].driver === 'Offline Ola', null, { timeout: 5000 }).then(() => true, () => false));
+  check('and the other\'s offline edit reaches it', await a.page.waitForFunction(() => state.routes[4].round === '7', null, { timeout: 5000 }).then(() => true, () => false));
+  check('both end on one plan', await converged(a.page, b.page));
+  const kept = JSON.parse(await planOf(a.page)).routes[2].driver;
+  const lost = kept === 'From A' ? 'From B' : 'From A';
+  const fa = await flagsOf(a.page);
+  const fb = await flagsOf(b.page);
+  same('a field both changed offline is flagged, the same on both screens', [fa, fb], [[{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept, lost }], [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept, lost }]]);
+  check('the base moved on with the room', await a.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:roomBase')).seq) === ops().at(-1).seq);
+
+  // A browser opening with its kept base, whose catchup is held while an op
+  // comes live: the op is read in its turn, after the catchup.
+  const stored = await a.page.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), base: localStorage.getItem('carcoord:roomBase') }));
+  await routeBox(a.page, 0, 'driver').fill('Before C');
+  await converged(a.page, b.page);
+  relay.holdCatchup();
+  const c = await profile({ items: inRoom({ ...SEED, 'carcoord:v1': stored.plan, 'carcoord:roomBase': stored.base }, secret) });
+  await pillSays(c.page, 'Connected');
+  await routeBox(a.page, 3, 'driver').fill('While Held');
+  await wait(600);
+  relay.releaseCatchup();
+  check('a browser with a kept base follows live from it, catching up on what it missed', await c.page.waitForFunction(() => state.routes[0].driver === 'Before C' && state.routes[3].driver === 'While Held' && roomLive(), null, { timeout: 5000 }).then(() => true, () => false));
+  check('three browsers end on one plan', await converged(a.page, c.page) && await converged(b.page, c.page));
+
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.click('[data-act="room-leave"]');
+  await b.page.click('[data-act="room-leave"]');
+  same('Leave forgets the kept base too', await b.page.evaluate(() => localStorage.getItem('carcoord:roomBase')), null);
+  same('offline and reload: no console errors', [...a.errors, ...b.errors, ...c.errors], []);
+  for (const x of [a, b, c]) await x.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {

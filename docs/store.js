@@ -792,7 +792,8 @@ const Store = (() => {
   return {
     SCHEMA, readyTags, weekdayTemplates, weekdayOf, init, recoverFromFile, checkFileAtStart, hasUsableLocalData, savedText, loadTrouble,
     pref, setPref,
-    save(state) { writeLocal(state); queueFileWrite(state); },
+    // Returns whether this browser took it, as writeLocal says.
+    save(state) { const ok = writeLocal(state); queueFileWrite(state); return ok; },
     // This browser only, leaving the file as it is until the next real change.
     saveLocal(state) { writeLocal(state); },
     // The save file only, through the same checks as every write to it: Keep

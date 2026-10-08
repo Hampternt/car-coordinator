@@ -13,7 +13,7 @@ passed (about 44 s for the three).
 - [x] 2. Send — one commit with 3 and 4 (see below); check.sh OK; sync.mjs passed; sync-ui 216 ok / 0 FAIL (34 new); a driver typed in one browser is on the other's screen in under a second (fake relay)
 - [x] 3. Receive — same commit; both browsers edit different routes at once (writes held at the relay, then let go) and end identical, saved alike
 - [x] 4. Catch up with changes — same commit; a newcomer's Take gets every op since the snapshot and follows live; ops of a newer schema or unreadable keep it read-only (offer and live)
-- [ ] 5. Offline and reload
+- [x] 5. Offline and reload — check.sh OK; sync.mjs passed; sync-ui 231 ok / 0 FAIL (15 new): edits made with the relay down, one browser reloaded, both reconnect: each other's edits arrive, one plan, and the field both changed carries the same flag on both screens; a browser opening with a kept base catches up with an op that came live while its catchup was held; Leave forgets the base
 - [ ] 6. Remote changes never disturb you
 - [ ] 7. Removed while you edit
 - [ ] 8. Collision flags
@@ -48,3 +48,5 @@ passed (about 44 s for the three).
 - A field being typed in that the room changes is held: the box keeps the typed text, its edits stay out of what is sent, and on leaving it the text goes out with `was` = the value before the room's change (so both screens flag the collision); if nothing was typed the box takes the room's value. Edits are gathered for 300 ms before sending.
 - Round-1 checks changed by design: Push's "the other browser's plan is untouched by it" became "the edit made before it reached the other browser live, and the push sent no op of its own"; Leave's "a second tab is in the room too" accepts the pill Not live (that profile's plan differs from the room's after the live sections). The ops-room and live-op read-only checks stand unchanged: their ops (`{made:'up'}`) are ones no build can apply.
 - Fake relay: `holdWrites()`/`releaseWrites()` hold every frame a welcomed client sends, read later in arrival order (per-connection order kept, §4.5).
+- Item 5: `carcoord:roomBase` = `{room, seq, plan}` (the room id, never the secret). It is written right after the plan (in save() and when the room's changes are put on screen) or when what it adds is already in the plan (an ack), so the stored pair always belongs together; a tab already holding this seq's base skips the write (same seq, same plan on every replica). Store.save now returns whether the browser took the write, and the base is written only then. recover.html lists it as "The shared plan, as last heard" (it holds no secret); Backups, Export and Archives never see it.
+- Item 5, known limit (for the live-data review): a reload while a collision is still in flight (own edit sent, not acked) or while a held field has typed text rebuilds those edits with `was` = the base, so that one collision may go unflagged; the edit itself is still sent and wins as it would have.

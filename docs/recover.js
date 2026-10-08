@@ -64,6 +64,7 @@
     'carcoord:v1': ['The plan and setup', 'Routes, templates, drivers, day groups, cars, positions and labels: everything the app shows. Import this file on the Data tab to bring it all back.', `car-coordinator-plan-${day}.json`],
     'carcoord:archives': ['Archives', 'Untouched copies taken before each update, and of a save that could not be read.', `car-coordinator-archives-${day}.json`],
     'carcoord:backups': ['Backups', 'The rolling copies taken before anything was cleared or deleted, and once a day.', `car-coordinator-backups-${day}.json`],
+    'carcoord:roomBase': ['The shared plan, as last heard', 'What this browser last heard from the shared plan, kept so changes made offline can be sent later. Your own plan is the one above.', `car-coordinator-shared-base-${day}.json`],
   };
   const order = (k) => (k in WHAT ? Object.keys(WHAT).indexOf(k) : k.startsWith('carcoord:') ? 10 : 20);
   keys = keys.sort((a, b) => order(a) - order(b) || a.localeCompare(b));
