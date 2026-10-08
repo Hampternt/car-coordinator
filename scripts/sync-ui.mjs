@@ -1134,6 +1134,53 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   for (const x of [a, b, j, c]) await x.context.close();
 }
 
+// The rest of the "Two people at once" table: one car on two routes at once,
+// a slow connection, and a question whose counts move under it.
+{
+  const { secret } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+
+  // Both put one car on two routes at once: the clash warning, as today.
+  const car = await a.page.evaluate(() => { const c = state.cars.find((x) => !['rt-01', 'rt-02'].some((id) => state.routes.find((r) => r.id === id).carId === x.id)); return { id: c.id, reg: c.reg }; });
+  relay.holdWrites();
+  await routeRow(a.page, 'rt-01').locator('[data-field="carId"]').selectOption(car.id);
+  await routeRow(b.page, 'rt-02').locator('[data-field="carId"]').selectOption(car.id);
+  await wait(600);
+  relay.releaseWrites();
+  check('one car put on two routes at once: both kept, one plan', await converged(a.page, b.page) && await a.page.evaluate((id) => ['rt-01', 'rt-02'].every((x) => state.routes.find((r) => r.id === x).carId === id), car.id));
+  for (const [who, x] of [['this', a], ['the other', b]]) {
+    await x.page.waitForFunction((reg) => (document.querySelector('#tab-plan .problems')?.innerText || '').includes(reg), car.reg, { timeout: 3000 }).catch(() => {});
+    check(`the clash warning shows on ${who} screen: the amber box and both rows striped`, (await x.page.locator('#tab-plan .problems').innerText()).includes(car.reg)
+      && await routeRow(x.page, 'rt-01').evaluate((el) => el.classList.contains('warn')) && await routeRow(x.page, 'rt-02').evaluate((el) => el.classList.contains('warn')));
+  }
+  same('a warning, not a block, and no flag: they changed different routes', [await flagsOf(a.page), await flagsOf(b.page)], [[], []]);
+
+  // A slow connection: the edit is on screen and saved at once; the pill says
+  // Sending… until the relay has it.
+  relay.holdWrites();
+  await routeBox(a.page, 2, 'driver').fill('Slow Sigrid');
+  same('slow: the edit is on screen at once', await routeBox(a.page, 2, 'driver').inputValue(), 'Slow Sigrid');
+  check('and saved in this browser at once', await a.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[2].driver === 'Slow Sigrid'));
+  check('the pill quietly says Sending… while the relay has not got it', await pillSays(a.page, 'Sending…', 4000), await pill(a.page).textContent());
+  check('nothing else is blocked meanwhile', await a.page.evaluate(() => [...document.querySelectorAll('dialog')].every((d) => !d.open)) && !(await routeBox(a.page, 3, 'driver').isDisabled()));
+  relay.releaseWrites();
+  check('let through: Connected again, and the other has it', await pillSays(a.page, 'Connected', 4000) && await b.page.waitForFunction(() => state.routes[2].driver === 'Slow Sigrid', null, { timeout: 3000 }).then(() => true, () => false));
+
+  // A template's load question redraws its counts when the room changes the plan.
+  await b.page.evaluate(() => { askTemplate(state.templates.find((t) => t.routes.length)); render(); });
+  const says = () => b.page.locator('#notices .tpl-says').innerText();
+  check('the load question counts the routes on screen', /Replaces your 15 routes/.test(await says()), await says());
+  await a.page.click('[data-act="add-route"]');
+  check('a route added by the other: it counts 16, and says the plan changed', await b.page.waitForFunction(() => /Replaces your 16 routes/.test(document.querySelector('#notices .tpl-says')?.innerText || '') && /changed while this was open/.test(document.getElementById('notices').innerText), null, { timeout: 3000 }).then(() => true, () => false), await says());
+  await b.page.locator('#notices [data-act="load-template"]').click();
+  check('Load acts on the plan as it is now: its Backup holds the 16 routes', JSON.parse(JSON.parse(await b.page.evaluate(() => localStorage.getItem('carcoord:backups')))[0].json).routes.length === 16);
+  check('and the loaded template reaches the other screen', await converged(a.page, b.page));
+  same('the rest of the table: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close();
+  await b.context.close();
+}
+
 // The copy shipped as 0.15.0 (round 1) applies no ops: in a room this build
 // has written live edits to, it must still only read, and never take it or
 // push a snapshot over the ops. Served from git as it shipped, so this

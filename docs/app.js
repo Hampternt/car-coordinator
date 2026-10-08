@@ -2868,14 +2868,17 @@ function roomFlush(r) {
       let body = null;
       try { body = await Sync.seal(r.keys, 'op', { schema: Store.SCHEMA, oid: b.oid, changes: b.changes }); } catch (e) { console.warn('shared plan: an edit could not be sealed', e); }
       if (room !== r || r.epoch !== epoch || !body || roomReadOnly(r)) { b.sent = false; return; }
-      // Over the relay's limit it would close the connection for good: kept
-      // on this PC only, and said so.
+      // Over the relay's limit it would close the connection for good. This
+      // browser stops following instead (as one with no record of the room:
+      // it follows again if the plans agree, or offers to take it), and says so.
       if (body.length > 512 * 1024) {
-        r.rep.queue = r.rep.queue.filter((x) => x !== b);
-        r.rep.replay();
-        note('warn', 'One change was too large to send to the shared plan, so it is on this PC only. Push a version to share it.');
+        r.rep = null;
+        r.legacy = true;
+        r.holds.clear();
+        roomBaseForget();
+        note('warn', 'A change was too large to send to the shared plan, so this browser stopped sending to it. Your plan stays here; take the shared plan on the Data tab to edit it together again.');
         renderKeepingFocus();
-        continue;
+        return;
       }
       if (!r.conn.send({ type: 'op', body })) { b.sent = false; return; }
       r.acks.push({ kind: 'op', batch: b });
@@ -2926,7 +2929,10 @@ function roomApply(r, mutate) {
   roomFlags(r, res.flags);
   if (res.applied) roomCompact(r);
   // Only this browser's own edits confirmed: the screen already has them.
-  if (r.rep.shadow === before) { if (res.applied) roomBaseWrite(r); if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
+  // The base is not written here: another tab may have saved a plan without
+  // them meanwhile, and a base ahead of the plan reads as edits undoing them.
+  // It moves with the next save; one that lags only resends what is there.
+  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
   let next = Sync.applyAll(r.rep.shadow, local);
   next = roomHold(r, next);
   roomShow(r, next);

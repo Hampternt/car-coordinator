@@ -49,9 +49,9 @@ const UPDATES = [
     version: '0.16.0',
     must: true,
     title: 'Shared plan: changes reach the other manager live',
-    changed: 'Changes in a shared plan reach the other manager within a second. If you both change one box, the last counts; the other is noted to put back.',
-    affects: 'Every tab in a shared plan, and the top bar. The printed sheet and share codes do not change. Update both copies: an older one can only read it.',
-    data: 'Nothing changes outside a shared plan. In one, this browser also keeps the shared plan as last heard; an older copy ignores that. Replacing your plan replaces it for both.',
+    changed: 'Shared plan changes reach the other manager within a second. If you both change one box, the last counts; the other is kept to restore.',
+    affects: 'Every tab in a shared plan. The printed sheet and share codes do not change. Update both copies: an older one only reads it.',
+    data: 'Nothing changes outside a shared plan. In one, this browser keeps its last copy, which older copies ignore. Replacing your plan changes it for both.',
   },
   {
     version: '0.15.0',
