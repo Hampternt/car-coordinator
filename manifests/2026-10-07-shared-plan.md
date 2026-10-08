@@ -158,7 +158,7 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 ## Round 2: Live updates (pack 3)
 
-**Status:** 💭 drafted 2026-10-08 while the owner tests round 1. Building waits for their go.
+**Status:** 🚧 building: the owner said go on 2026-10-08. Runs on `claude/car-coordinator-encryption-c717c5` after merging `dev` (148b443).
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules, `relay/PROTOCOL.md` (§4.3 snapshot rule, op frames), `docs/sync.js`, the Shared plan code in `docs/app.js` (roomPush, roomFrame, catchup, read-only, `planElsewhere`), `save()` at `docs/app.js:366`, the `input` handler at `docs/app.js:2268`, `scripts/sync-ui.mjs` and `scripts/sync-fakerelay.mjs`. Depends on: round 1 merged into `dev`.
 **Runs serial:** one unit, and every item writes `docs/app.js`.
