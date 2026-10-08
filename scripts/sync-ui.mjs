@@ -389,9 +389,12 @@ let pushed = null;   // { id, plan } for the Restore section
   check('the other browser sees it in its list, without a reload', await b.page.waitForFunction(() => [...document.querySelectorAll('#roomCard .room-v-name')].some((n) => n.textContent === 'Monday final'), null, { timeout: 5000 }).then(() => true, () => false));
   // Round 1 checked the other plan was untouched by a push; live, the edit
   // made before the push reaches it as any edit does, and the push adds no
-  // change of its own.
+  // change of its own: only one op with no changes, after its snapshot, so
+  // the room holds an op past it (a 0.15.0 copy stays read-only).
   check('the edit made before it reached the other browser live', await b.page.waitForFunction(() => state.routes[0].driver === 'Pushed Pedersen', null, { timeout: 3000 }).then(() => true, () => false));
-  same('and the push sent no op of its own', relay.sent('op', k.roomId).length, 1);
+  const framesFromPush = () => { const all = relay.log.filter((x) => x.roomId === k.roomId).map((x) => x.frame); return all.slice(all.findLastIndex((f) => f.type === 'snapshot') + 1).filter((f) => f.type === 'op'); };
+  await until(() => framesFromPush().length > 0);
+  same('and the push sent no change of its own: one op with none, after its snapshot', framesFromPush().map((f) => unseal(secret, 'op', f.body).changes), [[]]);
   const rest = await elsewhere(a.page);
   check('Push: the secret is still nowhere else', !rest.includes(secret) && !rest.includes(k.token));
 
@@ -1115,6 +1118,9 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
     JSON.stringify({ snap: roomNow().snapshot && roomNow().snapshot.seq, ops: roomNow().ops.length }));
   const snaps = relay.sent('snapshot', k.roomId);
   check('every snapshot was at or below the seq its sender had applied, and the room\'s', snaps.every((f) => f.seq <= roomNow().seq) && relay.open >= 2);
+  const frames = relay.log.filter((x) => x.roomId === k.roomId).map((x) => x.frame);
+  check('and each is followed by an op with no changes, so the room holds an op past it', await until(() => roomNow().ops.some((o) => o.seq > roomNow().snapshot.seq))
+    && frames.every((f, i) => f.type !== 'snapshot' || frames.slice(i + 1).some((g) => g.type === 'op' && unseal(secret, 'op', g.body).changes.length === 0)));
   check('both browsers end on one plan', await converged(a.page, b.page));
   const snap = unseal(secret, 'snapshot', roomNow().snapshot.body);
   check('the snapshot holds the plan as it was at its seq', snap.plan.routes.some((r) => /^c\d+$/.test(r.round) && Number(r.round.slice(1)) >= 185));
@@ -1235,7 +1241,42 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
     await jp.goto('about:blank');
     await jp.goto(`${old.base}#join=${secret}`, { waitUntil: 'networkidle' });
     check('offered the room, 0.15.0 says to update and has no Take', await dialogSays(jp, /Update the app to join it/) && (await jp.locator('[data-act="room-take"]').count()) === 0, await jp.locator('#roomDlg').innerText().catch(() => 'no dialog'));
-    same('0.15.0: no page errors', [...errors, ...a.errors], []);
+
+    // A push from this build snapshots the room at the seq it has applied,
+    // which drops every op up to it. One op with no changes follows it, so
+    // the room still holds an op past its snapshot and 0.15.0 stays read-only
+    // rather than free to push its own plan as the room's.
+    const r2 = liveRoom();
+    const p2 = await live(SEED, r2.secret);
+    await routeBox(p2.page, 1, 'driver').fill('Pushed From 0.16');
+    await until(() => r2.ops().length === 1);
+    await p2.page.click('[data-act="tab"][data-tab="data"]');
+    await p2.page.fill('#roomVersionName', 'Pushed by 0.16');
+    await p2.page.press('#roomVersionName', 'Enter');
+    await noticeSays(p2.page, /Pushed “Pushed by 0.16”/);
+    const held = () => relay.rooms.get(r2.k.roomId);
+    check('after this build\'s push, the room holds an op past its snapshot', await until(() => held().snapshot.seq >= 1 && held().ops.some((o) => o.seq > held().snapshot.seq)), JSON.stringify({ snap: held().snapshot.seq, ops: held().ops.map((o) => o.seq) }));
+    same('an op with no changes, nothing else', r2.ops().filter((o) => o.seq > held().snapshot.seq).map((o) => o.changes), [[]]);
+    const pushedSnap = held().snapshot.body;
+    const oldCtx = await browser.newContext();
+    await relay.attach(oldCtx);
+    const op2 = await oldCtx.newPage();
+    await op2.addInitScript((seed) => {
+      if (location.protocol === 'about:' || sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1'); localStorage.clear(); for (const [key, v] of Object.entries(seed)) localStorage.setItem(key, v);
+    }, { ...inRoom(SEED, r2.secret), 'carcoord:pref:seenUpdate': '0.15.0' });
+    op2.on('pageerror', (e) => errors.push(String(e)));
+    await op2.goto(old.base, { waitUntil: 'networkidle' });
+    check('0.15.0 in a room this build pushed to: Update the app', await pillSays(op2, 'Update the app'), await pill(op2).textContent().catch(() => 'no pill'));
+    const writes2 = () => relay.log.filter((x) => x.roomId === r2.k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+    const wrote2 = writes2();
+    await op2.click('[data-act="tab"][data-tab="data"]');
+    await op2.evaluate(() => { const box = document.getElementById('roomVersionName'); box.disabled = false; box.value = 'Old over pushed'; return roomPush(); });
+    await wait(800);
+    same('and its push sends nothing, leaving the pushed snapshot', [writes2() - wrote2, held().snapshot.body === pushedSnap], [0, true]);
+    await oldCtx.close();
+    await p2.context.close();
+    same('0.15.0: no page errors', [...errors, ...a.errors, ...p2.errors], []);
     await joiner.close();
     await context.close();
     await a.context.close();

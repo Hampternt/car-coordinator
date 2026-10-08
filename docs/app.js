@@ -2909,9 +2909,22 @@ async function roomCompact(r) {
     if (room === r && r.epoch === epoch && roomLive(r) && r.conn.send({ type: 'snapshot', seq: at, body })) {
       r.acks.push({ kind: 'snapshot' });
       r.snapSeq = Math.max(r.snapSeq, at);
+      roomMarkSnapshot(r);
     }
   } catch (e) { console.warn('shared plan: a snapshot could not be made', e); }
   r.compacting = false;
+}
+
+/* After a snapshot this build sends (Create, Push, compaction), one op with
+   no changes. A snapshot drops every op up to its seq, and a room holding no
+   op past its snapshot is one the copy shipped as 0.15.0, which applies no
+   ops, takes for its own to write: its Push would put its plan in as the
+   room's snapshot, over this one. An op past it keeps that copy read-only.
+   It travels as any batch does, so a dropped connection sends it again. */
+function roomMarkSnapshot(r) {
+  if (!r || !r.rep) return;
+  r.rep.queue.push({ oid: versionNonce().slice(0, 16), changes: [], sent: false });
+  roomFlush(r);
 }
 
 /* Fold what the room sequenced into this browser's plan, and the screen.
@@ -3313,6 +3326,7 @@ async function roomPush() {
     r.acks.push({ kind: 'snapshot' });
     // A room that had no plan has this one now, and this browser follows it.
     if (!r.rep) { r.rep = Sync.replica(snapAt, snapPlan); roomBaseWrite(r); }
+    roomMarkSnapshot(r);
   }
   if (box) box.value = '';
 }
@@ -3425,6 +3439,7 @@ async function roomCreate() {
     roomCreating = null;
     c.conn.close();
     roomStart(secret, { seq: 0, plan: c.plan });
+    roomMarkSnapshot(room);
     note('info', 'Made a shared plan from your plan. Send the invite link on the Data tab to the other manager, and to no one else.');
     render();
   });
