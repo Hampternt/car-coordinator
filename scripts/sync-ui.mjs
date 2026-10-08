@@ -1002,6 +1002,91 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   await b.context.close();
 }
 
+// Replacing the whole plan in a room changes it for both: the confirm each
+// action already has says so in one line, Backups first as ever, and a
+// Cancel sends nothing. No new dialog.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  const BOTH = 'This changes the shared plan for both of you.';
+  await b.page.evaluate(() => { window.__dialogs = []; const real = HTMLDialogElement.prototype.showModal; HTMLDialogElement.prototype.showModal = function (...x) { window.__dialogs.push(this.id); return real.apply(this, x); }; });
+  const quiet = async (what, n) => { await wait(900); same(`${what}: nothing is sent`, ops().length, n); };
+  const newestBackup = (pg) => pg.evaluate(() => JSON.parse(localStorage.getItem('carcoord:backups'))[0]);
+
+  // A version to restore later.
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  await a.page.fill('#roomVersionName', 'Before the loads');
+  await a.page.press('#roomVersionName', 'Enter');
+  await noticeSays(a.page, /Pushed “Before the loads”/);
+  const v1 = JSON.parse(await planOf(a.page));
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.waitForSelector('#roomCard [data-act="room-look"]');
+
+  // A share code.
+  const code = await b.page.evaluate(() => Share.encode({ ...state, routes: state.routes.map((r) => ({ ...r, driver: `Coded ${r.name}` })) }, 'day'));
+  let n = ops().length;
+  await b.page.fill('#shareIn', code);
+  await b.page.click('[data-act="share-read"]');
+  await b.page.waitForFunction(() => document.getElementById('shareDlg').open);
+  check('a share code\'s Load this list? says it changes the shared plan for both', (await b.page.locator('#shareDlg').innerText()).includes(BOTH));
+  await b.page.click('[data-act="share-cancel"]');
+  await quiet('Cancel on it', n);
+  await b.page.click('[data-act="share-read"]');
+  await b.page.click('[data-act="share-apply"]');
+  check('Load it: Backups first', (await newestBackup(b.page)).label === 'Loading a shared list');
+  check('and the other screen has the loaded list', await a.page.waitForFunction(() => state.routes.every((r) => r.driver === `Coded ${r.name}`), null, { timeout: 4000 }).then(() => true, () => false) && await converged(a.page, b.page));
+
+  // A version, from Look first, and from the list.
+  n = ops().length;
+  await b.page.click('#roomCard [data-act="room-look"]');
+  check('a version\'s Look first says it changes the shared plan for both', await dialogSays(b.page, new RegExp(BOTH.replace('.', '\\.'))));
+  await b.page.click('[data-act="room-look-close"]');
+  await quiet('Close on it', n);
+  const restoreBtn = b.page.locator('#roomCard [data-act="room-restore"]').first();
+  await restoreBtn.click();
+  check('the list\'s Restore, armed, says it beside Sure?', (await restoreBtn.innerText()) === 'Sure?' && (await b.page.locator('#roomCard .room-versions').innerText()).includes(BOTH));
+  await wait(3300);
+  same('left to disarm, it sends nothing', ops().length, n);
+  await b.page.click('#roomCard [data-act="room-look"]');
+  await dialogSays(b.page, /Restoring it/);
+  await b.page.click('#roomDlg [data-act="room-restore"]');
+  check('Restore it: said so, for both of you', await noticeSays(b.page, /Restored the shared version “Before the loads” for both of you/));
+  check('Backups first', /Before restoring the shared version/.test((await newestBackup(b.page)).label));
+  check('and the other screen has the version', await a.page.waitForFunction((d) => state.routes[0].driver === d, v1.routes[0].driver, { timeout: 4000 }).then(() => true, () => false) && await converged(a.page, b.page));
+
+  // A backup.
+  n = ops().length;
+  const backupBtn = b.page.locator('#backupsCard [data-act="restore"]').first();
+  await backupBtn.click();
+  check('Restore from Backups, armed, says it beside Sure?', (await backupBtn.innerText()) === 'Sure?' && (await b.page.locator('#backupsCard').innerText()).includes(BOTH));
+  await wait(3300);
+  same('left to disarm, it sends nothing', ops().length, n);
+  const target = JSON.parse((await newestBackup(b.page)).json);
+  await backupBtn.click();
+  await backupBtn.click();
+  check('restored: Backups first', (await newestBackup(b.page)).label === 'Restoring a backup');
+  check('and the other screen has the backup\'s plan', await a.page.waitForFunction((d) => state.routes.map((r) => r.driver).join() === d, target.routes.map((r) => r.driver).join(), { timeout: 4000 }).then(() => true, () => false) && await converged(a.page, b.page));
+
+  // Import: its confirm is the file picker, so the card says it beside it.
+  n = ops().length;
+  check('Import says it on its card while in the room', (await b.page.locator('#tab-data').innerText()).includes(`Importing replaces everything on screen. ${BOTH}`));
+  await b.page.setInputFiles('#importFile', []);
+  await quiet('a picker closed with no file', n);
+  await b.page.setInputFiles('#importFile', { name: 'other-pc.json', mimeType: 'application/json', buffer: Buffer.from(OTHER) });
+  check('Import: Backups first', /^Importing other-pc\.json$/.test((await newestBackup(b.page)).label));
+  check('and the other screen has the imported plan', await a.page.waitForFunction(() => state.cars.some((c) => c.reg === 'ZZ 90001'), null, { timeout: 4000 }).then(() => true, () => false) && await converged(a.page, b.page));
+
+  const opened = await b.page.evaluate(() => [...new Set(window.__dialogs)].sort());
+  check('no new dialog: only the ones these actions already had', opened.every((id) => ['roomDlg', 'shareDlg'].includes(id)), JSON.stringify(opened));
+  const legacy = await profile({ items: inRoom(OTHER_SEED, liveRoom().secret) });
+  await pillSays(legacy.page, 'Not live');
+  await legacy.page.click('[data-act="tab"][data-tab="data"]');
+  check('a browser not following a room does not say it', !(await legacy.page.locator('#tab-data').innerText()).includes(BOTH));
+  same('replace everything: no console errors', [...a.errors, ...b.errors, ...legacy.errors], []);
+  for (const x of [a, b, legacy]) await x.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {

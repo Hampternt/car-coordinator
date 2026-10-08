@@ -2081,7 +2081,7 @@ function archivesCard() {
     if (error || !s) return `<div class="arch-row"><span class="what">${head} \u00b7 Could not be read</span><span class="btns">${down}</span></div>`;
     const key = `archive:${a.t}`;
     return `<div class="arch-row"><span class="what">${head} \u00b7 ${esc(planSummary(s, true))}</span><span class="btns">${actBtn('archive-restore', 'update', a.t,
-      armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}</span></div>`;
+      armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}${bothArmed(key)}</span></div>`;
   }).join('');
   return `<div class="card">
       <h3>Archives${infoBtn('data-archives')}</h3>
@@ -2113,7 +2113,7 @@ function renderData() {
       <td>${esc(when(b.t))}</td>
       <td>${esc(b.label)}</td>
       <td>${contents === null ? 'Unreadable \u2014 only half of it was saved' : esc(contents)}</td>
-      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', keys[i], armed === `restore:${keys[i]}` ? 'Sure?' : 'Restore', armed === `restore:${keys[i]}` ? 'armed' : '')}</td>
+      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', keys[i], armed === `restore:${keys[i]}` ? 'Sure?' : 'Restore', armed === `restore:${keys[i]}` ? 'armed' : '') + bothArmed(`restore:${keys[i]}`)}</td>
     </tr>`;
   }).join('');
 
@@ -2143,6 +2143,7 @@ function renderData() {
       <button class="btn" data-act="export">Export a copy\u2026</button>
       <button class="btn" data-act="import">Import a copy\u2026</button>
       <input id="importFile" type="file" accept="application/json,.json" hidden>
+      ${roomLive() ? `<p class="hint both-line">Importing replaces everything on screen. ${BOTH_WORDS}</p>` : ''}
     </div>
 
     ${whatsNewCard()}
@@ -2458,6 +2459,7 @@ function renderShareDialog() {
     <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels${sum.drivers ? `, and ${sum.drivers} drivers with their groups` : ''}` : ''}.</p>
     ${missing.length ? `<p class="status warn-status">It mentions ${missing.join(' and ')}.</p>` : ''}
     <p class="status warn-status"><b>This replaces the day plan on screen.</b> A backup is taken first, so you can undo it from Backups.</p>
+    ${bothLine()}
 
     ${sum.hasEverything ? `<fieldset>
       <legend>What to take</legend>
@@ -3045,6 +3047,13 @@ function roomMarks() {
 // Whether the plan changed from the room since `tick` was taken.
 const staleSince = (tick) => !!room && Number.isInteger(tick) && room.tick !== tick;
 const roomTick = () => (room ? room.tick : 0);
+/* Replacing the whole plan while following a shared plan replaces it for the
+   other manager too. The confirm each such action already has says so, in
+   one line; there is never a second step (owner, 2026-10-08). */
+const BOTH_WORDS = 'This changes the shared plan for both of you.';
+const bothLine = () => (roomLive() ? `<p class="status warn-status both-line">${BOTH_WORDS}</p>` : '');
+// Beside an armed Sure?, the same words.
+const bothArmed = (key) => (roomLive() && armed === key ? ` <span class="both-line hint">${BOTH_WORDS}</span>` : '');
 const STALE_LINE = '<p class="status warn-status stale-line">The plan changed while this was open. What it says now is drawn from the plan as it is.</p>';
 function roomStaleDialogs() {
   if (pending.share && $('#shareDlg')?.open) renderShareDialog();
@@ -3188,7 +3197,7 @@ function renderRoomLook() {
     <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
     ${staleSince(l.tick) ? STALE_LINE : ''}
     <p class="hint">Pushed ${esc(when(l.at))}.</p>
-    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it')}
+    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it') + bothLine()}
     <div class="bar" style="margin:16px 0 0">
       ${newer ? '' : `<button class="btn primary-ish" data-act="room-restore" data-id="${esc(l.id)}" data-sure="1">Restore it</button>`}
       <button class="btn" data-act="room-look-close">Close</button>
@@ -3441,7 +3450,7 @@ function roomVersionsHtml() {
     return `<li data-version="${esc(v.id)}">
       <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}${newer ? ' \u00b7 saved by a newer version: update the app to restore it' : ''}</span>
       <button class="btn" data-act="room-look" data-id="${esc(v.id)}"${up ? '' : ' disabled'}>Look first</button>
-      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>
+      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>${bothArmed(`room-restore:${v.id}`)}
     </li>`;
   }).join('');
   return `<h4>Versions</h4>
