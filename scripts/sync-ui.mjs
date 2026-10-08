@@ -383,7 +383,11 @@ let pushed = null;   // { id, plan } for the Restore section
   check('which a snapshot key does not open', (() => { try { unseal(secret, 'snapshot', v.body); return false; } catch { return true; } })());
   check('the room\'s snapshot is now the pushed plan, so a later Take gets it', JSON.stringify(unseal(secret, 'snapshot', room.snapshot.body).plan) === aPlan);
   check('the other browser sees it in its list, without a reload', await b.page.waitForFunction(() => [...document.querySelectorAll('#roomCard .room-v-name')].some((n) => n.textContent === 'Monday final'), null, { timeout: 5000 }).then(() => true, () => false));
-  check('and its plan is untouched by it', !(await b.page.evaluate(() => JSON.stringify(state))).includes('Pushed Pedersen'));
+  // Round 1 checked the other plan was untouched by a push; live, the edit
+  // made before the push reaches it as any edit does, and the push adds no
+  // change of its own.
+  check('the edit made before it reached the other browser live', await b.page.waitForFunction(() => state.routes[0].driver === 'Pushed Pedersen', null, { timeout: 3000 }).then(() => true, () => false));
+  same('and the push sent no op of its own', relay.sent('op', k.roomId).length, 1);
   const rest = await elsewhere(a.page);
   check('Push: the secret is still nowhere else', !rest.includes(secret) && !rest.includes(k.token));
 
@@ -569,6 +573,138 @@ let pushed = null;   // { id, plan } for the Restore section
   await b.context.close();
 }
 
+// ===========================================================================
+// Round 2: live edits. Two browsers in one room, both following it.
+// A fresh room holding `plan`, and the ops written to it so far, opened.
+const liveRoom = (plan = created.plan) => {
+  const secret = newSecret();
+  const k = keysOf(secret);
+  relay.makeRoom(k.roomId, k.token, { snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan }) } });
+  const ops = () => (relay.rooms.get(k.roomId).ops || []).map((o) => ({ seq: o.seq, ...unseal(secret, 'op', o.body) }));
+  return { secret, k, ops };
+};
+const planOf = (pg) => pg.evaluate(() => JSON.stringify(state));
+const routeBox = (pg, i, f) => pg.locator('#tab-plan tbody tr').nth(i).locator(`[data-field="${f}"]`);
+// Waits until both screens hold the same plan, and says whether they do.
+const converged = async (a, b, ms = 5000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const [x, y] = [await planOf(a), await planOf(b)];
+    if (x === y) return true;
+    await wait(100);
+  }
+  return false;
+};
+const live = async (seed, secret) => {
+  const x = await profile({ items: inRoom(seed, secret) });
+  await pillSays(x.page, 'Connected');
+  await x.page.waitForFunction(() => !!room && !!room.rep && room.caught, null, { timeout: 5000 }).catch(() => {});
+  return x;
+};
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('two browsers whose plan is the room\'s follow it live', await a.page.evaluate(() => roomLive()) && await b.page.evaluate(() => roomLive()));
+  check('and neither sent anything just for joining', ops().length === 0 && relay.sent('snapshot', k.roomId).length === 0);
+
+  // Send: one field typed in one browser is on the other's screen within a second.
+  const was = await b.page.evaluate(() => state.routes[2].driver);
+  const t0 = Date.now();
+  await routeBox(a.page, 2, 'driver').fill('Live Lena');
+  const arrived = await b.page.waitForFunction(() => state.routes[2].driver === 'Live Lena', null, { timeout: 3000 }).then(() => Date.now() - t0, () => null);
+  check('a driver typed in one browser is on the other\'s screen within a second', arrived !== null && arrived < 1000, String(arrived));
+  check('drawn there, not only in its data', (await routeBox(b.page, 2, 'driver').inputValue()) === 'Live Lena');
+  check('and saved there', await b.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[2].driver === 'Live Lena'));
+  const sent = ops();
+  same('the relay holds it as one op: one field, with what it was', sent.map((o) => o.changes), [[{ op: 'set', kind: 'route', id: 'rt-03', field: 'driver', value: 'Live Lena', was }]]);
+  check('sealed with this build\'s schema and an id of its own', sent[0].schema === 6 && /^[0-9a-f]{16}$/.test(sent[0].oid));
+  check('nothing but ops was written for it', relay.sent('snapshot', k.roomId).length === 0 && relay.sent('version', k.roomId).length === 0);
+  check('the sender\'s pending edit is confirmed by its ack', await a.page.waitForFunction(() => room.rep.queue.length === 0 && room.rep.seq === 1, null, { timeout: 3000 }).then(() => true, () => false));
+
+  // Typing a word is a few changes, not one per key.
+  await routeBox(a.page, 3, 'driver').click();
+  await a.page.keyboard.type('Batched Bente', { delay: 20 });
+  await converged(a.page, b.page);
+  check('a word typed quickly travels as a few ops, not one per key', ops().length - 1 <= 4, String(ops().length - 1));
+
+  // Receive: both edit different routes at the same moment.
+  relay.holdWrites();
+  await routeBox(a.page, 4, 'driver').fill('Anna A');
+  await routeBox(b.page, 5, 'driver').fill('Bjørn B');
+  await a.page.locator('#tab-plan tbody tr').nth(6).locator('[data-act="toggle"][data-field="highlight"]').click();
+  await b.page.locator('#tab-plan tbody tr').nth(7).locator('[data-field="round"]').fill('9');
+  await wait(800);
+  relay.releaseWrites();
+  check('both edit different routes at once: both end identical', await converged(a.page, b.page), '');
+  const both = JSON.parse(await planOf(a.page));
+  check('with both browsers\' edits kept', both.routes[4].driver === 'Anna A' && both.routes[5].driver === 'Bjørn B' && both.routes[6].highlight === true && both.routes[7].round === '9', JSON.stringify(both.routes.slice(4, 8).map((r) => [r.driver, r.highlight, r.round])));
+  same('and the same plan saved in both', await a.page.evaluate(() => localStorage.getItem('carcoord:v1')), await b.page.evaluate(() => localStorage.getItem('carcoord:v1')));
+
+  // Catch up: a newcomer's Take gets every edit made since the last snapshot.
+  const j = await profile({ items: OTHER_SEED });
+  await openInvite(j.page, `#join=${secret}`);
+  check('a room holding edits is offered with Take', await dialogSays(j.page, /Join this shared plan\?[\s\S]*holds 15 routes/) && (await j.page.locator('[data-act="room-take"]').count()) === 1, await j.page.locator('#roomDlg').innerText().catch(() => ''));
+  await j.page.click('[data-act="room-take"]');
+  await pillSays(j.page, 'Connected');
+  same('a newcomer\'s Take gets every edit made since the snapshot', JSON.parse(await planOf(j.page)).routes.map((r) => [r.driver, r.highlight, r.round]), both.routes.map((r) => [r.driver, r.highlight, r.round]));
+  check('and it follows the room live from there', await j.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).then(() => true, () => false));
+  await j.page.click('[data-act="tab"][data-tab="plan"]');
+  await routeBox(j.page, 0, 'driver').fill('Newcomer Nora');
+  check('its own edit reaches the others', await a.page.waitForFunction(() => state.routes[0].driver === 'Newcomer Nora', null, { timeout: 3000 }).then(() => true, () => false)
+    && await b.page.waitForFunction(() => state.routes[0].driver === 'Newcomer Nora', null, { timeout: 3000 }).then(() => true, () => false));
+
+  check('and three browsers end on one plan', await converged(a.page, j.page) && await converged(b.page, j.page));
+  same('live: no console errors', [...a.errors, ...b.errors, ...j.errors], []);
+  for (const x of [a, b, j]) await x.context.close();
+}
+
+// Ops of a newer schema: applied by no browser of this build, which only
+// reads the room from then on, live or on joining.
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const newer = { schema: 7, oid: 'f'.repeat(16), changes: [{ op: 'set', kind: 'route', id: 'rt-01', field: 'driver', value: 'From The Future' }] };
+  await a.page.evaluate((body) => room.conn.send({ type: 'op', body }), seal(secret, 'op', newer));
+  const b = await profile({ items: inRoom(SEED, secret) });
+  check('a room holding an op of a newer schema: Update the app', await pillSays(b.page, 'Update the app'), await pill(b.page).textContent().catch(() => 'no pill'));
+  check('and its edit is not applied', await b.page.evaluate(() => state.routes[0].driver) !== 'From The Future');
+  await routeBox(b.page, 1, 'driver').fill('Stays Here');
+  await wait(800);
+  same('nothing is sent from it', ops().length, 1);
+  await b.page.evaluate((body) => room.conn.send({ type: 'op', body }), seal(secret, 'op', newer));
+  const c = await profile({ items: inRoom(SEED, secret) });
+  await pillSays(c.page, 'Update the app');
+  check('live, a newer op that arrives makes a following browser read-only too', await pillSays(a.page, 'Update the app') && await a.page.evaluate(() => state.routes[0].driver) !== 'From The Future');
+  const j = await profile({ items: OTHER_SEED });
+  await openInvite(j.page, `#join=${secret}`);
+  check('offered: Update the app to join it, and no Take', await dialogSays(j.page, /Update the app to join it/) && (await j.page.locator('[data-act="room-take"]').count()) === 0);
+  same('newer ops: no console errors', [...a.errors, ...b.errors, ...c.errors, ...j.errors], []);
+  for (const x of [a, b, c, j]) await x.context.close();
+  void k;
+}
+
+// A browser that joined before live updates, whose plan is not the room's,
+// does not follow it: its plan would be sent as edits over the other's.
+{
+  const { secret, k, ops } = liveRoom();
+  const p = await profile({ items: inRoom(OTHER_SEED, secret) });
+  check('a browser with no record of the room and another plan: Not live', await pillSays(p.page, 'Not live'), await pill(p.page).textContent().catch(() => 'no pill'));
+  await routeBox(p.page, 0, 'driver').fill('Not Sent Nils');
+  await wait(800);
+  same('its edits are not sent', [ops().length, relay.sent('snapshot', k.roomId).length], [0, 0]);
+  await p.page.click('[data-act="tab"][data-tab="data"]');
+  check('the card says why, and offers to take the shared plan', /joined it before live updates/.test(await p.page.locator('#roomStatus').innerText()) && (await p.page.locator('[data-act="room-retake"]').count()) === 1);
+  await p.page.click('[data-act="room-retake"]');
+  check('which opens the offer it already has', await dialogSays(p.page, /Join this shared plan\?[\s\S]*Taking it replaces everything on screen/), await p.page.locator('#roomDlg').innerText().catch(() => ''));
+  await p.page.click('[data-act="room-take"]');
+  check('taken: it follows live', await pillSays(p.page, 'Connected') && await p.page.waitForFunction(() => roomLive(), null, { timeout: 5000 }).then(() => true, () => false));
+  same('with the room\'s plan on screen', JSON.parse(await planOf(p.page)).routes[0].driver, created.plan.routes[0].driver);
+  check('and its own in Backups', /Not Sent Nils/.test(JSON.parse(await p.page.evaluate(() => localStorage.getItem('carcoord:backups')))[0].json));
+  same('not live: no console errors', p.errors, []);
+  await p.context.close();
+}
+
 // ---------------------------------------------------------------------------
 // Push seals first, which takes a moment: what the room says meanwhile still
 // counts, and a push that is no longer allowed sends nothing.
@@ -742,7 +878,9 @@ let pushed = null;   // { id, plan } for the Restore section
   const second = await p.context.newPage();
   await second.goto(base, { waitUntil: 'networkidle' });
   await pillSays(p.page, 'Connected');
-  check('a second tab of the same browser is in the room too', await pillSays(second, 'Connected'));
+  // Its plan is no longer the room's (the sections above edited it live), so
+  // the pill may say Not live: either way it is in the room.
+  check('a second tab of the same browser is in the room too', await pillSays(second, 'Connected', 2000) || await pillSays(second, 'Not live'));
   await p.page.click('[data-act="tab"][data-tab="data"]');
   const plan = await p.page.evaluate(() => JSON.stringify(state));
   const saved = (await kept(p.page)).plan;

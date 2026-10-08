@@ -369,6 +369,8 @@ const save = () => {
   if (planElsewhere) return;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
   Store.save(state);
+  // In a shared plan, the change goes to the room too (roomEdited, there).
+  roomEdited();
 };
 const isKeep = (n) => !!(n.offer && n.offer.act === 'keep-date');
 const dropKeep = () => { dateMove = null; notices = notices.filter((n) => !isKeep(n)); };
@@ -2115,7 +2117,7 @@ function renderData() {
 
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
-    <p class="hint">${room ? 'Everything you type is saved on this PC. Pushing a version sends it to the shared plan, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
+    <p class="hint">${room ? 'Everything you type is saved on this PC and, while connected, goes to the shared plan as you type it, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
 
     <div class="card" id="fileCard">
       <h3>Auto-save to a file${infoBtn('data-file')}</h3>
@@ -2518,28 +2520,37 @@ function openShare(share) {
    under carcoord:pref:room. A browser that has joined no room never calls
    roomStart(), so it never opens a connection at all.
 
-   Pack 2 never changes the plan on its own: only Take the shared plan and a
-   version's Restore replace it, each after a backup. Live edits are pack 3. */
+   Live edits (pack 3): while connected, save() leads to roomFlush(), which
+   works out what changed since the plan this browser last told the room
+   about (Sync.replica's shadow) and sends it as an op. What others send is
+   folded in in the relay's order, this browser's own unconfirmed edits are
+   replayed on top, and the screen is patched to the result. Only Take, a
+   version's Restore and Create start a room's plan from scratch. */
 // A cached store.js from before prefs cannot keep a room, so no room at all.
 const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function'
   && typeof Store.pref === 'function' && typeof Store.setPref === 'function';
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
-// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
+// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot, rep, … }
 let room = null;
 // { conn } while Create is making a room, before it is this browser's room.
 let roomCreating = null;
+// How long edits are gathered before they are sent: a word typed is one
+// change, not one per key.
+const ROOM_BATCH_MS = 300;
 
 // The schema the room's plans are written in, as far as this browser has
-// seen: the newest of its snapshot's and its versions'. Newer than this
-// build's means read-only, so an older normalise() can never drop a field
-// for both managers. So does a room holding ops (`ahead`): this build applies
-// none (live edits are pack 3), so a snapshot from it would claim ops it never
-// saw, and the relay would delete them (PROTOCOL.md §4.3).
-const roomReadOnly = () => !!room && (room.schema > Store.SCHEMA || room.ahead);
+// seen: the newest of its snapshot's, its versions' and its ops'. Newer than
+// this build's means read-only, so an older normalise() can never drop a
+// field for both managers. So does a room holding ops this build cannot
+// apply (`ahead`): a snapshot from it would claim ops it never applied, and
+// the relay would delete them (PROTOCOL.md §4.3).
+const roomReadOnly = (r = room) => !!r && (r.schema > Store.SCHEMA || r.ahead);
+// Following the room live: its plan is known (rep), and this browser may
+// write to it.
+const roomLive = (r = room) => !!r && !!r.rep && !r.legacy && !roomReadOnly(r);
 
-// Whether a catchup shows ops this build cannot apply: any op in it, or a room
-// seq past its snapshot's. The catchup asks only for ops after the welcome's
-// seq, so the seq is what shows the ones between the snapshot and the welcome.
+// Whether a catchup shows ops past its snapshot: any op in it, or a room seq
+// past its snapshot's.
 const opsAhead = (f) => {
   const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
   return (Array.isArray(f.ops) && f.ops.length > 0) || (Number.isInteger(f.seq) && f.seq > snapSeq);
@@ -2552,6 +2563,7 @@ const planSchema = (plain) => Math.max(
   Number.isInteger(plain && plain.schema) ? plain.schema : 0,
   plain && plain.plan && Number.isInteger(plain.plan.schemaVersion) ? plain.plan.schemaVersion : 0,
 );
+const opSchema = (plain) => (plain && Number.isInteger(plain.schema) ? plain.schema : 0);
 
 // A version's name and body are sealed apart (the label and the body), so the
 // relay could pair one version's name with another's body. Each push puts the
@@ -2560,7 +2572,9 @@ const planSchema = (plain) => Math.max(
 const versionNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.nonce : null);
 
-async function roomStart(secret) {
+// base: {seq, plan}, the room's plan as this browser last had it confirmed,
+// when it has one (from Create, Take, or kept from before).
+async function roomStart(secret, base = null) {
   roomStop();
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
   // seq: the room's latest seq as last heard. acks: what was sent and not yet
@@ -2568,18 +2582,35 @@ async function roomStart(secret) {
   // fetches: version id -> the resolvers waiting for its body (getVersion).
   // caught: the catchup since the last (re)connect has been read. Until then
   // the room's schema is unknown, so nothing is written to it.
-  // appliedSeq: the seq of the last op this browser's plan includes, the only
-  // seq it may send a snapshot at; with no ops applied, the room snapshot's.
-  // ahead: the room holds ops past it (opsAhead), so it is read-only here.
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, appliedSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false };
+  // snapSeq: the seq of the room's snapshot as last heard.
+  // ahead: the room holds ops this build cannot apply, so it is read-only.
+  // rep: the room's plan and this browser's edits to it (Sync.replica), once
+  // known. legacy: this browser has no record of the room's plan and its own
+  // differs (it joined before live updates), so it does not follow the room
+  // until it takes the shared plan again.
+  // frames: every frame is read in turn, in the order it came.
+  // epoch: counts (re)connects, so a send begun on an old connection stops.
+  // holds: the field being typed in, kept as typed while the room changed it.
+  // flags: collisions to show; tick: counts changes that came from the room.
+  const r = {
+    secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, snapSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false,
+    rep: base ? Sync.replica(base.seq, base.plan) : null, legacy: false, frames: Promise.resolve(), sending: Promise.resolve(), epoch: 0,
+    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0,
+  };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
-    // Catch up on every (re)connect: the version list, and the room's schema.
+    // Catch up on every (re)connect: the version list, the room's schema, and
+    // every op since the last one this browser applied.
     r.caught = false;
-    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
+    r.epoch++;
+    clearTimeout(r.flushTimer);
+    r.flushTimer = null;
+    // Whether the relay stored what was in flight is known only from the catchup.
+    if (r.rep) r.rep.lost();
+    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.rep ? r.rep.seq : 0 }); }
     // A connection that dropped will never answer what it was sent.
     let noted = false;
     if (status !== 'connected') roomFetchesEnd(r);
@@ -2587,14 +2618,18 @@ async function roomStart(secret) {
       const lost = r.acks.filter((a) => a.kind === 'version').map((a) => a.name);
       r.acks = [];
       if (lost.length && room === r) {
-        note('warn', `The connection dropped while pushing \u201c${lost.join('\u201d, \u201c')}\u201d. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
+        note('warn', `The connection dropped while pushing “${lost.join('”, “')}”. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
         noted = true;
       }
     }
     // A note is drawn with everything else; a status alone redraws only its own.
     if (room === r) { if (noted) renderKeepingFocus(); else renderRoom(); }
   });
-  r.conn.on('frame', (f) => { roomFrame(r, f).catch((e) => console.warn('shared plan: a frame could not be read', e)); });
+  // One at a time and in order: an op must never be read before the catchup
+  // that came ahead of it.
+  r.conn.on('frame', (f) => {
+    r.frames = r.frames.then(() => roomFrame(r, f)).catch((e) => console.warn('shared plan: a frame could not be read', e));
+  });
   // The Data tab's words change with it, not only the card.
   renderKeepingFocus();
 }
@@ -2602,7 +2637,9 @@ async function roomStart(secret) {
 function roomStop() {
   const r = room;
   room = null;
-  if (r && r.conn) r.conn.close();
+  if (!r) return;
+  clearTimeout(r.flushTimer);
+  if (r.conn) r.conn.close();
 }
 
 // A body this browser cannot open (a wrong key, a damaged frame) is skipped,
@@ -2610,6 +2647,23 @@ function roomStop() {
 const openOr = async (r, kind, body, fallback = null) => {
   try { return await Sync.open(r.keys, kind, body); } catch { return fallback; }
 };
+
+// What a sequenced op's plaintext must hold for this build to apply it.
+const opUsable = (plain) => !!plain && opSchema(plain) <= Store.SCHEMA && Array.isArray(plain.changes);
+
+// The room's plan from a catchup: its snapshot with every op after it, as a
+// replica at the room's seq. null when it cannot be built here: no snapshot,
+// an op this build cannot apply, or one missing.
+function roomPlanOf(f, snap, ops) {
+  if (!snap || !snap.plan || typeof snap.plan !== 'object') return null;
+  const rep = Sync.replica(f.snapshot.seq, snap.plan);
+  for (const o of ops) {
+    if (!opUsable(o.plain)) return null;
+    rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null);
+  }
+  try { rep.drain(); } catch { return null; }
+  return Number.isInteger(f.seq) && rep.seq < f.seq ? null : rep;
+}
 
 async function roomFrame(r, f) {
   if (f.type === 'catchup') {
@@ -2619,21 +2673,29 @@ async function roomFrame(r, f) {
       const label = await openOr(r, 'label', v.label);
       if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
     }
+    const ops = [];
+    for (const o of Array.isArray(f.ops) ? f.ops : []) if (Number.isInteger(o.seq)) ops.push({ seq: o.seq, plain: await openOr(r, 'op', o.body) });
     if (room !== r) return;
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
     r.versions = versions;
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
-    r.appliedSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
-    r.ahead = opsAhead(f);
-    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema));
+    r.snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema), ...ops.map((o) => opSchema(o.plain)));
+    // A newer room is only read: its plan is never put on screen here.
+    if (!roomReadOnly(r)) roomCatchUp(r, f, snap, ops);
     r.caught = true;
     renderRoom();
+    roomFlush(r);
   } else if (f.type === 'ack') {
     const a = r.acks.shift();
     if (!a || room !== r) return;
-    if (a.kind === 'version' && Number.isInteger(f.id)) {
+    if (a.kind === 'op') {
+      if (r.rep && Number.isInteger(f.seq)) roomApply(r, () => r.rep.take(f.seq, a.batch.changes, a.batch.oid));
+    } else if (a.kind === 'snapshot') {
+      if (Number.isInteger(f.seq)) r.snapSeq = Math.max(r.snapSeq, f.seq);
+    } else if (a.kind === 'version' && Number.isInteger(f.id)) {
       if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, nonce: a.nonce, schema: Store.SCHEMA });
-      note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
+      note('info', `Pushed “${a.name}” to the shared plan.`);
       renderKeepingFocus();
     }
   } else if (f.type === 'version' && typeof f.body === 'string') {
@@ -2646,11 +2708,22 @@ async function roomFrame(r, f) {
   } else if (f.type === 'noVersion') {
     roomFetched(r, f.id, null);
   } else if (f.type === 'op') {
-    // A newer build's live edit: this one cannot apply it, so from now on it
-    // only reads the room.
-    if (room !== r || r.ahead) return;
-    r.ahead = true;
-    renderRoom();
+    // The other browser's live edit. Before the catchup has been read it is
+    // in the catchup too (or comes after it), and a browser not following the
+    // room live leaves it to those that do.
+    if (room !== r || !r.rep || r.legacy || roomReadOnly(r) || !Number.isInteger(f.seq)) return;
+    const plain = await openOr(r, 'op', f.body);
+    if (room !== r) return;
+    if (!opUsable(plain)) {
+      // A newer build's, or one this build cannot read: from now on it only
+      // reads the room, rather than miss an edit and drift apart from it.
+      if (plain && opSchema(plain) > Store.SCHEMA) r.schema = Math.max(r.schema, opSchema(plain));
+      else r.ahead = true;
+      renderRoom();
+      return;
+    }
+    const take = () => r.rep.take(f.seq, plain.changes, typeof plain.oid === 'string' ? plain.oid : null);
+    if (r.caught) roomApply(r, take); else take();
   } else if (f.type === 'version' && typeof f.body !== 'string') {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
@@ -2659,6 +2732,222 @@ async function roomFrame(r, f) {
     r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
     renderRoom();
   }
+}
+
+/* A catchup, read: the room's plan as it is now, and this browser's place in
+   it. With a plan to follow, the ops since are folded in (from the snapshot,
+   when the room has been compacted past this browser). Without one, the
+   browser follows the room only when its own plan is the room's: one that
+   differs (joined before live updates, its plan changed since) would
+   otherwise send every difference as an edit and write over the other
+   manager's plan, so it waits to take the shared plan again. */
+function roomCatchUp(r, f, snap, ops) {
+  if (!r.rep) {
+    const now = roomPlanOf(f, snap, ops);
+    if (!now) { r.ahead = !!(snap && snap.plan) || opsAhead(f); return; }
+    // The same plan, read as this build reads it; the date moved on open
+    // (not saved yet) may be either.
+    const { state: theirs } = Store.parseImport(JSON.stringify(now.confirmed), defaults);
+    const text = theirs ? JSON.stringify(theirs) : null;
+    const same = text === JSON.stringify(state) || (dateMove && state === dateMove.plan && !dateMove.saved && text === JSON.stringify({ ...state, date: dateMove.from }));
+    if (same) { r.rep = Sync.replica(now.seq, now.confirmed); r.legacy = false; } else r.legacy = true;
+    return;
+  }
+  const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+  roomApply(r, () => {
+    // Compacted past what this browser applied: start again from the snapshot.
+    if (snap && snap.plan && typeof snap.plan === 'object' && snapSeq > r.rep.seq) r.rep.reset(snapSeq, snap.plan);
+    for (const o of ops) {
+      if (!opUsable(o.plain)) { r.ahead = true; return; }
+      r.rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null);
+    }
+  });
+  // An op missing (its snapshot unreadable, say): it cannot keep up.
+  if (r.rep.seq < (Number.isInteger(f.seq) ? f.seq : 0)) r.ahead = true;
+}
+
+/* ---------- live edits: in and out ---------- */
+// The field being typed in, as a change would name it: only a text box, where
+// a caret and half a word can be lost.
+function focusedField() {
+  const el = document.activeElement;
+  const d = el && el.dataset;
+  if (!d || !d.kind || !d.field) return null;
+  const text = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && ['text', 'search', ''].includes(el.type || ''));
+  if (!text || (d.kind !== 'meta' && !Sync.LISTS[d.kind])) return null;
+  const id = d.kind === 'meta' ? null : d.id;
+  return { kind: d.kind, id, field: d.field, key: Sync.fieldKey(d.kind, id, d.field) };
+}
+// {has, value} of one field in a plan.
+function fieldIn(plan, kind, id, field) {
+  if (kind === 'meta') return { has: true, value: plan[field] };
+  const list = plan[Sync.LISTS[kind]];
+  const item = Array.isArray(list) ? list.find((x) => x && x.id === id) : null;
+  return item ? { has: true, value: item[field] } : { has: false };
+}
+const setIn = (plan, h, value) => Sync.apply(plan, h.kind === 'meta' ? { op: 'set', kind: 'meta', field: h.field, value } : { op: 'set', kind: h.kind, id: h.id, field: h.field, value });
+
+// What is on screen beyond what the room has been told, as a batch to send.
+// A field held while typed in stays out until it is left; the date moved on
+// open stays out until the next real change saves it (moveDateOnOpen).
+// was: Map fieldKey -> the value a released field's `was` says.
+function roomCapture(r, was = null) {
+  if (!r || !r.rep || r.legacy || roomReadOnly(r)) return null;
+  const movedDate = dateMove && state === dateMove.plan && !dateMove.saved;
+  const skip = (c) => c.op === 'set' && ((c.kind === 'meta' && c.field === 'date' && movedDate)
+    || (r.holds.has(Sync.fieldKey(c.kind, c.id, c.field)) && !(was && was.has(Sync.fieldKey(c.kind, c.id, c.field)))));
+  return r.rep.capture(state, { skip, was });
+}
+
+// An edit on screen: sent after a short gather.
+function roomEdited() {
+  const r = room;
+  if (!roomLive(r) || r.flushTimer) return;
+  r.flushTimer = setTimeout(() => { r.flushTimer = null; roomFlush(r); }, ROOM_BATCH_MS);
+}
+
+// Seal and send every batch not sent yet, in order. Only while connected and
+// caught up; what cannot go now stays queued for the next connection.
+function roomFlush(r) {
+  if (room !== r || !roomLive(r) || !r.caught || planElsewhere || !r.conn || r.conn.status !== 'connected') return;
+  roomCapture(r);
+  if (!r.rep.queue.length) return;
+  if (!r.waitingSince) { r.waitingSince = Date.now(); setTimeout(() => { if (room === r) renderRoomPill(); }, 1100); }
+  const epoch = r.epoch;
+  r.sending = r.sending.then(async () => {
+    for (const b of r.rep.unsent()) {
+      if (room !== r || r.epoch !== epoch) return;
+      b.sent = true;
+      let body = null;
+      try { body = await Sync.seal(r.keys, 'op', { schema: Store.SCHEMA, oid: b.oid, changes: b.changes }); } catch (e) { console.warn('shared plan: an edit could not be sealed', e); }
+      if (room !== r || r.epoch !== epoch || !body || roomReadOnly(r)) { b.sent = false; return; }
+      // Over the relay's limit it would close the connection for good: kept
+      // on this PC only, and said so.
+      if (body.length > 512 * 1024) {
+        r.rep.queue = r.rep.queue.filter((x) => x !== b);
+        r.rep.replay();
+        note('warn', 'One change was too large to send to the shared plan, so it is on this PC only. Push a version to share it.');
+        renderKeepingFocus();
+        continue;
+      }
+      if (!r.conn.send({ type: 'op', body })) { b.sent = false; return; }
+      r.acks.push({ kind: 'op', batch: b });
+    }
+  }).catch((e) => console.warn('shared plan: sending failed', e));
+}
+
+/* Fold what the room sequenced into this browser's plan, and the screen.
+   mutate() hands the replica its ops (or a snapshot). First, every edit on
+   screen is captured, so it is measured against the plan it was made on and
+   never mistaken for a change to undo; what stays uncaptured (a field held,
+   the moved date) is put back on top afterwards. */
+function roomApply(r, mutate) {
+  if (!r.rep || room !== r || planElsewhere) { if (mutate) mutate(); return; }
+  roomCapture(r);
+  const before = r.rep.shadow;
+  const local = Sync.diff(before, state);
+  if (mutate) mutate();
+  let res;
+  try { res = r.rep.drain(); } catch (e) {
+    console.warn('shared plan: an op could not be applied', e);
+    r.ahead = true;
+    renderRoom();
+    return;
+  }
+  if (!r.rep.queue.length) r.waitingSince = null;
+  roomFlags(r, res.flags);
+  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
+  let next = Sync.applyAll(r.rep.shadow, local);
+  next = roomHold(r, next);
+  roomShow(r, next);
+}
+
+/* The field being typed in is never rewritten under the caret. When the room
+   changes it, the box keeps what is in it and the field is held: on leaving
+   it, what was typed is sent (with `was` saying what it was written over, so
+   both screens flag it), or, if nothing was typed, the box takes the room's
+   value. A held field whose route the room removed goes to the flags. */
+function roomHold(r, next) {
+  const f = focusedField();
+  if (f && !r.holds.has(f.key)) {
+    const now = fieldIn(state, f.kind, f.id, f.field);
+    const then = fieldIn(next, f.kind, f.id, f.field);
+    if (now.has && then.has && !Sync.equal(now.value, then.value)) {
+      r.holds.set(f.key, { ...f, base: now.value });
+      next = setIn(next, f, now.value);
+    }
+  }
+  for (const [key, h] of [...r.holds]) {
+    if (fieldIn(next, h.kind, h.id, h.field).has) continue;
+    r.holds.delete(key);
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    const list = state[Sync.LISTS[h.kind]];
+    const i = Array.isArray(list) ? list.findIndex((x) => x && x.id === h.id) : -1;
+    if (i >= 0 && now.has && !Sync.equal(now.value, h.base)) {
+      roomFlags(r, [{ type: 'removed', kind: h.kind, id: h.id, item: JSON.parse(JSON.stringify(list[i])), after: i > 0 ? list[i - 1].id : null, field: h.field }]);
+    }
+  }
+  return next;
+}
+// Leaving a held field.
+function roomRelease(r) {
+  if (!r || room !== r || !r.rep || !r.holds.size) return;
+  const f = focusedField();
+  let changed = false;
+  for (const [key, h] of [...r.holds]) {
+    if (f && f.key === key) continue;
+    r.holds.delete(key);
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    const there = fieldIn(r.rep.shadow, h.kind, h.id, h.field);
+    if (!now.has) continue;
+    if (Sync.equal(now.value, h.base)) {
+      if (there.has && !Sync.equal(now.value, there.value)) { roomPatch(setIn(state, h, there.value)); changed = true; }
+    } else {
+      roomCapture(r, new Map([[key, h.base]]));
+      roomEdited();
+    }
+  }
+  if (changed) { Store.save(state); r.tick++; renderKeepingFocus(); } else renderRoom();
+}
+document.addEventListener('focusout', () => {
+  const r = room;
+  if (r && r.holds.size) setTimeout(() => roomRelease(r), 0);
+});
+
+// Put `next` on screen in place: `state` stays the same object (dateMove and
+// the rest hold it), and only the parts that changed are replaced, with copies
+// of their own, so an edit on screen can never reach the replica's plans.
+function roomPatch(next) {
+  const keys = [...Object.keys(next), ...Object.keys(state).filter((k) => !(k in next))];
+  let changed = false;
+  for (const k of keys) {
+    if (JSON.stringify(state[k]) === JSON.stringify(next[k])) continue;
+    changed = true;
+    if (next[k] === undefined) delete state[k]; else state[k] = JSON.parse(JSON.stringify(next[k]));
+  }
+  return changed;
+}
+function roomShow(r, next) {
+  if (!roomPatch(next)) { renderRoom(); return; }
+  // Saved as any edit is, but not sent back: it came from the room.
+  Store.save(state);
+  r.tick++;
+  roomRedraw(r);
+}
+// A change from the room, on screen without disturbing the person working.
+function roomRedraw() {
+  renderKeepingFocus();
+}
+
+// Collisions found, kept for the marks and the card: one per field (or per
+// removed item), the newest winning.
+function roomFlags(r, flags) {
+  for (const x of flags) {
+    const key = x.type === 'set' ? `set\u0000${Sync.fieldKey(x.kind, x.id, x.field)}` : `removed\u0000${x.kind}\u0000${x.id}`;
+    r.flags = r.flags.filter((y) => y.key !== key);
+    r.flags.push({ ...x, key, at: Date.now() });
+  }
+  if (r.flags.length > 30) r.flags.splice(0, r.flags.length - 30);
 }
 
 /* ---------- versions: Look first and Restore ----------
@@ -2739,9 +3028,12 @@ async function roomRestore(id, looked) {
   const { state: next, error } = Store.parseImport(JSON.stringify(got.plain.plan), defaults);
   if (error || !next) { note('warn', 'That version could not be read, so nothing was changed.'); renderKeepingFocus(); return; }
   if (!Store.snapshot(state, `Before restoring the shared version \u201c${name}\u201d`)) { render(); return; }   // the warning says why
+  const live = roomLive();
   state = next;
   save();
-  note('info', `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
+  note('info', live
+    ? `Restored the shared version \u201c${name}\u201d for both of you. What was on screen before is in Backups.`
+    : `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
   render();
 }
 
@@ -2759,11 +3051,22 @@ async function roomPush() {
   // Before the catchup the room could be a newer build's: wait for it.
   if (!r.caught) { note('warn', 'The shared plan is still being read, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
+  // Following live, the edits on screen go out first, so the room's snapshot
+  // (the plan it has confirmed, never one with edits it has not) holds them.
+  if (roomLive(r)) {
+    roomFlush(r);
+    for (let i = 0; i < 40 && room === r && r.rep.queue.length && r.conn.status === 'connected'; i++) await new Promise((go) => setTimeout(go, 75));
+  }
+  if (room !== r) return;
+  // The snapshot is the room's plan at the seq this browser has applied, and
+  // a browser not following the room sends none: its plan is not the room's.
+  const snapAt = r.rep ? r.rep.seq : r.snapSeq;
+  const snapPlan = r.legacy ? null : r.rep ? r.rep.confirmed : r.seq === 0 && !r.snapshot ? JSON.parse(JSON.stringify(state)) : null;
   const nonce = versionNonce();
   const [body, label, snapshot] = await Promise.all([
     Sync.seal(r.keys, 'version', { schema: Store.SCHEMA, plan: state, name, nonce }),
     Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name, nonce }),
-    Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: state }),
+    snapPlan ? Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: snapPlan }) : null,
   ]);
   // Sealing takes a moment, in which the room can reconnect (and not be caught
   // up again yet), turn out read-only, or this tab's plan go stale.
@@ -2772,7 +3075,11 @@ async function roomPush() {
   if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
   r.acks.push({ kind: 'version', name, nonce });
   // Never above the seq this plan includes: the relay deletes every op up to it.
-  if (r.conn.send({ type: 'snapshot', seq: r.appliedSeq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
+  if (snapshot && r.conn.send({ type: 'snapshot', seq: snapAt, body: snapshot })) {
+    r.acks.push({ kind: 'snapshot' });
+    // A room that had no plan has this one now, and this browser follows it.
+    if (!r.rep) r.rep = Sync.replica(snapAt, snapPlan);
+  }
   if (box) box.value = '';
 }
 
@@ -2792,7 +3099,9 @@ function roomSays() {
   }
   if (planElsewhere) return { short: 'Reload this tab', text: 'The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.', cls: 'warn-status' };
   if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
-  if (status === 'connected') return { short: 'Connected', text: 'Connected to the shared plan.', cls: 'on' };
+  if (status === 'connected' && room.legacy) return { short: 'Not live', text: 'Connected, but your edits do not reach the shared plan yet: this browser joined it before live updates, and the plan here differs from it. Take the shared plan to edit it together; your plan goes into Backups first.', cls: 'warn-status' };
+  if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
+  if (status === 'connected') return { short: 'Connected', text: room.rep ? 'Connected to the shared plan. Your changes reach the other manager as you make them.' : 'Connected to the shared plan.', cls: 'on' };
   if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
   return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
 }
@@ -2850,7 +3159,10 @@ async function roomCreate() {
     } else if (status === 'connected' && !c.sent) {
       c.sent = true;
       let body = null;
-      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
+      // The room's plan from here on, as sealed: edits made meanwhile are sent
+      // as changes once the room is this browser's.
+      c.plan = JSON.parse(JSON.stringify(state));
+      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: c.plan }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
       // Seq 0: a room just made holds no ops, and this plan includes none.
       if (roomCreating === c && !(body && c.conn.send({ type: 'snapshot', seq: 0, body }))) finish(madeEmpty);
     }
@@ -2863,7 +3175,7 @@ async function roomCreate() {
     }
     roomCreating = null;
     c.conn.close();
-    roomStart(secret);
+    roomStart(secret, { seq: 0, plan: c.plan });
     note('info', 'Made a shared plan from your plan. Send the invite link on the Data tab to the other manager, and to no one else.');
     render();
   });
@@ -2907,6 +3219,7 @@ function roomCardHtml() {
   const qr = inviteQr(link);
   return `${head}
     <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    ${room.legacy ? '<button class="btn primary-ish" data-act="room-retake">Take the shared plan\u2026</button>' : ''}
     <h4>Invite link</h4>
     <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
     <div class="room-invite">
@@ -2967,15 +3280,18 @@ function roomDialog() {
 
 async function roomOfferStart(secret) {
   if (!syncReady()) return;
-  if (room && room.secret === secret) { note('info', 'This browser is already in that shared plan.'); render(); return; }
+  // Already following it; one that joined before live updates may take it again.
+  if (room && room.secret === secret && !room.legacy) { note('info', 'This browser is already in that shared plan.'); render(); return; }
   roomOfferEnd();
-  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0, ahead: false };
+  // room: the room's plan now, its snapshot with every op since (roomPlanOf).
+  const o = { secret, keys: null, conn: null, plain: null, room: null, caught: false, schema: 0, ahead: false };
   roomOffer = o;
   o.keys = await Sync.deriveKeys(secret);
   if (roomOffer !== o) return;
   o.conn = Sync.connect({ keys: o.keys });
   o.conn.on('status', (status) => {
-    if (status === 'connected') o.conn.send({ type: 'catchup', since: o.conn.seq });
+    // Since 0: every op after the snapshot, which is all of them.
+    if (status === 'connected') o.conn.send({ type: 'catchup', since: 0 });
     if (roomOffer === o) renderRoomOffer();
   });
   o.conn.on('frame', async (f) => {
@@ -2983,11 +3299,15 @@ async function roomOfferStart(secret) {
     const plain = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(o, 'snapshot', f.snapshot.body) : null;
     const labels = [];
     for (const v of Array.isArray(f.versions) ? f.versions : []) { const l = await openOr(o, 'label', v.label); if (l) labels.push(l.schema); }
+    const ops = [];
+    for (const x of Array.isArray(f.ops) ? f.ops : []) if (Number.isInteger(x.seq)) ops.push({ seq: x.seq, plain: await openOr(o, 'op', x.body) });
     if (roomOffer !== o) return;
     o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
-    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels);
-    // Ops past the snapshot: the snapshot alone is not the room's plan.
-    o.ahead = opsAhead(f);
+    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels, ...ops.map((x) => opSchema(x.plain)));
+    // The snapshot with every edit made since: what Take puts on screen.
+    // Ops this build cannot apply leave it unknown, so it cannot be taken.
+    o.room = o.plain && o.schema <= Store.SCHEMA ? roomPlanOf(f, o.plain, ops) : null;
+    o.ahead = !!o.plain && !o.room;
     o.caught = true;
     // Only one look: the offer shows what the room held when it was opened.
     o.conn.close();
@@ -3080,7 +3400,7 @@ function renderRoomOffer() {
   if (o.caught && o.plain && (o.schema > Store.SCHEMA || o.ahead)) {
     body = `<p class="status warn-status">This shared plan was saved by a newer version of Car Coordinator. Update the app to join it; nothing has changed here.</p>`;
   } else if (o.caught && o.plain) {
-    body = previewHtml(o.plain.plan, 'Taking it')
+    body = previewHtml(o.room ? o.room.confirmed : o.plain.plan, 'Taking it')
       + (room ? '<p>This browser leaves the shared plan it is in now.</p>' : '');
   } else if (o.caught) {
     body = '<p class="status warn-status">This shared plan holds no plan yet, so there is nothing to take. Nothing has changed here.</p>';
@@ -3091,7 +3411,7 @@ function renderRoomOffer() {
   } else {
     body = '<p class="status off">Opening the shared plan\u2026</p>';
   }
-  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA && !o.ahead;
+  const canTake = o.caught && o.room && o.schema <= Store.SCHEMA && !o.ahead;
   dlg.innerHTML = `
     <h2>Join this shared plan?</h2>
     ${body}
@@ -3105,8 +3425,8 @@ function renderRoomOffer() {
 function roomTake() {
   const o = roomOffer;
   if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was taken. Reload this tab first.'); roomOfferEnd(); render(); return; }
-  if (!o || !o.plain || o.schema > Store.SCHEMA || o.ahead) return;
-  const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
+  if (!o || !o.room || o.schema > Store.SCHEMA || o.ahead) return;
+  const { state: next, error } = Store.parseImport(JSON.stringify(o.room.confirmed), defaults);
   if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }
   if (!Store.snapshot(state, 'Before joining the shared plan')) { roomOfferEnd(); render(); return; }   // the warning says why
   if (!Store.setPref('room', o.secret)) {
@@ -3116,9 +3436,13 @@ function roomTake() {
     return;
   }
   roomOfferEnd();
+  // The room's plan as confirmed is where this browser starts from; anything
+  // reading it here changed (a repair) goes to the room as an edit.
+  const base = { seq: o.room.seq, plan: o.room.confirmed };
+  roomStop();
   state = next;
   save();
-  roomStart(o.secret);
+  roomStart(o.secret, base);
   tab = 'data';
   note('info', 'Joined the shared plan. What was on screen before is in Backups on the Data tab.');
   render();
@@ -3127,6 +3451,7 @@ function roomTake() {
 async function roomAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'room-take': roomTake(); return;
+    case 'room-retake': if (room) await roomOfferStart(room.secret); return;
     case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
@@ -4913,7 +5238,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-retake', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

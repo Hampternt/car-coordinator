@@ -28,6 +28,11 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   let hold = null;
   // { type, code }: the next frame of that type closes its socket instead.
   let drop = null;
+  // While held, every frame a welcomed client sends waits here, unread, and
+  // is read in the order it arrived when let go: two browsers' edits made
+  // "at once" reach the relay in a known order, and each connection's own
+  // frames stay in theirs (PROTOCOL.md §4.5).
+  let writes = null;
 
   function attach(target) {
     return target.routeWebSocket(/\/rooms\/[^/]+\/ws$/, (ws) => {
@@ -43,7 +48,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     });
   }
 
-  const send = (c, obj) => c.ws.send(JSON.stringify(obj));
+  // A socket closed meanwhile (a held frame read late) is not written to.
+  const send = (c, obj) => { if (live.has(c)) c.ws.send(JSON.stringify(obj)); };
   const shut = (c, code) => { live.delete(c); c.ws.close({ code, reason: String(code) }); };
   const others = (c) => [...live].filter((o) => o !== c && o.roomId === c.roomId && o.welcomed);
 
@@ -75,6 +81,11 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
       shut(c, ['snapshot', 'op', 'version', 'getVersion', 'catchup', 'presence'].includes(f.type) ? 4401 : 4400);
       return;
     }
+    if (writes) { writes.push(() => welcomed(c, f, room)); return; }
+    welcomed(c, f, room);
+  }
+
+  function welcomed(c, f, room) {
     const body = (v) => typeof v === 'string' && v.length > 0 && B64URL.test(v);
     switch (f.type) {
       case 'snapshot':
@@ -141,6 +152,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     down() { down = true; for (const c of [...live]) shut(c, 1006); },
     up() { down = false; },
     holdCatchup() { hold = hold || []; },
+    holdWrites() { writes = writes || []; },
+    releaseWrites() { const waiting = writes || []; writes = null; for (const go of waiting) go(); },
     // The next `type` frame any client sends closes its socket with `code`.
     dropNext(type, code = 1006) { drop = { type, code }; },
     releaseCatchup() { const waiting = hold || []; hold = null; for (const reply of waiting) reply(); },
