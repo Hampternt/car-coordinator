@@ -1466,13 +1466,9 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   await until(async () => (await flagsOf(b.page)).length > 0, 2000);
   same('and the other\'s value is in the same flag on both screens', [await flagsOf(a.page), await flagsOf(b.page)], [want, want]);
 
-  // Held, nothing typed since, then a reload: the room's value, as leaving
-  // the box would have given it, and nothing sent over it.
+  // Held while only focused (never typed in), then a reload: the room's
+  // value, as leaving the box would have given it, and nothing sent over it.
   await routeBox(a.page, 4, 'driver').click();
-  await a.page.keyboard.press('End');
-  await a.page.keyboard.type(' Before', { delay: 20 });
-  const before = await routeBox(a.page, 4, 'driver').inputValue();
-  await b.page.waitForFunction((v) => state.routes[4].driver === v, before, { timeout: 3000 }).catch(() => {});
   await routeBox(b.page, 4, 'driver').fill('B Wins');
   await b.page.keyboard.press('Tab');
   await a.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).catch(() => {});
@@ -1481,7 +1477,7 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   await a.page.reload({ waitUntil: 'networkidle' });
   await a.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
   await wait(800);
-  same('held with nothing typed since, reloaded: the room\'s value, and nothing sent over it', [await a.page.evaluate(() => state.routes[4].driver), ops().length - sent2], ['B Wins', 0]);
+  same('held, only focused, reloaded: the room\'s value, and nothing sent over it', [await a.page.evaluate(() => state.routes[4].driver), ops().length - sent2], ['B Wins', 0]);
   check('and both screens one plan', await converged(a.page, b.page));
   same('reload while held: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
@@ -1552,6 +1548,55 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   } finally { relay.up(); }
   same('a stopped tab letting go: no console errors', [...a1.errors, ...a2.errors, ...c.errors], []);
   for (const x of [a1, c]) await x.context.close();
+}
+
+// Typed in, then held: leaving the box sends what was typed, even with
+// nothing typed after the hold, and both screens carry the same flag, the
+// holding one included (the owner's server run, 2026-10-09).
+{
+  const { secret } = liveRoom();
+  const b = await live(SEED, secret);
+  const c = await live(SEED, secret);
+  const driver = (pg) => pg.evaluate(() => state.routes[3].driver);
+  await routeBox(c.page, 3, 'driver').fill('C still typing');
+  check('typed: the other has it', await b.page.waitForFunction(() => state.routes[3].driver === 'C still typing', null, { timeout: 3000 }).then(() => true, () => false));
+  await routeBox(b.page, 3, 'driver').fill('B changed it');
+  await b.page.keyboard.press('Tab');
+  check('the other changes it: the box being typed in is held', await c.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).then(() => true, () => false)
+    && (await routeBox(c.page, 3, 'driver').inputValue()) === 'C still typing');
+  await c.page.keyboard.press('Tab');
+  check('left with nothing typed after the hold: what was typed wins on both screens', await until(async () => (await driver(b.page)) === 'C still typing' && (await driver(c.page)) === 'C still typing') && await converged(b.page, c.page),
+    JSON.stringify([await driver(b.page), await driver(c.page)]));
+  const want = [{ type: 'set', kind: 'route', id: 'rt-04', field: 'driver', kept: 'C still typing', lost: 'B changed it' }];
+  await until(async () => (await flagsOf(b.page)).length > 0 && (await flagsOf(c.page)).length > 0, 2000);
+  same('and the same flag on both: kept the typed text, the other was B\'s', [await flagsOf(b.page), await flagsOf(c.page)], [want, want]);
+  for (const x of [b, c]) await x.page.click('[data-act="tab"][data-tab="data"]');
+  check('the card on both screens lists it', (await b.page.locator('#roomCard .room-flags li').allInnerTexts()).some((t) => /both of you/.test(t)) && (await c.page.locator('#roomCard .room-flags li').allInnerTexts()).some((t) => /both of you/.test(t)));
+
+  // Typed at the same moment (writes held): the other's reaches the relay
+  // last. While the box is still held, the holding screen carries the flag
+  // too, not only the other.
+  for (const x of [b, c]) await x.page.click('[data-act="tab"][data-tab="plan"]');
+  try {
+    relay.holdWrites();
+    await routeBox(c.page, 5, 'driver').fill('C at once');
+    await wait(400);
+    await routeBox(b.page, 5, 'driver').fill('B at once');
+    await b.page.keyboard.press('Tab');
+    await wait(400);
+  } finally { relay.releaseWrites(); }
+  const flag6 = (pg) => pg.evaluate(() => room.flags.filter((f) => f.id === 'rt-06').map((f) => ({ kept: f.kept, lost: f.lost })));
+  await until(async () => (await flag6(b.page)).length > 0);
+  await c.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).catch(() => {});
+  await wait(300);
+  await c.page.evaluate(() => renderRoom());
+  same('held, the holding screen has the same flag as the other', await flag6(c.page), await flag6(b.page));
+  await c.page.keyboard.press('Tab');
+  check('left: the typed text wins on both', await until(async () => (await b.page.evaluate(() => state.routes[5].driver)) === 'C at once') && await converged(b.page, c.page));
+  await until(async () => JSON.stringify(await flag6(b.page)) === JSON.stringify([{ kept: 'C at once', lost: 'B at once' }]), 2000);
+  same('and both flags say so', [await flag6(b.page), await flag6(c.page)], [[{ kept: 'C at once', lost: 'B at once' }], [{ kept: 'C at once', lost: 'B at once' }]]);
+  same('typed then held: no console errors', [...b.errors, ...c.errors], []);
+  for (const x of [b, c]) await x.context.close();
 }
 // <<< review fixes
 

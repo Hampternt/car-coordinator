@@ -2626,7 +2626,7 @@ function roomBaseRead(roomId) {
 }
 // The holds to keep: those held now, and those let go with typing whose
 // batch is still waiting for the room.
-const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) => ({ key: h.key, kind: h.kind, id: h.id, field: h.field, base: h.base, out: !!h.out }));
+const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) => ({ key: h.key, kind: h.kind, id: h.id, field: h.field, base: h.base, out: !!h.out, typed: !!h.typed }));
 // The holds changed: kept beside the base as it is stored, its seq and plan
 // left as they are (they belong to the plan stored with them).
 function roomHoldsKeep(r) {
@@ -2639,16 +2639,16 @@ function roomHoldsKeep(r) {
     localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, holds)}"plan":${JSON.stringify(b.plan)}}`);
   } catch (e) { console.warn('shared plan: its base could not be kept', e); }
 }
-/* Opening with holds kept: one held when the page went whose box still holds
-   what it held then (nothing typed since) takes the room's value, as leaving
-   it would have; any other goes out with what it was before the room
+/* Opening with holds kept: one held when the page went whose box was not
+   typed in takes the room's value, as leaving it would have; any other (typed
+   in before the hold or after) goes out with what it was before the room
    changed it as its `was` (r.wasKept, used by the first capture). */
 function roomHoldsBack(r, kept) {
   let changed = false;
   for (const h of kept.holds) {
     const now = fieldIn(state, h.kind, h.id, h.field);
     if (!now.has) continue;
-    if (!h.out && Sync.equal(now.value, h.base)) {
+    if (!h.out && !h.typed && Sync.equal(now.value, h.base)) {
       const there = fieldIn(kept.plan, h.kind, h.id, h.field);
       if (there.has && !Sync.equal(now.value, there.value)) changed = roomPatch(setIn(state, h, there.value)) || changed;
     } else r.wasKept.set(h.key, h);
@@ -3036,7 +3036,7 @@ function roomHold(r, next) {
     const now = fieldIn(state, f.kind, f.id, f.field);
     const then = fieldIn(next, f.kind, f.id, f.field);
     if (now.has && then.has && !Sync.equal(now.value, then.value)) {
-      r.holds.set(f.key, { ...f, base: now.value });
+      r.holds.set(f.key, { ...f, base: now.value, typed: typedIn === f.key });
       r.heldOut.delete(f.key);
       next = setIn(next, f, now.value);
     }
@@ -3065,7 +3065,9 @@ function roomRelease(r) {
     const now = fieldIn(state, h.kind, h.id, h.field);
     const there = fieldIn(r.rep.shadow, h.kind, h.id, h.field);
     if (!now.has) continue;
-    if (Sync.equal(now.value, h.base)) {
+    // Typed in since it was focused (before the hold or after): what was
+    // typed wins. Only focused, or tabbed through: the room's value.
+    if (!h.typed && Sync.equal(now.value, h.base)) {
       if (there.has && !Sync.equal(now.value, there.value)) { roomPatch(setIn(state, h, there.value)); changed = true; }
     } else {
       const batch = roomCapture(r, new Map([[key, h.base]]));
@@ -3079,7 +3081,13 @@ function roomRelease(r) {
 document.addEventListener('focusout', () => {
   const r = room;
   if (r && r.holds.size) setTimeout(() => roomRelease(r), 0);
+  // Left for another box (a redraw puts the focus back in the same one).
+  setTimeout(() => { const f = focusedField(); if (!f || f.key !== typedIn) typedIn = null; }, 0);
 });
+// The box typed in since it was focused, as a change would name it: a held
+// box typed in wins when it is left, even with nothing typed after the hold.
+let typedIn = null;
+document.addEventListener('input', () => { const f = focusedField(); if (f) typedIn = f.key; }, true);
 
 // Put `next` on screen in place: `state` stays the same object (dateMove and
 // the rest hold it), and only the parts that changed are replaced, with copies
@@ -3205,6 +3213,8 @@ function roomFlags(r, flags) {
 function roomFlagsPrune(r) {
   r.flags = r.flags.filter((x) => {
     if (x.type === 'removed') return !fieldIn(state, x.kind, x.id, 'id').has;
+    // A held box shows what is typed, not the plan: nothing is settled yet.
+    if (r.holds.has(Sync.fieldKey(x.kind, x.id, x.field))) return true;
     const now = fieldIn(state, x.kind, x.id, x.field);
     return now.has && !Sync.equal(now.value, x.lost);
   });
