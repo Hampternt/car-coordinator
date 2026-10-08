@@ -22,7 +22,7 @@ Tool for the warehouse team leader to plan the daily route sheet (route, driver,
 
 ## Decisions made
 1. Primary delivery: **web app on GitHub Pages**. Exe is optional/secondary.
-2. **No data stored online, ever.** Pages only serves code. All data stays on the leader's PC.
+2. **No data stored online, ever.** Pages only serves code. All data stays on the leader's PC. *Superseded 2026-10-07 by the shared plan (`manifests/2026-10-07-shared-plan.md`): nothing readable is stored online, and nothing at all unless a browser joins a shared plan, whose relay holds only ciphertext.*
 3. Free GitHub plan means the repo must be **public** for Pages, so remove the seeded car registrations from `defaults()` in `src/app.js` (start empty or with a neutral example).
 4. Move the app from `src/` to `docs/` (Pages source: main, /docs) and set `frontendDist` to `../docs` in `src-tauri/tauri.conf.json`.
 

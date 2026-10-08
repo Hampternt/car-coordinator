@@ -40,10 +40,12 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## Sharing
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
+- ✅ **Shared plan, round 1 (0.15.0)** — create a shared plan with the server's create code, send its invite link (and QR), take it on another PC with a preview and Backups first, push named versions, look at them first, restore them, or leave. End-to-end encrypted: the relay on the owner's server holds only what it cannot read. Not in the Windows app yet.
+- 🚧 **Shared plan, live updates and who is editing** — rounds 2 and 3. `manifests/2026-10-07-shared-plan.md`.
 
 ## Data
 - ✅ **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white.
-- ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
+- ✅ **Local unless you join a shared plan** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls until this browser creates or joins a shared plan, and even then the server only ever holds what it cannot read.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - ✅ **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start.
 - ✅ **Info bubbles instead of the tour** — a small ⓘ beside each part of the app opens a short explanation next to it, and a first-ever open shows one line pointing at them; they replace the first-use tour and its Tour button (0.14.0).

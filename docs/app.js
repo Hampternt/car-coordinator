@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.14.1';
+const APP_VERSION = '0.15.0';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -360,7 +360,13 @@ let notices = [];
    nowhere else. It lasts until the plan or its date is replaced, or its
    notice is put away. */
 let dateMove = null;
+// Set once another tab has saved a newer plan while this one is in a shared
+// plan; only a reload clears it. See the storage listener there.
+let planElsewhere = false;
 const save = () => {
+  // Another tab saved a newer plan (planElsewhere, in the shared plan's code):
+  // this one's is stale until reloaded, and writing it would undo that change.
+  if (planElsewhere) return;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
   Store.save(state);
 };
@@ -2109,7 +2115,7 @@ function renderData() {
 
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
-    <p class="hint">Everything you type stays on this PC. This page never sends it anywhere.</p>
+    <p class="hint">${room ? 'Everything you type is saved on this PC. Pushing a version sends it to the shared plan, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
 
     <div class="card" id="fileCard">
       <h3>Auto-save to a file${infoBtn('data-file')}</h3>
@@ -2124,6 +2130,8 @@ function renderData() {
     </div>
 
     <div class="card" id="shareCard"></div>
+
+    ${syncReady() ? '<div class="card" id="roomCard"></div>' : ''}
 
     <div class="card">
       <h3>Your own copy${infoBtn('data-copy')}</h3>
@@ -2242,7 +2250,7 @@ function render() {
   document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab').forEach((s) => s.classList.toggle('active', s.id === `tab-${tab}`));
   document.body.classList.toggle('show-sheet', tab === 'preview');
-  renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderSheet();
+  renderPlan(); renderDrivers(); renderCars(); renderPositions(); renderLabels(); renderData(); renderShare(); renderRoom(); renderSheet();
   // The preview's hint is static markup; its ⓘ goes in a slot there. A cached
   // index.html without the slot gets none.
   const previewInfo = document.getElementById('previewInfo');
@@ -2500,6 +2508,677 @@ async function shareAction(act, b) {
 function openShare(share) {
   pending = { share, mode: 'day', addMissing: true };
   renderShareDialog();
+}
+
+/* ---------- the shared plan ----------
+   A room on the relay, opened with the secret in an invite link. sync.js
+   holds the keys, the encryption and the connection; this is what the app
+   does with them. Nothing about the room is ever put on `state`: the plan is
+   what Export, Backups and the save file write, and the secret lives only
+   under carcoord:pref:room. A browser that has joined no room never calls
+   roomStart(), so it never opens a connection at all.
+
+   Pack 2 never changes the plan on its own: only Take the shared plan and a
+   version's Restore replace it, each after a backup. Live edits are pack 3. */
+// A cached store.js from before prefs cannot keep a room, so no room at all.
+const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function'
+  && typeof Store.pref === 'function' && typeof Store.setPref === 'function';
+const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
+// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
+let room = null;
+// { conn } while Create is making a room, before it is this browser's room.
+let roomCreating = null;
+
+// The schema the room's plans are written in, as far as this browser has
+// seen: the newest of its snapshot's and its versions'. Newer than this
+// build's means read-only, so an older normalise() can never drop a field
+// for both managers. So does a room holding ops (`ahead`): this build applies
+// none (live edits are pack 3), so a snapshot from it would claim ops it never
+// saw, and the relay would delete them (PROTOCOL.md §4.3).
+const roomReadOnly = () => !!room && (room.schema > Store.SCHEMA || room.ahead);
+
+// Whether a catchup shows ops this build cannot apply: any op in it, or a room
+// seq past its snapshot's. The catchup asks only for ops after the welcome's
+// seq, so the seq is what shows the ones between the snapshot and the welcome.
+const opsAhead = (f) => {
+  const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+  return (Array.isArray(f.ops) && f.ops.length > 0) || (Number.isInteger(f.seq) && f.seq > snapSeq);
+};
+
+// The schema an opened {schema, plan} was written in: the envelope's, or the
+// plan's own schemaVersion when that is newer, since normalise() loads a newer
+// plan with only a warning and would drop what it does not know.
+const planSchema = (plain) => Math.max(
+  Number.isInteger(plain && plain.schema) ? plain.schema : 0,
+  plain && plain.plan && Number.isInteger(plain.plan.schemaVersion) ? plain.plan.schemaVersion : 0,
+);
+
+// A version's name and body are sealed apart (the label and the body), so the
+// relay could pair one version's name with another's body. Each push puts the
+// same random nonce, and the name, in both; a body that does not carry its
+// label's is refused. 16 random bytes, as hex.
+const versionNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.nonce : null);
+
+async function roomStart(secret) {
+  roomStop();
+  if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
+  // seq: the room's latest seq as last heard. acks: what was sent and not yet
+  // answered, oldest first; the relay answers in the order it was sent.
+  // fetches: version id -> the resolvers waiting for its body (getVersion).
+  // caught: the catchup since the last (re)connect has been read. Until then
+  // the room's schema is unknown, so nothing is written to it.
+  // appliedSeq: the seq of the last op this browser's plan includes, the only
+  // seq it may send a snapshot at; with no ops applied, the room snapshot's.
+  // ahead: the room holds ops past it (opsAhead), so it is read-only here.
+  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, appliedSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false };
+  room = r;
+  try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
+  if (room !== r) return;   // left, or another room taken, while deriving
+  r.conn = Sync.connect({ keys: r.keys });
+  r.conn.on('status', (status) => {
+    // Catch up on every (re)connect: the version list, and the room's schema.
+    r.caught = false;
+    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
+    // A connection that dropped will never answer what it was sent.
+    let noted = false;
+    if (status !== 'connected') roomFetchesEnd(r);
+    if (status !== 'connected' && r.acks.length) {
+      const lost = r.acks.filter((a) => a.kind === 'version').map((a) => a.name);
+      r.acks = [];
+      if (lost.length && room === r) {
+        note('warn', `The connection dropped while pushing \u201c${lost.join('\u201d, \u201c')}\u201d. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
+        noted = true;
+      }
+    }
+    // A note is drawn with everything else; a status alone redraws only its own.
+    if (room === r) { if (noted) renderKeepingFocus(); else renderRoom(); }
+  });
+  r.conn.on('frame', (f) => { roomFrame(r, f).catch((e) => console.warn('shared plan: a frame could not be read', e)); });
+  // The Data tab's words change with it, not only the card.
+  renderKeepingFocus();
+}
+
+function roomStop() {
+  const r = room;
+  room = null;
+  if (r && r.conn) r.conn.close();
+}
+
+// A body this browser cannot open (a wrong key, a damaged frame) is skipped,
+// never fatal: the list shows what it can read.
+const openOr = async (r, kind, body, fallback = null) => {
+  try { return await Sync.open(r.keys, kind, body); } catch { return fallback; }
+};
+
+async function roomFrame(r, f) {
+  if (f.type === 'catchup') {
+    const snap = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(r, 'snapshot', f.snapshot.body) : null;
+    const versions = [];
+    for (const v of Array.isArray(f.versions) ? f.versions : []) {
+      const label = await openOr(r, 'label', v.label);
+      if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
+    }
+    if (room !== r) return;
+    r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
+    r.versions = versions;
+    if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
+    r.appliedSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+    r.ahead = opsAhead(f);
+    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema));
+    r.caught = true;
+    renderRoom();
+  } else if (f.type === 'ack') {
+    const a = r.acks.shift();
+    if (!a || room !== r) return;
+    if (a.kind === 'version' && Number.isInteger(f.id)) {
+      if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, nonce: a.nonce, schema: Store.SCHEMA });
+      note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
+      renderKeepingFocus();
+    }
+  } else if (f.type === 'version' && typeof f.body === 'string') {
+    // getVersion's answer: the whole version, for Look first or Restore.
+    const plain = await openOr(r, 'version', f.body);
+    const label = await openOr(r, 'label', f.label);
+    if (!plain || !plain.plan || typeof plain.plan !== 'object' || !label) { roomFetched(r, f.id, { unreadable: true }); return; }
+    const bound = typeof plain.name === 'string' && plain.name === label.name && typeof plain.nonce === 'string' && plain.nonce === labelNonce(label);
+    roomFetched(r, f.id, bound ? { plain, name: plain.name, nonce: plain.nonce } : { mismatch: true });
+  } else if (f.type === 'noVersion') {
+    roomFetched(r, f.id, null);
+  } else if (f.type === 'op') {
+    // A newer build's live edit: this one cannot apply it, so from now on it
+    // only reads the room.
+    if (room !== r || r.ahead) return;
+    r.ahead = true;
+    renderRoom();
+  } else if (f.type === 'version' && typeof f.body !== 'string') {
+    // Pushed from the other browser: its name, and nothing else yet.
+    const label = await openOr(r, 'label', f.label);
+    if (!label || room !== r || r.versions.some((v) => v.id === f.id)) return;
+    r.versions.push({ id: f.id, at: f.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
+    r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
+    renderRoom();
+  }
+}
+
+/* ---------- versions: Look first and Restore ----------
+   A version's plan is fetched only when it is looked at. Restore is local:
+   the plan on screen goes into Backups, the version takes its place, and
+   nothing is sent. A version written by a newer build is never restored
+   here, so an older normalise() never drops what it does not know. */
+function roomFetched(r, id, result) {
+  const waiting = r.fetches.get(id) || [];
+  r.fetches.delete(id);
+  for (const done of waiting) done(result);
+}
+function roomFetchesEnd(r) {
+  for (const id of [...r.fetches.keys()]) roomFetched(r, id, { offline: true });
+}
+// -> { plain, name, nonce } | { unreadable } | { mismatch } | { offline } |
+//    null (no such version)
+function roomFetch(id) {
+  const r = room;
+  if (!r || !r.conn) return Promise.resolve({ offline: true });
+  return new Promise((resolve) => {
+    const first = !r.fetches.has(id);
+    r.fetches.set(id, [...(r.fetches.get(id) || []), resolve]);
+    if (first && !r.conn.send({ type: 'getVersion', id })) roomFetched(r, id, { offline: true });
+  });
+}
+const roomVersion = (id) => room && room.versions.find((v) => v.id === id);
+
+// What a fetch that came back empty-handed says.
+function roomFetchFailed(got) {
+  if (!got) note('warn', 'That version is no longer in the shared plan: only the newest 50 are kept. Nothing was changed.');
+  else if (got.offline) note('warn', 'The shared plan cannot be reached right now, so the version could not be fetched. Nothing was changed.');
+  else if (got.mismatch) note('warn', 'This version does not match its name, so nothing was changed.');
+  else note('warn', 'That version could not be read, so nothing was changed.');
+  renderKeepingFocus();
+}
+
+// The body fetched is the one whose name the list shows: same name, same nonce.
+const matchesListed = (got, v) => !!v && got.name === v.name && got.nonce === v.nonce;
+
+async function roomLookFirst(id) {
+  const v = roomVersion(id);
+  if (!v) return;
+  let got = await roomFetch(id);
+  if (got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
+  if (!got || !got.plain) { roomFetchFailed(got); return; }
+  if (roomOffer) return;   // an invite's question came first
+  roomLook = { id, name: got.name, at: v.at, plain: got.plain };
+  renderRoomLook();
+}
+
+function renderRoomLook() {
+  const l = roomLook;
+  if (!l) return;
+  const dlg = roomDialog();
+  const newer = planSchema(l.plain) > Store.SCHEMA;
+  dlg.innerHTML = `
+    <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
+    <p class="hint">Pushed ${esc(when(l.at))}.</p>
+    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it')}
+    <div class="bar" style="margin:16px 0 0">
+      ${newer ? '' : `<button class="btn primary-ish" data-act="room-restore" data-id="${esc(l.id)}" data-sure="1">Restore it</button>`}
+      <button class="btn" data-act="room-look-close">Close</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+// looked: {plain, name} when it comes from Look first's dialog.
+async function roomRestore(id, looked) {
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was restored. Reload this tab first.'); renderKeepingFocus(); return; }
+  const v = roomVersion(id);
+  // From Look first the body was matched to its name when it was fetched.
+  let got = looked || await roomFetch(id);
+  if (!looked && got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
+  if (!got || !got.plain) { roomFetchFailed(got); return; }
+  const name = got.name || 'Unnamed';
+  if (planSchema(got.plain) > Store.SCHEMA) { note('warn', `Update the app to restore \u201c${name}\u201d: it was saved by a newer version of Car Coordinator. Nothing was changed.`); renderKeepingFocus(); return; }
+  const { state: next, error } = Store.parseImport(JSON.stringify(got.plain.plan), defaults);
+  if (error || !next) { note('warn', 'That version could not be read, so nothing was changed.'); renderKeepingFocus(); return; }
+  if (!Store.snapshot(state, `Before restoring the shared version \u201c${name}\u201d`)) { render(); return; }   // the warning says why
+  state = next;
+  save();
+  note('info', `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
+  render();
+}
+
+/* Push: a named version of the plan on screen, to go back to. It also
+   becomes the plan a newcomer's Take gets, so a join a week later starts
+   from the last pushed plan rather than the one the room was made with. */
+async function roomPush() {
+  const r = room;
+  if (!r || !r.conn) return;
+  const box = document.getElementById('roomVersionName');
+  const name = String(box?.value || '').replace(/\s+/g, ' ').trim();
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was pushed. Reload this tab first.'); render(); return; }
+  if (roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
+  if (r.conn.status !== 'connected') { note('warn', 'The shared plan cannot be reached right now, so nothing was pushed. Your plan is saved on this PC; push again once it says Connected.'); render(); return; }
+  // Before the catchup the room could be a newer build's: wait for it.
+  if (!r.caught) { note('warn', 'The shared plan is still being read, so nothing was pushed. Push again in a moment.'); render(); return; }
+  if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
+  const nonce = versionNonce();
+  const [body, label, snapshot] = await Promise.all([
+    Sync.seal(r.keys, 'version', { schema: Store.SCHEMA, plan: state, name, nonce }),
+    Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name, nonce }),
+    Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: state }),
+  ]);
+  // Sealing takes a moment, in which the room can reconnect (and not be caught
+  // up again yet), turn out read-only, or this tab's plan go stale.
+  if (room === r && roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
+  if (room === r && (!r.caught || planElsewhere)) { note('warn', 'The shared plan changed while the version was being made, so nothing was pushed. Push again in a moment.'); render(); return; }
+  if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
+  r.acks.push({ kind: 'version', name, nonce });
+  // Never above the seq this plan includes: the relay deletes every op up to it.
+  if (r.conn.send({ type: 'snapshot', seq: r.appliedSeq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
+  if (box) box.value = '';
+}
+
+/* What the status says, in the words on screen. `cls` picks the Data tab's
+   mark: on (✓), off (○) or warn-status (!). */
+function roomSays() {
+  if (!room || !room.conn) return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
+  const { status, closeCode } = room.conn;
+  if (status === 'refused') {
+    const why = {
+      4401: 'The relay does not know this shared plan. The invite link may be wrong, or the plan was removed from the server.',
+      4403: 'The create code was not accepted.',
+      4409: 'A shared plan with this link already exists.',
+      4413: 'The plan is too large for the shared plan.',
+    }[closeCode] || 'The relay refused what this browser sent.';
+    return { short: 'Refused', text: `${why} Your plan is still on this PC.`, cls: 'warn-status' };
+  }
+  if (planElsewhere) return { short: 'Reload this tab', text: 'The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.', cls: 'warn-status' };
+  if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
+  if (status === 'connected') return { short: 'Connected', text: 'Connected to the shared plan.', cls: 'on' };
+  if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
+  return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
+}
+
+// The status in the top bar, so it shows on every tab: only while in a room.
+function renderRoomPill() {
+  let pill = document.getElementById('syncStatus');
+  if (!room) { if (pill) pill.remove(); return; }
+  if (!pill) {
+    pill = document.createElement('button');
+    pill.id = 'syncStatus';
+    pill.type = 'button';
+    pill.dataset.act = 'show-data';
+    const bar = document.querySelector('.topbar');
+    bar.insertBefore(pill, bar.querySelector('[data-act="print"]'));
+  }
+  const says = roomSays();
+  pill.className = `sync-pill ${says.cls}`;
+  pill.title = says.text;
+  pill.textContent = `Shared plan: ${says.short}`;
+}
+
+/* Create: a new room on the relay, seeded with this plan. The owner's create
+   code is asked for each time and kept nowhere. The room becomes this
+   browser's only once the relay has stored the plan; until then nothing is
+   remembered, so a failed Create leaves no trace but the message. */
+async function roomCreate() {
+  if (room || roomCreating || !syncReady()) return;
+  const code = String(document.getElementById('roomCode')?.value || '').trim();
+  if (!code) { note('warn', 'Type the create code first. It is set on the shared plan\'s server; the owner of the server has it.'); render(); return; }
+  const secret = Sync.newSecret();
+  const keys = await Sync.deriveKeys(secret);
+  const c = { conn: null, sent: false };
+  roomCreating = c;
+  const finish = (text) => {
+    if (roomCreating !== c) return;
+    roomCreating = null;
+    c.conn.close();
+    if (text) note('warn', text);
+    render();
+  };
+  // Once connected, the relay has made the room (it welcomes a create only
+  // after `created`), so a failure from then on leaves it there, empty.
+  const madeEmpty = 'The shared plan was made on the server, but your plan did not reach it, so this browser is not using it. It may be on the server without its plan. Ask the server\'s owner to remove it, or try again. Your plan is unchanged.';
+  c.conn = Sync.connect({ keys, create: { createCode: code } });
+  c.conn.on('status', async (status, closeCode) => {
+    if ((status === 'refused' || status === 'offline') && c.sent) {
+      finish(madeEmpty);
+    } else if (status === 'refused') {
+      finish(closeCode === Sync.CLOSE.WRONG_CREATE_CODE
+        ? 'The create code was not accepted, so no shared plan was made. Check the code and try again.'
+        : 'The server refused to make the shared plan, so none was made. Your plan is unchanged.');
+    } else if (status === 'offline') {
+      finish('Could not reach the shared plan\'s server, so no shared plan was made. Your plan is unchanged; try again later.');
+    } else if (status === 'connected' && !c.sent) {
+      c.sent = true;
+      let body = null;
+      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
+      // Seq 0: a room just made holds no ops, and this plan includes none.
+      if (roomCreating === c && !(body && c.conn.send({ type: 'snapshot', seq: 0, body }))) finish(madeEmpty);
+    }
+  });
+  c.conn.on('frame', (f) => {
+    if (f.type !== 'ack' || roomCreating !== c) return;
+    if (!Store.setPref('room', secret)) {
+      finish('The shared plan was made, but this browser would not keep its link, so it cannot use it. Its storage may be full or switched off. The plan stays on the server unused: ask the server\'s owner to remove it, or try again.');
+      return;
+    }
+    roomCreating = null;
+    c.conn.close();
+    roomStart(secret);
+    note('info', 'Made a shared plan from your plan. Send the invite link on the Data tab to the other manager, and to no one else.');
+    render();
+  });
+  renderRoom();
+}
+
+// The QR is the invite link again, for a phone or a second PC with a camera;
+// drawn once per link. qr.js is fetched only when there is an invite to
+// draw, so a browser in no shared plan loads nothing it did not before.
+let roomQr = { link: '', svg: '' };
+let qrLoading = false;
+function inviteQr(link) {
+  if (typeof QR === 'undefined' || typeof QR.svg !== 'function') {
+    if (!qrLoading) {
+      qrLoading = true;
+      const tag = document.createElement('script');
+      tag.src = `qr.js?v=${APP_VERSION}`;
+      tag.onload = () => renderRoom();
+      document.head.appendChild(tag);
+    }
+    return '';
+  }
+  if (roomQr.link !== link) {
+    let svg = '';
+    try { svg = QR.svg(link, { level: 'M', label: 'The invite link as a QR code' }); } catch { /* too long: the link alone */ }
+    roomQr = { link, svg };
+  }
+  return roomQr.svg;
+}
+
+function roomCardHtml() {
+  const head = `<h3>Shared plan${infoBtn('data-shared')}</h3>`;
+  if (!room) {
+    return `${head}
+      <p class="hint">One plan for two managers, on any PC. It is locked on this PC before it is sent, so the server cannot read it; only the invite link opens it. To join one, open the invite link you were sent.</p>
+      <label class="room-code">Create code <input type="password" id="roomCode" autocomplete="off" spellcheck="false"${roomCreating ? ' disabled' : ''}></label>
+      <button class="btn primary-ish" data-act="room-create"${roomCreating ? ' disabled' : ''}>${roomCreating ? 'Creating\u2026' : 'Create a shared plan'}</button>`;
+  }
+  const says = roomSays();
+  const link = Sync.inviteLink(room.secret);
+  const qr = inviteQr(link);
+  return `${head}
+    <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    <h4>Invite link</h4>
+    <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
+    <div class="room-invite">
+      <div><textarea id="roomInvite" class="code" readonly rows="2">${esc(link)}</textarea>
+      <button class="btn" data-act="room-copy">Copy the invite link</button></div>
+      ${qr ? `<div class="room-qr">${qr}</div>` : ''}
+    </div>
+    ${roomVersionsHtml()}
+    <h4>Leave</h4>
+    <p class="hint">Stops sharing on this PC and forgets the invite link here. Your plan stays on screen as it is; the shared plan stays on the server for the other manager.</p>
+    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}`;
+}
+
+// Push, and the versions pushed so far, newest first.
+function roomVersionsHtml() {
+  const ro = roomReadOnly();
+  const up = room.conn && room.conn.status === 'connected';
+  const canPush = up && room.caught && !ro && !planElsewhere;
+  const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => {
+    const sure = armed === `room-restore:${v.id}`;
+    const newer = v.schema > Store.SCHEMA;
+    return `<li data-version="${esc(v.id)}">
+      <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}${newer ? ' \u00b7 saved by a newer version: update the app to restore it' : ''}</span>
+      <button class="btn" data-act="room-look" data-id="${esc(v.id)}"${up ? '' : ' disabled'}>Look first</button>
+      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>
+    </li>`;
+  }).join('');
+  return `<h4>Versions</h4>
+    <p class="hint">Push saves the plan on screen as a named version in the shared plan, for either of you to go back to. The newest 50 are kept.</p>
+    <div class="room-push">
+      <input type="text" id="roomVersionName" placeholder="Name it, e.g. Monday final" maxlength="80" autocomplete="off"${ro ? ' disabled' : ''}>
+      <button class="btn primary-ish" data-act="room-push"${canPush ? '' : ' disabled'}>Push a version</button>
+    </div>
+    ${rows ? `<ul class="room-versions">${rows}</ul>` : '<p class="empty">No versions pushed yet.</p>'}`;
+}
+
+/* ---------- joining: an offer, never forced ----------
+   An invite link opens a dialog that reaches the room to show what it holds,
+   and asks. Not now closes the connection and changes nothing at all. Take
+   the shared plan puts this plan into Backups first, then replaces the plan
+   and setup with the room's: ids are random per PC, so the room's win. */
+// { secret, keys, conn, plain: {schema, plan} | null, caught, empty }
+let roomOffer = null;
+// { id, name, plain } while a version's Look first is open in the same dialog.
+let roomLook = null;
+
+function roomDialog() {
+  let dlg = document.getElementById('roomDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'roomDlg';
+    document.body.appendChild(dlg);
+    // Esc closes a dialog on its own; for an offer that is Not now.
+    dlg.addEventListener('close', () => { if (roomOffer) roomOfferEnd(); roomLook = null; });
+  }
+  return dlg;
+}
+
+async function roomOfferStart(secret) {
+  if (!syncReady()) return;
+  if (room && room.secret === secret) { note('info', 'This browser is already in that shared plan.'); render(); return; }
+  roomOfferEnd();
+  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0, ahead: false };
+  roomOffer = o;
+  o.keys = await Sync.deriveKeys(secret);
+  if (roomOffer !== o) return;
+  o.conn = Sync.connect({ keys: o.keys });
+  o.conn.on('status', (status) => {
+    if (status === 'connected') o.conn.send({ type: 'catchup', since: o.conn.seq });
+    if (roomOffer === o) renderRoomOffer();
+  });
+  o.conn.on('frame', async (f) => {
+    if (f.type !== 'catchup') return;
+    const plain = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(o, 'snapshot', f.snapshot.body) : null;
+    const labels = [];
+    for (const v of Array.isArray(f.versions) ? f.versions : []) { const l = await openOr(o, 'label', v.label); if (l) labels.push(l.schema); }
+    if (roomOffer !== o) return;
+    o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
+    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels);
+    // Ops past the snapshot: the snapshot alone is not the room's plan.
+    o.ahead = opsAhead(f);
+    o.caught = true;
+    // Only one look: the offer shows what the room held when it was opened.
+    o.conn.close();
+    renderRoomOffer();
+  });
+  renderRoomOffer();
+}
+
+/* Another tab of this browser saved the plan while this one is in a shared
+   plan. This tab's plan is now stale, and every change in it would be saved
+   (and could be pushed) over the other tab's. Loading the new plan in place
+   would leave this tab's undo history, a moved date and an open dialog all
+   pointing at the old one, so instead the tab stops: it saves and pushes
+   nothing, and a dialog that does not close asks for a reload. planElsewhere
+   is declared beside save(), which it stops. */
+window.addEventListener('storage', (e) => {
+  if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
+  let now = null;
+  try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
+  // The plan this tab last saved, written again: nothing has changed.
+  if (now === JSON.stringify(state)) return;
+  planElsewhere = true;
+  renderPlanElsewhere();
+  renderRoom();
+});
+function renderPlanElsewhere() {
+  let dlg = document.getElementById('elsewhereDlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'elsewhereDlg';
+    dlg.innerHTML = `
+      <h2>This plan changed in another tab</h2>
+      <p>Another tab of this browser saved a change to the plan. This tab still shows the plan from before, so it saves nothing and pushes nothing to the shared plan until it is reloaded.</p>
+      <div class="bar" style="margin:16px 0 0"><button class="btn primary-ish" type="button" id="elsewhereReload">Reload this tab</button></div>`;
+    // Esc would close it; there is nothing to go back to.
+    dlg.addEventListener('cancel', (e) => e.preventDefault());
+    dlg.addEventListener('close', () => { if (planElsewhere && !dlg.open) dlg.showModal(); });
+    dlg.querySelector('#elsewhereReload').addEventListener('click', () => location.reload());
+    document.body.appendChild(dlg);
+  }
+  if (!dlg.open) dlg.showModal();
+}
+
+// Another tab of this browser joined or left: this one follows, so a Leave
+// there leaves no connection open here.
+window.addEventListener('storage', (e) => {
+  if (!syncReady() || (e.key !== null && e.key !== 'carcoord:pref:room')) return;
+  const secret = Store.pref('room');
+  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); renderKeepingFocus(); } }
+  else if (!room || room.secret !== secret) roomStart(secret);
+});
+
+// An invite pasted into the address bar of an open page changes only the
+// fragment: no reload, so start() never sees it.
+window.addEventListener('hashchange', () => {
+  if (!syncReady() || !/^#join=/.test(location.hash || '')) return;
+  const secret = Sync.readInvite(location.hash);
+  if (secret) roomOfferStart(secret);
+});
+
+function roomOfferEnd() {
+  const o = roomOffer;
+  roomOffer = null;
+  if (o && o.conn) o.conn.close();
+  const dlg = document.getElementById('roomDlg');
+  if (dlg && dlg.open && !roomLook) dlg.close();
+}
+
+// The lines a preview lists: what the plan offered holds, and what exists only
+// on this PC and so is kept in the Backup rather than carried over.
+function previewHtml(plan, verb) {
+  const p = Sync.joinPreview(state, plan);
+  // From the room, so read as a stranger's: a date the app writes, or none.
+  const [y, m, d] = /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date.split('-') : [];
+  const n = (k, one) => `${k} ${one}${k === 1 ? '' : 's'}`;
+  const groups = [['Cars', p.onlyHere.cars], ['Positions', p.onlyHere.positions], ['Labels', p.onlyHere.labels], ['Drivers', p.onlyHere.drivers], ['Day groups', p.onlyHere.crews], ['Templates', p.onlyHere.templates]]
+    .filter(([, names]) => names.length);
+  return `<p>It is dated <b>${y ? `${d}/${m}/${y}` : 'no date'}</b> and holds <b>${n(p.routes, 'route')}</b>, ${n(p.cars, 'car')}, ${n(p.drivers, 'driver')} and ${n(p.templates, 'template')}.</p>
+    <p class="status warn-status"><b>${verb} replaces everything on screen: the day plan and the setup.</b> Your own plan goes into Backups first, so you can get it back.</p>
+    ${groups.length ? `<p>Only on this PC, so kept in that Backup and not in what you take:</p>
+      <ul class="room-only">${groups.map(([what, names]) => `<li><b>${what}:</b> ${names.map(esc).join(', ')}</li>`).join('')}</ul>` : ''}`;
+}
+
+function renderRoomOffer() {
+  const o = roomOffer;
+  if (!o) return;
+  const dlg = roomDialog();
+  const status = o.conn ? o.conn.status : 'connecting';
+  let body;
+  if (o.caught && o.plain && (o.schema > Store.SCHEMA || o.ahead)) {
+    body = `<p class="status warn-status">This shared plan was saved by a newer version of Car Coordinator. Update the app to join it; nothing has changed here.</p>`;
+  } else if (o.caught && o.plain) {
+    body = previewHtml(o.plain.plan, 'Taking it')
+      + (room ? '<p>This browser leaves the shared plan it is in now.</p>' : '');
+  } else if (o.caught) {
+    body = '<p class="status warn-status">This shared plan holds no plan yet, so there is nothing to take. Nothing has changed here.</p>';
+  } else if (status === 'refused') {
+    body = '<p class="status warn-status">This invite link does not open a shared plan: it may be mistyped, or the plan was removed from the server. Nothing has changed here.</p>';
+  } else if (status === 'offline') {
+    body = '<p class="status warn-status">The shared plan\'s server cannot be reached right now. Still trying; nothing has changed here.</p>';
+  } else {
+    body = '<p class="status off">Opening the shared plan\u2026</p>';
+  }
+  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA && !o.ahead;
+  dlg.innerHTML = `
+    <h2>Join this shared plan?</h2>
+    ${body}
+    <div class="bar" style="margin:16px 0 0">
+      ${canTake ? '<button class="btn primary-ish" data-act="room-take">Take the shared plan</button>' : ''}
+      <button class="btn" data-act="room-notnow">Not now</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+function roomTake() {
+  const o = roomOffer;
+  if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was taken. Reload this tab first.'); roomOfferEnd(); render(); return; }
+  if (!o || !o.plain || o.schema > Store.SCHEMA || o.ahead) return;
+  const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
+  if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }
+  if (!Store.snapshot(state, 'Before joining the shared plan')) { roomOfferEnd(); render(); return; }   // the warning says why
+  if (!Store.setPref('room', o.secret)) {
+    note('warn', 'This browser would not keep the shared plan\'s link (its storage may be full or switched off), so nothing was changed.');
+    roomOfferEnd();
+    render();
+    return;
+  }
+  roomOfferEnd();
+  state = next;
+  save();
+  roomStart(o.secret);
+  tab = 'data';
+  note('info', 'Joined the shared plan. What was on screen before is in Backups on the Data tab.');
+  render();
+}
+
+async function roomAction(act, b, fromKeyboard = false) {
+  switch (act) {
+    case 'room-take': roomTake(); return;
+    case 'room-notnow': roomOfferEnd(); return;
+    case 'room-create': await roomCreate(); return;
+    case 'room-push': await roomPush(); return;
+    case 'room-leave': {
+      if (!room || !confirmTwice('room-leave', fromKeyboard)) return;
+      roomStop();
+      if (Store.setPref('room', null)) note('info', 'Left the shared plan. Your plan stays on this PC as it is. The invite link would open the shared plan again.');
+      else note('warn', 'Left the shared plan for now, but this browser would not forget its link, so it may join again when the page is next opened.');
+      render();
+      return;
+    }
+    case 'room-look': await roomLookFirst(Number(b.dataset.id)); return;
+    case 'room-look-close': { roomLook = null; const dlg = document.getElementById('roomDlg'); if (dlg && dlg.open) dlg.close(); return; }
+    case 'room-restore': {
+      const id = Number(b.dataset.id);
+      // From Look first, the dialog's button is the second press; from the
+      // list it takes two, as a backup's Restore does.
+      if (b.dataset.sure === '1' && roomLook && roomLook.id === id) {
+        const { plain, name } = roomLook;
+        roomLook = null;
+        document.getElementById('roomDlg')?.close();
+        await roomRestore(id, { plain, name });
+        return;
+      }
+      if (!confirmTwice(`room-restore:${id}`, fromKeyboard)) return;
+      await roomRestore(id);
+      return;
+    }
+    case 'room-copy': {
+      if (!room) return;
+      try { await navigator.clipboard.writeText(Sync.inviteLink(room.secret)); note('info', 'Copied the invite link.'); } catch { note('warn', 'The clipboard did not take it. Select the link on the Data tab and copy it from there.'); }
+      render();
+      return;
+    }
+    default:
+  }
+}
+
+/* The card is drawn with the Data tab, and again on its own when the
+   connection changes, keeping the focus and what was typed in it. */
+function renderRoom() {
+  renderRoomPill();
+  const card = document.getElementById('roomCard');
+  if (!card) return;
+  const el = document.activeElement;
+  const focusId = el && card.contains(el) && el.id ? el.id : null;
+  const sel = focusId && 'selectionStart' in el ? [el.selectionStart, el.selectionEnd] : null;
+  card.innerHTML = roomCardHtml();
+  if (focusId) {
+    const again = document.getElementById(focusId);
+    if (again) { again.focus(); if (sel) try { again.setSelectionRange(...sel); } catch { /* not a text box */ } }
+  }
 }
 
 // After a hold is answered in the screen's favour: write it now and say what
@@ -3046,6 +3725,7 @@ document.addEventListener('click', (e) => {
   const { act, kind, id } = b.dataset;
   if (SHARE_ACTS.has(act)) { shareAction(act, b); return; }
   if (DATA_ACTS.has(act)) { dataAction(act, b, e.detail === 0); return; }
+  if (ROOM_ACTS.has(act)) { roomAction(act, b, e.detail === 0); return; }
   // A tick in a template's load question changes the question, never the plan.
   if (act === 'tpl-part') {
     const n = notices[Number(b.dataset.index)];
@@ -4005,7 +4685,7 @@ document.addEventListener('contextmenu', (e) => {
   const layer = $('#ctxMenu');
   if (!layer) return;
   if (inCtx(t)) { e.preventDefault(); return; }
-  if (e.shiftKey || $('#shareDlg').open || !t.closest) return;
+  if (e.shiftKey || $('#shareDlg').open || document.getElementById('roomDlg')?.open || !t.closest) return;
   if (t.closest('textarea, a')) return;
   if (t.tagName === 'INPUT') {
     if (CTX_TEXT.has(t.type) ? t.selectionStart !== t.selectionEnd : !CTX_INPUTS.has(t.type)) return;
@@ -4216,7 +4896,7 @@ document.addEventListener('change', async (e) => {
 // Enter in an "add" box triggers its button.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag' };
+  const map = { newDriver: 'add-driver', newGroup: 'add-group', newTemplate: 'save-template', newCar: 'add-car', newPos: 'add-position', newLabel: 'add-label', newDriverTag: 'add-driver-tag', roomCode: 'room-create', roomVersionName: 'room-push' };
   // The rail's own boxes press their own buttons, not the tabs' — they add to
   // the same lists, but from a different box.
   const here = { railDriver: '[data-act="add-driver"][data-from]', railCar: '[data-act="add-car"][data-from]', newTagName: '[data-act="add-tag"]' }[e.target.id];
@@ -4232,6 +4912,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
+// The Shared plan card's, which talk to the relay and so are async.
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);
@@ -4295,6 +4977,12 @@ function drawFooter() {
 }
 
 async function start() {
+  // An invite's secret leaves the address bar before anything else runs, so it
+  // stays in no history, whatever happens below. Stripped even when sync.js is
+  // missing (a cached older index.html), which cannot read it anyway.
+  let invite = null;
+  if (syncReady()) invite = Sync.readInvite(location.hash);
+  else if (/^#join=/.test(location.hash || '')) history.replaceState(null, '', location.pathname + location.search);
   clearTheBar();
   drawFooter();
   // Read before Share.readHash() clears it: an open by share link keeps the
@@ -4336,6 +5024,11 @@ async function start() {
   // After the note, which is what works out whether this is a first run.
   try { offerInfoHint(link); } catch (e) { console.warn('first-open hint skipped', e); }
   render();
+
+  // The shared plan this browser has joined, if any. None: no connection, ever.
+  if (syncReady()) { const secret = Store.pref('room'); if (SECRET_RE.test(String(secret || ''))) roomStart(secret); }
+  // An invite opened: offer it. A mangled one was stripped all the same.
+  if (invite) roomOfferStart(invite);
 
   const fromLink = Share.readHash();
   if (fromLink) {

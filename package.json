@@ -1,13 +1,13 @@
 {
   "name": "car-coordinator",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "private": true,
   "scripts": {
     "dev": "node scripts/serve.mjs 5173",
     "tauri:dev": "tauri dev",
     "build": "tauri build",
     "icon": "tauri icon app-icon.png",
-    "test": "node scripts/versions.mjs && node scripts/map.mjs && node scripts/smoke.mjs && node scripts/breadify.mjs",
+    "test": "node scripts/versions.mjs && node scripts/map.mjs && node scripts/sync.mjs && node scripts/sync-ui.mjs && node scripts/smoke.mjs && node scripts/breadify.mjs",
     "screens": "node scripts/screens.mjs",
     "test:car": "node scripts/smoke.mjs",
     "test:map": "node scripts/map.mjs",
