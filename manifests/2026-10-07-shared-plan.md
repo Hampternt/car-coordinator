@@ -216,6 +216,10 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: **relay deployed** to the Hetzner box over SSH, on the owner's go:
+  - **Service:** `carsync` running as its own user; `/opt/carsync/.env` has `RELAY_ORIGINS` plus `http://localhost:5173` for testing from a local copy. The create code is left for the owner to set.
+  - **nginx:** the 443 block gains `location /carsync/` (19 lines added, none removed), `conf.d/carsync.conf` is added, `nginx -t` is OK and nginx reloaded. Backup: `portfolio.bak-20261008-0124`.
+  - **Checks from outside:** `/carsync/health` returns `ok`, the portfolio returns 200, and the upgrade gets 101 from the Pages origin, 101 from localhost:5173 and 403 from example.com.
 - 2026-10-08: round 1 took 123 min from the plan commit to handover, 37 commits (`wave-times.sh 2026-10-07T23:00`).
 - 2026-10-08: **pack gate on a frozen copy of c702444:**
   - `npm test` exit 0: `VERSIONS OK`, `map checks passed`, `sync checks passed`, `sync-ui checks passed`; smoke `all checks passed` (3 groups skipped for the stored file handle, as before); breadify `all passed`.
