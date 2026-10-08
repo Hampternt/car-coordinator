@@ -186,6 +186,10 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .sync-pill.on::before { color: var(--ok); }
 .sync-pill.warn-status { border-color: var(--hivis); }
 .sync-pill.warn-status::before { color: var(--hivis); }
+.sync-flags {
+  flex: none; padding: 5px 10px; border: 1px dashed var(--hivis); background: none;
+  color: var(--on-bar); font: 600 13px var(--head); white-space: nowrap; cursor: pointer;
+}
 @media (max-width: 1400px) {
   .topbar:has(.sync-pill) { flex-wrap: wrap; gap: 10px 16px; }
   .topbar:has(.sync-pill) .tabs { order: 3; flex-basis: 100%; overflow-x: auto; }
@@ -208,6 +212,9 @@ button.primary { background: var(--hivis); color: var(--on-bright); border: 0; p
 .room-v-name { font-weight: 600; }
 /* The shared plan's quiet marks on a box: changed by the room while typed in,
    or changed by both managers at once. An outline only, so nothing moves. */
+.room-flags { list-style: none; margin: 0 0 8px; padding: 0; max-width: 760px; }
+.room-flags li { padding: 6px 0; border-top: 1px solid var(--line); }
+.room-flag-acts { display: inline-flex; gap: 6px; margin-left: 6px; }
 .room-held, .room-collided { outline: 2px dashed var(--hivis); outline-offset: 1px; }
 .room-v-when { color: var(--muted); margin-right: auto; }
 

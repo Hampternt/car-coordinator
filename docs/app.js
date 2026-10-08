@@ -3053,14 +3053,81 @@ function roomStaleDialogs() {
 }
 
 // Collisions found, kept for the marks and the card: one per field (or per
-// removed item), the newest winning.
+// removed item), the newest winning. n: a number to name it by in a button.
+let flagCount = 0;
 function roomFlags(r, flags) {
   for (const x of flags) {
     const key = x.type === 'set' ? `set\u0000${Sync.fieldKey(x.kind, x.id, x.field)}` : `removed\u0000${x.kind}\u0000${x.id}`;
     r.flags = r.flags.filter((y) => y.key !== key);
-    r.flags.push({ ...x, key, at: Date.now() });
+    r.flags.push({ ...x, key, n: ++flagCount, at: Date.now() });
   }
   if (r.flags.length > 30) r.flags.splice(0, r.flags.length - 30);
+}
+// A flag stays while it still has something to say: a field not put back yet,
+// an item still gone.
+function roomFlagsPrune(r) {
+  r.flags = r.flags.filter((x) => {
+    if (x.type === 'removed') return !fieldIn(state, x.kind, x.id, 'id').has;
+    const now = fieldIn(state, x.kind, x.id, x.field);
+    return now.has && !Sync.equal(now.value, x.lost);
+  });
+}
+
+/* What a flag says, in the card's words. */
+const FIELD_WORDS = {
+  name: 'name', driver: 'driver', carId: 'car', positionId: 'position', round: 'round', highlight: 'pink mark', gapBefore: 'gap above',
+  note: 'note', reg: 'registration', labelId: 'status', tagId: 'tag', available: 'in today', multi: 'many cars', color: 'colour',
+  onSheet: 'show on printout', driverIds: 'drivers', routes: 'routes', weekday: 'day', date: 'date',
+};
+function flagThing(x) {
+  const item = x.type === 'removed' ? x.item : (fieldIn(state, x.kind, x.id, 'id').has ? (state[Sync.LISTS[x.kind]] || []).find((i) => i && i.id === x.id) : null);
+  const name = item ? String(item.reg ?? item.name ?? '').trim() : '';
+  if (x.kind === 'meta') return 'The plan';
+  const what = { route: 'Route', car: 'Car', position: 'Position', label: 'Status', driver: 'Driver', driverTag: 'Driver tag', driverGroup: 'Day group', template: 'Template' }[x.kind] || 'An item';
+  return name ? `${what} ${name}` : `A ${what.toLowerCase()} with no name`;
+}
+function flagValue(field, v) {
+  const named = { carId: [state.cars, 'reg'], positionId: [state.positions, 'name'], labelId: [state.labels, 'name'], tagId: [state.driverTags || [], 'name'] }[field];
+  if (named && v) { const hit = byId(named[0], v); return hit ? shown(hit[named[1]]) : 'one since removed'; }
+  if (field === 'routes' && Array.isArray(v)) return plural(v.length, 'route');
+  if (field === 'driverIds' && Array.isArray(v)) return plural(v.length, 'driver');
+  return shown(v);
+}
+function flagText(x) {
+  const word = FIELD_WORDS[x.field] || x.field;
+  if (x.type === 'removed') {
+    const edit = x.field && x.item && x.field in x.item ? ` (its ${word}: ${flagValue(x.field, x.item[x.field])})` : '';
+    return `${flagThing(x)} was removed while it was being changed${edit}. Put it back to keep it, with that change.`;
+  }
+  return `${flagThing(x)}'s ${word} was changed by both of you at once. Kept ${flagValue(x.field, x.kept)}; the other was ${flagValue(x.field, x.lost)}.`;
+}
+function roomFlagsHtml() {
+  roomFlagsPrune(room);
+  if (!room.flags.length) return '';
+  const rows = room.flags.slice().reverse().map((x) => `<li>${esc(flagText(x))}
+      <span class="room-flag-acts">${actBtn('room-putback', '', x.n, 'Put it back')}${actBtn('room-dismiss', '', x.n, 'Dismiss')}</span></li>`).join('');
+  return `<h4>Changed by both of you</h4><ul class="room-flags">${rows}</ul>`;
+}
+// Put it back: the value that lost, or the item that was removed with its
+// change, as an edit of this browser's, so it reaches the other screen too.
+function roomPutBack(n) {
+  const r = room;
+  const x = r && r.flags.find((y) => y.n === n);
+  if (!x) return;
+  r.flags = r.flags.filter((y) => y !== x);
+  if (x.type === 'removed') {
+    const list = state[Sync.LISTS[x.kind]];
+    if (Array.isArray(list) && !list.some((i) => i && i.id === x.id)) {
+      const after = x.after ? list.findIndex((i) => i && i.id === x.after) : -1;
+      list.splice(x.after === null ? 0 : after >= 0 ? after + 1 : list.length, 0, JSON.parse(JSON.stringify(x.item)));
+    }
+  } else if (fieldIn(state, x.kind, x.id, x.field).has) {
+    const next = setIn(state, x, x.lost);
+    roomPatch(next);
+  }
+  save();
+  note('info', 'Put back. It is on both screens once the shared plan has it.');
+  renderKeepingFocus();
 }
 
 /* ---------- versions: Look first and Restore ----------
@@ -3223,7 +3290,7 @@ function roomSays() {
 // The status in the top bar, so it shows on every tab: only while in a room.
 function renderRoomPill() {
   let pill = document.getElementById('syncStatus');
-  if (!room) { if (pill) pill.remove(); return; }
+  if (!room) { if (pill) pill.remove(); document.getElementById('syncFlags')?.remove(); return; }
   if (!pill) {
     pill = document.createElement('button');
     pill.id = 'syncStatus';
@@ -3236,6 +3303,21 @@ function renderRoomPill() {
   pill.className = `sync-pill ${says.cls}`;
   pill.title = says.text;
   pill.textContent = `Shared plan: ${says.short}`;
+  // Changes made by both at once, to look at on the Data tab: a count beside
+  // the pill, never a popup.
+  roomFlagsPrune(room);
+  let count = document.getElementById('syncFlags');
+  if (!room.flags.length) { if (count) count.remove(); return; }
+  if (!count) {
+    count = document.createElement('button');
+    count.id = 'syncFlags';
+    count.type = 'button';
+    count.className = 'sync-flags';
+    count.dataset.act = 'show-data';
+    pill.after(count);
+  }
+  count.textContent = `${room.flags.length} to look at`;
+  count.title = 'Changed by both of you at once. The Shared plan card on the Data tab lists them, with Put it back.';
 }
 
 /* Create: a new room on the relay, seeded with this plan. The owner's create
@@ -3333,6 +3415,7 @@ function roomCardHtml() {
   const qr = inviteQr(link);
   return `${head}
     <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    ${roomFlagsHtml()}
     ${room.legacy ? '<button class="btn primary-ish" data-act="room-retake">Take the shared plan\u2026</button>' : ''}
     <h4>Invite link</h4>
     <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
@@ -3568,6 +3651,8 @@ async function roomAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'room-take': roomTake(); return;
     case 'room-retake': if (room) await roomOfferStart(room.secret); return;
+    case 'room-putback': roomPutBack(Number(b.dataset.id)); return;
+    case 'room-dismiss': if (room) { room.flags = room.flags.filter((x) => x.n !== Number(b.dataset.id)); roomMarks(); renderKeepingFocus(); } return;
     case 'room-notnow': roomOfferEnd(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
@@ -5356,7 +5441,7 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-retake', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-retake', 'room-putback', 'room-dismiss', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

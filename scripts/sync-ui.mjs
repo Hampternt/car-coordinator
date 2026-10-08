@@ -886,6 +886,71 @@ const routeRow = (pg, id) => pg.locator(`#tab-plan tbody tr[data-route="${id}"]`
   await b.context.close();
 }
 
+// Removed while you edit: the edit is never lost silently. The route goes,
+// the card says so on both screens, and Put it back brings the route back
+// with the edit, for both.
+const removeRoute = async (pg, id) => {
+  await routeRow(pg, id).locator('[data-act="del"]').click();
+  await routeRow(pg, id).locator('[data-act="del"]').click();
+};
+const hasRoute = (pg, id) => pg.evaluate((x) => state.routes.some((r) => r.id === x), id);
+const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f) => f.type === 'removed' && f.id === x).map((f) => ({ driver: f.item.driver, after: f.after })) : []), id);
+{
+  const { secret } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+
+  // The remove reaches the relay first, then what was typed into the route.
+  relay.holdWrites();
+  await removeRoute(b.page, 'rt-07');
+  await wait(500);
+  await routeRow(a.page, 'rt-07').locator('[data-field="driver"]').click();
+  await a.page.keyboard.press('End');
+  await a.page.keyboard.type(' Typed On', { delay: 30 });
+  await wait(600);
+  relay.releaseWrites();
+  check('removed, then typed into: the route is gone on both screens', await until(async () => !(await hasRoute(a.page, 'rt-07')) && !(await hasRoute(b.page, 'rt-07'))));
+  await converged(a.page, b.page);
+  const want = [{ driver: 'Guro Typed On', after: 'rt-06' }];
+  same('and both screens keep the edit in a flag, with where the route was', [await removedFlag(a.page, 'rt-07'), await removedFlag(b.page, 'rt-07')], [want, want]);
+  check('the bar says there is something to look at, quietly', (await a.page.locator('#syncFlags').innerText()) === '1 to look at' && (await b.page.locator('#syncFlags').count()) === 1);
+  await a.page.click('#syncFlags');
+  const card = await a.page.locator('#roomCard').innerText();
+  check('which opens the Data tab, where the card says what was lost', /Route 7 was removed while it was being changed \(its driver: “Guro Typed On”\)/.test(card), card);
+  same('no dialog opened for it', await a.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open)), false);
+  await a.page.locator('#roomCard [data-act="room-putback"]').click();
+  check('Put it back: the route is back, with the edit, on both screens', await b.page.waitForFunction(() => { const i = state.routes.findIndex((r) => r.id === 'rt-07'); return i === 6 && state.routes[i].driver === 'Guro Typed On'; }, null, { timeout: 3000 }).then(() => true, () => false)
+    && await converged(a.page, b.page));
+  check('and the flag is gone from both', await until(async () => (await removedFlag(a.page, 'rt-07')).length === 0 && (await removedFlag(b.page, 'rt-07')).length === 0) && (await a.page.locator('#syncFlags').count()) === 0);
+
+  // The edit reaches the relay first, then a remove from a browser that had
+  // not seen it.
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
+  relay.holdWrites();
+  await routeRow(a.page, 'rt-08').locator('[data-field="driver"]').fill('Edited First');
+  await a.page.keyboard.press('Tab');
+  await wait(500);
+  await removeRoute(b.page, 'rt-08');
+  await wait(500);
+  relay.releaseWrites();
+  check('edited, then removed by one who had not seen the edit: gone on both', await until(async () => !(await hasRoute(a.page, 'rt-08')) && !(await hasRoute(b.page, 'rt-08'))));
+  const want2 = [{ driver: 'Edited First', after: 'rt-07' }];
+  same('and the edit is in the same flag on both', [await removedFlag(a.page, 'rt-08'), await removedFlag(b.page, 'rt-08')], [want2, want2]);
+  await b.page.click('[data-act="tab"][data-tab="data"]');
+  await b.page.locator('#roomCard [data-act="room-dismiss"]').click();
+  same('Dismiss puts the flag away on that screen only, changing nothing', [(await removedFlag(b.page, 'rt-08')).length, await hasRoute(b.page, 'rt-08'), (await removedFlag(a.page, 'rt-08')).length], [0, false, 1]);
+
+  // A removed route seen and removed again: nothing to flag.
+  await converged(a.page, b.page);
+  await b.page.click('[data-act="tab"][data-tab="plan"]');
+  await removeRoute(b.page, 'rt-09');
+  await until(async () => !(await hasRoute(a.page, 'rt-09')));
+  same('a route removed with nothing changed in it is not flagged', [await removedFlag(a.page, 'rt-09'), await removedFlag(b.page, 'rt-09')], [[], []]);
+  same('removed while editing: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close();
+  await b.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {
