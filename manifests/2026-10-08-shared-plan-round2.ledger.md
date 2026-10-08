@@ -66,7 +66,15 @@ passed (about 44 s for the three).
 - After a self-check against the table, before handover: (1) the two rows with no test of their own got one: one car put on two routes at once shows the amber box and both stripes on both screens, no flag; a slow connection (writes held) shows the edit and saves it at once, the pill says Sending… after a second, nothing is blocked, and it is Connected with the edit on the other screen once let through. The stale-dialog row now also proves the counts: the template question says 15 routes, then 16 after the other adds one, and Load backs up the 16. (2) An own op's ack no longer writes the base without the plan: another live tab may have saved a plan without that edit, and a base ahead of the plan would read on reload as a silent revert. (3) A change too large for the relay no longer drops and re-captures itself every 300 ms: the browser stops following (Not live, Take offered) and says so once. (4) The 0.16.0 note is trimmed to 25 words or fewer a field. check.sh OK; sync.mjs passed; sync-ui 348 ok / 0 FAIL (14 new).
 - For the review, not fixed: a 0.15.0 copy in a room that holds no ops yet can still Push a snapshot at the room's current seq with its own plan; browsers following live do not reset (the seq is unchanged), so a newcomer would get the 0.15.0 plan and drift from them. Both copies must be updated (must: true says so).
 
-## Final gates (on b3f9e19)
+## Final gates (on 1eb6781)
+
+- `npm test` exit 0: `VERSIONS OK`, `map checks passed`, `sync checks passed` (159 ok), `sync-ui checks passed` (348 ok, the 0.15.0 section ran from git), smoke `all checks passed` (3 groups skipped for the stored file handle, as before), breadify `all passed`.
+- `npm run screens` exit 0: `no console errors, 4 warnings raised and asserted`.
+- Not run here: `npm run upgrade` from an older checkout, the relay's `cargo test` (relay/ untouched), and the browser smoke check (main session's).
+- Measured: fd1f914 to b3f9e19 (the cut), 15 commits over 77 min (`wave-times.sh 2026-10-08T09:00`); the self-check fixes and the second full run came after.
+
+## Earlier full run (on b3f9e19)
+
 
 - `npm test` exit 0 (9.5 min): `VERSIONS OK`, `map checks passed`, `sync checks passed` (159 ok), `sync-ui checks passed` (334 ok, the 0.15.0 section ran from git), smoke `all checks passed` (3 groups skipped for the stored file handle, as before), breadify `all passed`.
 - `npm run screens` exit 0: `no console errors, 4 warnings raised and asserted`.
