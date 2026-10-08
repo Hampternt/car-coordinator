@@ -1353,8 +1353,10 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   await p.context.close();
 }
 
-// >>> review fixes: the concurrency and live-data review of round 2 (each
-// section failed on 7ff16fc before its fix).
+// ---------------------------------------------------------------------------
+// The concurrency and live-data review of round 2, and the owner's server run:
+// each section below failed on the code before its fix (the ledger,
+// manifests/2026-10-08-shared-plan-round2-fixes.ledger.md, says which).
 // The pair a browser keeps, as a profile reopening it would find it.
 const keptPair = (pg) => pg.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), base: localStorage.getItem('carcoord:roomBase') }));
 const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
@@ -1471,8 +1473,9 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   await routeBox(a.page, 4, 'driver').click();
   await routeBox(b.page, 4, 'driver').fill('B Wins');
   await b.page.keyboard.press('Tab');
-  await a.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).catch(() => {});
+  check('only focused: the other\'s change holds the box', await a.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).then(() => true, () => false));
   await wait(400);
+  same('and the hold is kept beside the base, not typed in', await a.page.evaluate(() => (JSON.parse(localStorage.getItem('carcoord:roomBase')).holds || []).map((h) => [h.id, h.field, h.typed])), [['rt-05', 'driver', false]]);
   const sent2 = ops().length;
   await a.page.reload({ waitUntil: 'networkidle' });
   await a.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
@@ -1727,7 +1730,6 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('Leave with two tabs: no console errors', t1.errors, []);
   await t1.context.close();
 }
-// <<< review fixes
 
 // ---------------------------------------------------------------------------
 // Push seals first, which takes a moment: what the room says meanwhile still
