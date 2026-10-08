@@ -2718,6 +2718,18 @@ async function roomFrame(r, f) {
     const ops = [];
     for (const o of Array.isArray(f.ops) ? f.ops : []) if (Number.isInteger(o.seq)) ops.push({ seq: o.seq, plain: await openOr(r, 'op', o.body) });
     if (room !== r) return;
+    // The room is behind what this browser applied (its server restored from
+    // an older copy, say): its seqs mean other things now, and this reply
+    // holds only the ops past a seq that no longer means anything. Start over
+    // as a browser with no record of it, reading the room whole: still not
+    // caught up, so nothing is sent or shown until that answer is read.
+    if (r.rep && Number.isInteger(f.seq) && f.seq < r.rep.seq) {
+      r.rep = null;
+      r.holds.clear();
+      roomBaseForget();
+      r.conn.send({ type: 'catchup', since: 0 });
+      return;
+    }
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
     r.versions = versions;
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
@@ -2784,11 +2796,6 @@ async function roomFrame(r, f) {
    otherwise send every difference as an edit and write over the other
    manager's plan, so it waits to take the shared plan again. */
 function roomCatchUp(r, f, snap, ops) {
-  // The room is behind what this browser applied (its server restored from
-  // an older copy, say): its seqs mean other things now. Start over as a
-  // browser with no record of it: follow it if the plans agree, else offer
-  // to take it.
-  if (r.rep && Number.isInteger(f.seq) && f.seq < r.rep.seq) { r.rep = null; r.holds.clear(); roomBaseForget(); }
   if (!r.rep) {
     const now = roomPlanOf(f, snap, ops);
     if (!now) { r.ahead = !!(snap && snap.plan) || opsAhead(f); return; }

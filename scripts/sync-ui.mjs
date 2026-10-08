@@ -1343,6 +1343,33 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('base after own ack: no console errors', [...a2.errors, ...b.errors], []);
   for (const x of [a2, b]) await x.context.close();
 }
+
+// A relay restored from an older copy that holds an op past its snapshot:
+// starting over reads the room whole (catchup since 0), so a room holding
+// this browser's own plan is followed again rather than taken for a newer
+// build's.
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  for (const [i, name] of [[0, 'Restored One'], [1, 'Restored Two'], [2, 'Restored Three']]) {
+    await routeBox(a.page, i, 'driver').fill(name);
+    await until(() => ops().length === i + 1);
+  }
+  await a.page.waitForFunction(() => room.rep.seq === 3 && !room.rep.queue.length, null, { timeout: 3000 });
+  // The copy restored: the snapshot at 0, and one op carrying all three edits.
+  const changes = [['rt-01', 'Restored One'], ['rt-02', 'Restored Two'], ['rt-03', 'Restored Three']].map(([id, value]) => ({ op: 'set', kind: 'route', id, field: 'driver', value }));
+  relay.makeRoom(k.roomId, k.token, { seq: 1, snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: 6, plan: created.plan }) }, ops: [{ seq: 1, body: seal(secret, 'op', { schema: 6, oid: 'e'.repeat(16), changes }) }] });
+  try {
+    relay.down();
+    await pillSays(a.page, 'Offline');
+  } finally { relay.up(); }
+  check('a restored room with an op past its snapshot, holding this plan: followed again, not Update the app', await pillSays(a.page, 'Connected', 10000) && await a.page.waitForFunction(() => roomLive() && room.caught && room.rep.seq === 1, null, { timeout: 3000 }).then(() => true, () => false),
+    `${await pill(a.page).textContent().catch(() => 'no pill')} ${await a.page.evaluate(() => JSON.stringify({ ahead: room.ahead, legacy: room.legacy, seq: room.rep && room.rep.seq }))}`);
+  await routeBox(a.page, 3, 'driver').fill('After Restore');
+  check('and an edit after it goes to the room at its next seq', await until(() => ops().some((o) => o.seq === 2 && o.changes.some((c) => c.value === 'After Restore'))), JSON.stringify(ops().map((o) => o.seq)));
+  same('restored relay with ops: no console errors', a.errors, []);
+  await a.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------

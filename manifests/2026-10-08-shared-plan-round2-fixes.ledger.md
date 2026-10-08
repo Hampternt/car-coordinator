@@ -14,7 +14,7 @@ passed, 348 ok (2 min 8 s).
 ## Findings
 
 - [x] 1. Base lags own acked edits (reopen resends stale pending) — reproduced: sync-ui `reopened after the other removed what it added: nothing is sent again` FAILED on 1a02443 (got the `add` of the route resent after B's remove) and `and the route stays removed on both screens` FAILED. Fixed: after a drain that applied anything, roomApply writes the base when the stored v1 is this screen (`storedIsScreen()`), so the base never lags this tab's confirmed edits and is never ahead of the stored plan. check.sh OK; sync.mjs passed; sync-ui 352 ok / 0 FAIL
-- [ ] 4. Restored-relay start-over misreads as newer
+- [x] 4. Restored-relay start-over misreads as newer — reproduced: sync-ui `a restored room with an op past its snapshot, holding this plan: followed again, not Update the app` FAILED on ad9fad0 (pill Update the app, ahead true) and `and an edit after it goes to the room at its next seq` FAILED. Fixed: the catchup that shows the room behind this browser is not read as the room's plan; the browser drops its replica, base and holds, asks `catchup since: 0`, and stays not caught up (sends and shows nothing, `ahead` untouched) until that reply is read. check.sh OK; sync.mjs passed; sync-ui 355 ok / 0 FAIL
 - [ ] 5. 0.15.0 snapshot clobber (no-change op after each snapshot)
 - [ ] 2. Edit to a removed item vanishes unmarked (empty graveyard)
 - [ ] 6. Reload during a held field loses the other's value unflagged
