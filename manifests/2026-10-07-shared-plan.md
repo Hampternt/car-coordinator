@@ -216,6 +216,13 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-08: **tested against the real server** from a local copy (the owner typed the create code; Claude drove the rest, with window 2 as a separate Playwright profile):
+  - **Create:** Connected through `wss://portfolio.dblo.net/carsync`.
+  - **Join:** the invite is cleared from the address bar, and the offer names 15 routes. Take brought window 1's drivers across, with the old plan in Backups.
+  - **Push and restore:** `Test 1` was listed in window 2. Look first changed nothing; Restore brought window 1's edit across, with Backups first.
+  - **Offline:** stopping the relay showed Offline in both windows, and an edit was still saved. On restart, both reconnected after about 1 s.
+  - **Console:** the only error was Chrome's own failed-handshake line (502) while the relay was down.
+  - The test rooms were wiped from the server afterwards.
 - 2026-10-08: **relay deployed** to the Hetzner box over SSH, on the owner's go:
   - **Service:** `carsync` running as its own user; `/opt/carsync/.env` has `RELAY_ORIGINS` plus `http://localhost:5173` for testing from a local copy. The create code is left for the owner to set.
   - **nginx:** the 443 block gains `location /carsync/` (19 lines added, none removed), `conf.d/carsync.conf` is added, `nginx -t` is OK and nginx reloaded. Backup: `portfolio.bak-20261008-0124`.
