@@ -2546,6 +2546,9 @@ let roomCreating = null;
 // How long edits are gathered before they are sent: a word typed is one
 // change, not one per key.
 const ROOM_BATCH_MS = 300;
+// After this many ops past the room's snapshot, a browser that has applied
+// them sends a new snapshot, so the relay can drop them (PROTOCOL.md §4.3).
+const ROOM_COMPACT_AFTER = 200;
 
 // The schema the room's plans are written in, as far as this browser has
 // seen: the newest of its snapshot's, its versions' and its ops'. Newer than
@@ -2632,7 +2635,7 @@ async function roomStart(secret, base = null) {
   const r = {
     secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, snapSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false,
     rep: base ? Sync.replica(base.seq, base.plan) : null, legacy: false, frames: Promise.resolve(), sending: Promise.resolve(), epoch: 0,
-    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0,
+    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0, compacting: false,
   };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
@@ -2875,6 +2878,27 @@ function roomFlush(r) {
   }).catch((e) => console.warn('shared plan: sending failed', e));
 }
 
+/* Compaction: the room's plan as this browser has it confirmed, at the seq
+   it has applied and never above it, sent as the room's snapshot. Any
+   browser following live may send it; two at one seq hold the same plan,
+   and the relay keeps either. */
+async function roomCompact(r) {
+  if (r.compacting || !roomLive(r) || !r.caught || planElsewhere || !r.conn || r.conn.status !== 'connected') return;
+  if (r.rep.seq - r.snapSeq < ROOM_COMPACT_AFTER) return;
+  r.compacting = true;
+  const at = r.rep.seq;
+  const plan = r.rep.confirmed;
+  const epoch = r.epoch;
+  try {
+    const body = await Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan });
+    if (room === r && r.epoch === epoch && roomLive(r) && r.conn.send({ type: 'snapshot', seq: at, body })) {
+      r.acks.push({ kind: 'snapshot' });
+      r.snapSeq = Math.max(r.snapSeq, at);
+    }
+  } catch (e) { console.warn('shared plan: a snapshot could not be made', e); }
+  r.compacting = false;
+}
+
 /* Fold what the room sequenced into this browser's plan, and the screen.
    mutate() hands the replica its ops (or a snapshot). First, every edit on
    screen is captured, so it is measured against the plan it was made on and
@@ -2895,6 +2919,7 @@ function roomApply(r, mutate) {
   }
   if (!r.rep.queue.length) r.waitingSince = null;
   roomFlags(r, res.flags);
+  if (res.applied) roomCompact(r);
   // Only this browser's own edits confirmed: the screen already has them.
   if (r.rep.shadow === before) { if (res.applied) roomBaseWrite(r); if (res.flags.length) renderRoom(); else renderRoomPill(); return; }
   let next = Sync.applyAll(r.rep.shadow, local);

@@ -1087,6 +1087,49 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   for (const x of [a, b, legacy]) await x.context.close();
 }
 
+// Compaction: after 200 ops a browser that has applied them sends a snapshot
+// at the seq it has applied, so the relay holds fewer than 200; a newcomer,
+// and a browser away the whole time, still get the full plan.
+{
+  const { secret, k } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  // A browser that will be away for all of it, with the pair it would keep.
+  const away = await a.page.evaluate(() => ({ plan: localStorage.getItem('carcoord:v1'), base: localStorage.getItem('carcoord:roomBase') }));
+  // 250 changes, each sent as its own op (the gathering is skipped on purpose).
+  await a.page.evaluate(async () => {
+    for (let i = 0; i < 250; i++) {
+      state.routes[i % state.routes.length].round = `c${i}`;
+      save();
+      roomFlush(room);
+      if (i % 25 === 24) await new Promise((go) => setTimeout(go, 30));
+    }
+  });
+  const roomNow = () => relay.rooms.get(k.roomId);
+  check('250 changes reach the relay', await until(() => roomNow().seq >= 250, 15000), String(roomNow().seq));
+  check('the relay holds a snapshot past 200 and fewer than 200 ops', await until(() => roomNow().snapshot && roomNow().snapshot.seq >= 200 && roomNow().ops.length < 200, 10000),
+    JSON.stringify({ snap: roomNow().snapshot && roomNow().snapshot.seq, ops: roomNow().ops.length }));
+  const snaps = relay.sent('snapshot', k.roomId);
+  check('every snapshot was at or below the seq its sender had applied, and the room\'s', snaps.every((f) => f.seq <= roomNow().seq) && relay.open >= 2);
+  check('both browsers end on one plan', await converged(a.page, b.page));
+  const snap = unseal(secret, 'snapshot', roomNow().snapshot.body);
+  check('the snapshot holds the plan as it was at its seq', snap.plan.routes.some((r) => /^c\d+$/.test(r.round) && Number(r.round.slice(1)) >= 185));
+
+  const j = await profile({ items: OTHER_SEED });
+  await openInvite(j.page, `#join=${secret}`);
+  await dialogSays(j.page, /holds 15 routes/);
+  await j.page.click('[data-act="room-take"]');
+  await pillSays(j.page, 'Connected');
+  same('a newcomer still gets the full plan', await planOf(j.page), await planOf(a.page));
+
+  const c = await profile({ items: inRoom({ ...SEED, 'carcoord:v1': away.plan, 'carcoord:roomBase': away.base }, secret) });
+  check('a browser away for all of it catches up from the snapshot', await c.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).then(() => true, () => false) && await converged(c.page, a.page));
+  await routeBox(a.page, 0, 'driver').fill('After Compaction');
+  check('and follows live from there', await c.page.waitForFunction(() => state.routes[0].driver === 'After Compaction', null, { timeout: 3000 }).then(() => true, () => false));
+  same('compaction: no console errors', [...a.errors, ...b.errors, ...j.errors, ...c.errors], []);
+  for (const x of [a, b, j, c]) await x.context.close();
+}
+
 // Ops of a newer schema: applied by no browser of this build, which only
 // reads the room from then on, live or on joining.
 {

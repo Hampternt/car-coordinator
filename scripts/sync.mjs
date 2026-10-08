@@ -624,6 +624,30 @@ await block('replica: a field held back, and what its was says', () => {
   check('an op holding a change this build does not know throws, and applies nothing', threw && A.seq === 0);
 });
 
+await block('replica: a snapshot past it, with edits of its own queued', () => {
+  const base = samplePlan();
+  const A = Sync.replica(0, base);
+  const B = Sync.replica(0, base);
+  const ops = [];
+  let plan = base;
+  for (let i = 1; i <= 5; i++) {
+    const next = JSON.parse(J(plan)); next.routes[i % 5].round = String(i);
+    ops.push({ seq: i, changes: Sync.diff(plan, next) });
+    plan = next;
+  }
+  for (const o of ops) A.take(o.seq, o.changes);
+  A.drain();
+  // B was away for all five, then edited; the room compacted at 4.
+  const mine = JSON.parse(J(B.shadow)); mine.routes[0].driver = 'Away Edit';
+  B.capture(mine);
+  B.reset(4, A.confirmed.routes ? Sync.applyAll(base, ops.slice(0, 4).flatMap((o) => o.changes)) : null);
+  B.take(5, ops[4].changes);
+  B.drain();
+  same('reset to a snapshot, then its ops: the room\'s plan', J(B.confirmed), J(A.confirmed));
+  same('with this browser\'s own edit still on top', B.shadow.routes[0].driver, 'Away Edit');
+  same('and still to send', B.unsent().length, 1);
+});
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);
