@@ -220,7 +220,6 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 - **Replace-everything** (Import, Restore from Backups, a share code, Restore a version) changes the plan for both of you. The confirm each already has gains the line "This changes the shared plan for both of you"; there is no extra dialog.
 - **Collisions:** the last change to reach the server wins. It shows as a small mark on the field plus a line in the Shared plan card holding the losing value, with no popup.
 
-**Test it yourself (round 2), outline:** two windows in the room; type in both at once; stop the relay, edit, restart; edit the same driver in both within a second and read the flag.
 
 **Test it yourself (round 2):** two windows on `http://localhost:5173` in one shared plan (the owner's server, or the `carsync-relay-dev` launch config with create code `dev`). Check that:
 - a driver typed in one appears in the other within a second;
