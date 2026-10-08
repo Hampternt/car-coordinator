@@ -1486,6 +1486,73 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('reload while held: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
 }
+
+// A tab that cannot follow yet (its catchup not read) edits; the live tab
+// of the same browser saves over it; the first tab stops saving. Its edit,
+// and what it is typed after, still reach the room, and a copy of its plan
+// is in Backups: nothing it held is dropped.
+{
+  const { secret, ops } = liveRoom();
+  const a1 = await live(SEED, secret);
+  const c = await live(SEED, secret);
+  const a2 = { page: await a1.context.newPage(), errors: [] };
+  a2.page.on('pageerror', (e) => a2.errors.push(String(e)));
+  relay.holdCatchup();
+  try {
+    await a2.page.goto(base, { waitUntil: 'networkidle' });
+    await pillSays(a2.page, 'Connected');
+    await routeBox(a2.page, 1, 'driver').fill('Second Tab Edit');
+    await a2.page.keyboard.press('Tab');
+    await wait(500);
+    same('a tab not caught up yet keeps its edit to itself for now', ops().length, 0);
+    await routeBox(a1.page, 2, 'driver').fill('First Tab Edit');
+    await a1.page.keyboard.press('Tab');
+    check('the live tab saves over it, and the first tab stops saving', await pillSays(a2.page, 'Reload this tab'));
+  } finally { relay.releaseCatchup(); }
+  check('caught up, the stopped tab\'s edit still reaches the other PC', await c.page.waitForFunction(() => state.routes[1].driver === 'Second Tab Edit', null, { timeout: 5000 }).then(() => true, () => false));
+  await routeBox(a2.page, 3, 'driver').fill('Typed While Stopped');
+  await a2.page.keyboard.press('Tab');
+  check('and so does what is typed in it afterwards', await c.page.waitForFunction(() => state.routes[3].driver === 'Typed While Stopped', null, { timeout: 5000 }).then(() => true, () => false));
+  check('the live tab has both, and the browser\'s saved plan with it', await a1.page.waitForFunction(() => state.routes[1].driver === 'Second Tab Edit' && state.routes[3].driver === 'Typed While Stopped' && JSON.parse(localStorage.getItem('carcoord:v1')).routes[3].driver === 'Typed While Stopped', null, { timeout: 5000 }).then(() => true, () => false));
+  check('three screens, one plan', await converged(a1.page, c.page) && await converged(a2.page, c.page));
+  const backups = JSON.parse(await a1.page.evaluate(() => localStorage.getItem('carcoord:backups')) || '[]');
+  check('and a copy of the stopped tab\'s plan, with its edits, is in Backups', backups.some((x) => /stopped saving/.test(x.label) && JSON.parse(x.json).routes[1].driver === 'Second Tab Edit'), JSON.stringify(backups.map((x) => x.label)));
+  check('no dialog in either tab', !(await a2.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open))) && !(await a1.page.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open))));
+  same('a tab stopped by another: no console errors', [...a1.errors, ...a2.errors, ...c.errors], []);
+  for (const x of [a1, c]) await x.context.close();
+}
+
+// A tab holding a box when it is stopped writes nothing over the other tab's
+// plan when the box is let go (roomRelease saved past the guard).
+{
+  const { secret } = liveRoom();
+  const a1 = await live(SEED, secret);
+  const c = await live(SEED, secret);
+  const a2 = { page: await a1.context.newPage(), errors: [] };
+  a2.page.on('pageerror', (e) => a2.errors.push(String(e)));
+  await a2.page.goto(base, { waitUntil: 'networkidle' });
+  await a2.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 });
+  await routeBox(a2.page, 5, 'driver').click();
+  await a2.page.keyboard.press('End');
+  await a2.page.keyboard.type(' Held', { delay: 20 });
+  await c.page.waitForFunction(() => /Held$/.test(state.routes[5].driver), null, { timeout: 3000 }).catch(() => {});
+  await routeBox(c.page, 5, 'driver').fill('Other PC Value');
+  await c.page.keyboard.press('Tab');
+  check('the second tab holds its box', await a2.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).then(() => true, () => false));
+  try {
+    relay.down();
+    await pillSays(a1.page, 'Offline');
+    await pillSays(a2.page, 'Offline');
+    await routeBox(a1.page, 0, 'driver').fill('First Tab Offline');
+    await a1.page.keyboard.press('Tab');
+    check('the other tab saves; this one stops', await pillSays(a2.page, 'Reload this tab'));
+    await a2.page.keyboard.press('Tab');
+    await wait(300);
+    same('letting go of the held box writes nothing over the other tab\'s plan', await a1.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver), 'First Tab Offline');
+  } finally { relay.up(); }
+  same('a stopped tab letting go: no console errors', [...a1.errors, ...a2.errors, ...c.errors], []);
+  for (const x of [a1, c]) await x.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------

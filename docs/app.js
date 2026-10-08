@@ -363,10 +363,15 @@ let dateMove = null;
 // Set once another tab has saved a newer plan while this one is in a shared
 // plan; only a reload clears it. See the storage listener there.
 let planElsewhere = false;
+// Whether this tab has saved a change since it was opened.
+let savedHere = false;
 const save = () => {
   // Another tab saved a newer plan (planElsewhere, in the shared plan's code):
   // this one's is stale until reloaded, and writing it would undo that change.
-  if (planElsewhere) return;
+  // The change still goes to the shared plan when this tab follows it, and a
+  // copy of this tab's plan goes to Backups, so nothing typed here is lost.
+  if (planElsewhere) { roomFrozenBackup(); roomEdited(); return; }
+  savedHere = true;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
   const kept = Store.save(state);
   // In a shared plan, the change goes to the room too, and the room's plan as
@@ -2600,7 +2605,8 @@ const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.
 const BASE_KEY = 'carcoord:roomBase';
 const baseHead = (roomId, seq, holds) => `{"room":${JSON.stringify(roomId)},"seq":${seq},"holds":${JSON.stringify(holds)},`;
 function roomBaseWrite(r) {
-  if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r)) return;
+  // A tab another one saved over writes nothing beside that tab's plan.
+  if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r) || planElsewhere) return;
   const head = baseHead(r.keys.roomId, r.rep.seq, roomHoldsOf(r));
   try {
     const now = localStorage.getItem(BASE_KEY);
@@ -2624,7 +2630,7 @@ const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) 
 // The holds changed: kept beside the base as it is stored, its seq and plan
 // left as they are (they belong to the plan stored with them).
 function roomHoldsKeep(r) {
-  if (!r || !r.keys) return;
+  if (!r || !r.keys || planElsewhere) return;
   try {
     const b = JSON.parse(localStorage.getItem(BASE_KEY));
     if (!b || b.room !== r.keys.roomId || !Number.isInteger(b.seq)) return;
@@ -2919,7 +2925,7 @@ function roomEdited() {
 // Seal and send every batch not sent yet, in order. Only while connected and
 // caught up; what cannot go now stays queued for the next connection.
 function roomFlush(r) {
-  if (room !== r || !roomLive(r) || !r.caught || planElsewhere || !r.conn || r.conn.status !== 'connected') return;
+  if (room !== r || !roomLive(r) || !r.caught || !r.conn || r.conn.status !== 'connected') return;
   roomCapture(r);
   if (!r.rep.queue.length) return;
   if (!r.waitingSince) { r.waitingSince = Date.now(); setTimeout(() => { if (room === r) renderRoomPill(); }, 1100); }
@@ -2989,7 +2995,7 @@ function roomMarkSnapshot(r) {
    never mistaken for a change to undo; what stays uncaptured (a field held,
    the moved date) is put back on top afterwards. */
 function roomApply(r, mutate) {
-  if (!r.rep || room !== r || planElsewhere) { if (mutate) mutate(); return; }
+  if (!r.rep || room !== r) { if (mutate) mutate(); return; }
   roomCapture(r);
   const before = r.rep.shadow;
   const local = Sync.diff(before, state);
@@ -3068,7 +3074,7 @@ function roomRelease(r) {
     }
   }
   roomHoldsKeep(r);
-  if (changed) { Store.save(state); r.tick++; renderKeepingFocus(); } else { renderRoom(); roomMarks(); }
+  if (changed) { if (!planElsewhere) Store.save(state); r.tick++; renderKeepingFocus(); } else { renderRoom(); roomMarks(); }
 }
 document.addEventListener('focusout', () => {
   const r = room;
@@ -3093,8 +3099,9 @@ function roomShow(r, next) {
   const sig = liveSig();
   // Nothing on screen changed (a field held, say): only its marks.
   if (!roomPatch(next)) { renderRoom(); roomMarks(); return; }
-  // Saved as any edit is, but not sent back: it came from the room.
-  if (Store.save(state) !== false) roomBaseWrite(r);
+  // Saved as any edit is, but not sent back: it came from the room. A tab
+  // another one saved over shows it and writes nothing.
+  if (!planElsewhere && Store.save(state) !== false) roomBaseWrite(r);
   r.tick++;
   roomRedraw(was, sig);
 }
@@ -3415,7 +3422,12 @@ function roomSays() {
     }[closeCode] || 'The relay refused what this browser sent.';
     return { short: 'Refused', text: `${why} Your plan is still on this PC.`, cls: 'warn-status' };
   }
-  if (planElsewhere) return { short: 'Reload this tab', text: 'The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.', cls: 'warn-status' };
+  if (planElsewhere) {
+    const backed = frozenBacked ? ' A copy of its plan is in Backups.' : '';
+    return roomLive(room)
+      ? { short: 'Reload this tab', text: `The plan changed in another tab of this browser, so this tab no longer saves here. Your changes in it still go to the shared plan.${backed} Reload it to save here again.`, cls: 'warn-status' }
+      : { short: 'Reload this tab', text: `The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.${backed}`, cls: 'warn-status' };
+  }
   if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
   if (status === 'connected' && room.legacy) return { short: 'Not live', text: 'Connected, but your edits do not reach the shared plan yet: this browser joined it before live updates, and the plan here differs from it. Take the shared plan to edit it together; your plan goes into Backups first.', cls: 'warn-status' };
   if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
@@ -3668,8 +3680,34 @@ window.addEventListener('storage', (e) => {
   if (now === JSON.stringify(state)) return;
   if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected') return;
   planElsewhere = true;
+  // What this tab held that the other's plan may not: kept in Backups now.
+  // A tab following the room keeps sending its edits (roomFlush), but until
+  // the room has them they are only here.
+  const r = room;
+  const unsent = r.rep && !r.legacy ? r.rep.queue.length > 0 || Sync.diff(r.rep.shadow, state).length > 0 : savedHere;
+  if (unsent) roomFrozenBackup(true);
   renderRoom();
 });
+
+/* A tab another one saved over keeps a copy of its plan in Backups: one entry,
+   brought up to date a moment after each change it could not save (and as the
+   page goes), so typing here is never lost and the Backups list is not
+   flooded. The pill says so. */
+const FROZEN_LABEL = 'From a tab that stopped saving (another tab saved over it)';
+let frozenBacked = false;
+let frozenTimer = null;
+function roomFrozenBackup(now = false) {
+  if (!planElsewhere) return;
+  clearTimeout(frozenTimer);
+  frozenTimer = null;
+  const take = () => {
+    frozenTimer = null;
+    if (Store.snapshot(state, FROZEN_LABEL, { replace: true })) frozenBacked = true;
+    if (room) renderRoom();
+  };
+  if (now) take(); else frozenTimer = setTimeout(take, 1500);
+}
+window.addEventListener('pagehide', () => { if (frozenTimer) roomFrozenBackup(true); });
 
 // Another tab of this browser joined or left: this one follows, so a Leave
 // there leaves no connection open here.

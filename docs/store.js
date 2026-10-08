@@ -351,11 +351,14 @@ const Store = (() => {
   // true when it was skipped because the newest entry already holds exactly
   // it; false only when storage is full and nothing could be stored. A caller
   // about to overwrite something checks this before it goes ahead.
-  function snapshot(state, label) {
+  // opts.replace: a newest entry with the same label is brought up to date
+  // rather than joined by another, for a copy kept current as work goes on.
+  function snapshot(state, label, opts = {}) {
     const list = backups();
     const entry = { t: new Date().toISOString(), label, json: JSON.stringify(state) };
     // Skip a snapshot identical to the newest one (nothing actually changed).
     if (list[0] && list[0].json === entry.json) return true;
+    if (opts.replace && list[0] && list[0].label === label) list.shift();
     list.unshift(entry);
     while (list.length > MAX_BACKUPS) list.pop();
     // Storage can be full, and dropping the oldest entries is worth nothing
