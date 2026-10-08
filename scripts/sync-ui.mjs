@@ -10,7 +10,11 @@
 import { chromium } from 'playwright';
 import net from 'node:net';
 import nodeCrypto from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
 import { fakeRelay } from './sync-fakerelay.mjs';
 
@@ -1128,6 +1132,69 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
   check('and follows live from there', await c.page.waitForFunction(() => state.routes[0].driver === 'After Compaction', null, { timeout: 3000 }).then(() => true, () => false));
   same('compaction: no console errors', [...a.errors, ...b.errors, ...j.errors, ...c.errors], []);
   for (const x of [a, b, j, c]) await x.context.close();
+}
+
+// The copy shipped as 0.15.0 (round 1) applies no ops: in a room this build
+// has written live edits to, it must still only read, and never take it or
+// push a snapshot over the ops. Served from git as it shipped, so this
+// proves its behaviour rather than assuming it.
+{
+  const SHIPPED = 'b26529f';   // "Announce the shared plan and cut 0.15.0"
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  let dir = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'cc-0.15.0-'));
+    execSync(`git -C "${repo}" archive ${SHIPPED} docs | tar -x -C "${dir}"`, { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { if (dir) await rm(dir, { recursive: true, force: true }); dir = null; }
+  if (!dir) {
+    // A shallow clone (CI's default checkout) does not hold the commit.
+    console.log(`  skip  0.15.0 in a room with ops: commit ${SHIPPED} is not in this clone; run it in a full clone`);
+  } else {
+    const old = await startServer(0, join(dir, 'docs'));
+    const { secret, k, ops } = liveRoom();
+    const a = await live(SEED, secret);
+    await routeBox(a.page, 0, 'driver').fill('Live From 0.16');
+    await until(() => ops().length === 1);
+    const context = await browser.newContext();
+    await relay.attach(context);
+    const page = await context.newPage();
+    await page.addInitScript((seed) => {
+      if (location.protocol === 'about:' || sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1'); localStorage.clear(); for (const [key, v] of Object.entries(seed)) localStorage.setItem(key, v);
+    }, { ...inRoom(SEED, secret), 'carcoord:pref:seenUpdate': '0.15.0' });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(old.base, { waitUntil: 'networkidle' });
+    same('the old copy is really 0.15.0', await page.evaluate(() => APP_VERSION), '0.15.0');
+    check('0.15.0 in a room holding live ops: Update the app', await pillSays(page, 'Update the app'), await pill(page).textContent().catch(() => 'no pill'));
+    const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
+    const wrote = writes();
+    await page.click('[data-act="tab"][data-tab="data"]');
+    check('its Push is disabled', await page.locator('[data-act="room-push"]').isDisabled());
+    await page.evaluate(() => { const box = document.getElementById('roomVersionName'); box.disabled = false; box.value = 'Old over new'; return roomPush(); });
+    await wait(800);
+    same('and pushing anyway sends no snapshot, version or op', writes(), wrote);
+    same('the live op is still in the room', relay.rooms.get(k.roomId).ops.map((o) => o.seq), [1]);
+    // Another PC on 0.15.0, opening the invite.
+    const joiner = await browser.newContext();
+    await relay.attach(joiner);
+    const jp = await joiner.newPage();
+    await jp.addInitScript((seed) => {
+      if (location.protocol === 'about:' || sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1'); localStorage.clear(); for (const [key, v] of Object.entries(seed)) localStorage.setItem(key, v);
+    }, { ...OTHER_SEED, 'carcoord:pref:seenUpdate': '0.15.0' });
+    jp.on('pageerror', (e) => errors.push(String(e)));
+    await jp.goto(old.base, { waitUntil: 'networkidle' });
+    await jp.goto('about:blank');
+    await jp.goto(`${old.base}#join=${secret}`, { waitUntil: 'networkidle' });
+    check('offered the room, 0.15.0 says to update and has no Take', await dialogSays(jp, /Update the app to join it/) && (await jp.locator('[data-act="room-take"]').count()) === 0, await jp.locator('#roomDlg').innerText().catch(() => 'no dialog'));
+    same('0.15.0: no page errors', [...errors, ...a.errors], []);
+    await joiner.close();
+    await context.close();
+    await a.context.close();
+    await old.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 // Ops of a newer schema: applied by no browser of this build, which only
