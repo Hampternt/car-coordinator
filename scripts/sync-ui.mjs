@@ -1258,42 +1258,71 @@ const removedFlag = (pg, id) => pg.evaluate((x) => (room ? room.flags.filter((f)
 }
 
 // ---------------------------------------------------------------------------
-// A second tab of the same browser changes the plan: this one is stale, so it
-// saves and pushes nothing until it is reloaded.
+// A second tab of the same browser changes the plan while this one cannot
+// follow the room (its plan is not the room's, so it is Not live): this one
+// is stale, so it saves and pushes nothing until it is reloaded. Round 1
+// blocked it with a dialog; now only the pill says so (owner, 2026-10-08).
 {
   const { secret } = created;
   const k = keysOf(secret);
   const p = await profile({ items: inRoom(SEED, secret) });
-  await pillSays(p.page, 'Connected');
+  await pillSays(p.page, 'Not live');
   await p.page.click('[data-act="tab"][data-tab="data"]');
   const second = await p.context.newPage();
   await second.goto(base, { waitUntil: 'networkidle' });
-  await pillSays(second, 'Connected');
-  const elsewhereOpen = (pg) => pg.evaluate(() => !!document.getElementById('elsewhereDlg')?.open);
+  await pillSays(second, 'Not live');
+  const anyDialog = (pg) => pg.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open));
   await wait(500);
-  check('opening a second tab leaves the first as it was', !(await elsewhereOpen(p.page)));
+  check('opening a second tab leaves the first as it was', !(await anyDialog(p.page)) && await pillSays(p.page, 'Not live', 500));
   const driver = () => p.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver);
   await second.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]').fill('Second Tab Svendsen');
   same('the second tab saves its edit', await driver(), 'Second Tab Svendsen');
-  check('the first tab says the plan changed in another tab', await p.page.waitForFunction(() => { const d = document.getElementById('elsewhereDlg'); return !!d && d.open && /changed in another tab/.test(d.innerText); }, null, { timeout: 5000 }).then(() => true, () => false));
-  // Twice: Chrome lets a second Esc close a dialog that refused the first.
-  await p.page.keyboard.press('Escape');
-  await p.page.keyboard.press('Escape');
-  await wait(300);
-  check('and Esc does not put it away', await elsewhereOpen(p.page));
-  check('the bar says to reload', await pillSays(p.page, 'Reload this tab'));
+  check('the bar of the first tab says to reload', await pillSays(p.page, 'Reload this tab'));
+  check('and no dialog opens for it', !(await anyDialog(p.page)) && (await p.page.locator('#elsewhereDlg').count()) === 0);
   await p.page.evaluate(() => { state.routes[0].driver = 'Stale Stian'; save(); });
   same('a save in the stale tab writes nothing over it', await driver(), 'Second Tab Svendsen');
   const writes = () => relay.log.filter((x) => x.roomId === k.roomId && ['snapshot', 'version', 'op'].includes(x.frame.type)).length;
   const wrote = writes();
   await p.page.evaluate(() => { const box = document.getElementById('roomVersionName'); box.value = 'From the stale tab'; return roomPush(); });
   check('and a push from it sends nothing', await noticeSays(p.page, /changed in another tab, so nothing was pushed/) && writes() === wrote);
-  await Promise.all([p.page.waitForEvent('load'), p.page.click('#elsewhereReload')]);
-  await pillSays(p.page, 'Connected');
+  await p.page.reload({ waitUntil: 'networkidle' });
+  await pillSays(p.page, 'Not live');
   same('Reload: the first tab now shows the second tab\'s plan', await p.page.evaluate(() => state.routes[0].driver), 'Second Tab Svendsen');
-  check('and is a normal tab again', !(await elsewhereOpen(p.page)));
+  check('and is a normal tab again', !(await pillSays(p.page, 'Reload this tab', 500)));
   same('second tab: no console errors', p.errors, []);
   await p.context.close();
+}
+
+// Two tabs of one browser following the room live: each is one more
+// receiver. They edit in turn with no dialog and end identical to the other PC.
+{
+  const { secret } = liveRoom();
+  const a1 = await live(SEED, secret);
+  const a2 = { page: await a1.context.newPage() };
+  await a2.page.goto(base, { waitUntil: 'networkidle' });
+  await pillSays(a2.page, 'Connected');
+  await a2.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 });
+  const b = await live(SEED, secret);
+  const anyDialog = (pg) => pg.evaluate(() => [...document.querySelectorAll('dialog')].some((d) => d.open));
+  check('a second tab of the same browser follows the room live too', await a2.page.evaluate(() => roomLive()));
+  await routeBox(a1.page, 0, 'driver').fill('Tab One');
+  await a1.page.keyboard.press('Tab');
+  await routeBox(a2.page, 1, 'driver').fill('Tab Two');
+  await a2.page.keyboard.press('Tab');
+  await routeBox(b.page, 2, 'driver').fill('Other PC');
+  await b.page.keyboard.press('Tab');
+  await routeBox(a1.page, 3, 'round').fill('3');
+  await a1.page.keyboard.press('Tab');
+  await routeBox(a2.page, 4, 'round').fill('4');
+  await a2.page.keyboard.press('Tab');
+  check('two tabs and the other PC end on one plan', await converged(a1.page, b.page) && await converged(a2.page, b.page));
+  const end = JSON.parse(await planOf(b.page));
+  check('holding every edit', end.routes[0].driver === 'Tab One' && end.routes[1].driver === 'Tab Two' && end.routes[2].driver === 'Other PC' && end.routes[3].round === '3' && end.routes[4].round === '4');
+  check('with no dialog and no Reload this tab in either tab', !(await anyDialog(a1.page)) && !(await anyDialog(a2.page)) && await pillSays(a1.page, 'Connected', 500) && await pillSays(a2.page, 'Connected', 500));
+  same('and the browser\'s saved plan is that plan', await a1.page.evaluate(() => localStorage.getItem('carcoord:v1')), await planOf(b.page));
+  same('two tabs: no console errors', [...a1.errors, ...b.errors], []);
+  await a1.context.close();
+  await b.context.close();
 }
 
 // ---------------------------------------------------------------------------

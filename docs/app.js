@@ -3524,39 +3524,23 @@ async function roomOfferStart(secret) {
 }
 
 /* Another tab of this browser saved the plan while this one is in a shared
-   plan. This tab's plan is now stale, and every change in it would be saved
-   (and could be pushed) over the other tab's. Loading the new plan in place
-   would leave this tab's undo history, a moved date and an open dialog all
-   pointing at the old one, so instead the tab stops: it saves and pushes
-   nothing, and a dialog that does not close asks for a reload. planElsewhere
-   is declared beside save(), which it stops. */
+   plan. A tab following the room live hears the same change from the room,
+   because the other tab sends it, so it does nothing here and follows
+   quietly. A tab that cannot follow (offline, not caught up, read-only, not
+   following live) would save its stale plan over the other tab's, so it
+   stops: it saves and pushes nothing until reloaded, and the pill says so.
+   No dialog (owner, 2026-10-08). planElsewhere is declared beside save(),
+   which it stops. */
 window.addEventListener('storage', (e) => {
   if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
   let now = null;
   try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
   // The plan this tab last saved, written again: nothing has changed.
   if (now === JSON.stringify(state)) return;
+  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected') return;
   planElsewhere = true;
-  renderPlanElsewhere();
   renderRoom();
 });
-function renderPlanElsewhere() {
-  let dlg = document.getElementById('elsewhereDlg');
-  if (!dlg) {
-    dlg = document.createElement('dialog');
-    dlg.id = 'elsewhereDlg';
-    dlg.innerHTML = `
-      <h2>This plan changed in another tab</h2>
-      <p>Another tab of this browser saved a change to the plan. This tab still shows the plan from before, so it saves nothing and pushes nothing to the shared plan until it is reloaded.</p>
-      <div class="bar" style="margin:16px 0 0"><button class="btn primary-ish" type="button" id="elsewhereReload">Reload this tab</button></div>`;
-    // Esc would close it; there is nothing to go back to.
-    dlg.addEventListener('cancel', (e) => e.preventDefault());
-    dlg.addEventListener('close', () => { if (planElsewhere && !dlg.open) dlg.showModal(); });
-    dlg.querySelector('#elsewhereReload').addEventListener('click', () => location.reload());
-    document.body.appendChild(dlg);
-  }
-  if (!dlg.open) dlg.showModal();
-}
 
 // Another tab of this browser joined or left: this one follows, so a Leave
 // there leaves no connection open here.
