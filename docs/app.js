@@ -2592,11 +2592,16 @@ const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.
    already in the plan (an ack), so the two always belong together: a base
    ahead of the plan would read as edits undoing the room's. Every tab of
    the room holds the same plan at the same seq, so one already written at
-   this seq is not written again. */
+   this seq (with the same holds) is not written again.
+   `holds` are the fields held while typed in (roomHold), and those let go
+   with what was typed whose batch the room has not confirmed yet: what each
+   was before the room changed it. A reload rebuilds those edits with that as
+   their `was`, so the collision is still flagged on both screens. */
 const BASE_KEY = 'carcoord:roomBase';
+const baseHead = (roomId, seq, holds) => `{"room":${JSON.stringify(roomId)},"seq":${seq},"holds":${JSON.stringify(holds)},`;
 function roomBaseWrite(r) {
   if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r)) return;
-  const head = `{"room":${JSON.stringify(r.keys.roomId)},"seq":${r.rep.seq},`;
+  const head = baseHead(r.keys.roomId, r.rep.seq, roomHoldsOf(r));
   try {
     const now = localStorage.getItem(BASE_KEY);
     if (now && now.startsWith(head)) return;
@@ -2606,9 +2611,43 @@ function roomBaseWrite(r) {
 function roomBaseRead(roomId) {
   try {
     const b = JSON.parse(localStorage.getItem(BASE_KEY));
-    if (b && b.room === roomId && Number.isInteger(b.seq) && b.seq >= 0 && b.plan && typeof b.plan === 'object' && !Array.isArray(b.plan)) return { seq: b.seq, plan: b.plan };
+    if (b && b.room === roomId && Number.isInteger(b.seq) && b.seq >= 0 && b.plan && typeof b.plan === 'object' && !Array.isArray(b.plan)) {
+      const holds = (Array.isArray(b.holds) ? b.holds : []).filter((h) => h && typeof h.key === 'string' && typeof h.kind === 'string' && typeof h.field === 'string');
+      return { seq: b.seq, plan: b.plan, holds };
+    }
   } catch { /* none kept, or unreadable: none */ }
   return null;
+}
+// The holds to keep: those held now, and those let go with typing whose
+// batch is still waiting for the room.
+const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) => ({ key: h.key, kind: h.kind, id: h.id, field: h.field, base: h.base, out: !!h.out }));
+// The holds changed: kept beside the base as it is stored, its seq and plan
+// left as they are (they belong to the plan stored with them).
+function roomHoldsKeep(r) {
+  if (!r || !r.keys) return;
+  try {
+    const b = JSON.parse(localStorage.getItem(BASE_KEY));
+    if (!b || b.room !== r.keys.roomId || !Number.isInteger(b.seq)) return;
+    const holds = roomHoldsOf(r);
+    if (JSON.stringify(b.holds || []) === JSON.stringify(holds)) return;
+    localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, holds)}"plan":${JSON.stringify(b.plan)}}`);
+  } catch (e) { console.warn('shared plan: its base could not be kept', e); }
+}
+/* Opening with holds kept: one held when the page went whose box still holds
+   what it held then (nothing typed since) takes the room's value, as leaving
+   it would have; any other goes out with what it was before the room
+   changed it as its `was` (r.wasKept, used by the first capture). */
+function roomHoldsBack(r, kept) {
+  let changed = false;
+  for (const h of kept.holds) {
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    if (!now.has) continue;
+    if (!h.out && Sync.equal(now.value, h.base)) {
+      const there = fieldIn(kept.plan, h.kind, h.id, h.field);
+      if (there.has && !Sync.equal(now.value, there.value)) changed = roomPatch(setIn(state, h, there.value)) || changed;
+    } else r.wasKept.set(h.key, h);
+  }
+  if (changed && !planElsewhere) Store.save(state);
 }
 const roomBaseForget = () => { try { localStorage.removeItem(BASE_KEY); } catch { /* storage refused: nothing kept anyway */ } };
 
@@ -2636,12 +2675,15 @@ async function roomStart(secret, base = null) {
     secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, snapSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false,
     rep: base ? Sync.replica(base.seq, base.plan) : null, legacy: false, frames: Promise.resolve(), sending: Promise.resolve(), epoch: 0,
     flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0, compacting: false,
+    // heldOut: holds let go with typing, until the room confirms their batch;
+    // wasKept: holds kept from before a reload, for the first capture.
+    heldOut: new Map(), wasKept: new Map(),
   };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
   if (r.rep) roomBaseWrite(r);
-  else { const kept = roomBaseRead(r.keys.roomId); if (kept) r.rep = Sync.replica(kept.seq, kept.plan); }
+  else { const kept = roomBaseRead(r.keys.roomId); if (kept) { r.rep = Sync.replica(kept.seq, kept.plan); roomHoldsBack(r, kept); } }
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
     // Catch up on every (re)connect: the version list, the room's schema, and
@@ -2848,9 +2890,23 @@ const setIn = (plan, h, value) => Sync.apply(plan, h.kind === 'meta' ? { op: 'se
 function roomCapture(r, was = null) {
   if (!r || !r.rep || r.legacy || roomReadOnly(r)) return null;
   const movedDate = dateMove && state === dateMove.plan && !dateMove.saved;
+  // Holds kept from before a reload: their edits are rebuilt here, once.
+  const kept = r.wasKept;
+  if (kept.size) {
+    was = new Map([...[...kept].map(([k, h]) => [k, h.base]), ...(was || [])]);
+    r.wasKept = new Map();
+  }
   const skip = (c) => c.op === 'set' && ((c.kind === 'meta' && c.field === 'date' && movedDate)
     || (r.holds.has(Sync.fieldKey(c.kind, c.id, c.field)) && !(was && was.has(Sync.fieldKey(c.kind, c.id, c.field)))));
-  return r.rep.capture(state, { skip, was });
+  const batch = r.rep.capture(state, { skip, was });
+  if (batch && kept.size) {
+    for (const c of batch.changes) {
+      const h = c.op === 'set' ? kept.get(Sync.fieldKey(c.kind, c.id, c.field)) : null;
+      if (h) r.heldOut.set(h.key, { ...h, out: true, oid: batch.oid });
+    }
+  }
+  if (kept.size) roomHoldsKeep(r);
+  return batch;
 }
 
 // An edit on screen: sent after a short gather.
@@ -2946,6 +3002,10 @@ function roomApply(r, mutate) {
     return;
   }
   if (!r.rep.queue.length) r.waitingSince = null;
+  // A hold let go with typing is confirmed with its batch.
+  const outs = r.heldOut.size;
+  for (const [key, h] of [...r.heldOut]) if (!r.rep.queue.some((b) => b.oid === h.oid)) r.heldOut.delete(key);
+  if (r.heldOut.size !== outs) roomHoldsKeep(r);
   roomFlags(r, res.flags);
   if (res.applied) roomCompact(r);
   if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); }
@@ -2971,6 +3031,7 @@ function roomHold(r, next) {
     const then = fieldIn(next, f.kind, f.id, f.field);
     if (now.has && then.has && !Sync.equal(now.value, then.value)) {
       r.holds.set(f.key, { ...f, base: now.value });
+      r.heldOut.delete(f.key);
       next = setIn(next, f, now.value);
     }
   }
@@ -2984,6 +3045,7 @@ function roomHold(r, next) {
       roomFlags(r, [{ type: 'removed', kind: h.kind, id: h.id, item: JSON.parse(JSON.stringify(list[i])), after: i > 0 ? list[i - 1].id : null, field: h.field }]);
     }
   }
+  roomHoldsKeep(r);
   return next;
 }
 // Leaving a held field.
@@ -3000,10 +3062,12 @@ function roomRelease(r) {
     if (Sync.equal(now.value, h.base)) {
       if (there.has && !Sync.equal(now.value, there.value)) { roomPatch(setIn(state, h, there.value)); changed = true; }
     } else {
-      roomCapture(r, new Map([[key, h.base]]));
+      const batch = roomCapture(r, new Map([[key, h.base]]));
+      if (batch && batch.changes.some((c) => c.op === 'set' && Sync.fieldKey(c.kind, c.id, c.field) === key)) r.heldOut.set(key, { ...h, out: true, oid: batch.oid });
       roomEdited();
     }
   }
+  roomHoldsKeep(r);
   if (changed) { Store.save(state); r.tick++; renderKeepingFocus(); } else { renderRoom(); roomMarks(); }
 }
 document.addEventListener('focusout', () => {

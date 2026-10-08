@@ -1440,6 +1440,52 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
   same('edit to a route gone without a record: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
 }
+
+// A reload while a field is held: what was typed over the other's change
+// still goes out as a collision, flagged on both screens, the other's value
+// in the flag.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  await routeBox(a.page, 2, 'driver').click();
+  await a.page.keyboard.press('End');
+  await a.page.keyboard.type(' Typed', { delay: 20 });
+  const typed = await routeBox(a.page, 2, 'driver').inputValue();
+  check('held: the first words reach the other browser', await b.page.waitForFunction((v) => state.routes[2].driver === v, typed, { timeout: 3000 }).then(() => true, () => false));
+  await routeBox(b.page, 2, 'driver').fill('From B');
+  await b.page.keyboard.press('Tab');
+  check('the other\'s change holds the box being typed in', await a.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).then(() => true, () => false));
+  await a.page.keyboard.type(' More', { delay: 20 });
+  await wait(500);
+  const sent = ops().length;
+  await a.page.reload({ waitUntil: 'networkidle' });
+  await a.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
+  check('reloaded: what was typed goes out', await until(() => ops().length > sent) && await converged(a.page, b.page));
+  const want = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept: `${typed} More`, lost: 'From B' }];
+  await until(async () => (await flagsOf(b.page)).length > 0, 2000);
+  same('and the other\'s value is in the same flag on both screens', [await flagsOf(a.page), await flagsOf(b.page)], [want, want]);
+
+  // Held, nothing typed since, then a reload: the room's value, as leaving
+  // the box would have given it, and nothing sent over it.
+  await routeBox(a.page, 4, 'driver').click();
+  await a.page.keyboard.press('End');
+  await a.page.keyboard.type(' Before', { delay: 20 });
+  const before = await routeBox(a.page, 4, 'driver').inputValue();
+  await b.page.waitForFunction((v) => state.routes[4].driver === v, before, { timeout: 3000 }).catch(() => {});
+  await routeBox(b.page, 4, 'driver').fill('B Wins');
+  await b.page.keyboard.press('Tab');
+  await a.page.waitForFunction(() => room.holds.size === 1, null, { timeout: 3000 }).catch(() => {});
+  await wait(400);
+  const sent2 = ops().length;
+  await a.page.reload({ waitUntil: 'networkidle' });
+  await a.page.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
+  await wait(800);
+  same('held with nothing typed since, reloaded: the room\'s value, and nothing sent over it', [await a.page.evaluate(() => state.routes[4].driver), ops().length - sent2], ['B Wins', 0]);
+  check('and both screens one plan', await converged(a.page, b.page));
+  same('reload while held: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
 // <<< review fixes
 
 // ---------------------------------------------------------------------------
