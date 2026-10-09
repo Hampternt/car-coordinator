@@ -99,4 +99,5 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
+- 💭 **Lift cars** — mark a car as a van or a lift car with an icon, and warn when a lift car is parked outside a lift spot (Spot 4, Spot 5, Gate). `manifests/2026-10-09-car-types.md`.
 - 💭 **Plan ahead, saved to a date** — plan tomorrow and submit it as that day's list, then plan two days ahead and submit that, each kept under its own date in a separate saved-days area, with a Plan ahead / Save to date button. Not for the current version.
