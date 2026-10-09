@@ -19,7 +19,8 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   Gate: check.sh OK; colour-guard clean; presence-ui 83 ok, 0 FAIL (marks within 1 s; layout identical to the pixel; typing in a marked row keeps every key and the caret; marks back after a remote redraw; dark values checked).
 - [x] **5. Elsewhere**: rail rows, Cars/Drivers/Positions rows, template cards; `pillText()`.
   Gate: check.sh OK; colour-guard clean; presence-ui 104 ok, 0 FAIL (rail, Drivers, Cars, Positions, template card; the bar names Drivers, Cars, Positions, Print preview as the tabs do).
-- [ ] **6. Quiet note**: "Kari is editing this line" beside a row the other is in; never blocks.
+- [x] **6. Quiet note**: "Kari is editing this line" beside a row the other is in; never blocks.
+  Gate: check.sh OK; colour-guard clean; presence-ui 119 ok, 0 FAIL (note within 0.5 s, no dialog or notice, layout unchanged, typing keeps every key; goes on leaving the row, on the other leaving, and on their timeout).
 
 ## Decisions
 
@@ -56,6 +57,11 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   sender's clock, so it is not used for the timeout).
 - The pill names each name once (two tabs of one person, or a reload before its bye got out, read
   as one); no name set reads as "Someone".
+
+- The note is shown whenever this browser's focus is in a row someone else is in (so the one
+  already there sees the newcomer's note too). In a table it sits at the row's end, over its top
+  edge like the tag; a rail row or template card is too narrow for both, so there the note takes
+  the tag's place. On a template card it reads "… is editing this template".
 
 ## Deviations and notes for the merge
 

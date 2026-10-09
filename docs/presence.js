@@ -231,8 +231,8 @@ const Presence = (() => {
       Store.setPref('presenceColor', el.value);
       queue();
     });
-    document.addEventListener('focusin', () => queue());
-    document.addEventListener('focusout', () => queue());
+    document.addEventListener('focusin', () => { queue(); renote(); });
+    document.addEventListener('focusout', () => { queue(); renote(); });
     // Leaving: said at once, as far as the page lets it (the lock may finish
     // after the page has gone; then the other screen lets go after a while).
     window.addEventListener('pagehide', () => { if (isLive()) { try { api.send(message({ at: null, bye: true })); } catch { /* gone */ } } });
@@ -256,12 +256,13 @@ const Presence = (() => {
   // The rows a place can be in: a route on the Day plan, a driver or car on
   // its rail, a row of the Drivers, Cars and Positions tabs, a template card.
   const ROWS = '#tab-plan tbody tr[data-route], .rail-row, #tab-drivers tbody tr, #tab-cars tbody tr, #tab-positions tbody tr, .tpl-head[data-tpl]';
-  const MARKED = '.presence-row, .presence-box, [data-presence-who]';
+  const MARKED = '.presence-row, .presence-box, [data-presence-who], [data-presence-note]';
   const COLOURS = KEYS.map((k) => `pr-c-${k}`);
   function unmark() {
     for (const el of document.querySelectorAll(MARKED)) {
       el.classList.remove('presence-row', 'presence-box', ...COLOURS);
       el.removeAttribute('data-presence-who');
+      el.removeAttribute('data-presence-note');
     }
   }
   // Every control of the place's item on screen, whatever its box.
@@ -279,8 +280,22 @@ const Presence = (() => {
     for (const el of controls) { const r = el.closest(ROWS); if (r) rows.add(r); }
     return rows;
   }
-  // The start of a row, where its name tag goes.
+  // The start of a row, where its name tag goes, and its end, where the
+  // quiet note goes. A rail row or a template card is too narrow for both:
+  // there the note takes the tag's place.
   const startOf = (r) => (r.tagName === 'TR' ? r.cells[0] : r);
+  const endOf = (r) => (r.tagName === 'TR' ? r.cells[r.cells.length - 1] : r);
+  const andNames = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+  // The rows this browser's focus is in: the one holding it, or for a row's
+  // own grid or menu, the row it belongs to.
+  function myRows() {
+    const el = document.activeElement;
+    const row = el && el !== document.body && el.closest ? el.closest(ROWS) : null;
+    if (row) return new Set([row]);
+    if (!el || !el.closest || !el.closest('#picker, #tagMenu, #ctxMenu, #ctxSub')) return new Set();
+    const at = whereAt();
+    return at ? rowsOf(at, controlsOf(at)) : new Set();
+  }
 
   // decorate(): put the row tints, name tags, box outlines and the quiet note
   // back after a redraw. A redraw is also how the app changes tab.
@@ -310,6 +325,23 @@ const Presence = (() => {
       const start = startOf(r);
       if (start) start.setAttribute('data-presence-who', ps.map((p) => p.name).join(', '));
     }
+    // The quiet note: in a row someone else is in, say so beside it. Never a
+    // dialog, never in the way of the typing (Quiet by default).
+    for (const r of myRows()) {
+      const ps = inRow.get(r);
+      const end = ps && endOf(r);
+      if (!end) continue;
+      const names = ps.map((p) => p.name);
+      const what = r.classList.contains('tpl-head') ? 'this template' : 'this line';
+      end.setAttribute('data-presence-note', `${andNames(names)} ${names.length > 1 ? 'are' : 'is'} editing ${what}`);
+    }
+  }
+
+  // Focus moved here: the note follows at once, once the focus has settled.
+  let noteTimer = null;
+  function renote() {
+    if (noteTimer || !others.size) return;
+    noteTimer = setTimeout(() => { noteTimer = null; decorate(); }, 0);
   }
 
   // pillText(): who else is here, for the top bar beside the Shared plan

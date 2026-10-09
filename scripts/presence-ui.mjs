@@ -441,6 +441,59 @@ const ringed = (pg, sel) => pg.evaluate((q) => [...document.querySelectorAll(q)]
   await a.context.close(); await b.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// 6. The quiet note: entering a row the other is in says so beside it, and
+// never stops the typing.
+const noteOf = (pg) => pg.evaluate(() => [...document.querySelectorAll('[data-presence-note]')].map((el) => {
+  const pseudo = el.tagName === 'TD' ? '::after' : '::before';
+  return { where: el.closest('tr')?.dataset.route || el.dataset.id || el.dataset.tpl || el.tagName, text: el.getAttribute('data-presence-note'), drawn: getComputedStyle(el, pseudo).content };
+}));
+const anyDialog = (pg) => pg.evaluate(() => !!document.querySelector('dialog[open]'));
+{
+  const { secret } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  const ids = await a.page.evaluate(() => state.routes.map((r) => r.id));
+  const NOTE = 'Kari is editing this line';
+  await row(a.page, 3).locator('[data-field="driver"]').focus();
+  await markedAt(b.page, ids[3], 'driver');
+  same('no note while this browser is in no row of theirs', await noteOf(b.page), []);
+  const noticesBefore = await b.page.locator('#notices').innerHTML();
+  const layoutBefore = await layoutOf(b.page);
+  const t0 = Date.now();
+  await row(b.page, 3).locator('[data-field="round"]').click();
+  check('entering the row the other is in: the quiet note, at once', await pageUntil(b.page, () => !!document.querySelector('[data-presence-note]'), null, 500), String(Date.now() - t0));
+  same('beside the row, in words', await noteOf(b.page), [{ where: ids[3], text: NOTE, drawn: `"${NOTE}"` }]);
+  check('not a dialog, and not a notice', !(await anyDialog(b.page)) && (await b.page.locator('#notices').innerHTML()) === noticesBefore);
+  same('and nothing moved', await layoutOf(b.page), layoutBefore);
+  await b.page.keyboard.press('End');
+  await b.page.keyboard.type('Q7', { delay: 40 });
+  const was3 = JSON.parse(PLAN).routes[3].round || '';
+  same('typing goes on as ever: every key, the focus and the caret', await b.page.evaluate(() => { const el = document.activeElement; return [el.dataset.field, el.value, el.selectionStart]; }), ['round', `${was3}Q7`, `${was3}Q7`.length]);
+  check('and the edit reaches the other', await pageUntil(a.page, ([i, v]) => state.routes.find((r) => r.id === i).round === v, [ids[3], `${was3}Q7`], 3000));
+  check('it works both ways: the one already in the row sees the newcomer\'s note', await pageUntil(a.page, (t) => document.querySelector('[data-presence-note]')?.getAttribute('data-presence-note') === t, 'Ola is editing this line', 1500));
+
+  await row(b.page, 4).locator('[data-field="round"]').focus();
+  check('moving to another row: the note goes', await pageUntil(b.page, () => !document.querySelector('[data-presence-note]'), null, 500));
+  await row(b.page, 3).locator('[data-field="name"]').focus();
+  check('back in theirs: it is back', await pageUntil(b.page, (t) => document.querySelector('[data-presence-note]')?.getAttribute('data-presence-note') === t, NOTE, 500));
+  await a.page.evaluate(() => document.activeElement.blur());
+  check('the other leaves the row: the note goes within a second', await pageUntil(b.page, () => !document.querySelector('[data-presence-note]'), null, 1000));
+
+  // The rail and a template card: the note takes the tag's place.
+  const driver = JSON.parse(PLAN).drivers[1];
+  await tabTo(a.page, 'drivers');
+  await a.page.locator(`#tab-drivers [data-kind="driver"][data-id="${driver.id}"][data-field="name"]`).focus();
+  await b.page.locator(`.rail-row[data-id="${driver.id}"] .rail-name`).focus();
+  check('on the rail: the note in the row\'s tag', await pageUntil(b.page, ([id, t]) => {
+    const li = document.querySelector(`.rail-row[data-id="${id}"]`);
+    return li.getAttribute('data-presence-note') === t && getComputedStyle(li, '::before').content === `"${t}"`;
+  }, [driver.id, NOTE], 1500));
+  same('one note only', (await noteOf(b.page)).length, 1);
+  same('the note: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
 // Dark mode: the tag, the tint and the ring in the dark values, still seen.
 {
   const { secret } = liveRoom();
@@ -472,16 +525,17 @@ const ringed = (pg, sel) => pg.evaluate((q) => [...document.querySelectorAll(q)]
   const b = await live(secret, { name: 'Ola', color: 'violet' });
   const fromA = () => presenceOf(secret, k).filter((m) => m.who.name === 'Kari');
   check('both see each other', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan') && await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan'));
-  await row(a.page, 3).locator('[data-field="driver"]').focus();
+  await row(a.page, 1).locator('[data-field="round"]').focus();
   await row(b.page, 1).locator('[data-field="driver"]').focus();
   await wait(1000);
+  check('in one row: each sees the note', (await noteOf(a.page)).length === 1 && (await noteOf(b.page)).length === 1);
   await silence(b.page);
   const quietFrom = fromA().length;
   const silentAt = Date.now();
-  const rid = await a.page.evaluate(() => state.routes[3].id);
+  const rid = await a.page.evaluate(() => state.routes[1].id);
   await wait(21500);
   const beats = fromA().slice(quietFrom);
-  check('nothing moving for 21 s: the heartbeat says it again', beats.length >= 1 && beats.every((m) => sameAt(m, { kind: 'route', id: rid, field: 'driver' })), JSON.stringify(beats.map((m) => m.at)));
+  check('nothing moving for 21 s: the heartbeat says it again', beats.length >= 1 && beats.every((m) => sameAt(m, { kind: 'route', id: rid, field: 'round' })), JSON.stringify(beats.map((m) => m.at)));
   check('and only about every 20 s', beats.length <= 2, String(beats.length));
   check('the other, quiet for 21 s, is still here', (await pillOf(a.page)).includes('Ola is here'));
   check('and their row still marked', (await marksOf(a.page)).rows.length === 1);
@@ -489,7 +543,7 @@ const ringed = (pg, sel) => pg.evaluate((q) => [...document.querySelectorAll(q)]
   const gone = await pillIs(a.page, 'Shared plan: Connected', 30000);
   const after = Math.round((Date.now() - silentAt) / 1000);
   check('quiet with no goodbye: let go after about 45 s', gone && after >= 44 && after <= 49, `${gone} after ${after} s`);
-  check('and their marks go with them', (await marksOf(a.page)).rows.length === 0 && (await marksOf(a.page)).boxes.length === 0);
+  check('and their marks and the note go with them', (await marksOf(a.page)).rows.length === 0 && (await marksOf(a.page)).boxes.length === 0 && (await noteOf(a.page)).length === 0);
   check('while the one still talking stays', (await pillOf(b.page)).includes('Kari is here') && (await marksOf(b.page)).rows.length === 1);
   await a.context.close(); await b.context.close();
 }
