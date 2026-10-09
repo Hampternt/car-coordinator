@@ -232,7 +232,7 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 
 ## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Status:** 💭 drafted 2026-10-09 from the owner's requests while they test round 2 on PC and tablet. Building waits for their go and the decisions below. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+**Status:** 💭 drafted 2026-10-09 from the owner's requests while they test round 2 on PC and tablet; decisions made (below). Building waits for their go, after round 2's test. Both packs write `docs/app.js`, so they run serial: pack 4 first.
 
 ### Pack 4: Who is editing
 
@@ -259,10 +259,10 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 *Done when:* `sync-ui` covers each choice. Hold sends nothing; Send equals today's merge; Keep puts the offline plan in Backups and the screen takes the room's; the times are right; and nothing is lost in any choice.
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
 
-**Decisions for the owner before building** (asked 2026-10-09):
-- Clicking into a line someone else is editing: a quiet note (recommended), or lock the line for the second person?
-- When the review appears: only when the other person changed lines you also changed offline (recommended), whenever you have offline changes and the shared plan changed meanwhile, or every time?
-- Choosing per change: all-or-nothing with a list to look at first (recommended for now), or tick each change to send or keep?
+**Decided by the owner, 2026-10-09:**
+- Clicking into a line someone else is editing gives a **quiet note**, never a lock.
+- The review appears **only on overlap**: the other person changed lines you also changed offline. Otherwise offline changes go up quietly, as now.
+- **All or nothing**, with a Look first list; per-change ticking is left for later if it's missed.
 
 ---
 
