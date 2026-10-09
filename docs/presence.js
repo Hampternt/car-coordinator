@@ -37,13 +37,18 @@ const Presence = (() => {
   // manager's own second tab is not someone else, so it neither marks rows
   // nor names itself in the bar. Kept with the browser's other preferences;
   // a browser that refuses storage keeps one for as long as the page is open.
-  const myId = (() => {
+  // Made and kept only once this browser is in a shared plan and says or
+  // hears something (both wait for api.live()): a browser that never joins one
+  // writes nothing, and its start-up stays exactly as it was.
+  let idKept = null;
+  const myId = () => {
+    if (idKept) return idKept;
     const kept = typeof Store !== 'undefined' ? Store.pref('presenceId') : null;
-    if (typeof kept === 'string' && /^[0-9a-f]{16}$/.test(kept)) return kept;
-    const id = randomId();
-    if (typeof Store !== 'undefined') Store.setPref('presenceId', id);
-    return id;
-  })();
+    if (typeof kept === 'string' && /^[0-9a-f]{16}$/.test(kept)) return (idKept = kept);
+    idKept = randomId();
+    if (typeof Store !== 'undefined') Store.setPref('presenceId', idKept);
+    return idKept;
+  };
   const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const cleanName = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
   // The colour of someone whose key this build does not know (a newer
@@ -124,7 +129,7 @@ const Presence = (() => {
   }
   const message = (extra = {}) => ({
     schema: typeof Store !== 'undefined' ? Store.SCHEMA : 0,
-    who: { id: myId, name: myName(), color: myColour() },
+    who: { id: myId(), name: myName(), color: myColour() },
     tab: currentTab(),
     at: whereAt(),
     t: Date.now(),
@@ -196,7 +201,7 @@ const Presence = (() => {
     try {
       const who = plain && typeof plain === 'object' ? plain.who : null;
       const id = who && str(who.id, 64);
-      if (!id || id === myId || !isLive()) return;
+      if (!id || !isLive() || id === myId()) return;
       if (plain.bye === true) { if (others.delete(id)) redraw(); return; }
       const fresh = !others.has(id);
       const tab = str(plain.tab, 40);
