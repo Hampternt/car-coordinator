@@ -39,3 +39,22 @@ sync-ui.mjs passed, 412 ok (2 min 43 s).
 - Item 7, dropped while building: a live tab taking up a hold raised in another tab (on the base's storage event). It cannot happen: a tab following live saves every change it gets from the room, which stops the offline tab first, and a stopped tab never writes the hold. Removed rather than kept untested.
 - Item 7, Leave while held: the held edits stay in the plan on this PC (they were on screen and in carcoord:v1), nothing is sent, the hold goes with the base. The armed Leave says so in one line beside Sure?; no dialog.
 - Item 7, read-only while held: Send is disabled with "Update the app to send them"; Keep works (Backup, then the plan as this browser could read it). A test note: the fake relay's typing hold (round 2) holds a box still focused when the other's change arrives, so tests press Tab after filling a box the other will change.
+- After a self-check, two tests added (test-only, same commit as the final gates): Send pressed while offline, then a reload before the connection is back (the review kept as `sending` and restored as such, nothing sent until back, then the same two flags on both screens and the kept review cleared); and the room compacted past the away browser's base (250 ops from the other, one in the snapshot only, with no time): held, both clashes counted, Send flags both alike. `offlineClash` now waits until both of B's edits are in the relay, however they were batched.
+
+## For the concurrency + live-data review
+
+- Record size: the kept review holds two plans (the base and, after compaction, the snapshot) and every op of the other's since the base, rewritten on each capture while held. A write refused for quota forgets the base (round 2's rule), and the hold with it: the edits stay in carcoord:v1, but the browser then reads as one with no record of the room (Not live, Take offered) rather than held.
+- A tab that follows an answer given in another tab (Send there) marks the batches sent and relies on that tab's ops arriving to clear them; if it reconnects first it sends them again (same changes, harmless, no flag).
+- Compaction past the base: this browser's own ops sequenced before the snapshot count as the other's in the snapshot's diff, which can raise a review that was not needed. Never a silent send.
+- Replace-everything while held (Import, Restore from Backups, a share code, Restore a version): the confirm still says "This changes the shared plan for both of you", but the change is held behind the review like any edit; Keep drops it from the screen (it is in the Kept Backup).
+- An older copy (0.16.0) opening a profile with a kept hold ignores `review`, rebuilds the edits from the moved base and sends them unflagged. Only on a downgrade.
+- Two browsers back at the same moment: see the known limit above (round 2's flagged merge).
+
+## Final gates (on the tip)
+
+- `check.sh`: CHECK OK.
+- `sync.mjs`: sync checks passed, 197 ok (34 new).
+- `sync-ui.mjs`: sync-ui checks passed, 544 ok (132 new), twice in a row.
+- `smoke.mjs` (once, on 921d184; only tests changed since): all checks passed (3 groups skipped for the stored file handle, as before).
+- Not run here: the full `npm test` (its `presence-ui.mjs` is pack 4's), `npm run upgrade`, `screens`, the relay's `cargo test` (relay/ untouched), the browser smoke check (main session's).
+- Measured: f28c7ec (03:28) to 921d184 (04:43), 7 commits; this final one after (`wave-times.sh 2026-10-09T03:28`; pack 4's commits interleave in that window).

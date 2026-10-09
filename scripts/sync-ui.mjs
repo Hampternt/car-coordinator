@@ -2042,7 +2042,8 @@ const offlineClash = async (a, b, ops) => {
   await b.page.clock.setFixedTime(clockAt('09:20'));
   await routeBox(b.page, 2, 'driver').fill('Theirs Live');
   await routeBox(b.page, 5, 'driver').fill('Theirs Elsewhere');
-  await until(async () => ops().length >= 1 && await b.page.evaluate(() => room.rep.queue.length === 0));
+  // Both of B's edits in the relay, whether they went as one op or two.
+  await until(async () => ops().flatMap((o) => o.changes).some((c) => c.id === 'rt-06' && c.field === 'driver') && await b.page.evaluate(() => room.rep.queue.length === 0));
   relay.mend(a.context);
   await pillSays(a.page, 'Connected', 10000);
   return a.page.waitForFunction(() => roomHeld(), null, { timeout: 5000 }).then(() => true, () => false);
@@ -2312,6 +2313,81 @@ const reviewOids = (pg) => pg.evaluate(() => (room.review ? room.review.oids : [
   const sorted = async (pg) => (await flagsOf(pg)).sort((x, y) => x.id.localeCompare(y.id));
   check('both fields flagged alike on both screens', await until(async () => JSON.stringify([await sorted(a.page), await sorted(b.page)]) === JSON.stringify([flags, flags])), JSON.stringify([await sorted(a.page), await sorted(b.page)]));
   same('offline again while held: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// Send pressed while offline, then a reload before the connection is back:
+// what was sent from the review is kept beside the base until the room has
+// it, so the reload neither forgets it nor rebuilds it on the moved base
+// (which would send it unflagged). Back, it goes out, flagged alike.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, then Send while offline', await offlineClash(a, b, ops));
+  relay.cut(a.context);
+  await pillSays(a.page, 'Offline');
+  const was = ops().length;
+  await routeBox(b.page, 3, 'round').fill('7');
+  await b.page.keyboard.press('Tab');
+  await until(() => ops().length === was + 1);
+  const sent = ops().length;
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-review-send"]');
+  same('Send while offline: the bar goes, and it is kept as being sent', [await held(a.page), (await keptReview(a.page) || {}).state], [false, 'sending']);
+  await a.page.reload({ waitUntil: 'networkidle' });
+  same('reloaded, still offline: still kept as being sent, not held again', [await held(a.page), (await keptReview(a.page) || {}).state, await a.page.evaluate(() => room && room.review && room.review.state)], [false, 'sending', 'sending']);
+  same('and nothing has gone yet', ops().length, sent);
+  relay.mend(a.context);
+  await pillSays(a.page, 'Connected', 10000);
+  check('back: it goes out, and no bar comes back', await until(() => ops().length > sent) && !(await held(a.page)));
+  check('one plan', await converged(a.page, b.page));
+  const flags = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept: 'Mine Offline', lost: 'Theirs Live' }, { type: 'set', kind: 'route', id: 'rt-04', field: 'round', kept: '4', lost: '7' }];
+  const sorted = async (pg) => (await flagsOf(pg)).sort((x, y) => x.id.localeCompare(y.id));
+  check('every field both changed is flagged alike on both screens', await until(async () => JSON.stringify([await sorted(a.page), await sorted(b.page)]) === JSON.stringify([flags, flags])), JSON.stringify([await sorted(a.page), await sorted(b.page)]));
+  check('and once the room has it, nothing is kept', await a.page.waitForFunction(() => !JSON.parse(localStorage.getItem('carcoord:roomBase')).review, null, { timeout: 5000 }).then(() => true, () => false));
+  same('Send while offline, reloaded: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// Away while the room was compacted past this browser's base: the other's
+// changes before the snapshot have no ops left, only the snapshot. They
+// still count, and the hold still comes.
+{
+  const { secret, k, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  relay.cut(a.context);
+  await pillSays(a.page, 'Offline');
+  await routeBox(a.page, 2, 'driver').fill('Mine Offline');
+  await routeBox(a.page, 3, 'round').fill('4');
+  await wait(500);
+  await routeBox(b.page, 2, 'driver').fill('Theirs Early');
+  await b.page.keyboard.press('Tab');
+  await until(() => ops().length >= 1);
+  await b.page.evaluate(async () => {
+    for (let i = 0; i < 250; i++) {
+      state.routes[i % state.routes.length].round = `c${i}`;
+      save();
+      roomFlush(room);
+      if (i % 25 === 24) await new Promise((go) => setTimeout(go, 30));
+    }
+  });
+  const roomNow = () => relay.rooms.get(k.roomId);
+  check('the room is compacted past the away browser\'s base', await until(() => roomNow().seq >= 251 && roomNow().snapshot && roomNow().snapshot.seq >= 200, 15000), JSON.stringify({ seq: roomNow().seq, snap: roomNow().snapshot && roomNow().snapshot.seq }));
+  const sent = ops().length;
+  relay.mend(a.context);
+  await pillSays(a.page, 'Connected', 10000);
+  check('back: held, its base passed by the snapshot', await a.page.waitForFunction(() => roomHeld() && room.caught && !!room.review.from, null, { timeout: 5000 }).then(() => true, () => false));
+  same('both clashes counted: the one only in the snapshot (no time) and the one after it', await a.page.evaluate(() => room.review.result.changes.filter((e) => e.clash).map((e) => [e.id, e.field, e.clash.theirs === undefined ? null : typeof e.clash.theirs, e.clash.at === null])),
+    [['rt-03', 'driver', 'string', true], ['rt-04', 'round', 'string', false]]);
+  await wait(600);
+  same('nothing sent', ops().length, sent);
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-review-send"]');
+  check('Send: one plan', await converged(a.page, b.page, 8000));
+  check('with both fields flagged alike', await until(async () => JSON.stringify((await flagsOf(a.page)).map((f) => [f.id, f.kept])) === JSON.stringify((await flagsOf(b.page)).map((f) => [f.id, f.kept])) && (await flagsOf(a.page)).length === 2), JSON.stringify([await flagsOf(a.page), await flagsOf(b.page)]));
+  same('compacted while away: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
 }
 
