@@ -2136,6 +2136,38 @@ const offlineClash = async (a, b, ops) => {
   for (const x of [a, b]) await x.context.close();
 }
 
+// Keep them on this PC only: the plan on screen goes into Backups by name,
+// the screen takes the shared plan, and nothing is sent.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held again, for Keep', await offlineClash(a, b, ops));
+  const screen = await planOf(a.page);
+  const sent = ops().length;
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-review-keep"]');
+  const t14 = await a.page.evaluate((x) => when(x), clockAt('09:14'));
+  const newest = await a.page.evaluate(() => Store.backups()[0]);
+  same('Keep: the plan that was on screen is in Backups, named for the last offline change', newest && newest.label, `Kept from offline, ${t14}`);
+  check('holding every offline edit (nothing lost)', newest && newest.json === screen && JSON.parse(newest.json).routes[2].driver === 'Mine Offline' && JSON.parse(newest.json).routes[3].round === '4');
+  check('the screen takes the shared plan', await converged(a.page, b.page));
+  same('so its edits are gone from screen, and the other\'s are there', JSON.parse(await planOf(a.page)).routes.slice(2, 6).map((r) => [r.driver, r.round]),
+    JSON.parse(await planOf(b.page)).routes.slice(2, 6).map((r) => [r.driver, r.round]));
+  check('and saved so', await a.page.evaluate(() => localStorage.getItem('carcoord:v1') === JSON.stringify(state)));
+  await wait(800);
+  same('nothing was sent', ops().length, sent);
+  check('no bar, no note, nothing kept held, nothing queued', !(await held(a.page)) && (await a.page.locator('#roomReview, #syncReview').count()) === 0
+    && await a.page.evaluate(() => !JSON.parse(localStorage.getItem('carcoord:roomBase')).review && room.rep.queue.length === 0));
+  check('Keep says so, in a notice', await noticeSays(a.page, /Kept your offline changes on this PC only/));
+  check('and no dialog', await a.page.evaluate(() => !document.querySelector('dialog[open]')));
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
+  await routeBox(a.page, 8, 'driver').fill('After Keep');
+  check('after Keep, edits go to the other as usual', await b.page.waitForFunction(() => state.routes[8].driver === 'After Keep', null, { timeout: 5000 }).then(() => true, () => false));
+  same('Keep: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
 // No overlap: the offline edits go out quietly, as before. No bar.
 {
   const { secret, ops } = liveRoom();

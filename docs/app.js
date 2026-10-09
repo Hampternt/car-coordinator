@@ -2731,9 +2731,34 @@ async function roomReviewSend() {
   r.review.look = false;
   roomHoldsKeep(r);
   roomFlush(r);
+  note('info', 'Sending your offline changes. Where you both changed something, yours is kept, and theirs is on the Shared plan card with Put it back.');
   renderKeepingFocus();
 }
-async function roomReviewKeep() {}
+/* Keep them on this PC only: the plan on screen, held edits and all, goes into
+   Backups first (and nothing happens if it cannot); then every held edit is
+   dropped and the screen takes the shared plan. Nothing is sent. What was
+   never taken into the queue (a box held while typed in, the date moved on
+   open) stays on top, as it would after any change from the room. */
+async function roomReviewKeep() {
+  const r = room;
+  if (!roomHeld(r)) return;
+  roomCapture(r);
+  const mine = r.review.result ? r.review.result.mine.last : null;
+  const label = `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
+  if (!Store.snapshot(state, label)) { render(); return; }   // the warning says why
+  const local = Sync.diff(r.rep.shadow, state);
+  // A no-change op queued after a snapshot is not an edit: it still goes.
+  r.rep.queue = r.rep.queue.filter((b) => !b.changes.length);
+  r.rep.replay();
+  r.review = null;
+  r.times.clear();
+  r.heldOut.clear();
+  r.wasKept = new Map();
+  roomShow(r, Sync.applyAll(r.rep.shadow, local));
+  roomHoldsKeep(r);
+  note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
+  renderKeepingFocus();
+}
 function roomReviewLook() {
   if (!roomHeld()) return;
   room.review.look = true;
