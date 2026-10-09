@@ -237,20 +237,77 @@ const sameAt = (m, at) => JSON.stringify(m.at) === JSON.stringify(at);
 }
 
 // ---------------------------------------------------------------------------
-// Quiet for a while: the heartbeat keeps saying where this browser is.
+// 3. Receiving: who else is here, by id; gone on bye, on going quiet, and
+// while this browser is offline.
+const pillOf = (pg) => pg.evaluate(() => document.getElementById('syncStatus')?.textContent || '');
+const pillIs = (pg, text, ms = 3000) => pageUntil(pg, (t) => document.getElementById('syncStatus')?.textContent === t, text, ms);
+// Presence frames from this page vanish from now on, while it stays live:
+// a browser gone quiet without a goodbye.
+const silence = (pg) => pg.evaluate(() => {
+  const c = room.conn, send = c.send.bind(c);
+  c.send = (f) => (f && f.type === 'presence' ? true : send(f));
+});
+{
+  const { secret, k } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  check('alone in the room: the bar says nothing more', await pillIs(a.page, 'Shared plan: Connected'), await pillOf(a.page));
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  check('the other joins: the bar says who is here, and on which tab', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan', 2000), await pillOf(a.page));
+  check('and the newcomer sees the one already here at once, not after a heartbeat', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan', 2000), await pillOf(b.page));
+  await tabTo(b.page, 'drivers');
+  check('the other changes tab: the bar follows within a second', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Drivers', 1000), await pillOf(a.page));
+  check('its own messages are not someone else', !(await pillOf(a.page)).includes('Kari') && !(await pillOf(b.page)).includes('Ola'));
+
+  // Nonsense from another build: nobody, and no error.
+  await b.page.evaluate(() => Promise.all([
+    roomSendPresence({ schema: 6, who: 5, tab: 'plan', at: null, t: 1 }),
+    roomSendPresence({ schema: 6, who: { id: 'x'.repeat(500), name: 'Long' }, tab: 'plan', at: null, t: 1 }),
+    roomSendPresence({ schema: 6, who: { id: 'odd1', name: 'Odd', color: '#123456' }, tab: 'nowhere', at: { kind: 7 }, t: 1 }),
+  ]));
+  await wait(500);
+  check('odd messages: no name from the broken ones; an unknown tab and colour are left out', !/Long/.test(await pillOf(a.page)));
+  await b.page.evaluate(() => roomSendPresence({ schema: 6, who: { id: 'odd1' }, tab: 'plan', at: null, t: 1, bye: true }));
+  check('a bye: gone at once', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Drivers', 1500), await pillOf(a.page));
+
+  const bId = presenceOf(secret, k).find((m) => m.who.name === 'Ola').who.id;
+  await b.page.evaluate((id) => roomSendPresence({ schema: 6, who: { id, name: 'Ola', color: 'violet' }, tab: 'drivers', at: null, t: Date.now(), bye: true }), bId);
+  check('the other leaves (bye): gone from the bar at once', await pillIs(a.page, 'Shared plan: Connected', 1000), await pillOf(a.page));
+  await tabTo(b.page, 'plan');
+  check('and back when it next says where it is', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan', 1500), await pillOf(a.page));
+
+  relay.down();
+  check('offline: nobody else is here', await pageUntil(a.page, () => !/is here/.test(document.getElementById('syncStatus')?.textContent || ''), null, 3000), await pillOf(a.page));
+  relay.up();
+  check('back online: both see each other again', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan', 12000)
+    && await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan', 3000), `${await pillOf(a.page)} | ${await pillOf(b.page)}`);
+  same('receiving: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
+// Quiet for a while: the heartbeat keeps saying where a browser is, and one
+// gone quiet without a goodbye is let go after about 45 s.
 {
   const { secret, k } = liveRoom();
   const a = await live(secret, { name: 'Kari', color: 'teal' });
   const b = await live(secret, { name: 'Ola', color: 'violet' });
   const fromA = () => presenceOf(secret, k).filter((m) => m.who.name === 'Kari');
+  check('both see each other', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan') && await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan'));
   await row(a.page, 3).locator('[data-field="driver"]').focus();
   await wait(1000);
+  await silence(b.page);
   const quietFrom = fromA().length;
+  const silentAt = Date.now();
   const rid = await a.page.evaluate(() => state.routes[3].id);
   await wait(21500);
   const beats = fromA().slice(quietFrom);
   check('nothing moving for 21 s: the heartbeat says it again', beats.length >= 1 && beats.every((m) => sameAt(m, { kind: 'route', id: rid, field: 'driver' })), JSON.stringify(beats.map((m) => m.at)));
   check('and only about every 20 s', beats.length <= 2, String(beats.length));
+  check('the other, quiet for 21 s, is still here', (await pillOf(a.page)).includes('Ola is here'));
+  check('the one still talking is kept for as long as it talks', (await pillOf(b.page)).includes('Kari is here'));
+  const gone = await pillIs(a.page, 'Shared plan: Connected', 30000);
+  const after = Math.round((Date.now() - silentAt) / 1000);
+  check('quiet with no goodbye: let go after about 45 s', gone && after >= 44 && after <= 49, `${gone} after ${after} s`);
+  check('while the one still talking stays', (await pillOf(b.page)).includes('Kari is here'));
   await a.context.close(); await b.context.close();
 }
 

@@ -145,14 +145,63 @@ const Presence = (() => {
     Promise.resolve(api.send(m)).then((ok) => { if (!ok && lastSent === says) lastSent = null; }, () => { if (lastSent === says) lastSent = null; });
   }
 
+  /* ---------- receiving: who else is here ---------- */
+  const FORGET = 45000;        // gone quiet this long (by this PC's clock): gone
+  const others = new Map();    // who.id -> { name, color, tab, at, heard }
+  const str = (v, max) => (typeof v === 'string' && v.length <= max ? v : null);
+  const tabLabel = (t) => (t ? document.querySelector(`.tabs [data-act="tab"][data-tab="${CSS.escape(t)}"]`)?.textContent.trim() || '' : '');
+  function placeOf(at) {
+    if (!at || typeof at !== 'object') return null;
+    const kind = str(at.kind, 40);
+    if (!kind) return null;
+    return { kind, id: kind === 'meta' ? null : str(at.id, 200), field: str(at.field, 60) };
+  }
+
+  // After who is here changed: the marks again, and the whole screen only
+  // when the bar's words change (someone came, went or changed tab), so the
+  // heartbeat and a move within a tab redraw nothing.
+  function redraw(pillWas) {
+    if (!api) return;
+    if (pillText() !== pillWas) api.rerender(); else decorate();
+  }
+
+  function receive(plain) {
+    try {
+      const who = plain && typeof plain === 'object' ? plain.who : null;
+      const id = who && str(who.id, 64);
+      if (!id || id === myId || !isLive()) return;
+      const was = pillText();
+      if (plain.bye === true) { if (others.delete(id)) redraw(was); return; }
+      const fresh = !others.has(id);
+      const tab = str(plain.tab, 40);
+      others.set(id, {
+        name: cleanName(who.name) || 'Someone',
+        color: KEYS.includes(who.color) ? who.color : colourOf(id),
+        tab: tab && tabLabel(tab) ? tab : null,
+        at: placeOf(plain.at),
+        heard: Date.now(),
+      });
+      // Someone new hears where this browser is now, not in 20 s.
+      if (fresh) queue(true);
+      redraw(was);
+    } catch { /* a message this build cannot read is nobody */ }
+  }
+
   // Once a second: joining (or back online) says where this browser is at
-  // once, and the heartbeat keeps saying it.
+  // once, and the heartbeat keeps saying it. Offline, or no longer live,
+  // nobody else is here; one gone quiet too long has gone.
   function tick() {
     const live = isLive();
     if (live && !wasLive) queue(true);
     if (!live && wasLive) lastSent = null;
     wasLive = live;
     if (live && Date.now() - lastSendAt >= HEARTBEAT) queue(true);
+    if (!others.size) return;
+    const was = pillText(true);
+    const now = Date.now();
+    let gone = false;
+    for (const [id, p] of others) if (!live || now - p.heard > FORGET) { others.delete(id); gone = true; }
+    if (gone) redraw(was);
   }
 
   function listen() {
@@ -183,9 +232,6 @@ const Presence = (() => {
     listen();
   }
 
-  // receive(plain): another tab's or PC's presence. Ignores its own id.
-  function receive(plain) { void plain; }
-
   // decorate(): put the row tints, name tags, box outlines and the quiet note
   // back after a redraw. A redraw is also how the app changes tab.
   function decorate() {
@@ -193,8 +239,26 @@ const Presence = (() => {
     if (t !== lastTab) { lastTab = t; queue(); }
   }
 
-  // pillText(): who else is here, for the top bar beside the Shared plan pill.
-  function pillText() { return ''; }
+  // pillText(): who else is here, for the top bar beside the Shared plan
+  // pill: 'Kari is here · Day plan'. One name once, however many tabs it has
+  // open (or a tab reloaded before its goodbye got out); the tab is the one
+  // heard from last. '' when nobody, or when not live. `asWas` reads it
+  // whether live or not, to see if the bar has to change.
+  function pillText(asWas = false) {
+    if (!others.size || (!asWas && !isLive())) return '';
+    const byName = new Map();
+    for (const p of others.values()) {
+      const had = byName.get(p.name);
+      if (!had || p.heard >= had.heard) byName.set(p.name, p);
+    }
+    const people = [...byName.values()];
+    if (people.length === 1) {
+      const where = tabLabel(people[0].tab);
+      return `${people[0].name} is here${where ? ` \u00b7 ${where}` : ''}`;
+    }
+    const names = people.map((p) => p.name);
+    return `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are here`;
+  }
 
   return Object.freeze({ attach, receive, decorate, settingsHtml, pillText, get api() { return api; } });
 })();
