@@ -2766,13 +2766,21 @@ async function roomReviewKeep() {
   const r = room;
   if (!roomHeld(r) || planElsewhere) return;
   roomCapture(r);
-  const label = roomKeptLabel(r);
-  if (!Store.snapshot(state, label)) { render(); return; }   // the warning says why
+  const want = roomKeptLabel(r);
+  if (!Store.snapshot(state, want)) { render(); return; }   // the warning says why
+  const label = backupHolding(state, want);
   const id = r.review.id;
   roomKeepDrop(r);
   roomReviewTell(r, 'keep', id);
   note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
   renderKeepingFocus();
+}
+// The name of the Backup that holds `plan` once it has been taken as
+// `label`: Store.snapshot takes nothing when the newest one already holds
+// exactly that plan, and that one keeps its own name.
+function backupHolding(plan, label) {
+  const top = Store.backups()[0];
+  return top && top.json === JSON.stringify(plan) ? top.label : label;
 }
 // The Backup Keep takes, named for the last offline change.
 function roomKeptLabel(r) {

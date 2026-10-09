@@ -2294,6 +2294,26 @@ for (const choice of ['keep', 'send']) {
   for (const x of [a, b]) await x.context.close();
 }
 
+// Keep's notice names the Backup that holds the plan, even when Backups
+// already had it as the newest (a Backup identical to the newest is not
+// taken again).
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, for Keep\'s notice', await offlineClash(a, b, ops));
+  await a.page.evaluate(() => Store.snapshot(state, 'Taken by hand'));
+  const screen = await planOf(a.page);
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-review-keep"]');
+  check('Keep: said so in a notice', await noticeSays(a.page, /Kept your offline changes on this PC only/));
+  const said = await a.page.evaluate(() => document.getElementById('notices').innerText);
+  const named = (said.match(/in Backups, as “([^”]+)”/) || [])[1];
+  check('the Backup it names holds the plan that was on screen', await a.page.evaluate(([label, json]) => Store.backups().some((x) => x.label === label && x.json === json), [named, screen]), `${named}`);
+  same('Keep\'s notice: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
 // Two tabs open when the connection goes: the one the offline edits are made
 // in holds them; the other stopped saving when they were saved over it
 // (round 2), shows no review and sends nothing. The review appears in one
