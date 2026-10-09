@@ -798,3 +798,12 @@ body.show-sheet .sheet {
 /* presence — round 3, pack 4: who is editing (docs/presence.js). Pack 4 writes only here. */
 
 /* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */
+/* Offline edits held for the review: on screen, not sent yet. A dotted outline
+   for one the other manager did not touch, a solid one where both changed it.
+   An outline only, so nothing moves. */
+.room-offline { outline: 2px dotted var(--steel); outline-offset: 1px; }
+.room-offline-clash { outline: 2px solid var(--hivis); outline-offset: 1px; }
+/* The review bar on the Shared plan card. */
+.room-review { max-width: 760px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--hivis); background: var(--panel); }
+.room-review-says { margin: 0 0 8px; }
+.room-review .bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
