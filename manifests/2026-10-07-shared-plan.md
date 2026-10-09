@@ -324,6 +324,7 @@ Use two windows (or the PC and the tablet) in one shared plan, with made-up data
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-09: the server's test copy at `/carsync-test/` was updated to 0.17.0 (9d4d5dc's `docs/`, swapped in whole). It loads in a secure context with no console errors.
 - 2026-10-09: **round 3 built in parallel and handed over as 0.17.0.** Ledgers are in `manifests/archive/2026-10-09-shared-plan-r3-*.ledger.md`.
   - **Scaffold** f28c7ec. The builders worked in nested worktrees `.wt/pack4` and `.wt/pack5` and are now removed. Separation proved before merging: the only shared file was `docs/style.css`, one hunk in each pack's own region, and pack 5 left the presence lines untouched.
   - **Pack 4, who is editing** (569f07e…5e4b517): `presence-ui` 124 ok.
