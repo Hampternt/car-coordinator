@@ -22,6 +22,9 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   const live = new Set();       // every open routed socket: { ws, roomId, welcomed }
   const log = [];               // [{ roomId, frame }] every frame a client sent, as parsed
   let down = false;
+  // Browser contexts cut off on their own (cut/mend): the relay is down for
+  // them only, so one manager can work offline while the other carries on.
+  const cutOff = new Set();
   let dialled = 0;
   // While held, catchup replies wait here, to look at a client before it has
   // heard what the room holds.
@@ -40,8 +43,8 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
       const roomId = new URL(ws.url()).pathname.split('/')[2];
       // Down: the socket opens in the page (routing always does) and drops at
       // once with 1006, as a relay that is not there looks to the app.
-      if (down) { ws.close({ code: 1006, reason: 'down' }); return; }
-      const c = { ws, roomId, welcomed: false };
+      if (down || cutOff.has(target)) { ws.close({ code: 1006, reason: 'down' }); return; }
+      const c = { ws, roomId, welcomed: false, target };
       live.add(c);
       ws.onClose(() => live.delete(c));
       ws.onMessage((text) => handle(c, text));
@@ -151,6 +154,10 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     // Every open socket drops with 1006 and every new one is dropped until up().
     down() { down = true; for (const c of [...live]) shut(c, 1006); },
     up() { down = false; },
+    // One browser context offline: its sockets drop with 1006 and its new
+    // ones are dropped until mend(); every other context carries on.
+    cut(target) { cutOff.add(target); for (const c of [...live]) if (c.target === target) shut(c, 1006); },
+    mend(target) { cutOff.delete(target); },
     holdCatchup() { hold = hold || []; },
     holdWrites() { writes = writes || []; },
     releaseWrites() { const waiting = writes || []; writes = null; for (const go of waiting) go(); },

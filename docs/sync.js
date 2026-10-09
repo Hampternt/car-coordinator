@@ -18,8 +18,10 @@
    one version's label with another's body. Each push puts the same name and
    a fresh random nonce in both, and the app refuses a body whose name or
    nonce is not its label's ("This version does not match its name").
-     op                  {schema, oid, changes}  one batch of edits; see
-                         "changes" below for what `changes` holds
+     op                  {schema, oid, at, changes}  one batch of edits; see
+                         "changes" below for what `changes` holds. `at` is
+                         when it was made, in ms by the sender's clock
+                         (round 3); an op from 0.16.0 or before has none
      presence            pack 4
 
    The secret is kept per browser under carcoord:pref:room (Store.pref('room')),
@@ -402,6 +404,11 @@ const Sync = (() => {
     return true;
   };
   const fieldKey = (kind, id, field) => `${kind}\u0000${kind === 'meta' ? '' : id}\u0000${field}`;
+  // What a change is about, as one string: a field (fieldKey) for a set, the
+  // item for an add or a remove, the list for an order.
+  const itemKey = (kind, id) => `${kind}\u0000${id}`;
+  const changeKey = (c) => (c.op === 'set' ? fieldKey(c.kind, c.id, c.field)
+    : c.op === 'order' ? `${c.kind}\u0001order` : itemKey(c.kind, c.op === 'add' ? c.item && c.item.id : c.id));
 
   // diff(prev, next) -> changes, so that applyAll(prev, changes) is next.
   // Removes first, then adds in the new order (each after the one before it),
@@ -562,10 +569,131 @@ const Sync = (() => {
     return null;
   }
 
+  /* ---------- offline work: what sending it would write over ----------
+     Round 3. A browser back from working offline holds edits made on `base`
+     (the room's plan as it last had it confirmed) while the room moved on.
+     Sent as they are, they are applied after the room's, and every field the
+     other manager changed too is overwritten (and flagged). overlap() says,
+     before anything is sent, exactly what that would be: it applies this
+     browser's changes on top of the room's plan with collision()'s own rule,
+     so the clashes it finds are the flags sending them would raise.
+
+     overlap(base, mine, theirs, from = base) -> review
+       mine    this browser's batches since `base`, oldest first:
+               [{at, changes, times?}]; times: {changeKey: ms}, per change,
+               over the batch's own `at`
+       theirs  the room's ops since `from`, in seq order: [{at, changes,
+               own}]; `at` null when unknown (0.16.0). own: one of this
+               browser's, sequenced before the connection dropped: part of
+               the room's plan, never counted as the other's
+       from    the plan the room's ops start from: `base`, or a snapshot past
+               it (the room compacted while this browser was away), whose
+               changes since `base` have no time
+     review
+       changes  this browser's changes, one per thing changed, in plan order:
+                {key, op, kind, id, field, value, was, item, at, clash}
+                op 'set' (field, value, was), 'add', 'remove' (item) or
+                'order'; item: the item it is about, for its name; clash:
+                null, or what the room has there:
+                  {type:'set', theirs, at}   both changed the field
+                  {type:'removed', at}       the other removed the item
+                  {type:'changed', item, at} the other changed an item this
+                                             browser removed
+       clashes  how many changes clash
+       mine     {count, last}: changes made, the newest time (null: unknown)
+       theirs   {count, last}: the things the other changed since `base`,
+                and the newest time
+       clashLast  the newest time among the other's clashing changes
+     Only what the room changed since `base` can clash: an edit whose `was`
+     is older than the base (a box typed in while the other changed it,
+     rebuilt after a reload) is a live collision, flagged as it goes out. */
+  const timeOf = (t) => (Number.isFinite(t) ? t : null);
+  const later = (a, b) => (a === null ? b : b === null ? a : Math.max(a, b));
+  // changeKey -> the time of the last change to it, and the newest overall.
+  function timesBy(batches) {
+    const by = new Map();
+    let last = null;
+    for (const b of batches) {
+      for (const c of Array.isArray(b.changes) ? b.changes : []) {
+        const k = changeKey(c);
+        const t = timeOf(b.times && own(b.times, k) ? b.times[k] : b.at);
+        by.set(k, t);
+        last = later(last, t);
+      }
+    }
+    return { by, last };
+  }
+  // The newest time of anything about one item: the item, or a field of it.
+  function itemTime(by, kind, id) {
+    const head = `${fieldKey(kind, id, '')}`;
+    let t = null;
+    for (const [k, v] of by) if (k === itemKey(kind, id) || k.startsWith(head)) t = later(t, v);
+    return t;
+  }
+  const itemIn = (plan, kind, id) => {
+    const list = plan && plan[LISTS[kind]];
+    return Array.isArray(list) ? list.find((x) => isObj(x) && x.id === id) || null : null;
+  };
+  function overlap(base, mine, theirs, from = base) {
+    const myChanges = mine.flatMap((b) => (Array.isArray(b.changes) ? b.changes : []));
+    const theirEnd = applyAll(from, theirs.flatMap((o) => (Array.isArray(o.changes) ? o.changes : [])));
+    const myEnd = applyAll(base, myChanges);
+    const myTimes = timesBy(mine);
+    const others = theirs.filter((o) => !o.own);
+    const theirTimes = timesBy(others);
+    // What the other changed since the base: in its ops, and in a snapshot
+    // past the base.
+    const touched = new Set([...theirTimes.by.keys(), ...(from === base ? [] : diff(base, from).map(changeKey))]);
+    const touchedItem = (kind, id) => touched.has(itemKey(kind, id)) || [...touched].some((k) => k.startsWith(fieldKey(kind, id, '')));
+    // Sending: this browser's changes, in order, on top of the room's plan.
+    const hits = new Map();
+    let p = theirEnd;
+    for (const c of myChanges) {
+      const hit = collision(p, c);
+      const since = hit && (hit.type === 'set' ? touched.has(changeKey(c)) : hit.type === 'gone' ? touched.has(itemKey(c.kind, c.id)) : touchedItem(c.kind, c.id));
+      if (since && !hits.has(changeKey(c))) {
+        if (hit.type === 'set') hits.set(changeKey(c), { type: 'set', theirs: clone(hit.lost), at: theirTimes.by.get(changeKey(c)) ?? null });
+        else if (hit.type === 'gone') hits.set(changeKey(c), { type: 'removed', at: theirTimes.by.get(itemKey(c.kind, c.id)) ?? null });
+        else if (hit.type === 'removed') hits.set(changeKey(c), { type: 'changed', item: clone(hit.item), at: itemTime(theirTimes.by, c.kind, c.id) });
+      }
+      p = apply(p, c);
+    }
+    const entry = (c) => {
+      const k = changeKey(c);
+      const e = { key: k, op: c.op, kind: c.kind, id: c.kind === 'meta' ? null : c.op === 'add' ? c.item.id : c.id ?? null };
+      if (c.op === 'set') { e.field = c.field; e.value = c.del ? undefined : clone(c.value); e.was = clone(c.was); }
+      if (c.kind !== 'meta' && e.id !== null) e.item = clone(itemIn(myEnd, c.kind, e.id) || itemIn(base, c.kind, e.id) || itemIn(theirEnd, c.kind, e.id));
+      e.at = c.op === 'set' || c.op === 'order' ? myTimes.by.get(k) ?? null : itemTime(myTimes.by, c.kind, e.id);
+      e.clash = hits.get(k) || null;
+      return e;
+    };
+    const changes = diff(base, myEnd).map(entry);
+    // Changed and changed back: nothing to send, on the face of it, but the
+    // change still goes out, and still writes over the other's.
+    for (const [k, clash] of hits) {
+      if (changes.some((e) => e.key === k)) continue;
+      const c = myChanges.find((x) => changeKey(x) === k);
+      const e = entry(c.op === 'set' ? { ...c, value: c.kind === 'meta' ? myEnd[c.field] : (itemIn(myEnd, c.kind, c.id) || {})[c.field] } : c);
+      e.clash = clash;
+      if (c.op === 'set') e.was = clone(c.kind === 'meta' ? base[c.field] : (itemIn(base, c.kind, c.id) || {})[c.field]);
+      changes.push(e);
+    }
+    let clashLast = null;
+    for (const e of changes) if (e.clash) clashLast = later(clashLast, e.clash.at);
+    return {
+      changes,
+      clashes: changes.filter((e) => e.clash).length,
+      mine: { count: changes.length, last: myTimes.last },
+      theirs: { count: touched.size, last: theirTimes.last },
+      clashLast,
+    };
+  }
+
   /* ---------- a replica: one browser's view of the room ----------
      confirmed  the plan after every op the relay has sequenced, up to `seq`
      queue      this browser's own batches the relay has not sequenced yet,
-                oldest first: {oid, changes, sent}
+                oldest first: {oid, changes, sent, at}; `at` is when the
+                batch was made (ms), and travels in its op
      shadow     confirmed with the queue on top: the plan this browser has
                 said it holds
 
@@ -599,9 +727,10 @@ const Sync = (() => {
       graveyard: new Map(),
       // Flags a reset found, for the next drain to return.
       later: [],
-      // capture(screen, {skip, was}) -> batch | null
+      // capture(screen, {skip, was, at}) -> batch | null
       //   skip(change): leave it out, on the screen only, for now (a field
-      //   being typed in); was: Map fieldKey -> the value its `was` says.
+      //   being typed in); was: Map fieldKey -> the value its `was` says;
+      //   at: when the edits were made (ms), Date.now() when not given.
       capture(screen, opts = {}) {
         let changes = diff(R.shadow, screen);
         if (opts.skip) changes = changes.filter((c) => !opts.skip(c));
@@ -613,26 +742,32 @@ const Sync = (() => {
           }
         }
         R.shadow = applyAll(R.shadow, changes);
-        const batch = { oid: newOid(), changes, sent: false };
+        const batch = { oid: newOid(), changes, sent: false, at: Number.isFinite(opts.at) ? opts.at : Date.now() };
         R.queue.push(batch);
         return batch;
       },
       // A sequenced op: anyone's, held until every seq before it is here.
-      take(at, changes, oid = null) {
+      // time: when its sender made it (the op's `at`), null when unknown.
+      take(at, changes, oid = null, time = null) {
         if (!Number.isInteger(at) || at <= R.seq) return;
-        R.inbox.set(at, { changes, oid });
+        R.inbox.set(at, { changes, oid, time: Number.isFinite(time) ? time : null });
       },
-      // -> {applied, flags}; throws (applying nothing of that op) when an op
-      // holds a change this build does not know.
+      // -> {applied, flags, ops}; throws (applying nothing of that op) when
+      // an op holds a change this build does not know. ops: what was
+      // applied, in seq order, {seq, oid, at, own, changes}; own: one of this
+      // browser's queued batches. A flag carries its op's time as opAt, when
+      // the op said.
       drain() {
         let applied = 0;
+        const ops = [];
         // What a reset found, first: it came before these ops.
         const flags = R.later.splice(0);
         while (R.inbox.has(R.seq + 1)) {
-          const { changes, oid } = R.inbox.get(R.seq + 1);
+          const { changes, oid, time } = R.inbox.get(R.seq + 1);
           if (!Array.isArray(changes)) throw new TypeError('Sync: an op without changes');
           changes.forEach(check);
           R.inbox.delete(R.seq + 1);
+          const from = flags.length;
           for (const c of changes) {
             const hit = collision(R.confirmed, c);
             if (hit && hit.type === 'gone') {
@@ -657,13 +792,16 @@ const Sync = (() => {
             }
             R.confirmed = apply(R.confirmed, c);
           }
+          if (time !== null) for (let i = from; i < flags.length; i++) flags[i].opAt = time;
           R.seq++;
           applied++;
-          if (oid) R.queue = R.queue.filter((b) => b.oid !== oid);
+          const own = !!oid && R.queue.some((b) => b.oid === oid);
+          if (own) R.queue = R.queue.filter((b) => b.oid !== oid);
+          ops.push({ seq: R.seq, oid, at: time, own, changes });
         }
         for (const k of [...R.inbox.keys()]) if (k <= R.seq) R.inbox.delete(k);
         if (applied) R.replay();
-        return { applied, flags };
+        return { applied, flags, ops };
       },
       // A snapshot past what this browser has applied: start again from it.
       // The queue stays, to be replayed and sent. An item this browser has an
@@ -703,6 +841,7 @@ const Sync = (() => {
     RELAY, RELAY_PREF, ROOM_PREF, KINDS, INFO, CLOSE,
     relayUrl, roomUrl, newSecret, deriveKeys, seal, open, inviteLink, readInvite, connect,
     joinPreview,
-    LISTS, equal, diff, apply, applyAll, collision, check, replica, fieldKey,
+    LISTS, equal, diff, apply, applyAll, collision, check, replica, fieldKey, itemKey, changeKey,
+    overlap,
   };
 })();
