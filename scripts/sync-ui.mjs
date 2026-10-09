@@ -2260,6 +2260,40 @@ const stopped = (pg) => pg.evaluate(() => planElsewhere);
   for (const x of [a, b]) await x.context.close();
 }
 
+// Keep answered in another tab does what Keep does in the tab it is pressed
+// in: every held edit, those made after the hold too, is kept in the Backup
+// and none is sent. Send answered in another tab sends each edit once.
+for (const choice of ['keep', 'send']) {
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check(`held, then an edit after the hold, then a second tab (${choice})`, await offlineClash(a, b, ops));
+  await routeBox(a.page, 7, 'driver').fill('After The Hold');
+  await a.page.keyboard.press('Tab');
+  await wait(800);
+  const tab2 = await a.context.newPage();
+  const tabErrors = [];
+  tab2.on('pageerror', (e) => tabErrors.push(String(e)));
+  await tab2.goto(base, { waitUntil: 'networkidle' });
+  check(`the second tab is held with the edit made after the hold (${choice})`, await tab2.waitForFunction(() => roomHeld() && room.caught && state.routes[7].driver === 'After The Hold', null, { timeout: 5000 }).then(() => true, () => false));
+  const sent = ops().length;
+  await tab2.click('[data-act="tab"][data-tab="data"]');
+  await tab2.click(`[data-act="room-review-${choice}"]`);
+  check(`answered in the second tab, the first follows (${choice})`, await a.page.waitForFunction(() => !roomHeld(), null, { timeout: 5000 }).then(() => true, () => false));
+  await wait(1500);
+  if (choice === 'keep') {
+    same('Keep in either tab: nothing sent, the edit made after the hold included', ops().length, sent);
+    check('both tabs end on the shared plan, without it', await converged(a.page, b.page) && await converged(tab2, b.page) && JSON.parse(await planOf(a.page)).routes[7].driver !== 'After The Hold');
+    check('it is in the Backup Keep took', await a.page.evaluate(() => Store.backups().some((x) => /^Kept from offline/.test(x.label) && JSON.parse(x.json).routes[7].driver === 'After The Hold')));
+  } else {
+    const oids = ops().slice(sent).map((o) => o.oid);
+    same('Send in either tab: each held edit sent once, the one after the hold too', [...new Set(oids)].length, oids.length);
+    check('three screens, one plan, with it', await converged(a.page, b.page) && await converged(tab2, b.page) && JSON.parse(await planOf(b.page)).routes[7].driver === 'After The Hold');
+  }
+  same(`answered in another tab (${choice}): no console errors`, [...a.errors, ...b.errors, ...tabErrors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
 // Two tabs open when the connection goes: the one the offline edits are made
 // in holds them; the other stopped saving when they were saved over it
 // (round 2), shows no review and sends nothing. The review appears in one

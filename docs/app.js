@@ -2691,7 +2691,7 @@ function roomReviewHtml() {
         <button class="btn" data-act="room-review-look">Look first</button>
         <button class="btn" data-act="room-review-keep"${planElsewhere ? ' disabled' : ''}>Keep them on this PC only</button>
       </div>
-      <p class="hint">Send my changes: both of your changes are kept, and where you both changed the same box, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
+      <p class="hint">Send my changes: both of your changes are kept, and where you both changed the same box, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, the screen takes the shared plan, and nothing you changed since going offline is sent.</p>
       ${r.review.look ? roomReviewListHtml(r.review.result) : ''}
     </div>`;
 }
@@ -2766,11 +2766,24 @@ async function roomReviewKeep() {
   const r = room;
   if (!roomHeld(r) || planElsewhere) return;
   roomCapture(r);
-  const mine = r.review.result ? r.review.result.mine.last : null;
-  const label = `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
+  const label = roomKeptLabel(r);
   if (!Store.snapshot(state, label)) { render(); return; }   // the warning says why
-  const local = Sync.diff(r.rep.shadow, state);
   const id = r.review.id;
+  roomKeepDrop(r);
+  roomReviewTell(r, 'keep', id);
+  note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
+  renderKeepingFocus();
+}
+// The Backup Keep takes, named for the last offline change.
+function roomKeptLabel(r) {
+  const mine = r.review && r.review.result ? r.review.result.mine.last : null;
+  return `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
+}
+/* Keep, once the plan on screen is in Backups: every edit waiting in the
+   queue is dropped, the offline ones and those made while held alike (the
+   bar promises nothing is sent), and the screen takes the shared plan. */
+function roomKeepDrop(r) {
+  const local = Sync.diff(r.rep.shadow, state);
   // A no-change op queued after a snapshot is not an edit: it still goes.
   r.rep.queue = r.rep.queue.filter((b) => !b.changes.length);
   r.rep.replay();
@@ -2780,9 +2793,6 @@ async function roomReviewKeep() {
   r.wasKept = new Map();
   roomShow(r, Sync.applyAll(r.rep.shadow, local));
   roomHoldsKeep(r);
-  roomReviewTell(r, 'keep', id);
-  note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
-  renderKeepingFocus();
 }
 /* Other tabs of this browser. The hold is kept beside the base, so a tab
    opened while held (or reloaded) reads it and is held too, with the same
@@ -2802,30 +2812,37 @@ function roomReviewTell(r, choice, id = r.review && r.review.id) {
     localStorage.removeItem(REVIEW_ANSWER);
   } catch { /* storage refused: each tab answers for itself */ }
 }
-/* Answered in another tab. Send there: it sends the held edits, so this tab
-   takes up its record of them (kept beside the base just before it said so)
-   as sent, and keeps them on screen until the room has them, sending nothing
-   itself. Keep there: it took the Backup, so they are dropped here and the
-   screen takes the shared plan. Either way, edits made here while held were
-   this tab's own, and go out as usual. */
+/* Answered in another tab, and done here as it was there. Keep there: it
+   took the Backup, so every waiting edit is dropped here as there (this
+   tab's screen goes into Backups first too, which takes nothing when it is
+   the same plan) and the screen takes the shared plan. Send there: it sends
+   its whole queue, held edits and those made while held, so this tab takes
+   up its record of them (kept beside the base just before it said so) as
+   sent, and keeps them on screen until the room has them, sending none of
+   them again. An edit only this tab holds is its own, and goes out as usual
+   (a held tab stops when another one edits, so there are none in practice). */
 function roomReviewFollow(r, choice) {
   const rv = r.review;
   if (!roomHeld(r)) return;
   roomCapture(r);
+  if (choice === 'keep') {
+    if (!Store.snapshot(state, roomKeptLabel(r))) { render(); return; }   // still held here; the warning says why
+    roomKeepDrop(r);
+    renderKeepingFocus();
+    return;
+  }
   const local = Sync.diff(r.rep.shadow, state);
   let kept = null;
-  if (choice === 'send') {
-    try { kept = roomReviewRead(JSON.parse(localStorage.getItem(BASE_KEY)).review); } catch { kept = null; }
-    if (kept && kept.state !== 'sending') kept = null;
-  }
-  r.rep.queue = r.rep.queue.filter((b) => !rv.oids.includes(b.oid));
+  try { kept = roomReviewRead(JSON.parse(localStorage.getItem(BASE_KEY)).review); } catch { kept = null; }
+  if (kept && kept.state !== 'sending') kept = null;
   if (kept) {
-    const have = new Set(r.rep.queue.map((b) => b.oid));
-    const theirs = kept.batches.filter((b) => kept.oids.includes(b.oid) && !have.has(b.oid))
-      .map((b) => ({ oid: b.oid, changes: b.changes, at: Number.isFinite(b.at) ? b.at : Date.now(), sent: true }));
-    r.rep.queue = [...theirs, ...r.rep.queue];
+    const there = new Set(kept.batches.map((b) => b.oid));
+    const own = r.rep.queue.filter((b) => !there.has(b.oid) && !rv.oids.includes(b.oid));
+    const sent = kept.batches.map((b) => ({ oid: b.oid, changes: b.changes, at: Number.isFinite(b.at) ? b.at : Date.now(), sent: true }));
+    r.rep.queue = [...sent, ...own];
     r.review = { id: kept.id, state: 'sending', base: kept.base, baseSeq: kept.baseSeq, from: kept.from, oids: kept.oids, theirs: kept.theirs, started: kept.started, look: false };
   } else {
+    r.rep.queue = r.rep.queue.filter((b) => !rv.oids.includes(b.oid));
     r.review = null;
     r.times.clear();
   }
