@@ -2671,13 +2671,25 @@ function roomReviewHtml() {
   const r = room;
   if (!roomHeld(r) || !r.review.result) return '';
   const ro = roomReadOnly(r);
+  const { mine, theirs, clashes, clashLast } = r.review.result;
+  const things = (k) => plural(k, 'thing');
+  // Edits made since the review was raised wait with the offline ones.
+  const since = r.rep.queue.filter((b) => b.changes.length && !r.review.oids.includes(b.oid)).length;
+  const others = theirs.count - clashes;
+  const says = [
+    `You changed ${things(mine.count)} offline (last ${reviewWhen(mine.last)}). The other manager changed ${clashes === 1 ? 'one of them' : `${clashes} of them`} too (last ${reviewWhen(clashLast)}).`,
+    others > 0 ? 'The rest of what they changed is on your screen already.' : '',
+    `Yours are on your screen, marked, and not sent until you choose${since ? ' (with what you changed since)' : ''}.`,
+  ].filter(Boolean).join(' ');
   return `<div class="room-review" id="roomReview">
-      <p class="room-review-says">Your offline changes are not sent yet.</p>
+      <p class="room-review-says">${esc(says)}</p>
+      ${ro ? '<p class="status warn-status">Update the app to send them: the shared plan was saved by a newer version of Car Coordinator. Keeping them on this PC still works.</p>' : ''}
       <div class="bar">
         <button class="btn primary-ish" data-act="room-review-send"${ro ? ' disabled' : ''}>Send my changes</button>
         <button class="btn" data-act="room-review-look">Look first</button>
         <button class="btn" data-act="room-review-keep">Keep them on this PC only</button>
       </div>
+      <p class="hint">Send my changes: where you both changed something, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
     </div>`;
 }
 // Send my changes: what was held goes out as any edit does.
@@ -3690,7 +3702,7 @@ function roomSays() {
 // The status in the top bar, so it shows on every tab: only while in a room.
 function renderRoomPill() {
   let pill = document.getElementById('syncStatus');
-  if (!room) { if (pill) pill.remove(); document.getElementById('syncFlags')?.remove(); return; }
+  if (!room) { if (pill) pill.remove(); document.getElementById('syncFlags')?.remove(); document.getElementById('syncReview')?.remove(); return; }
   if (!pill) {
     pill = document.createElement('button');
     pill.id = 'syncStatus';
@@ -3705,6 +3717,22 @@ function renderRoomPill() {
   pill.textContent = `Shared plan: ${says.short}`;
   const here = Presence.pillText();   // round 3, pack 4: 'Kari is here · Day plan'
   if (here) pill.textContent += ` \u00b7 ${here}`;
+  // Round 3, pack 5: offline edits held for the review, a quiet note beside
+  // the pill that opens the Data tab. Never a dialog.
+  let review = document.getElementById('syncReview');
+  if (!roomHeld()) review?.remove();
+  else {
+    if (!review) {
+      review = document.createElement('button');
+      review.id = 'syncReview';
+      review.type = 'button';
+      review.className = 'sync-flags sync-review';
+      review.dataset.act = 'show-data';
+    }
+    if (pill.nextElementSibling !== review) pill.after(review);
+    review.textContent = 'Offline changes not sent';
+    review.title = 'You changed things offline that the other manager changed too. They are not sent yet: the Shared plan card on the Data tab asks what to do.';
+  }
   // Changes made by both at once, to look at on the Data tab: a count beside
   // the pill, never a popup.
   roomFlagsPrune(room);

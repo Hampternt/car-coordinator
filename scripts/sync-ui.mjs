@@ -2057,6 +2057,19 @@ const offlineClash = async (a, b, ops) => {
   await wait(800);
   same('held: nothing of them reaches the relay', ops().length, sent);
   check('and the bar says Connected all the same', await pillSays(a.page, 'Connected', 1000), await pill(a.page).textContent());
+  // The review: a bar on the Shared plan card and a note beside the pill.
+  same('beside the pill, a quiet note', await a.page.locator('#syncReview').innerText().catch(() => null), 'Offline changes not sent');
+  check('and no dialog', await a.page.evaluate(() => !document.querySelector('dialog[open]')));
+  check('the other browser has no note', (await b.page.locator('#syncReview').count()) === 0);
+  await a.page.click('#syncReview');
+  check('the note opens the Data tab, where the bar is', await a.page.locator('#roomReview').isVisible());
+  const [t14, t20] = await a.page.evaluate(([x, y]) => [when(x), when(y)], [clockAt('09:14'), clockAt('09:20')]);
+  same('the bar says how much each changed, and when, by each one\'s clock', await a.page.locator('#roomReview .room-review-says').innerText(),
+    `You changed 2 things offline (last ${t14}). The other manager changed one of them too (last ${t20}). The rest of what they changed is on your screen already. Yours are on your screen, marked, and not sent until you choose.`);
+  same('with its three choices', await a.page.locator('#roomReview button').allInnerTexts(), ['Send my changes', 'Look first', 'Keep them on this PC only']);
+  const unknown = await a.page.evaluate(() => { const res = room.review.result; const t = res.clashLast; res.clashLast = null; const html = roomReviewHtml(); res.clashLast = t; return html; });
+  check('a time the other\'s op did not carry (0.16.0) reads as unknown', /last time unknown/.test(unknown) && !/NaN|Invalid/.test(unknown), unknown);
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
   const onA = JSON.parse(await planOf(a.page));
   same('the screen shows the shared plan, with the held edits on top', [onA.routes[5].driver, onA.routes[2].driver, onA.routes[3].round], ['Theirs Elsewhere', 'Mine Offline', '4']);
   same('marked: a solid outline where both changed it, a dotted one where only this browser did', [await boxClass(a.page, 2, 'driver'), await boxClass(a.page, 3, 'round'), await boxClass(a.page, 5, 'driver')], ['room-offline-clash', 'room-offline', '']);
@@ -2094,6 +2107,7 @@ const offlineClash = async (a, b, ops) => {
   const flag = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept: 'Mine Offline', lost: 'Theirs Live' }];
   check('the field both changed is flagged alike on both screens, even after a reload while held', await until(async () => JSON.stringify([await flagsOf(a.page), await flagsOf(b.page)]) === JSON.stringify([flag, flag])), JSON.stringify([await flagsOf(a.page), await flagsOf(b.page)]));
   check('the bar is gone', !(await held(a.page)) && (await a.page.locator('#roomReview').count()) === 0);
+  check('and so is the note beside the pill', (await a.page.locator('#syncReview').count()) === 0);
   check('and once the room has it, the hold is no longer kept', await a.page.waitForFunction(() => !JSON.parse(localStorage.getItem('carcoord:roomBase')).review, null, { timeout: 5000 }).then(() => true, () => false));
   same('held, sent: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
