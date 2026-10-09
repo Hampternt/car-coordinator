@@ -232,7 +232,7 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 
 ## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Status:** 🚧 built in parallel, merged, reviewed, fixed and tested on the owner's server as 0.17.0; handed over for the owner's Test it yourself. Not merged into `dev`. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+**Status:** ✅ tested by the owner on PC and tablet (2026-10-09, "working fine"); going to `dev` through a PR, then the owner's hands-on upgrade test before `main`. Both packs write `docs/app.js`, so they run serial: pack 4 first.
 
 ### Round 3 runs parallel (owner, 2026-10-09: "assign agents to help speed up work")
 
