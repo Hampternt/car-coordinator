@@ -876,6 +876,16 @@ td[data-presence-note]::after {
   background: var(--field); color: var(--ink); font: 600 11px/1.5 var(--body); pointer-events: none;
 }
 .rail-row[data-presence-note]::before, .tpl-head[data-presence-note]::before { content: attr(data-presence-note); max-width: calc(100% - 2px); }
+/* The bar's pill grows by "· Kari is here · Day plan". Where the bar keeps
+   it on one line with the tabs (above 1400px) but has no room for those
+   words (up to about 1700px), they give way, cut short with an ellipsis,
+   rather than wrap the name or Print and push the page down, or push it
+   sideways, for the person working. Without them the pill is never cut: it
+   fits wherever it did. */
+@media (min-width: 1401px) {
+  .topbar .sync-pill { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .brand, .topbar .primary { flex-shrink: 0; white-space: nowrap; }
+}
 
 
 /* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */

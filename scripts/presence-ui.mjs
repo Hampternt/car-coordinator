@@ -280,6 +280,13 @@ const silence = (pg) => pg.evaluate(() => {
   relay.up();
   check('back online: both see each other again', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan', 12000)
     && await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan', 3000), `${await pillOf(a.page)} | ${await pillOf(b.page)}`);
+  // The relay forwards presence and keeps none of it: no body it was sent as
+  // presence is in what it holds for the room.
+  const held = relay.rooms.get(k.roomId);
+  const sentAsPresence = new Set(relay.sent('presence', k.roomId).map((f) => f.body));
+  const kept = [held.snapshot && held.snapshot.body, ...held.ops.map((o) => o.body), ...held.versions.flatMap((v) => [v.body, v.label])].filter(Boolean);
+  check('the relay never holds presence: none of the room\'s stored bodies is one', sentAsPresence.size >= 6 && kept.length >= 1 && kept.every((x) => !sentAsPresence.has(x)), `${sentAsPresence.size} sent, ${kept.length} kept`);
+  check('and every op it holds opens as an op, none as presence', held.ops.every((o) => { try { unseal(secret, 'op', o.body); return true; } catch { return false; } }));
   same('receiving: no console errors', [...a.errors, ...b.errors], []);
   await a.context.close(); await b.context.close();
 }
@@ -514,6 +521,30 @@ const anyDialog = (pg) => pg.evaluate(() => !!document.querySelector('dialog[ope
   const light = await a.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--presence-teal').trim());
   same('light: the same key is the darker teal', light, '#00796b');
   same('dark: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
+// The bar: the words in the pill never wrap it or push the page sideways,
+// whatever the window's width, even for the longest name.
+{
+  const { secret } = liveRoom();
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  const WIDTHS = [1206, 1280, 1400, 1401, 1450, 1500, 1600, 1920];
+  const barAt = async (w) => {
+    await b.page.setViewportSize({ width: w, height: 1000 });
+    return b.page.evaluate(() => [document.querySelector('.topbar').offsetHeight, document.documentElement.scrollWidth > document.documentElement.clientWidth]);
+  };
+  const alone = [];
+  for (const w of WIDTHS) alone.push(await barAt(w));
+  const a = await live(secret, { name: 'Abcdefghijklm Nopqrstuvw', color: 'teal' });
+  await tabTo(a.page, 'preview');
+  await pillIs(b.page, 'Shared plan: Connected \u00b7 Abcdefghijklm Nopqrstuvw is here \u00b7 Print preview');
+  const shared = [];
+  for (const w of WIDTHS) shared.push(await barAt(w));
+  same('the bar keeps its height and never scrolls sideways, at 1206 to 1920 px', shared, alone);
+  await b.page.setViewportSize({ width: 1920, height: 1000 });
+  check('with room, the words are there in full', await b.page.evaluate(() => { const p = document.getElementById('syncStatus'); return p.scrollWidth <= p.clientWidth; }));
+  same('the bar: no console errors', [...a.errors, ...b.errors], []);
   await a.context.close(); await b.context.close();
 }
 

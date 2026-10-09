@@ -21,6 +21,13 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   Gate: check.sh OK; colour-guard clean; presence-ui 104 ok, 0 FAIL (rail, Drivers, Cars, Positions, template card; the bar names Drivers, Cars, Positions, Print preview as the tabs do).
 - [x] **6. Quiet note**: "Kari is editing this line" beside a row the other is in; never blocks.
   Gate: check.sh OK; colour-guard clean; presence-ui 119 ok, 0 FAIL (note within 0.5 s, no dialog or notice, layout unchanged, typing keeps every key; goes on leaving the row, on the other leaving, and on their timeout).
+- [x] **7. (added) The bar keeps one line.** Measured: from 1401 to ~1600 px the pill's extra words
+  grew the bar 64 -> 78/95 px (the page jumped down) and a long name pushed the page sideways. In
+  the presence region, above 1400 px only: the pill may shrink with an ellipsis, the brand and
+  Print may not wrap. Plus a check that the relay holds no presence body.
+  Gate: check.sh OK; colour-guard clean; presence-ui 124 ok, 0 FAIL (bar height and no sideways
+  scroll identical with and without a 24-character name at 1206/1280/1400/1401/1450/1500/1600/1920;
+  the same check FAILs with the rule switched off).
 
 ## Decisions
 
@@ -62,6 +69,10 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   already there sees the newcomer's note too). In a table it sits at the row's end, over its top
   edge like the tag; a rail row or template card is too narrow for both, so there the note takes
   the tag's place. On a template card it reads "… is editing this template".
+
+- The pill fix styles two elements outside presence's own (`.topbar .sync-pill`, `.topbar .brand`,
+  `.topbar .primary`), from the presence region and only above 1400 px. Without presence words the
+  pill is never cut, so the bar is as before.
 
 ## Deviations and notes for the merge
 
