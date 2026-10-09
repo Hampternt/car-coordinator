@@ -4,7 +4,7 @@
    index.html asks for ?v= of it, so a browser never pairs this file with one
    from another release. scripts/versions.mjs keeps it level with
    package.json, Cargo.toml and tauri.conf.json; declare it here only. */
-const APP_VERSION = '0.15.0';
+const APP_VERSION = '0.17.0';
 
 const $ = (s) => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -363,12 +363,21 @@ let dateMove = null;
 // Set once another tab has saved a newer plan while this one is in a shared
 // plan; only a reload clears it. See the storage listener there.
 let planElsewhere = false;
+// Whether this tab has saved a change since it was opened.
+let savedHere = false;
 const save = () => {
   // Another tab saved a newer plan (planElsewhere, in the shared plan's code):
   // this one's is stale until reloaded, and writing it would undo that change.
-  if (planElsewhere) return;
+  // The change still goes to the shared plan when this tab follows it, and a
+  // copy of this tab's plan goes to Backups, so nothing typed here is lost.
+  if (planElsewhere) { roomFrozenBackup(); roomEdited(); return; }
+  savedHere = true;
   if (dateMove && state === dateMove.plan) dateMove.saved = true;
-  Store.save(state);
+  const kept = Store.save(state);
+  // In a shared plan, the change goes to the room too, and the room's plan as
+  // confirmed is kept beside it (roomEdited and roomBaseWrite, there).
+  if (kept !== false) roomBaseWrite(room);
+  roomEdited();
 };
 const isKeep = (n) => !!(n.offer && n.offer.act === 'keep-date');
 const dropKeep = () => { dateMove = null; notices = notices.filter((n) => !isKeep(n)); };
@@ -1996,7 +2005,7 @@ function fileStatus() {
     return `<p class="status off">Not saving to a file yet.</p>
       <p class="hint">Pick a file once (OneDrive, a network drive, a memory stick) and every change writes straight to it. Nothing is uploaded anywhere \u2014 the file is written by your browser, on your PC.</p>
       <button class="btn primary-ish" data-act="link-file">Choose save file\u2026</button>
-      <button class="btn" data-act="open-file">Open an existing file\u2026</button>`;
+      <button class="btn" data-act="open-file">Open an existing file\u2026</button>${fileBothLine()}`;
   }
   // A hold: the file was not written because it may hold the only good copy,
   // or could not be looked at. Nothing reaches it until one of these is used.
@@ -2010,7 +2019,7 @@ function fileStatus() {
         <p class="hint">In the file${f.hold.modified ? ` (last changed ${esc(when(f.hold.modified))})` : ''}: ${esc(sum(f.hold.state))}.<br>On screen: ${esc(sum(state))}.${f.hold.differ ? `<br>${esc(n(f.hold.differ, 'route'))} ${f.hold.differ === 1 ? 'differs' : 'differ'} between the two.` : ''}</p>
         <button class="btn" data-act="file-keep-file">Load the file</button>
         <button class="btn" data-act="file-keep-screen">Write this screen to the file</button>
-        ${stop}
+        ${stop}${roomLive() ? `<p class="hint both-line">Loading the file replaces everything on screen. ${BOTH_WORDS}</p>` : ''}
         <p class="hint">Whichever one you replace is put in Backups first, so either choice can be undone there.</p>`;
     }
     const why = f.hold.kind === 'notPlan'
@@ -2031,8 +2040,11 @@ function fileStatus() {
   return `<p class="status on">Saving to <b>${esc(f.name)}</b>${f.lastSaved ? ` \u2014 last written ${esc(when(f.lastSaved))}` : ''}.</p>
     ${f.error ? `<p class="status warn-status">${esc(f.error)}</p>` : ''}
     <button class="btn" data-act="open-file">Open a different file\u2026</button>
-    <button class="btn" data-act="unlink-file">Stop using this file</button>`;
+    <button class="btn" data-act="unlink-file">Stop using this file</button>${fileBothLine()}`;
 }
+// Opening a file replaces everything, and its only confirm is the picker: in
+// a shared plan, the card says what that does, as Import's does.
+const fileBothLine = () => (roomLive() ? `<p class="hint both-line">Opening a file replaces everything on screen. ${BOTH_WORDS}</p>` : '');
 
 /* Every note there has been, newest first: the newest three in full, the
    older ones a line each, keeping what a `must` entry says it affects. */
@@ -2077,7 +2089,7 @@ function archivesCard() {
     if (error || !s) return `<div class="arch-row"><span class="what">${head} \u00b7 Could not be read</span><span class="btns">${down}</span></div>`;
     const key = `archive:${a.t}`;
     return `<div class="arch-row"><span class="what">${head} \u00b7 ${esc(planSummary(s, true))}</span><span class="btns">${actBtn('archive-restore', 'update', a.t,
-      armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}</span></div>`;
+      armed === key ? 'Sure?' : 'Restore', armed === key ? 'armed' : '')}${down}${bothArmed(key)}</span></div>`;
   }).join('');
   return `<div class="card">
       <h3>Archives${infoBtn('data-archives')}</h3>
@@ -2109,13 +2121,13 @@ function renderData() {
       <td>${esc(when(b.t))}</td>
       <td>${esc(b.label)}</td>
       <td>${contents === null ? 'Unreadable \u2014 only half of it was saved' : esc(contents)}</td>
-      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', keys[i], armed === `restore:${keys[i]}` ? 'Sure?' : 'Restore', armed === `restore:${keys[i]}` ? 'armed' : '')}</td>
+      <td class="btns">${contents === null ? '' : actBtn('restore', 'backup', keys[i], armed === `restore:${keys[i]}` ? 'Sure?' : 'Restore', armed === `restore:${keys[i]}` ? 'armed' : '') + bothArmed(`restore:${keys[i]}`)}</td>
     </tr>`;
   }).join('');
 
   $('#tab-data').innerHTML = `
     <h2>Data</h2>
-    <p class="hint">${room ? 'Everything you type is saved on this PC. Pushing a version sends it to the shared plan, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
+    <p class="hint">${room ? 'Everything you type is saved on this PC and, while connected, goes to the shared plan as you type it, locked so that only the invite link opens it.' : 'Everything you type stays on this PC. This page never sends it anywhere.'}</p>
 
     <div class="card" id="fileCard">
       <h3>Auto-save to a file${infoBtn('data-file')}</h3>
@@ -2139,6 +2151,7 @@ function renderData() {
       <button class="btn" data-act="export">Export a copy\u2026</button>
       <button class="btn" data-act="import">Import a copy\u2026</button>
       <input id="importFile" type="file" accept="application/json,.json" hidden>
+      ${roomLive() ? `<p class="hint both-line">Importing replaces everything on screen. ${BOTH_WORDS}</p>` : ''}
     </div>
 
     ${whatsNewCard()}
@@ -2170,7 +2183,7 @@ function renderNotices() {
     const q = templateQuestion(t, n.parts);
     const ticks = TEMPLATE_PARTS.map(([k, name]) =>
       `<label><input type="checkbox" data-act="tpl-part" data-index="${i}" data-part="${k}"${n.parts[k] ? ' checked' : ''}> ${name}</label>`).join('');
-    return { say: `${esc(n.text)}<div class="tpl-parts" role="group" aria-label="What to take from ${esc(t.name)}">${ticks}</div><p class="tpl-says">${esc(q.text)}</p>`, button: q.button };
+    return { say: `${esc(n.text)}${staleSince(n.tick) ? ' The plan changed while this was open; what it says below is drawn from the plan as it is now.' : ''}<div class="tpl-parts" role="group" aria-label="What to take from ${esc(t.name)}">${ticks}</div><p class="tpl-says">${esc(q.text)}</p>`, button: q.button };
   };
   $('#notices').innerHTML = notices.map((n, i) => {
     const q = loading(n, i);
@@ -2261,6 +2274,8 @@ function render() {
   renderCtxMenu();
   placeInfoBubble();
   drawTplPeek();
+  roomMarks();
+  Presence.decorate();   // round 3, pack 4: who is editing (docs/presence.js)
 }
 
 /* ---------- events ---------- */
@@ -2359,7 +2374,9 @@ function confirmTwice(key, fromKeyboard = false) {
    found by what it is rather than which element it was — the redraw replaces
    them all. Looked for in the same part of the page it was in: the rail and
    the Drivers tab both have a ✕ for driver d3, and only one is showing. */
-function renderKeepingFocus() {
+function renderKeepingFocus() { keepingFocus(render); }
+// The same around any redraw: the shared plan's also redraws open dialogs.
+function keepingFocus(draw) {
   const el = document.activeElement;
   const area = el && el !== document.body && el.closest('section.tab, #notices, #tagMenu, #picker, #ctxMenu, #ctxSub, dialog');
   // The tag menu, the route picker and the right-click menu put their own
@@ -2381,7 +2398,7 @@ function renderKeepingFocus() {
   // name — holds what is typed in it until it is added, and the redraw
   // rebuilds it empty. Carry the words across along with the focus.
   const loose = el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && !d.field ? el.value : null;
-  render();
+  draw();
   if (!what) return;
   const again = el.id ? document.querySelector(what) : document.querySelector(`#${area.id} ${what}`);
   if (!again) return;
@@ -2447,9 +2464,11 @@ function renderShareDialog() {
 
   dlg.innerHTML = `
     <h2>Load this list?</h2>
+    ${staleSince(pending.tick) ? STALE_LINE : ''}
     <p>A day plan for <b>${y ? `${d}/${m}/${y}` : 'an unknown date'}</b> with <b>${sum.routes} routes</b>${sum.hasEverything ? `, plus ${sum.cars} cars, ${sum.positions} positions and their labels${sum.drivers ? `, and ${sum.drivers} drivers with their groups` : ''}` : ''}.</p>
     ${missing.length ? `<p class="status warn-status">It mentions ${missing.join(' and ')}.</p>` : ''}
     <p class="status warn-status"><b>This replaces the day plan on screen.</b> A backup is taken first, so you can undo it from Backups.</p>
+    ${bothLine()}
 
     ${sum.hasEverything ? `<fieldset>
       <legend>What to take</legend>
@@ -2506,7 +2525,8 @@ async function shareAction(act, b) {
    the radio offers "everything" and the dialog says what it costs, but the
    option that is pre-selected should be the one that replaces least. */
 function openShare(share) {
-  pending = { share, mode: 'day', addMissing: true };
+  // tick: the shared plan's changes so far, to tell when this goes stale.
+  pending = { share, mode: 'day', addMissing: true, tick: roomTick() };
   renderShareDialog();
 }
 
@@ -2518,28 +2538,374 @@ function openShare(share) {
    under carcoord:pref:room. A browser that has joined no room never calls
    roomStart(), so it never opens a connection at all.
 
-   Pack 2 never changes the plan on its own: only Take the shared plan and a
-   version's Restore replace it, each after a backup. Live edits are pack 3. */
+   Live edits (pack 3): while connected, save() leads to roomFlush(), which
+   works out what changed since the plan this browser last told the room
+   about (Sync.replica's shadow) and sends it as an op. What others send is
+   folded in in the relay's order, this browser's own unconfirmed edits are
+   replayed on top, and the screen is patched to the result. Only Take, a
+   version's Restore and Create start a room's plan from scratch. */
 // A cached store.js from before prefs cannot keep a room, so no room at all.
 const syncReady = () => typeof Sync !== 'undefined' && typeof Sync.connect === 'function'
   && typeof Store.pref === 'function' && typeof Store.setPref === 'function';
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
-// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot }
+// { secret, keys, conn, versions: [{id, at, name, schema}], schema, snapshot, rep, … }
 let room = null;
 // { conn } while Create is making a room, before it is this browser's room.
 let roomCreating = null;
+// How long edits are gathered before they are sent: a word typed is one
+// change, not one per key.
+const ROOM_BATCH_MS = 300;
+// After this many ops past the room's snapshot, a browser that has applied
+// them sends a new snapshot, so the relay can drop them (PROTOCOL.md §4.3).
+const ROOM_COMPACT_AFTER = 200;
+// The relay's limit on a body (PROTOCOL.md §5): over it, it closes the
+// connection for good (4413), so nothing that size is ever sent.
+const BODY_LIMIT = 512 * 1024;
 
 // The schema the room's plans are written in, as far as this browser has
-// seen: the newest of its snapshot's and its versions'. Newer than this
-// build's means read-only, so an older normalise() can never drop a field
-// for both managers. So does a room holding ops (`ahead`): this build applies
-// none (live edits are pack 3), so a snapshot from it would claim ops it never
-// saw, and the relay would delete them (PROTOCOL.md §4.3).
-const roomReadOnly = () => !!room && (room.schema > Store.SCHEMA || room.ahead);
+// seen: the newest of its snapshot's, its versions' and its ops'. Newer than
+// this build's means read-only, so an older normalise() can never drop a
+// field for both managers. So does a room holding ops this build cannot
+// apply (`ahead`): a snapshot from it would claim ops it never applied, and
+// the relay would delete them (PROTOCOL.md §4.3).
+const roomReadOnly = (r = room) => !!r && (r.schema > Store.SCHEMA || r.ahead);
+// Following the room live: its plan is known (rep), and this browser may
+// write to it.
+const roomLive = (r = room) => !!r && !!r.rep && !r.legacy && !roomReadOnly(r);
 
-// Whether a catchup shows ops this build cannot apply: any op in it, or a room
-// seq past its snapshot's. The catchup asks only for ops after the welcome's
-// seq, so the seq is what shows the ones between the snapshot and the welcome.
+/* ---------- round 3, pack 5: offline work reviewed before it is sent ----------
+   Edits made offline wait in the queue, made on the room's plan as it was
+   when the connection went (the base). When the catchup shows the other
+   manager changed some of the same lines meanwhile (Sync.overlap: a route,
+   a car, a driver… both changed anything on, owner 2026-10-09), they are
+   held, not sent: the screen shows the shared plan with them on top,
+   marked; the other's changes keep arriving; and a bar on the Shared plan
+   card asks, beside a quiet note by the pill. Never a dialog. Send my changes sends them as any edit (a field
+   both changed is flagged, with Put it back); Keep them on this PC only puts
+   the plan on screen into Backups and takes the shared plan. With no overlap
+   they go out quietly, as before. Edits made while held wait behind them.
+   room.review: {id, state, base, baseSeq, from, oids, theirs, started,
+   result, look}
+     state   'held', or 'sending' once Send is pressed, until the room has
+             confirmed what was held
+     base    the room's plan the offline edits were made on, at baseSeq
+     from    null, or the snapshot the room's ops start from when it was
+             compacted past the base
+     oids    the batches reviewed (the queue's, when it was raised)
+     theirs  the room's ops since the base, as drained: {seq, at, own,
+             changes}
+     result  Sync.overlap's answer, worked out again as ops arrive
+     look    Look first's list is open
+   It is kept beside the base (carcoord:roomBase `review`, with the whole
+   queue as `batches`) while held and until what was sent is confirmed, so a
+   reload neither forgets the hold nor rebuilds the edits on a base that has
+   moved past the other's changes, which would send them unflagged. */
+const roomHeld = (r = room) => !!r && !!r.review && r.review.state === 'held';
+// A time the review shows: an op from 0.16.0 does not say when it was made.
+const reviewWhen = (t) => (Number.isFinite(t) ? when(t) : 'time unknown');
+// The reviewed batches still waiting, with each edit's own time.
+function roomReviewMine(r, rv) {
+  const times = Object.fromEntries(r.times);
+  return r.rep.queue.filter((b) => rv.oids.includes(b.oid)).map((b) => ({ at: b.at, changes: b.changes, times }));
+}
+function roomReviewWork(r, rv) {
+  rv.result = Sync.overlap(rv.base, roomReviewMine(r, rv), rv.theirs, rv.from || rv.base);
+  return rv.result;
+}
+// What is kept beside the base, and read back.
+function roomReviewKept(r) {
+  const rv = r.review;
+  if (!rv || !r.rep) return null;
+  return {
+    id: rv.id, state: rv.state, baseSeq: rv.baseSeq, base: rv.base, from: rv.from, oids: rv.oids, theirs: rv.theirs, started: rv.started,
+    batches: r.rep.queue.map((b) => ({ oid: b.oid, at: b.at, changes: b.changes })),
+  };
+}
+function roomReviewRead(x) {
+  const plan = (p) => !!p && typeof p === 'object' && !Array.isArray(p);
+  if (!x || typeof x !== 'object' || typeof x.id !== 'string' || !['held', 'sending'].includes(x.state) || !plan(x.base)
+    || !(x.from === null || plan(x.from)) || !Number.isInteger(x.baseSeq) || !Array.isArray(x.oids) || !Array.isArray(x.theirs)
+    || !x.theirs.every((o) => o && Array.isArray(o.changes)) || !Array.isArray(x.batches)
+    || !x.batches.every((b) => b && typeof b.oid === 'string' && Array.isArray(b.changes))) return null;
+  return x;
+}
+// Opening with a review kept: the queue as it was, still held, or still to
+// be confirmed, and every edit in it measured against the base it was made on.
+function roomReviewBack(r, kept) {
+  r.rep.queue = kept.batches.map((b) => ({ oid: b.oid, changes: b.changes, at: Number.isFinite(b.at) ? b.at : Date.now(), sent: false }));
+  r.rep.replay();
+  r.review = {
+    id: kept.id, state: kept.state, base: kept.base, baseSeq: kept.baseSeq, from: kept.from, oids: kept.oids,
+    theirs: kept.theirs, started: Number.isFinite(kept.started) ? kept.started : Date.now(), look: false,
+  };
+  roomReviewWork(r, r.review);
+}
+// A snapshot past the base: the room's ops before it are gone, and what they
+// changed is in it, with no time.
+function roomReviewReset(r, plan) {
+  const rv = r.review || r.reviewCand;
+  if (rv) { rv.from = JSON.parse(JSON.stringify(plan)); rv.theirs = []; }
+}
+// The room's ops as they are applied: a held review is worked out again; one
+// sent ends once the room has confirmed everything it held.
+function roomReviewTake(r, ops) {
+  const rv = r.review || r.reviewCand;
+  if (!rv) return;
+  for (const o of ops) rv.theirs.push({ seq: o.seq, at: o.at, own: o.own, changes: o.changes });
+  if (rv !== r.review) return;
+  if (rv.state === 'held') roomReviewWork(r, rv);
+  else if (!r.rep.queue.some((b) => rv.oids.includes(b.oid))) { r.review = null; roomHoldsKeep(r); }
+}
+// After a catchup: held only when the other changed what these edits change.
+function roomReviewRaise(r) {
+  const cand = r.reviewCand;
+  r.reviewCand = null;
+  if (!cand || room !== r || !r.rep || r.legacy || roomReadOnly(r)) return;
+  // By line (owner, 2026-10-09): no line both changed, sent quietly.
+  if (!roomReviewWork(r, cand).lines) return;
+  r.review = { ...cand, id: versionNonce().slice(0, 16), state: 'held', started: Date.now(), look: false };
+  roomHoldsKeep(r);
+  roomMarks();
+}
+
+function roomReviewHtml() {
+  const r = room;
+  if (!roomHeld(r) || !r.review.result) return '';
+  const ro = roomReadOnly(r);
+  const { mine, lines, myLines, lineLast, elsewhere } = r.review.result;
+  const things = (k) => plural(k, 'thing');
+  // Edits made since the review was raised wait with the offline ones.
+  const since = r.rep.queue.filter((b) => b.changes.length && !r.review.oids.includes(b.oid)).length;
+  const which = lines === 1 ? (myLines === 1 ? 'that line' : 'one of those lines') : `${lines} of those lines`;
+  const says = [
+    `You changed ${things(mine.count)} offline (last ${reviewWhen(mine.last)}). The other manager changed ${which} too (last ${reviewWhen(lineLast)}).`,
+    elsewhere > 0 ? 'The rest of what they changed is on your screen already.' : '',
+    `Yours are on your screen, marked, and not sent until you choose${since ? ' (with what you changed since)' : ''}.`,
+  ].filter(Boolean).join(' ');
+  return `<div class="room-review" id="roomReview">
+      <p class="room-review-says">${esc(says)}</p>
+      ${ro && !planElsewhere ? '<p class="status warn-status">Update the app to send them: the shared plan was saved by a newer version of Car Coordinator. Keeping them on this PC still works.</p>' : ''}
+      ${planElsewhere ? '<p class="status warn-status">Reload this tab to answer: another tab of this browser changed the plan, and holds the review now.</p>' : ''}
+      <div class="bar">
+        <button class="btn primary-ish" data-act="room-review-send"${ro || planElsewhere ? ' disabled' : ''}>Send my changes</button>
+        <button class="btn" data-act="room-review-look">Look first</button>
+        <button class="btn" data-act="room-review-keep"${planElsewhere ? ' disabled' : ''}>Keep them on this PC only</button>
+      </div>
+      <p class="hint">Send my changes: both of your changes are kept, and where you both changed the same box, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, the screen takes the shared plan, and nothing you changed since going offline is sent.</p>
+      ${r.review.look ? roomReviewListHtml(r.review.result) : ''}
+    </div>`;
+}
+/* Look first: every change made offline, in the plan's order, one row per
+   line; a line the other manager changed too is marked, with which fields
+   each side changed, both values and both times. In the card, under the bar:
+   nothing opens over the page. */
+const ORDER_WORDS = { route: 'the routes', car: 'the cars', position: 'the positions', label: 'the statuses', driver: 'the drivers', driverTag: 'the driver tags', driverGroup: 'the day groups', template: 'the templates' };
+function reviewLine(e) {
+  const thing = e.kind === 'meta' ? 'The plan' : flagThing({ type: 'removed', kind: e.kind, id: e.id, item: e.item || null });
+  const at = reviewWhen(e.at);
+  if (e.op === 'order') return `You changed the order of ${ORDER_WORDS[e.kind] || 'a list'} (${at}).`;
+  if (e.op === 'add') return `You added ${thing} (${at}).`;
+  if (e.op === 'remove') return `You removed ${thing} (${at}).`;
+  return `${thing}'s ${FIELD_WORDS[e.field] || e.field}: yours ${flagValue(e.field, e.value)} (${at}).`;
+}
+// What the other changed on a line, beside this browser's changes to it.
+function reviewTheirs(es) {
+  const ln = es[0].line;
+  if (!ln) return '';
+  if (ln.removed) return `The other manager removed it (${reviewWhen(ln.at)}).`;
+  if (es[0].op === 'remove') {
+    const words = ln.theirs.map((t) => FIELD_WORDS[t.field] || t.field);
+    return `The other manager changed it${words.length ? ` (its ${words.join(', ')})` : ''} (${reviewWhen(ln.at)}).`;
+  }
+  const mine = new Set(es.filter((e) => e.op === 'set').map((e) => e.field));
+  return ln.theirs.map((t) => (mine.has(t.field)
+    ? `Theirs${es.length > 1 ? ` (${FIELD_WORDS[t.field] || t.field})` : ''} ${flagValue(t.field, t.value)} (${reviewWhen(t.at)}).`
+    : `They changed its ${FIELD_WORDS[t.field] || t.field} to ${flagValue(t.field, t.value)} (${reviewWhen(t.at)}).`)).join(' ');
+}
+function roomReviewListHtml(res) {
+  // One row per line (a route, a car, the date…), in the plan's order, its
+  // own changes and, where the other changed it too, theirs, field by field.
+  const groups = [];
+  const at = new Map();
+  for (const e of res.changes) {
+    const k = e.op === 'order' || e.op === 'add' ? null : e.kind === 'meta' ? `meta\u0000${e.field}` : `${e.kind}\u0000${e.id}`;
+    if (k !== null && at.has(k)) { at.get(k).push(e); continue; }
+    const g = [e];
+    if (k !== null) at.set(k, g);
+    groups.push(g);
+  }
+  const rows = groups.map((es) => {
+    const both = !!es[0].line;
+    const theirs = reviewTheirs(es);
+    return `<li${both ? ' class="room-review-both"' : ''}>${both ? '<b>Both changed:</b> ' : ''}${esc(es.map(reviewLine).join(' '))}${theirs ? ` <span class="room-review-theirs">${esc(theirs)}</span>` : ''}</li>`;
+  }).join('');
+  return `<h4>Your offline changes</h4>
+      <ul class="room-review-list">${rows}</ul>
+      <button class="btn" data-act="room-review-close">Close</button>`;
+}
+// Send my changes: what was held goes out as any edit does.
+async function roomReviewSend() {
+  const r = room;
+  // A tab that stopped saving answers nothing: its plan is in Backups, and
+  // the tab that saved over it holds the review.
+  if (!roomHeld(r) || roomReadOnly(r) || planElsewhere) return;
+  r.review.state = 'sending';
+  r.review.look = false;
+  roomHoldsKeep(r);
+  roomReviewTell(r, 'send');
+  roomFlush(r);
+  note('info', 'Sending your offline changes. Where you both changed something, yours is kept, and theirs is on the Shared plan card with Put it back.');
+  renderKeepingFocus();
+}
+/* Keep them on this PC only: the plan on screen, held edits and all, goes into
+   Backups first (and nothing happens if it cannot); then every held edit is
+   dropped and the screen takes the shared plan. Nothing is sent. What was
+   never taken into the queue (a box held while typed in, the date moved on
+   open) stays on top, as it would after any change from the room. */
+async function roomReviewKeep() {
+  const r = room;
+  if (!roomHeld(r) || planElsewhere) return;
+  roomCapture(r);
+  const want = roomKeptLabel(r);
+  if (!Store.snapshot(state, want)) { render(); return; }   // the warning says why
+  const label = backupHolding(state, want);
+  const id = r.review.id;
+  roomKeepDrop(r);
+  roomReviewTell(r, 'keep', id);
+  note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
+  renderKeepingFocus();
+}
+// The name of the Backup that holds `plan` once it has been taken as
+// `label`: Store.snapshot takes nothing when the newest one already holds
+// exactly that plan, and that one keeps its own name.
+function backupHolding(plan, label) {
+  const top = Store.backups()[0];
+  return top && top.json === JSON.stringify(plan) ? top.label : label;
+}
+// The Backup Keep takes, named for the last offline change.
+function roomKeptLabel(r) {
+  const mine = r.review && r.review.result ? r.review.result.mine.last : null;
+  return `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
+}
+/* Keep, once the plan on screen is in Backups: every edit waiting in the
+   queue is dropped, the offline ones and those made while held alike (the
+   bar promises nothing is sent), and the screen takes the shared plan. */
+function roomKeepDrop(r) {
+  const local = Sync.diff(r.rep.shadow, state);
+  // A no-change op queued after a snapshot is not an edit: it still goes.
+  r.rep.queue = r.rep.queue.filter((b) => !b.changes.length);
+  r.rep.replay();
+  r.review = null;
+  r.times.clear();
+  r.heldOut.clear();
+  r.wasKept = new Map();
+  roomShow(r, Sync.applyAll(r.rep.shadow, local));
+  roomHoldsKeep(r);
+}
+/* Other tabs of this browser. The hold is kept beside the base, so a tab
+   opened while held (or reloaded) reads it and is held too, with the same
+   edits: one review, answered once. The tab that answers says so under
+   carcoord:roomReviewAnswer, written and removed at once (the room's id and
+   the review's, never the secret), and every other held tab of the browser
+   follows. A tab that stopped saving (another tab saved over it, round 2)
+   neither tells nor follows: what it holds is its own, and its plan is in
+   Backups already. A tab following the room live never needs to take a hold
+   up: while it is live, every change it gets from the room is saved over the
+   offline tab's plan, which stops that tab saving first. */
+const REVIEW_ANSWER = 'carcoord:roomReviewAnswer';
+function roomReviewTell(r, choice, id = r.review && r.review.id) {
+  if (!r.keys || !id || planElsewhere) return;
+  try {
+    localStorage.setItem(REVIEW_ANSWER, JSON.stringify({ room: r.keys.roomId, id, choice }));
+    localStorage.removeItem(REVIEW_ANSWER);
+  } catch { /* storage refused: each tab answers for itself */ }
+}
+/* Answered in another tab, and done here as it was there. Keep there: it
+   took the Backup, so every waiting edit is dropped here as there (this
+   tab's screen goes into Backups first too, which takes nothing when it is
+   the same plan) and the screen takes the shared plan. Send there: it sends
+   its whole queue, held edits and those made while held, so this tab takes
+   up its record of them (kept beside the base just before it said so) as
+   sent, and keeps them on screen until the room has them, sending none of
+   them again. An edit only this tab holds is its own, and goes out as usual
+   (a held tab stops when another one edits, so there are none in practice). */
+function roomReviewFollow(r, choice) {
+  const rv = r.review;
+  if (!roomHeld(r)) return;
+  roomCapture(r);
+  if (choice === 'keep') {
+    if (!Store.snapshot(state, roomKeptLabel(r))) { render(); return; }   // still held here; the warning says why
+    roomKeepDrop(r);
+    renderKeepingFocus();
+    return;
+  }
+  const local = Sync.diff(r.rep.shadow, state);
+  let kept = null;
+  try { kept = roomReviewRead(JSON.parse(localStorage.getItem(BASE_KEY)).review); } catch { kept = null; }
+  if (kept && kept.state !== 'sending') kept = null;
+  if (kept) {
+    const there = new Set(kept.batches.map((b) => b.oid));
+    const own = r.rep.queue.filter((b) => !there.has(b.oid) && !rv.oids.includes(b.oid));
+    const sent = kept.batches.map((b) => ({ oid: b.oid, changes: b.changes, at: Number.isFinite(b.at) ? b.at : Date.now(), sent: true }));
+    r.rep.queue = [...sent, ...own];
+    r.review = { id: kept.id, state: 'sending', base: kept.base, baseSeq: kept.baseSeq, from: kept.from, oids: kept.oids, theirs: kept.theirs, started: kept.started, look: false };
+  } else {
+    r.rep.queue = r.rep.queue.filter((b) => !rv.oids.includes(b.oid));
+    r.review = null;
+    r.times.clear();
+  }
+  r.rep.replay();
+  roomShow(r, Sync.applyAll(r.rep.shadow, local));
+  roomHoldsKeep(r);
+  roomFlush(r);
+  renderKeepingFocus();
+}
+window.addEventListener('storage', (e) => {
+  const r = room;
+  if (e.key !== REVIEW_ANSWER || !e.newValue || !r || !r.keys || !r.rep || planElsewhere || !roomHeld(r)) return;
+  let x = null;
+  try { x = JSON.parse(e.newValue); } catch { return; }
+  if (x && x.room === r.keys.roomId && ['send', 'keep'].includes(x.choice)) roomReviewFollow(r, x.choice);
+});
+
+function roomReviewLook() {
+  if (!roomHeld()) return;
+  room.review.look = true;
+  renderRoom();
+}
+function roomReviewClose() {
+  if (!room || !room.review) return;
+  room.review.look = false;
+  renderRoom();
+}
+
+/* An index.html cached from before 0.17.0 loads this app.js without
+   presence.js: everything about who is editing then quietly does nothing,
+   rather than the page failing to draw (the upgrade check's mixed files). */
+if (typeof Presence === 'undefined') {
+  window.Presence = Object.freeze({ attach() {}, receive() {}, decorate() {}, settingsHtml: () => '', pillText: () => '' });
+}
+
+/* ---------- round 3, pack 4: who is editing ----------
+   The app's half of docs/presence.js: seal a presence message and send it.
+   Never queued and never stored: one that cannot go now is simply dropped,
+   and the next move or heartbeat says the same again. */
+async function roomSendPresence(plain) {
+  const r = room;
+  if (!r || !r.conn || r.conn.status !== 'connected' || !r.caught) return false;
+  let body;
+  try { body = await Sync.seal(r.keys, 'presence', plain); } catch { return false; }
+  if (room !== r || r.conn.status !== 'connected') return false;
+  return !!r.conn.send({ type: 'presence', body });
+}
+Presence.attach({
+  live: () => roomLive() && !!room.caught && !!room.conn && room.conn.status === 'connected',
+  send: roomSendPresence,
+  rerender: () => renderKeepingFocus(),
+});
+
+// Whether a catchup shows ops past its snapshot: any op in it, or a room seq
+// past its snapshot's.
 const opsAhead = (f) => {
   const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
   return (Array.isArray(f.ops) && f.ops.length > 0) || (Number.isInteger(f.seq) && f.seq > snapSeq);
@@ -2552,6 +2918,7 @@ const planSchema = (plain) => Math.max(
   Number.isInteger(plain && plain.schema) ? plain.schema : 0,
   plain && plain.plan && Number.isInteger(plain.plan.schemaVersion) ? plain.plan.schemaVersion : 0,
 );
+const opSchema = (plain) => (plain && Number.isInteger(plain.schema) ? plain.schema : 0);
 
 // A version's name and body are sealed apart (the label and the body), so the
 // relay could pair one version's name with another's body. Each push puts the
@@ -2560,7 +2927,89 @@ const planSchema = (plain) => Math.max(
 const versionNonce = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.nonce : null);
 
-async function roomStart(secret) {
+/* The room's plan as this browser last had it confirmed, kept beside the plan
+   so that edits made offline, or before a reload, are worked out against it
+   and sent later: carcoord:roomBase, {room, seq, plan}. Never in carcoord:v1,
+   so Backups, Export, Archives and the save file never hold it. Written only
+   just after the plan itself (save(), roomShow()), or when what it adds is
+   already in the plan (an ack), so the two always belong together: a base
+   ahead of the plan would read as edits undoing the room's. Every tab of
+   the room holds the same plan at the same seq, so one already written at
+   this seq (with the same holds) is not written again.
+   `holds` are the fields held while typed in (roomHold), and those let go
+   with what was typed whose batch the room has not confirmed yet: what each
+   was before the room changed it. A reload rebuilds those edits with that as
+   their `was`, so the collision is still flagged on both screens.
+   `times` (round 3): when each edit made offline was made, [key, ms] by
+   Sync.changeKey, so a reload before reconnecting still says when.
+   `review` (round 3): offline edits held for the review, or sent from it and
+   not yet confirmed, with the queue they are in (roomReviewKept). */
+const BASE_KEY = 'carcoord:roomBase';
+const baseHead = (roomId, seq, extras) => `{"room":${JSON.stringify(roomId)},"seq":${seq},"holds":${JSON.stringify(extras.holds)},"times":${JSON.stringify(extras.times)},"review":${JSON.stringify(extras.review)},`;
+function roomBaseWrite(r) {
+  // A tab another one saved over writes nothing beside that tab's plan.
+  if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r) || planElsewhere) return;
+  const head = baseHead(r.keys.roomId, r.rep.seq, roomExtrasOf(r));
+  try {
+    const now = localStorage.getItem(BASE_KEY);
+    if (now && now.startsWith(head)) return;
+    localStorage.setItem(BASE_KEY, `${head}"plan":${JSON.stringify(r.rep.confirmed)}}`);
+  } catch (e) {
+    // Not kept (storage full): the one stored is older than the plan beside
+    // it, and would read as edits undoing the room's. None is safer.
+    console.warn('shared plan: its base could not be kept', e);
+    roomBaseForget();
+  }
+}
+function roomBaseRead(roomId) {
+  try {
+    const b = JSON.parse(localStorage.getItem(BASE_KEY));
+    if (b && b.room === roomId && Number.isInteger(b.seq) && b.seq >= 0 && b.plan && typeof b.plan === 'object' && !Array.isArray(b.plan)) {
+      const holds = (Array.isArray(b.holds) ? b.holds : []).filter((h) => h && typeof h.key === 'string' && typeof h.kind === 'string' && typeof h.field === 'string');
+      const times = (Array.isArray(b.times) ? b.times : []).filter((x) => Array.isArray(x) && typeof x[0] === 'string' && Number.isFinite(x[1]));
+      return { seq: b.seq, plan: b.plan, holds, times, review: roomReviewRead(b.review) };
+    }
+  } catch { /* none kept, or unreadable: none */ }
+  return null;
+}
+// The holds to keep: those held now, and those let go with typing whose
+// batch is still waiting for the room.
+const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) => ({ key: h.key, kind: h.kind, id: h.id, field: h.field, base: h.base, out: !!h.out, typed: !!h.typed }));
+// Everything kept beside the base's seq and plan.
+const roomExtrasOf = (r) => ({ holds: roomHoldsOf(r), times: [...r.times], review: roomReviewKept(r) });
+// The holds or times changed: kept beside the base as it is stored, its seq
+// and plan left as they are (they belong to the plan stored with them).
+function roomHoldsKeep(r) {
+  if (!r || !r.keys || planElsewhere) return;
+  try {
+    const b = JSON.parse(localStorage.getItem(BASE_KEY));
+    if (!b || b.room !== r.keys.roomId || !Number.isInteger(b.seq)) return;
+    const extras = roomExtrasOf(r);
+    if (JSON.stringify({ holds: b.holds || [], times: b.times || [], review: b.review || null }) === JSON.stringify(extras)) return;
+    localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, extras)}"plan":${JSON.stringify(b.plan)}}`);
+  } catch (e) { console.warn('shared plan: its base could not be kept', e); roomBaseForget(); }
+}
+/* Opening with holds kept: one held when the page went whose box was not
+   typed in takes the room's value, as leaving it would have; any other (typed
+   in before the hold or after) goes out with what it was before the room
+   changed it as its `was` (r.wasKept, used by the first capture). */
+function roomHoldsBack(r, kept) {
+  let changed = false;
+  for (const h of kept.holds) {
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    if (!now.has) continue;
+    if (!h.out && !h.typed && Sync.equal(now.value, h.base)) {
+      const there = fieldIn(kept.plan, h.kind, h.id, h.field);
+      if (there.has && !Sync.equal(now.value, there.value)) changed = roomPatch(setIn(state, h, there.value)) || changed;
+    } else r.wasKept.set(h.key, h);
+  }
+  if (changed && !planElsewhere) Store.save(state);
+}
+const roomBaseForget = () => { try { localStorage.removeItem(BASE_KEY); } catch { /* storage refused: nothing kept anyway */ } };
+
+// base: {seq, plan}, the room's plan as this browser last had it confirmed,
+// when it has one (from Create or Take); otherwise the one kept, if any.
+async function roomStart(secret, base = null) {
   roomStop();
   if (!syncReady() || !SECRET_RE.test(String(secret || ''))) return;
   // seq: the room's latest seq as last heard. acks: what was sent and not yet
@@ -2568,18 +3017,56 @@ async function roomStart(secret) {
   // fetches: version id -> the resolvers waiting for its body (getVersion).
   // caught: the catchup since the last (re)connect has been read. Until then
   // the room's schema is unknown, so nothing is written to it.
-  // appliedSeq: the seq of the last op this browser's plan includes, the only
-  // seq it may send a snapshot at; with no ops applied, the room snapshot's.
-  // ahead: the room holds ops past it (opsAhead), so it is read-only here.
-  const r = { secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, appliedSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false };
+  // snapSeq: the seq of the room's snapshot as last heard.
+  // ahead: the room holds ops this build cannot apply, so it is read-only.
+  // rep: the room's plan and this browser's edits to it (Sync.replica), once
+  // known. legacy: this browser has no record of the room's plan and its own
+  // differs (it joined before live updates), so it does not follow the room
+  // until it takes the shared plan again.
+  // frames: every frame is read in turn, in the order it came.
+  // epoch: counts (re)connects, so a send begun on an old connection stops.
+  // holds: the field being typed in, kept as typed while the room changed it.
+  // flags: collisions to show; tick: counts changes that came from the room.
+  const r = {
+    secret, keys: null, conn: null, versions: [], schema: 0, snapshot: null, seq: 0, snapSeq: 0, ahead: false, acks: [], fetches: new Map(), caught: false,
+    rep: base ? Sync.replica(base.seq, base.plan) : null, legacy: false, frames: Promise.resolve(), sending: Promise.resolve(), epoch: 0,
+    flushTimer: null, waitingSince: null, holds: new Map(), flags: [], tick: 0, compacting: false, toldTooLarge: false,
+    // heldOut: holds let go with typing, until the room confirms their batch;
+    // wasKept: holds kept from before a reload, for the first capture.
+    heldOut: new Map(), wasKept: new Map(),
+    // times: Sync.changeKey -> when it was made (ms), for edits taken while
+    // not sending (offline, or catching up); timesKept: those kept from
+    // before a reload, for the first capture, which rebuilds those edits.
+    times: new Map(), timesKept: null,
+    // review: offline edits held for the review (round 3, roomReviewHtml);
+    // reviewCand: the one a catchup is working out.
+    review: null, reviewCand: null,
+  };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
+  if (r.rep) roomBaseWrite(r);
+  else {
+    const kept = roomBaseRead(r.keys.roomId);
+    if (kept) {
+      r.rep = Sync.replica(kept.seq, kept.plan);
+      r.times = new Map(kept.times);
+      r.timesKept = new Map(kept.times);
+      if (kept.review) roomReviewBack(r, kept.review);
+      roomHoldsBack(r, kept);
+    }
+  }
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
-    // Catch up on every (re)connect: the version list, and the room's schema.
+    // Catch up on every (re)connect: the version list, the room's schema, and
+    // every op since the last one this browser applied.
     r.caught = false;
-    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.conn.seq }); }
+    r.epoch++;
+    clearTimeout(r.flushTimer);
+    r.flushTimer = null;
+    // Whether the relay stored what was in flight is known only from the catchup.
+    if (r.rep) r.rep.lost();
+    if (status === 'connected') { r.seq = r.conn.seq; r.conn.send({ type: 'catchup', since: r.rep ? r.rep.seq : 0 }); }
     // A connection that dropped will never answer what it was sent.
     let noted = false;
     if (status !== 'connected') roomFetchesEnd(r);
@@ -2587,14 +3074,18 @@ async function roomStart(secret) {
       const lost = r.acks.filter((a) => a.kind === 'version').map((a) => a.name);
       r.acks = [];
       if (lost.length && room === r) {
-        note('warn', `The connection dropped while pushing \u201c${lost.join('\u201d, \u201c')}\u201d. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
+        note('warn', `The connection dropped while pushing “${lost.join('”, “')}”. It may not have been saved: look for it in the list once the shared plan is back, and push it again if it is missing.`);
         noted = true;
       }
     }
     // A note is drawn with everything else; a status alone redraws only its own.
     if (room === r) { if (noted) renderKeepingFocus(); else renderRoom(); }
   });
-  r.conn.on('frame', (f) => { roomFrame(r, f).catch((e) => console.warn('shared plan: a frame could not be read', e)); });
+  // One at a time and in order: an op must never be read before the catchup
+  // that came ahead of it.
+  r.conn.on('frame', (f) => {
+    r.frames = r.frames.then(() => roomFrame(r, f)).catch((e) => console.warn('shared plan: a frame could not be read', e));
+  });
   // The Data tab's words change with it, not only the card.
   renderKeepingFocus();
 }
@@ -2602,7 +3093,9 @@ async function roomStart(secret) {
 function roomStop() {
   const r = room;
   room = null;
-  if (r && r.conn) r.conn.close();
+  if (!r) return;
+  clearTimeout(r.flushTimer);
+  if (r.conn) r.conn.close();
 }
 
 // A body this browser cannot open (a wrong key, a damaged frame) is skipped,
@@ -2610,6 +3103,28 @@ function roomStop() {
 const openOr = async (r, kind, body, fallback = null) => {
   try { return await Sync.open(r.keys, kind, body); } catch { return fallback; }
 };
+
+// What a sequenced op's plaintext must hold for this build to apply it.
+// An op's `at` (round 3) is not needed: 0.16.0 checked only these two, so it
+// applies a 0.17 op as before and ignores the time, and an op from 0.16.0,
+// which has none, is applied here with its time unknown.
+const opUsable = (plain) => !!plain && opSchema(plain) <= Store.SCHEMA && Array.isArray(plain.changes);
+// When an op was made, by its sender's clock: null when it does not say.
+const opTime = (plain) => (plain && Number.isFinite(plain.at) && plain.at > 0 ? plain.at : null);
+
+// The room's plan from a catchup: its snapshot with every op after it, as a
+// replica at the room's seq. null when it cannot be built here: no snapshot,
+// an op this build cannot apply, or one missing.
+function roomPlanOf(f, snap, ops) {
+  if (!snap || !snap.plan || typeof snap.plan !== 'object') return null;
+  const rep = Sync.replica(f.snapshot.seq, snap.plan);
+  for (const o of ops) {
+    if (!opUsable(o.plain)) return null;
+    rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null, opTime(o.plain));
+  }
+  try { rep.drain(); } catch { return null; }
+  return Number.isInteger(f.seq) && rep.seq < f.seq ? null : rep;
+}
 
 async function roomFrame(r, f) {
   if (f.type === 'catchup') {
@@ -2619,21 +3134,43 @@ async function roomFrame(r, f) {
       const label = await openOr(r, 'label', v.label);
       if (label) versions.push({ id: v.id, at: v.at, name: String(label.name || ''), nonce: labelNonce(label), schema: label.schema });
     }
+    const ops = [];
+    for (const o of Array.isArray(f.ops) ? f.ops : []) if (Number.isInteger(o.seq)) ops.push({ seq: o.seq, plain: await openOr(r, 'op', o.body) });
     if (room !== r) return;
+    // The room is behind what this browser applied (its server restored from
+    // an older copy, say): its seqs mean other things now, and this reply
+    // holds only the ops past a seq that no longer means anything. Start over
+    // as a browser with no record of it, reading the room whole: still not
+    // caught up, so nothing is sent or shown until that answer is read.
+    if (r.rep && Number.isInteger(f.seq) && f.seq < r.rep.seq) {
+      r.rep = null;
+      r.review = null;
+      r.reviewCand = null;
+      r.holds.clear();
+      roomBaseForget();
+      r.conn.send({ type: 'catchup', since: 0 });
+      return;
+    }
     r.snapshot = snap ? { seq: f.snapshot.seq, plain: snap } : null;
     r.versions = versions;
     if (Number.isInteger(f.seq)) r.seq = Math.max(r.seq, f.seq);
-    r.appliedSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
-    r.ahead = opsAhead(f);
-    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema));
+    r.snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+    r.schema = Math.max(0, snap ? planSchema(snap) : 0, ...versions.map((v) => v.schema), ...ops.map((o) => opSchema(o.plain)));
+    // A newer room is only read: its plan is never put on screen here.
+    if (!roomReadOnly(r)) roomCatchUp(r, f, snap, ops);
     r.caught = true;
     renderRoom();
+    roomFlush(r);
   } else if (f.type === 'ack') {
     const a = r.acks.shift();
     if (!a || room !== r) return;
-    if (a.kind === 'version' && Number.isInteger(f.id)) {
+    if (a.kind === 'op') {
+      if (r.rep && Number.isInteger(f.seq)) roomApply(r, () => r.rep.take(f.seq, a.batch.changes, a.batch.oid, a.batch.at));
+    } else if (a.kind === 'snapshot') {
+      if (Number.isInteger(f.seq)) r.snapSeq = Math.max(r.snapSeq, f.seq);
+    } else if (a.kind === 'version' && Number.isInteger(f.id)) {
       if (!r.versions.some((v) => v.id === f.id)) r.versions.push({ id: f.id, at: f.at, name: a.name, nonce: a.nonce, schema: Store.SCHEMA });
-      note('info', `Pushed \u201c${a.name}\u201d to the shared plan.`);
+      note('info', `Pushed “${a.name}” to the shared plan.`);
       renderKeepingFocus();
     }
   } else if (f.type === 'version' && typeof f.body === 'string') {
@@ -2646,11 +3183,26 @@ async function roomFrame(r, f) {
   } else if (f.type === 'noVersion') {
     roomFetched(r, f.id, null);
   } else if (f.type === 'op') {
-    // A newer build's live edit: this one cannot apply it, so from now on it
-    // only reads the room.
-    if (room !== r || r.ahead) return;
-    r.ahead = true;
-    renderRoom();
+    // The other browser's live edit. Before the catchup has been read it is
+    // in the catchup too (or comes after it), and a browser not following the
+    // room live leaves it to those that do.
+    if (room !== r || !r.rep || r.legacy || roomReadOnly(r) || !Number.isInteger(f.seq)) return;
+    const plain = await openOr(r, 'op', f.body);
+    if (room !== r) return;
+    if (!opUsable(plain)) {
+      // A newer build's, or one this build cannot read: from now on it only
+      // reads the room, rather than miss an edit and drift apart from it.
+      if (plain && opSchema(plain) > Store.SCHEMA) r.schema = Math.max(r.schema, opSchema(plain));
+      else r.ahead = true;
+      renderRoom();
+      return;
+    }
+    const take = () => r.rep.take(f.seq, plain.changes, typeof plain.oid === 'string' ? plain.oid : null, opTime(plain));
+    if (r.caught) roomApply(r, take); else take();
+  } else if (f.type === 'presence' && typeof f.body === 'string') {
+    // Round 3, pack 4: who is editing. Never stored; docs/presence.js reads it.
+    const plain = await openOr(r, 'presence', f.body);
+    if (plain && room === r) Presence.receive(plain);
   } else if (f.type === 'version' && typeof f.body !== 'string') {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
@@ -2659,6 +3211,513 @@ async function roomFrame(r, f) {
     r.schema = Math.max(r.schema, Number.isInteger(label.schema) ? label.schema : 0);
     renderRoom();
   }
+}
+
+/* A catchup, read: the room's plan as it is now, and this browser's place in
+   it. With a plan to follow, the ops since are folded in (from the snapshot,
+   when the room has been compacted past this browser). Without one, the
+   browser follows the room only when its own plan is the room's: one that
+   differs (joined before live updates, its plan changed since) would
+   otherwise send every difference as an edit and write over the other
+   manager's plan, so it waits to take the shared plan again. */
+function roomCatchUp(r, f, snap, ops) {
+  if (!r.rep) {
+    const now = roomPlanOf(f, snap, ops);
+    if (!now) { r.ahead = !!(snap && snap.plan) || opsAhead(f); return; }
+    // The same plan, read as this build reads it; the date moved on open
+    // (not saved yet) may be either.
+    const { state: theirs } = Store.parseImport(JSON.stringify(now.confirmed), defaults);
+    const text = theirs ? JSON.stringify(theirs) : null;
+    const same = text === JSON.stringify(state) || (dateMove && state === dateMove.plan && !dateMove.saved && text === JSON.stringify({ ...state, date: dateMove.from }));
+    if (same) { r.rep = Sync.replica(now.seq, now.confirmed); r.legacy = false; roomBaseWrite(r); } else r.legacy = true;
+    return;
+  }
+  const snapSeq = f.snapshot && Number.isInteger(f.snapshot.seq) ? f.snapshot.seq : 0;
+  // Edits waiting to be sent (made offline, most often) are measured against
+  // what the room did meanwhile before any of them goes (round 3).
+  roomCapture(r);
+  const waiting = r.review ? [] : r.rep.queue.filter((b) => b.changes.length);
+  if (waiting.length) r.reviewCand = { base: r.rep.confirmed, baseSeq: r.rep.seq, from: null, oids: waiting.map((b) => b.oid), theirs: [] };
+  roomApply(r, () => {
+    // Compacted past what this browser applied: start again from the snapshot.
+    if (snap && snap.plan && typeof snap.plan === 'object' && snapSeq > r.rep.seq) { r.rep.reset(snapSeq, snap.plan); roomReviewReset(r, snap.plan); }
+    for (const o of ops) {
+      if (!opUsable(o.plain)) { r.ahead = true; return; }
+      r.rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null, opTime(o.plain));
+    }
+  });
+  // An op missing (its snapshot unreadable, say): it cannot keep up.
+  if (r.rep.seq < (Number.isInteger(f.seq) ? f.seq : 0)) r.ahead = true;
+  roomReviewRaise(r);
+}
+
+/* ---------- live edits: in and out ---------- */
+// The field being typed in, as a change would name it: only a text box, where
+// a caret and half a word can be lost.
+function focusedField() {
+  const el = document.activeElement;
+  const d = el && el.dataset;
+  if (!d || !d.kind || !d.field) return null;
+  const text = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && ['text', 'search', ''].includes(el.type || ''));
+  if (!text || (d.kind !== 'meta' && !Sync.LISTS[d.kind])) return null;
+  const id = d.kind === 'meta' ? null : d.id;
+  return { kind: d.kind, id, field: d.field, key: Sync.fieldKey(d.kind, id, d.field) };
+}
+// {has, value} of one field in a plan.
+function fieldIn(plan, kind, id, field) {
+  if (kind === 'meta') return { has: true, value: plan[field] };
+  const list = plan[Sync.LISTS[kind]];
+  const item = Array.isArray(list) ? list.find((x) => x && x.id === id) : null;
+  return item ? { has: true, value: item[field] } : { has: false };
+}
+const setIn = (plan, h, value) => Sync.apply(plan, h.kind === 'meta' ? { op: 'set', kind: 'meta', field: h.field, value } : { op: 'set', kind: h.kind, id: h.id, field: h.field, value });
+
+// What is on screen beyond what the room has been told, as a batch to send.
+// A field held while typed in stays out until it is left; the date moved on
+// open stays out until the next real change saves it (moveDateOnOpen).
+// was: Map fieldKey -> the value a released field's `was` says.
+function roomCapture(r, was = null) {
+  if (!r || !r.rep || r.legacy || roomReadOnly(r)) return null;
+  const movedDate = dateMove && state === dateMove.plan && !dateMove.saved;
+  // Holds kept from before a reload: their edits are rebuilt here, once.
+  const kept = r.wasKept;
+  if (kept.size) {
+    was = new Map([...[...kept].map(([k, h]) => [k, h.base]), ...(was || [])]);
+    r.wasKept = new Map();
+  }
+  const skip = (c) => c.op === 'set' && ((c.kind === 'meta' && c.field === 'date' && movedDate)
+    || (r.holds.has(Sync.fieldKey(c.kind, c.id, c.field)) && !(was && was.has(Sync.fieldKey(c.kind, c.id, c.field)))));
+  const batch = r.rep.capture(state, { skip, was });
+  if (batch) roomStamp(r, batch);
+  if (batch && kept.size) {
+    for (const c of batch.changes) {
+      const h = c.op === 'set' ? kept.get(Sync.fieldKey(c.kind, c.id, c.field)) : null;
+      if (h) r.heldOut.set(h.key, { ...h, out: true, oid: batch.oid });
+    }
+  }
+  if (kept.size) roomHoldsKeep(r);
+  return batch;
+}
+
+/* When each edit was made. A batch taken while sending is sent within a
+   moment, and its `at` says when. One taken while not sending (offline, or
+   before the catchup is read) waits, so its time is also kept per edit
+   (r.times, beside the base), and the first batch after a reload, which
+   rebuilds the edits made before it, takes the times kept then: the review
+   of offline work says when each was made, not when the connection came back. */
+function roomStamp(r, batch) {
+  const sending = r.caught && r.conn && r.conn.status === 'connected';
+  const kept = r.timesKept;
+  r.timesKept = null;
+  let last = 0;
+  for (const c of batch.changes) {
+    const k = Sync.changeKey(c);
+    const t = kept && kept.has(k) ? kept.get(k) : batch.at;
+    last = Math.max(last, t);
+    if (!sending || kept) r.times.set(k, t);
+  }
+  if (kept && last) batch.at = last;
+}
+
+// An edit on screen: sent after a short gather.
+function roomEdited() {
+  const r = room;
+  if (!roomLive(r) || r.flushTimer) return;
+  // Held for the review: nothing goes out, and the edit is kept beside the
+  // base at once, in the same moment as the plan it is in, so another held
+  // tab of this browser always reads the two together (see the storage
+  // listener on carcoord:v1).
+  if (roomHeld(r)) { roomFlush(r); return; }
+  r.flushTimer = setTimeout(() => { r.flushTimer = null; roomFlush(r); }, ROOM_BATCH_MS);
+}
+
+// Seal and send every batch not sent yet, in order. Only while connected and
+// caught up; what cannot go now stays queued for the next connection.
+function roomFlush(r) {
+  if (room !== r || !roomLive(r)) return;
+  if (!r.caught || !r.conn || r.conn.status !== 'connected' || roomHeld(r)) {
+    // Not sending yet: the edits are taken now all the same, so each keeps
+    // when it was made, and wait in the queue for the connection, or, held
+    // for the review of offline work, for its answer (round 3).
+    if (roomCapture(r)) roomHoldsKeep(r);
+    return;
+  }
+  roomCapture(r);
+  if (!r.rep.queue.length) return;
+  if (!r.waitingSince) { r.waitingSince = Date.now(); setTimeout(() => { if (room === r) renderRoomPill(); }, 1100); }
+  const epoch = r.epoch;
+  r.sending = r.sending.then(async () => {
+    for (const b of r.rep.unsent()) {
+      if (room !== r || r.epoch !== epoch) return;
+      b.sent = true;
+      let body = null;
+      try { body = await Sync.seal(r.keys, 'op', { schema: Store.SCHEMA, oid: b.oid, at: b.at, changes: b.changes }); } catch (e) { console.warn('shared plan: an edit could not be sealed', e); }
+      if (room !== r || r.epoch !== epoch || !body || roomReadOnly(r)) { b.sent = false; return; }
+      // Over the relay's limit it would close the connection for good. This
+      // browser stops following instead (as one with no record of the room:
+      // it follows again if the plans agree, or offers to take it), and says so.
+      if (body.length > BODY_LIMIT) {
+        r.rep = null;
+        r.legacy = true;
+        r.holds.clear();
+        roomBaseForget();
+        note('warn', 'A change was too large to send to the shared plan, so this browser stopped sending to it. Your plan stays here; take the shared plan on the Data tab to edit it together again.');
+        renderKeepingFocus();
+        return;
+      }
+      if (!r.conn.send({ type: 'op', body })) { b.sent = false; return; }
+      r.acks.push({ kind: 'op', batch: b });
+    }
+  }).catch((e) => console.warn('shared plan: sending failed', e));
+}
+
+/* Compaction: the room's plan as this browser has it confirmed, at the seq
+   it has applied and never above it, sent as the room's snapshot. Any
+   browser following live may send it; two at one seq hold the same plan,
+   and the relay keeps either. */
+async function roomCompact(r) {
+  // Held for the review: its no-change op would wait behind the held edits.
+  if (r.compacting || !roomLive(r) || !r.caught || planElsewhere || roomHeld(r) || !r.conn || r.conn.status !== 'connected') return;
+  if (r.rep.seq - r.snapSeq < ROOM_COMPACT_AFTER) return;
+  r.compacting = true;
+  const at = r.rep.seq;
+  const plan = r.rep.confirmed;
+  const epoch = r.epoch;
+  try {
+    const body = await Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan });
+    if (body.length > BODY_LIMIT) {
+      // Too large to keep whole on the relay: the ops stay there instead, and
+      // this is not tried again after every op. Said once.
+      r.snapSeq = Math.max(r.snapSeq, at);
+      if (!r.toldTooLarge) { r.toldTooLarge = true; note('warn', 'The shared plan is too large for its server to keep a whole copy, so it keeps your changes one by one instead. Edits still reach the other manager; pushing a version will not work until the plan is smaller.'); renderKeepingFocus(); }
+    } else if (room === r && r.epoch === epoch && roomLive(r) && r.conn.send({ type: 'snapshot', seq: at, body })) {
+      r.acks.push({ kind: 'snapshot' });
+      r.snapSeq = Math.max(r.snapSeq, at);
+      roomMarkSnapshot(r);
+    }
+  } catch (e) { console.warn('shared plan: a snapshot could not be made', e); }
+  r.compacting = false;
+}
+
+/* After a snapshot this build sends (Create, Push, compaction), one op with
+   no changes. A snapshot drops every op up to its seq, and a room holding no
+   op past its snapshot is one the copy shipped as 0.15.0, which applies no
+   ops, takes for its own to write: its Push would put its plan in as the
+   room's snapshot, over this one. An op past it keeps that copy read-only.
+   It travels as any batch does, so a dropped connection sends it again. */
+function roomMarkSnapshot(r) {
+  if (!r || !r.rep) return;
+  r.rep.queue.push({ oid: versionNonce().slice(0, 16), changes: [], sent: false, at: Date.now() });
+  roomFlush(r);
+}
+
+/* Fold what the room sequenced into this browser's plan, and the screen.
+   mutate() hands the replica its ops (or a snapshot). First, every edit on
+   screen is captured, so it is measured against the plan it was made on and
+   never mistaken for a change to undo; what stays uncaptured (a field held,
+   the moved date) is put back on top afterwards. */
+function roomApply(r, mutate) {
+  if (!r.rep || room !== r) { if (mutate) mutate(); return; }
+  roomCapture(r);
+  const before = r.rep.shadow;
+  const local = Sync.diff(before, state);
+  if (mutate) mutate();
+  let res;
+  try { res = r.rep.drain(); } catch (e) {
+    console.warn('shared plan: an op could not be applied', e);
+    r.ahead = true;
+    renderRoom();
+    return;
+  }
+  if (!r.rep.queue.length) { r.waitingSince = null; r.times.clear(); }
+  roomReviewTake(r, res.ops);
+  // A hold let go with typing is confirmed with its batch.
+  const outs = r.heldOut.size;
+  for (const [key, h] of [...r.heldOut]) if (!r.rep.queue.some((b) => b.oid === h.oid)) r.heldOut.delete(key);
+  if (r.heldOut.size !== outs) roomHoldsKeep(r);
+  roomFlags(r, res.flags);
+  if (res.applied) roomCompact(r);
+  if (r.rep.shadow === before) { if (res.flags.length) renderRoom(); else renderRoomPill(); }
+  else roomShow(r, roomHold(r, Sync.applyAll(r.rep.shadow, local)));
+  // This browser's own edits confirmed: the base moves with them, or a reopen
+  // would rebuild them from a base that lacks them and send them again, over
+  // whatever the other manager did since (a route put back after its removal,
+  // say). Only while the plan stored is this screen: another tab may have
+  // saved one without them, and a base ahead of the plan reads as an undo.
+  if (res.applied && storedIsScreen()) roomBaseWrite(r);
+}
+const storedIsScreen = () => { try { return localStorage.getItem('carcoord:v1') === JSON.stringify(state); } catch { return false; } };
+
+/* The field being typed in is never rewritten under the caret. When the room
+   changes it, the box keeps what is in it and the field is held: on leaving
+   it, what was typed is sent (with `was` saying what it was written over, so
+   both screens flag it), or, if nothing was typed, the box takes the room's
+   value. A held field whose route the room removed goes to the flags. */
+function roomHold(r, next) {
+  const f = focusedField();
+  if (f && !r.holds.has(f.key)) {
+    const now = fieldIn(state, f.kind, f.id, f.field);
+    const then = fieldIn(next, f.kind, f.id, f.field);
+    if (now.has && then.has && !Sync.equal(now.value, then.value)) {
+      r.holds.set(f.key, { ...f, base: now.value, typed: typedIn === f.key });
+      r.heldOut.delete(f.key);
+      next = setIn(next, f, now.value);
+    }
+  }
+  for (const [key, h] of [...r.holds]) {
+    if (fieldIn(next, h.kind, h.id, h.field).has) continue;
+    r.holds.delete(key);
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    const list = state[Sync.LISTS[h.kind]];
+    const i = Array.isArray(list) ? list.findIndex((x) => x && x.id === h.id) : -1;
+    if (i >= 0 && now.has && !Sync.equal(now.value, h.base)) {
+      roomFlags(r, [{ type: 'removed', kind: h.kind, id: h.id, item: JSON.parse(JSON.stringify(list[i])), after: i > 0 ? list[i - 1].id : null, field: h.field }]);
+    }
+  }
+  roomHoldsKeep(r);
+  return next;
+}
+// Leaving a held field.
+function roomRelease(r) {
+  if (!r || room !== r || !r.rep || !r.holds.size) return;
+  const f = focusedField();
+  let changed = false;
+  for (const [key, h] of [...r.holds]) {
+    if (f && f.key === key) continue;
+    r.holds.delete(key);
+    const now = fieldIn(state, h.kind, h.id, h.field);
+    const there = fieldIn(r.rep.shadow, h.kind, h.id, h.field);
+    if (!now.has) continue;
+    // Typed in since it was focused (before the hold or after): what was
+    // typed wins. Only focused, or tabbed through: the room's value.
+    if (!h.typed && Sync.equal(now.value, h.base)) {
+      if (there.has && !Sync.equal(now.value, there.value)) { roomPatch(setIn(state, h, there.value)); changed = true; }
+    } else {
+      const batch = roomCapture(r, new Map([[key, h.base]]));
+      if (batch && batch.changes.some((c) => c.op === 'set' && Sync.fieldKey(c.kind, c.id, c.field) === key)) r.heldOut.set(key, { ...h, out: true, oid: batch.oid });
+      roomEdited();
+    }
+  }
+  roomHoldsKeep(r);
+  if (changed) { if (!planElsewhere) Store.save(state); r.tick++; renderKeepingFocus(); } else { renderRoom(); roomMarks(); }
+}
+document.addEventListener('focusout', () => {
+  const r = room;
+  if (r && r.holds.size) setTimeout(() => roomRelease(r), 0);
+  // Left for another box (a redraw puts the focus back in the same one).
+  setTimeout(() => { const f = focusedField(); if (!f || f.key !== typedIn) typedIn = null; }, 0);
+});
+// The box typed in since it was focused, as a change would name it: a held
+// box typed in wins when it is left, even with nothing typed after the hold.
+let typedIn = null;
+document.addEventListener('input', () => { const f = focusedField(); if (f) typedIn = f.key; }, true);
+
+// Put `next` on screen in place: `state` stays the same object (dateMove and
+// the rest hold it), and only the parts that changed are replaced, with copies
+// of their own, so an edit on screen can never reach the replica's plans.
+function roomPatch(next) {
+  const keys = [...Object.keys(next), ...Object.keys(state).filter((k) => !(k in next))];
+  let changed = false;
+  for (const k of keys) {
+    if (JSON.stringify(state[k]) === JSON.stringify(next[k])) continue;
+    changed = true;
+    if (next[k] === undefined) delete state[k]; else state[k] = JSON.parse(JSON.stringify(next[k]));
+  }
+  return changed;
+}
+function roomShow(r, next) {
+  const was = JSON.parse(JSON.stringify(state));
+  const sig = liveSig();
+  // Nothing on screen changed (a field held, say): only its marks.
+  if (!roomPatch(next)) { renderRoom(); roomMarks(); return; }
+  // Saved as any edit is, but not sent back: it came from the room. A tab
+  // another one saved over shows it and writes nothing.
+  if (!planElsewhere && Store.save(state) !== false) roomBaseWrite(r);
+  r.tick++;
+  roomRedraw(was, sig);
+}
+
+/* A change from the room, on screen without disturbing the person working:
+   the focus, the caret and the selection, the scroll, an open picker or
+   menu and an armed button all stay as they were.
+   - A route's name, driver or round, or a note, changed in a box that is not
+     being typed in, is put straight into its box, with the sheet, the map
+     and the picker redrawn: what typing it here redraws, as long as no
+     warning or driver on the rail moves with it (liveSig, as typing checks).
+   - Anything else redraws the lot through keepingFocus, which finds the
+     focused control again by what it is, and puts its caret back.
+   An open dialog drawn from the plan (a list to load, a version's preview, an
+   invite) is drawn again with its counts as they are now, and says the plan
+   changed while it was open. */
+const PATCHABLE = new Set(['route\u0000name', 'route\u0000driver', 'route\u0000round', 'car\u0000note', 'position\u0000note', 'driver\u0000note']);
+function roomRedraw(was, sig) {
+  const changes = Sync.diff(was, state);
+  const boxes = [];
+  const quiet = liveSig() === sig && changes.every((c) => {
+    if (c.op !== 'set' || c.kind === 'meta' || typeof c.value !== 'string' || !PATCHABLE.has(`${c.kind}\u0000${c.field}`)) return false;
+    const els = [...document.querySelectorAll(`[data-kind="${c.kind}"][data-id="${CSS.escape(c.id)}"][data-field="${CSS.escape(c.field)}"]`)];
+    if (!els.every((el) => el.tagName === 'INPUT' && el.type === 'text')) return false;
+    for (const el of els) boxes.push([el, c.value]);
+    return true;
+  });
+  const x = window.scrollX, y = window.scrollY;
+  if (quiet) {
+    // The box being typed in holds what is typed (roomHold), never this.
+    for (const [el, value] of boxes) if (el !== document.activeElement && el.value !== value) el.value = value;
+    renderSheet(); renderPicker(); renderMap();
+    renderRoom();
+  } else keepingFocus(() => { render(); roomStaleDialogs(); });
+  if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+  if (quiet) roomStaleDialogs();
+  roomMarks();
+}
+/* The quiet marks on the boxes the shared plan has something to say about:
+   one the room changed while it was being typed in (held), and one both
+   managers changed at once (a flag; the card lists it, with Put it back).
+   An outline and a tooltip, nothing that moves the page. The title a box
+   had is kept aside (never as a data-* attribute: keepingFocus finds the
+   focused box again by those) and put back when the mark goes. */
+const markTitles = new WeakMap();
+const fieldBoxes = (kind, id, field) => document.querySelectorAll(kind === 'meta'
+  ? `[data-kind="meta"][data-field="${CSS.escape(field)}"]`
+  : `[data-kind="${CSS.escape(kind)}"][data-id="${CSS.escape(String(id))}"][data-field="${CSS.escape(field)}"]`);
+const shown = (v) => (v === undefined || v === null || v === '' ? 'empty' : typeof v === 'boolean' ? (v ? 'on' : 'off') : `\u201c${String(Array.isArray(v) ? v.join(', ') : v)}\u201d`);
+function roomMarks() {
+  for (const el of document.querySelectorAll('.room-held, .room-collided, .room-offline, .room-offline-clash')) {
+    el.classList.remove('room-held', 'room-collided', 'room-offline', 'room-offline-clash');
+    if (markTitles.has(el)) { el.title = markTitles.get(el); markTitles.delete(el); }
+  }
+  const r = room;
+  if (!r) return;
+  const put = (kind, id, field, cls, title) => {
+    for (const el of fieldBoxes(kind, id, field)) {
+      if (!markTitles.has(el)) markTitles.set(el, el.title);
+      el.classList.add(cls);
+      el.title = title;
+    }
+  };
+  for (const x of r.flags) if (x.type === 'set') put(x.kind, x.id, x.field, 'room-collided', `Changed by both of you at once. Kept ${flagValue(x.field, x.kept)}; the other was ${flagValue(x.field, x.lost)}. The Shared plan card on the Data tab can put it back.`);
+  for (const h of r.holds.values()) {
+    const there = r.rep ? fieldIn(r.rep.shadow, h.kind, h.id, h.field) : { has: false };
+    put(h.kind, h.id, h.field, 'room-held', `The other manager changed this to ${flagValue(h.field, there.value)} while you were typing. What you type is kept when you leave the box; the other value is noted on the Data tab.`);
+  }
+  // Round 3: offline edits held for the review, on screen and not sent yet.
+  // Solid where the other changed the same line (owner, 2026-10-09).
+  if (roomHeld(r) && r.review.result) {
+    for (const e of r.review.result.changes) {
+      if (e.op !== 'set') continue;
+      const c = e.clash;
+      const ln = e.line;
+      const said = c && c.type === 'set'
+        ? ` The other manager changed it to ${flagValue(e.field, c.theirs)} (${reviewWhen(c.at)}).`
+        : ln && ln.removed ? ` The other manager removed it (${reviewWhen(ln.at)}).`
+          : ln ? ` The other manager changed this line too: ${ln.theirs.map((t) => `its ${FIELD_WORDS[t.field] || t.field} to ${flagValue(t.field, t.value)}`).join(', ')} (${reviewWhen(ln.at)}).` : '';
+      put(e.kind, e.id, e.field, ln ? 'room-offline-clash' : 'room-offline', `Changed offline${c && c.type === 'set' ? ` to ${flagValue(e.field, e.value)}` : ''} (${reviewWhen(e.at)}), not sent yet.${said} The Shared plan card on the Data tab asks what to do.`);
+    }
+  }
+}
+
+// Whether the plan changed from the room since `tick` was taken.
+const staleSince = (tick) => !!room && Number.isInteger(tick) && room.tick !== tick;
+const roomTick = () => (room ? room.tick : 0);
+/* Replacing the whole plan while following a shared plan replaces it for the
+   other manager too. The confirm each such action already has says so, in
+   one line; there is never a second step (owner, 2026-10-08). */
+const BOTH_WORDS = 'This changes the shared plan for both of you.';
+const bothLine = () => (roomLive() ? `<p class="status warn-status both-line">${BOTH_WORDS}</p>` : '');
+// Beside an armed Sure?, the same words.
+const bothArmed = (key) => (roomLive() && armed === key ? ` <span class="both-line hint">${BOTH_WORDS}</span>` : '');
+const STALE_LINE = '<p class="status warn-status stale-line">The plan changed while this was open. What it says now is drawn from the plan as it is.</p>';
+function roomStaleDialogs() {
+  if (pending.share && $('#shareDlg')?.open) renderShareDialog();
+  if (roomLook) renderRoomLook();
+  if (roomOffer && roomOffer.caught) renderRoomOffer();
+}
+
+// Collisions found, kept for the marks and the card: one per field (or per
+// removed item), the newest winning. n: a number to name it by in a button.
+let flagCount = 0;
+function roomFlags(r, flags) {
+  for (const x of flags) {
+    const key = x.type === 'set' ? `set\u0000${Sync.fieldKey(x.kind, x.id, x.field)}` : `removed\u0000${x.kind}\u0000${x.id}`;
+    r.flags = r.flags.filter((y) => y.key !== key);
+    r.flags.push({ ...x, key, n: ++flagCount, at: Date.now() });
+  }
+  if (r.flags.length > 30) r.flags.splice(0, r.flags.length - 30);
+}
+// A flag stays while it still has something to say: a field not put back yet,
+// an item still gone.
+function roomFlagsPrune(r) {
+  r.flags = r.flags.filter((x) => {
+    if (x.type === 'removed') return !fieldIn(state, x.kind, x.id, 'id').has;
+    // A held box shows what is typed, not the plan: nothing is settled yet.
+    if (r.holds.has(Sync.fieldKey(x.kind, x.id, x.field))) return true;
+    const now = fieldIn(state, x.kind, x.id, x.field);
+    return now.has && !Sync.equal(now.value, x.lost);
+  });
+}
+
+/* What a flag says, in the card's words. */
+const FIELD_WORDS = {
+  name: 'name', driver: 'driver', carId: 'car', positionId: 'position', round: 'round', highlight: 'pink mark', gapBefore: 'gap above',
+  note: 'note', reg: 'registration', labelId: 'status', tagId: 'tag', available: 'in today', multi: 'many cars', color: 'colour',
+  onSheet: 'show on printout', driverIds: 'drivers', routes: 'routes', weekday: 'day', date: 'date',
+};
+function flagThing(x) {
+  const item = x.type === 'removed' ? x.item : (fieldIn(state, x.kind, x.id, 'id').has ? (state[Sync.LISTS[x.kind]] || []).find((i) => i && i.id === x.id) : null);
+  const name = item ? String(item.reg ?? item.name ?? '').trim() : '';
+  if (x.kind === 'meta') return 'The plan';
+  const what = { route: 'Route', car: 'Car', position: 'Position', label: 'Status', driver: 'Driver', driverTag: 'Driver tag', driverGroup: 'Day group', template: 'Template' }[x.kind] || 'An item';
+  if (x.type === 'removed' && !x.item) return `A ${what.toLowerCase()}`;
+  return name ? `${what} ${name}` : `A ${what.toLowerCase()} with no name`;
+}
+function flagValue(field, v) {
+  const named = { carId: [state.cars, 'reg'], positionId: [state.positions, 'name'], labelId: [state.labels, 'name'], tagId: [state.driverTags || [], 'name'] }[field];
+  if (named && v) { const hit = byId(named[0], v); return hit ? shown(hit[named[1]]) : 'one since removed'; }
+  if (field === 'routes' && Array.isArray(v)) return plural(v.length, 'route');
+  if (field === 'driverIds' && Array.isArray(v)) return plural(v.length, 'driver');
+  return shown(v);
+}
+function flagText(x) {
+  const word = FIELD_WORDS[x.field] || x.field;
+  if (x.type === 'removed' && !x.item) {
+    // Removed before this browser could keep a copy (a reload since): what
+    // arrived for it is said, and there is nothing here to put back.
+    return `${flagThing(x)} that was removed was changed after (its ${word}: ${flagValue(x.field, x.value)}). It stays removed.`;
+  }
+  if (x.type === 'removed') {
+    const edit = x.field && x.item && x.field in x.item ? ` (its ${word}: ${flagValue(x.field, x.item[x.field])})` : '';
+    return `${flagThing(x)} was removed while it was being changed${edit}. Put it back to keep it, with that change.`;
+  }
+  return `${flagThing(x)}'s ${word} was changed by both of you at once. Kept ${flagValue(x.field, x.kept)}; the other was ${flagValue(x.field, x.lost)}.`;
+}
+function roomFlagsHtml() {
+  roomFlagsPrune(room);
+  if (!room.flags.length) return '';
+  const rows = room.flags.slice().reverse().map((x) => `<li>${esc(flagText(x))}
+      <span class="room-flag-acts">${x.type === 'removed' && !x.item ? '' : actBtn('room-putback', '', x.n, 'Put it back')}${actBtn('room-dismiss', '', x.n, 'Dismiss')}</span></li>`).join('');
+  return `<h4>Changed by both of you</h4><ul class="room-flags">${rows}</ul>`;
+}
+// Put it back: the value that lost, or the item that was removed with its
+// change, as an edit of this browser's, so it reaches the other screen too.
+function roomPutBack(n) {
+  const r = room;
+  const x = r && r.flags.find((y) => y.n === n);
+  if (!x || (x.type === 'removed' && !x.item)) return;
+  r.flags = r.flags.filter((y) => y !== x);
+  if (x.type === 'removed') {
+    const list = state[Sync.LISTS[x.kind]];
+    if (Array.isArray(list) && !list.some((i) => i && i.id === x.id)) {
+      const after = x.after ? list.findIndex((i) => i && i.id === x.after) : -1;
+      list.splice(x.after === null ? 0 : after >= 0 ? after + 1 : list.length, 0, JSON.parse(JSON.stringify(x.item)));
+    }
+  } else if (fieldIn(state, x.kind, x.id, x.field).has) {
+    const next = setIn(state, x, x.lost);
+    roomPatch(next);
+  }
+  save();
+  note('info', 'Put back. It is on both screens once the shared plan has it.');
+  renderKeepingFocus();
 }
 
 /* ---------- versions: Look first and Restore ----------
@@ -2706,7 +3765,7 @@ async function roomLookFirst(id) {
   if (got && got.plain && !matchesListed(got, v)) got = { mismatch: true };
   if (!got || !got.plain) { roomFetchFailed(got); return; }
   if (roomOffer) return;   // an invite's question came first
-  roomLook = { id, name: got.name, at: v.at, plain: got.plain };
+  roomLook = { id, name: got.name, at: v.at, plain: got.plain, tick: roomTick() };
   renderRoomLook();
 }
 
@@ -2717,8 +3776,9 @@ function renderRoomLook() {
   const newer = planSchema(l.plain) > Store.SCHEMA;
   dlg.innerHTML = `
     <h2>Version \u201c${esc(l.name || 'Unnamed')}\u201d</h2>
+    ${staleSince(l.tick) ? STALE_LINE : ''}
     <p class="hint">Pushed ${esc(when(l.at))}.</p>
-    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it')}
+    ${newer ? '<p class="status warn-status">This version was saved by a newer version of Car Coordinator. Update the app to restore it; nothing has changed here.</p>' : previewHtml(l.plain.plan, 'Restoring it') + bothLine()}
     <div class="bar" style="margin:16px 0 0">
       ${newer ? '' : `<button class="btn primary-ish" data-act="room-restore" data-id="${esc(l.id)}" data-sure="1">Restore it</button>`}
       <button class="btn" data-act="room-look-close">Close</button>
@@ -2739,9 +3799,12 @@ async function roomRestore(id, looked) {
   const { state: next, error } = Store.parseImport(JSON.stringify(got.plain.plan), defaults);
   if (error || !next) { note('warn', 'That version could not be read, so nothing was changed.'); renderKeepingFocus(); return; }
   if (!Store.snapshot(state, `Before restoring the shared version \u201c${name}\u201d`)) { render(); return; }   // the warning says why
+  const live = roomLive();
   state = next;
   save();
-  note('info', `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
+  note('info', live
+    ? `Restored the shared version \u201c${name}\u201d for both of you. What was on screen before is in Backups.`
+    : `Restored the shared version \u201c${name}\u201d on this PC. What was on screen before is in Backups. Push it if the other manager should have it too.`);
   render();
 }
 
@@ -2759,12 +3822,28 @@ async function roomPush() {
   // Before the catchup the room could be a newer build's: wait for it.
   if (!r.caught) { note('warn', 'The shared plan is still being read, so nothing was pushed. Push again in a moment.'); render(); return; }
   if (!name) { note('warn', 'Name the version first, for example \u201cMonday final\u201d.'); render(); return; }
+  // A version is the plan on screen, held offline edits and all: it would
+  // send them before they are answered for.
+  if (roomHeld(r)) { note('warn', 'Choose what happens to your offline changes first (on the Shared plan card): a version would send them.'); render(); return; }
+  // Following live, the edits on screen go out first, so the room's snapshot
+  // (the plan it has confirmed, never one with edits it has not) holds them.
+  if (roomLive(r)) {
+    roomFlush(r);
+    for (let i = 0; i < 40 && room === r && r.rep && r.rep.queue.length && r.conn.status === 'connected'; i++) await new Promise((go) => setTimeout(go, 75));
+  }
+  if (room !== r) return;
+  // The snapshot is the room's plan at the seq this browser has applied, and
+  // a browser not following the room sends none: its plan is not the room's.
+  const snapAt = r.rep ? r.rep.seq : r.snapSeq;
+  const snapPlan = r.legacy ? null : r.rep ? r.rep.confirmed : r.seq === 0 && !r.snapshot ? JSON.parse(JSON.stringify(state)) : null;
   const nonce = versionNonce();
   const [body, label, snapshot] = await Promise.all([
     Sync.seal(r.keys, 'version', { schema: Store.SCHEMA, plan: state, name, nonce }),
     Sync.seal(r.keys, 'label', { schema: Store.SCHEMA, name, nonce }),
-    Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: state }),
+    snapPlan ? Sync.seal(r.keys, 'snapshot', { schema: Store.SCHEMA, plan: snapPlan }) : null,
   ]);
+  // Over the relay's limit, the relay would close the connection for good.
+  if ([body, label, snapshot].some((x) => x && x.length > BODY_LIMIT)) { note('warn', `\u201c${name}\u201d was not pushed: the plan is too large for the shared plan's server. Your plan is unchanged; edits still reach the other manager.`); render(); return; }
   // Sealing takes a moment, in which the room can reconnect (and not be caught
   // up again yet), turn out read-only, or this tab's plan go stale.
   if (room === r && roomReadOnly()) { note('warn', 'Update the app to push to the shared plan: it was saved by a newer version of Car Coordinator.'); render(); return; }
@@ -2772,7 +3851,12 @@ async function roomPush() {
   if (room !== r || !r.conn.send({ type: 'version', body, label })) { note('warn', 'The connection dropped, so nothing was pushed. Push again once it says Connected.'); render(); return; }
   r.acks.push({ kind: 'version', name, nonce });
   // Never above the seq this plan includes: the relay deletes every op up to it.
-  if (r.conn.send({ type: 'snapshot', seq: r.appliedSeq, body: snapshot })) r.acks.push({ kind: 'snapshot' });
+  if (snapshot && r.conn.send({ type: 'snapshot', seq: snapAt, body: snapshot })) {
+    r.acks.push({ kind: 'snapshot' });
+    // A room that had no plan has this one now, and this browser follows it.
+    if (!r.rep) { r.rep = Sync.replica(snapAt, snapPlan); roomBaseWrite(r); }
+    roomMarkSnapshot(r);
+  }
   if (box) box.value = '';
 }
 
@@ -2790,9 +3874,19 @@ function roomSays() {
     }[closeCode] || 'The relay refused what this browser sent.';
     return { short: 'Refused', text: `${why} Your plan is still on this PC.`, cls: 'warn-status' };
   }
-  if (planElsewhere) return { short: 'Reload this tab', text: 'The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.', cls: 'warn-status' };
+  if (planElsewhere) {
+    const backed = frozenBacked ? ' A copy of its plan is in Backups.' : '';
+    return roomLive(room)
+      ? { short: 'Reload this tab', text: `The plan changed in another tab of this browser, so this tab no longer saves here. Your changes in it still go to the shared plan.${backed} Reload it to save here again.`, cls: 'warn-status' }
+      : { short: 'Reload this tab', text: `The plan changed in another tab of this browser. Reload this tab before going on; until then it saves and pushes nothing.${backed}`, cls: 'warn-status' };
+  }
   if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
-  if (status === 'connected') return { short: 'Connected', text: 'Connected to the shared plan.', cls: 'on' };
+  if (status === 'connected' && room.legacy) return { short: 'Not live', text: 'Connected, but your edits do not reach the shared plan yet: this browser joined it before live updates, and the plan here differs from it. Take the shared plan to edit it together; your plan goes into Backups first.', cls: 'warn-status' };
+  // Held for the review (round 3): nothing of this browser's goes out, so never
+  // Sending…, even with an edit waiting from before the connection went.
+  if (status === 'connected' && roomHeld()) return { short: 'Connected', text: 'Connected to the shared plan. Your offline changes are waiting for your answer on the Shared plan card on the Data tab, and nothing you change is sent until then. The other manager\u2019s changes keep arriving.', cls: 'on' };
+  if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
+  if (status === 'connected') return { short: 'Connected', text: room.rep ? 'Connected to the shared plan. Your changes reach the other manager as you make them.' : 'Connected to the shared plan.', cls: 'on' };
   if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
   return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
 }
@@ -2800,7 +3894,7 @@ function roomSays() {
 // The status in the top bar, so it shows on every tab: only while in a room.
 function renderRoomPill() {
   let pill = document.getElementById('syncStatus');
-  if (!room) { if (pill) pill.remove(); return; }
+  if (!room) { if (pill) pill.remove(); document.getElementById('syncFlags')?.remove(); document.getElementById('syncReview')?.remove(); return; }
   if (!pill) {
     pill = document.createElement('button');
     pill.id = 'syncStatus';
@@ -2813,6 +3907,39 @@ function renderRoomPill() {
   pill.className = `sync-pill ${says.cls}`;
   pill.title = says.text;
   pill.textContent = `Shared plan: ${says.short}`;
+  const here = Presence.pillText();   // round 3, pack 4: 'Kari is here · Day plan'
+  if (here) pill.textContent += ` \u00b7 ${here}`;
+  // Round 3, pack 5: offline edits held for the review, a quiet note beside
+  // the pill that opens the Data tab. Never a dialog.
+  let review = document.getElementById('syncReview');
+  if (!roomHeld()) review?.remove();
+  else {
+    if (!review) {
+      review = document.createElement('button');
+      review.id = 'syncReview';
+      review.type = 'button';
+      review.className = 'sync-flags sync-review';
+      review.dataset.act = 'show-data';
+    }
+    if (pill.nextElementSibling !== review) pill.after(review);
+    review.textContent = 'Offline changes not sent';
+    review.title = 'You changed things offline that the other manager changed too. They are not sent yet: the Shared plan card on the Data tab asks what to do.';
+  }
+  // Changes made by both at once, to look at on the Data tab: a count beside
+  // the pill, never a popup.
+  roomFlagsPrune(room);
+  let count = document.getElementById('syncFlags');
+  if (!room.flags.length) { if (count) count.remove(); return; }
+  if (!count) {
+    count = document.createElement('button');
+    count.id = 'syncFlags';
+    count.type = 'button';
+    count.className = 'sync-flags';
+    count.dataset.act = 'show-data';
+    pill.after(count);
+  }
+  count.textContent = `${room.flags.length} to look at`;
+  count.title = 'Changed by both of you at once. The Shared plan card on the Data tab lists them, with Put it back.';
 }
 
 /* Create: a new room on the relay, seeded with this plan. The owner's create
@@ -2850,7 +3977,10 @@ async function roomCreate() {
     } else if (status === 'connected' && !c.sent) {
       c.sent = true;
       let body = null;
-      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: state }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
+      // The room's plan from here on, as sealed: edits made meanwhile are sent
+      // as changes once the room is this browser's.
+      c.plan = JSON.parse(JSON.stringify(state));
+      try { body = await Sync.seal(keys, 'snapshot', { schema: Store.SCHEMA, plan: c.plan }); } catch (e) { console.warn('shared plan: the plan could not be sealed', e); }
       // Seq 0: a room just made holds no ops, and this plan includes none.
       if (roomCreating === c && !(body && c.conn.send({ type: 'snapshot', seq: 0, body }))) finish(madeEmpty);
     }
@@ -2863,7 +3993,8 @@ async function roomCreate() {
     }
     roomCreating = null;
     c.conn.close();
-    roomStart(secret);
+    roomStart(secret, { seq: 0, plan: c.plan });
+    roomMarkSnapshot(room);
     note('info', 'Made a shared plan from your plan. Send the invite link on the Data tab to the other manager, and to no one else.');
     render();
   });
@@ -2907,6 +4038,10 @@ function roomCardHtml() {
   const qr = inviteQr(link);
   return `${head}
     <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    ${roomReviewHtml()}
+    ${roomFlagsHtml()}
+    ${Presence.settingsHtml()}
+    ${room.legacy ? '<button class="btn primary-ish" data-act="room-retake">Take the shared plan\u2026</button>' : ''}
     <h4>Invite link</h4>
     <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
     <div class="room-invite">
@@ -2917,21 +4052,21 @@ function roomCardHtml() {
     ${roomVersionsHtml()}
     <h4>Leave</h4>
     <p class="hint">Stops sharing on this PC and forgets the invite link here. Your plan stays on screen as it is; the shared plan stays on the server for the other manager.</p>
-    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}`;
+    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}${roomHeld() && armed === 'room-leave' ? ' <span class="hint">Your offline changes stay on this PC, in your plan, and are not sent.</span>' : ''}`;
 }
 
 // Push, and the versions pushed so far, newest first.
 function roomVersionsHtml() {
   const ro = roomReadOnly();
   const up = room.conn && room.conn.status === 'connected';
-  const canPush = up && room.caught && !ro && !planElsewhere;
+  const canPush = up && room.caught && !ro && !planElsewhere && !roomHeld();
   const rows = room.versions.slice().sort((a, b) => b.id - a.id).map((v) => {
     const sure = armed === `room-restore:${v.id}`;
     const newer = v.schema > Store.SCHEMA;
     return `<li data-version="${esc(v.id)}">
       <span class="room-v-name">${esc(v.name || 'Unnamed')}</span> <span class="room-v-when">${esc(when(v.at))}${newer ? ' \u00b7 saved by a newer version: update the app to restore it' : ''}</span>
       <button class="btn" data-act="room-look" data-id="${esc(v.id)}"${up ? '' : ' disabled'}>Look first</button>
-      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>
+      <button class="btn ${sure ? 'armed' : ''}" data-act="room-restore" data-id="${esc(v.id)}"${up && !newer ? '' : ' disabled'}>${sure ? 'Sure?' : 'Restore'}</button>${bothArmed(`room-restore:${v.id}`)}
     </li>`;
   }).join('');
   return `<h4>Versions</h4>
@@ -2967,15 +4102,18 @@ function roomDialog() {
 
 async function roomOfferStart(secret) {
   if (!syncReady()) return;
-  if (room && room.secret === secret) { note('info', 'This browser is already in that shared plan.'); render(); return; }
+  // Already following it; one that joined before live updates may take it again.
+  if (room && room.secret === secret && !room.legacy) { note('info', 'This browser is already in that shared plan.'); render(); return; }
   roomOfferEnd();
-  const o = { secret, keys: null, conn: null, plain: null, caught: false, schema: 0, ahead: false };
+  // room: the room's plan now, its snapshot with every op since (roomPlanOf).
+  const o = { secret, keys: null, conn: null, plain: null, room: null, caught: false, schema: 0, ahead: false };
   roomOffer = o;
   o.keys = await Sync.deriveKeys(secret);
   if (roomOffer !== o) return;
   o.conn = Sync.connect({ keys: o.keys });
   o.conn.on('status', (status) => {
-    if (status === 'connected') o.conn.send({ type: 'catchup', since: o.conn.seq });
+    // Since 0: every op after the snapshot, which is all of them.
+    if (status === 'connected') o.conn.send({ type: 'catchup', since: 0 });
     if (roomOffer === o) renderRoomOffer();
   });
   o.conn.on('frame', async (f) => {
@@ -2983,12 +4121,17 @@ async function roomOfferStart(secret) {
     const plain = f.snapshot && typeof f.snapshot.body === 'string' ? await openOr(o, 'snapshot', f.snapshot.body) : null;
     const labels = [];
     for (const v of Array.isArray(f.versions) ? f.versions : []) { const l = await openOr(o, 'label', v.label); if (l) labels.push(l.schema); }
+    const ops = [];
+    for (const x of Array.isArray(f.ops) ? f.ops : []) if (Number.isInteger(x.seq)) ops.push({ seq: x.seq, plain: await openOr(o, 'op', x.body) });
     if (roomOffer !== o) return;
     o.plain = plain && plain.plan && typeof plain.plan === 'object' ? plain : null;
-    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels);
-    // Ops past the snapshot: the snapshot alone is not the room's plan.
-    o.ahead = opsAhead(f);
+    o.schema = Math.max(0, plain ? planSchema(plain) : 0, ...labels, ...ops.map((x) => opSchema(x.plain)));
+    // The snapshot with every edit made since: what Take puts on screen.
+    // Ops this build cannot apply leave it unknown, so it cannot be taken.
+    o.room = o.plain && o.schema <= Store.SCHEMA ? roomPlanOf(f, o.plain, ops) : null;
+    o.ahead = !!o.plain && !o.room;
     o.caught = true;
+    o.tick = roomTick();
     // Only one look: the offer shows what the room held when it was opened.
     o.conn.close();
     renderRoomOffer();
@@ -2997,46 +4140,100 @@ async function roomOfferStart(secret) {
 }
 
 /* Another tab of this browser saved the plan while this one is in a shared
-   plan. This tab's plan is now stale, and every change in it would be saved
-   (and could be pushed) over the other tab's. Loading the new plan in place
-   would leave this tab's undo history, a moved date and an open dialog all
-   pointing at the old one, so instead the tab stops: it saves and pushes
-   nothing, and a dialog that does not close asks for a reload. planElsewhere
-   is declared beside save(), which it stops. */
+   plan. A tab following the room live hears the same change from the room,
+   because the other tab sends it, so it does nothing here and follows
+   quietly. A tab that cannot follow (offline, not caught up, read-only, not
+   following live) would save its stale plan over the other tab's, so it
+   stops: it saves and pushes nothing until reloaded, and the pill says so.
+   No dialog (owner, 2026-10-08). planElsewhere is declared beside save(),
+   which it stops.
+   Held for the review (round 3), a tab sends nothing, so an edit made in
+   another held tab never reaches this one from the room: this one stops too,
+   as one that cannot follow, rather than save its plan over that edit
+   (heldTabCheck). */
 window.addEventListener('storage', (e) => {
   if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
   let now = null;
   try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
   // The plan this tab last saved, written again: nothing has changed.
   if (now === JSON.stringify(state)) return;
-  planElsewhere = true;
-  renderPlanElsewhere();
-  renderRoom();
-});
-function renderPlanElsewhere() {
-  let dlg = document.getElementById('elsewhereDlg');
-  if (!dlg) {
-    dlg = document.createElement('dialog');
-    dlg.id = 'elsewhereDlg';
-    dlg.innerHTML = `
-      <h2>This plan changed in another tab</h2>
-      <p>Another tab of this browser saved a change to the plan. This tab still shows the plan from before, so it saves nothing and pushes nothing to the shared plan until it is reloaded.</p>
-      <div class="bar" style="margin:16px 0 0"><button class="btn primary-ish" type="button" id="elsewhereReload">Reload this tab</button></div>`;
-    // Esc would close it; there is nothing to go back to.
-    dlg.addEventListener('cancel', (e) => e.preventDefault());
-    dlg.addEventListener('close', () => { if (planElsewhere && !dlg.open) dlg.showModal(); });
-    dlg.querySelector('#elsewhereReload').addEventListener('click', () => location.reload());
-    document.body.appendChild(dlg);
+  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected') {
+    // Held: judged with the base the other tab writes just after its plan.
+    if (roomHeld(room)) heldTabSoon();
+    return;
   }
-  if (!dlg.open) dlg.showModal();
+  roomStopSaving();
+});
+// The base another tab wrote beside its plan.
+window.addEventListener('storage', (e) => { if (e.key === BASE_KEY) heldTabCheck(); });
+function roomStopSaving() {
+  planElsewhere = true;
+  // What this tab held that the other's plan may not: kept in Backups now.
+  // A tab following the room keeps sending its edits (roomFlush), but until
+  // the room has them they are only here.
+  const r = room;
+  const unsent = r.rep && !r.legacy ? r.rep.queue.length > 0 || Sync.diff(r.rep.shadow, state).length > 0 : savedHere;
+  if (unsent) roomFrozenBackup(true);
+  renderRoom();
 }
+
+/* Held, and another tab saved a plan that is not this one's: whether it
+   holds an edit made there. Both tabs follow the room's changes, so a save
+   that only differs by one of those (one tab has applied it, the other not
+   yet) is not one: the base beside it says which seq that tab's plan is at,
+   and the tab behind saves again once it has caught up, and is judged then.
+   A review answered there (gone, or being sent) is not one either: the
+   answer follows (roomReviewFollow). The base is written just after the
+   plan, and reaches this tab after it, so the plan is judged when its base
+   arrives (and, should none come, a moment later). */
+function heldTabCheck() {
+  const r = room;
+  if (!r || planElsewhere || !roomHeld(r) || !r.keys || !r.rep || !r.caught || !r.conn || r.conn.status !== 'connected') return;
+  let b = null;
+  let now = null;
+  try { b = JSON.parse(localStorage.getItem(BASE_KEY)); now = localStorage.getItem('carcoord:v1'); } catch { return; }
+  if (now === JSON.stringify(state)) return;
+  if (!b || b.room !== r.keys.roomId || !b.review || b.review.state !== 'held' || b.review.id !== r.review.id || b.seq !== r.rep.seq) return;
+  roomStopSaving();
+}
+let heldTabTimer = null;
+function heldTabSoon() {
+  clearTimeout(heldTabTimer);
+  heldTabTimer = setTimeout(() => { heldTabTimer = null; heldTabCheck(); }, 500);
+}
+
+/* A tab another one saved over keeps a copy of its plan in Backups: one entry,
+   brought up to date a moment after each change it could not save (and as the
+   page goes), so typing here is never lost and the Backups list is not
+   flooded. The pill says so. */
+const FROZEN_LABEL = 'From a tab that stopped saving (another tab saved over it)';
+let frozenBacked = false;
+let frozenTimer = null;
+function roomFrozenBackup(now = false) {
+  if (!planElsewhere) return;
+  clearTimeout(frozenTimer);
+  frozenTimer = null;
+  const take = () => {
+    frozenTimer = null;
+    if (Store.snapshot(state, FROZEN_LABEL, { replace: true })) frozenBacked = true;
+    if (room) renderRoom();
+  };
+  if (now) take(); else frozenTimer = setTimeout(take, 1500);
+}
+// Edits still being gathered when the page goes are not sent from here:
+// sealing is asynchronous and the page is gone before it resolves. They are
+// in the stored plan and base, and go out the next time the page is opened.
+window.addEventListener('pagehide', () => { if (frozenTimer) roomFrozenBackup(true); });
 
 // Another tab of this browser joined or left: this one follows, so a Leave
 // there leaves no connection open here.
 window.addEventListener('storage', (e) => {
   if (!syncReady() || (e.key !== null && e.key !== 'carcoord:pref:room')) return;
   const secret = Store.pref('room');
-  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); renderKeepingFocus(); } }
+  // Left there: this tab may have written the base again since that tab
+  // forgot it, and a base left behind would be rebuilt into edits on a later
+  // join. Forgotten here too.
+  if (!SECRET_RE.test(String(secret || ''))) { if (room) { roomStop(); roomBaseForget(); renderKeepingFocus(); } }
   else if (!room || room.secret !== secret) roomStart(secret);
 });
 
@@ -3080,7 +4277,7 @@ function renderRoomOffer() {
   if (o.caught && o.plain && (o.schema > Store.SCHEMA || o.ahead)) {
     body = `<p class="status warn-status">This shared plan was saved by a newer version of Car Coordinator. Update the app to join it; nothing has changed here.</p>`;
   } else if (o.caught && o.plain) {
-    body = previewHtml(o.plain.plan, 'Taking it')
+    body = previewHtml(o.room ? o.room.confirmed : o.plain.plan, 'Taking it')
       + (room ? '<p>This browser leaves the shared plan it is in now.</p>' : '');
   } else if (o.caught) {
     body = '<p class="status warn-status">This shared plan holds no plan yet, so there is nothing to take. Nothing has changed here.</p>';
@@ -3091,9 +4288,10 @@ function renderRoomOffer() {
   } else {
     body = '<p class="status off">Opening the shared plan\u2026</p>';
   }
-  const canTake = o.caught && o.plain && o.schema <= Store.SCHEMA && !o.ahead;
+  const canTake = o.caught && o.room && o.schema <= Store.SCHEMA && !o.ahead;
   dlg.innerHTML = `
     <h2>Join this shared plan?</h2>
+    ${staleSince(o.tick) ? STALE_LINE : ''}
     ${body}
     <div class="bar" style="margin:16px 0 0">
       ${canTake ? '<button class="btn primary-ish" data-act="room-take">Take the shared plan</button>' : ''}
@@ -3105,8 +4303,8 @@ function renderRoomOffer() {
 function roomTake() {
   const o = roomOffer;
   if (planElsewhere) { note('warn', 'The plan changed in another tab, so nothing was taken. Reload this tab first.'); roomOfferEnd(); render(); return; }
-  if (!o || !o.plain || o.schema > Store.SCHEMA || o.ahead) return;
-  const { state: next, error } = Store.parseImport(JSON.stringify(o.plain.plan), defaults);
+  if (!o || !o.room || o.schema > Store.SCHEMA || o.ahead) return;
+  const { state: next, error } = Store.parseImport(JSON.stringify(o.room.confirmed), defaults);
   if (error || !next) { note('warn', 'The shared plan could not be read, so nothing was changed.'); roomOfferEnd(); render(); return; }
   if (!Store.snapshot(state, 'Before joining the shared plan')) { roomOfferEnd(); render(); return; }   // the warning says why
   if (!Store.setPref('room', o.secret)) {
@@ -3116,9 +4314,13 @@ function roomTake() {
     return;
   }
   roomOfferEnd();
+  // The room's plan as confirmed is where this browser starts from; anything
+  // reading it here changed (a repair) goes to the room as an edit.
+  const base = { seq: o.room.seq, plan: o.room.confirmed };
+  roomStop();
   state = next;
   save();
-  roomStart(o.secret);
+  roomStart(o.secret, base);
   tab = 'data';
   note('info', 'Joined the shared plan. What was on screen before is in Backups on the Data tab.');
   render();
@@ -3127,12 +4329,21 @@ function roomTake() {
 async function roomAction(act, b, fromKeyboard = false) {
   switch (act) {
     case 'room-take': roomTake(); return;
+    case 'room-retake': if (room) await roomOfferStart(room.secret); return;
+    case 'room-putback': roomPutBack(Number(b.dataset.id)); return;
+    case 'room-dismiss': if (room) { room.flags = room.flags.filter((x) => x.n !== Number(b.dataset.id)); roomMarks(); renderKeepingFocus(); } return;
     case 'room-notnow': roomOfferEnd(); return;
+    // Round 3, pack 5: offline work reviewed before it is sent.
+    case 'room-review-send': await roomReviewSend(); return;
+    case 'room-review-keep': await roomReviewKeep(); return;
+    case 'room-review-look': roomReviewLook(); return;
+    case 'room-review-close': roomReviewClose(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
     case 'room-leave': {
       if (!room || !confirmTwice('room-leave', fromKeyboard)) return;
       roomStop();
+      roomBaseForget();
       if (Store.setPref('room', null)) note('info', 'Left the shared plan. Your plan stays on this PC as it is. The invite link would open the shared plan again.');
       else note('warn', 'Left the shared plan for now, but this browser would not forget its link, so it may join again when the page is next opened.');
       render();
@@ -3230,7 +4441,11 @@ async function dataAction(act, b, fromKeyboard = false) {
       if (!Store.snapshot(state, 'Before loading the save file')) break;   // render() shows why
       Store.release();
       state = h.state;
-      Store.saveLocal(state);
+      // This browser only (the file holds it already), and, in a shared
+      // plan, to the room now as any edit is, not at some later capture.
+      if (planElsewhere) roomFrozenBackup();
+      else { Store.saveLocal(state); savedHere = true; roomBaseWrite(room); }
+      roomEdited();
       note('info', `Loaded the plan from ${Store.file.name}. What was on screen before is in Backups.`);
       break;
     }
@@ -3701,6 +4916,7 @@ function askTemplate(t) {
   const n = note('warn', `Load the ${t.name} template over the plan on screen? Untick what the plan should keep.`,
     { act: 'load-template', kind: 'template', id: t.id, text: `Load ${t.name}` });
   n.parts = allParts();
+  n.tick = roomTick();
 }
 
 function applyImport(text, source) {
@@ -4913,7 +6129,8 @@ document.addEventListener('keydown', (e) => {
 
 const SHARE_ACTS = new Set(['share-make', 'share-link', 'share-read', 'share-apply', 'share-cancel']);
 // The Shared plan card's, which talk to the relay and so are async.
-const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave']);
+const ROOM_ACTS = new Set(['room-create', 'room-copy', 'room-take', 'room-retake', 'room-putback', 'room-dismiss', 'room-notnow', 'room-push', 'room-look', 'room-look-close', 'room-restore', 'room-leave',
+  'room-review-send', 'room-review-keep', 'room-review-look', 'room-review-close']);
 // The acts that act on one item out of a list, and so need to find it first.
 const ITEM_ACTS = new Set(['up', 'down', 'toggle', 'setLabel', 'del', 'ask-template', 'load-template', 'peek-template', 'group-member', 'apply-group', 'group-empty', 'tag', 'set-tag', 'add-tag', 'crew-day', 'insert-route', 'clear-route', 'take-off', 'put-on', 'move-pos', 'resave-template']);
 const DATA_ACTS = new Set(['link-file', 'reconnect-file', 'file-keep-file', 'file-keep-screen', 'file-overwrite', 'unlink-file', 'open-file', 'export', 'import', 'restore', 'archive-restore', 'archive-download', 'dismiss']);

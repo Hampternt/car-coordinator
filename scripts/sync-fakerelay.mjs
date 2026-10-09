@@ -22,12 +22,20 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   const live = new Set();       // every open routed socket: { ws, roomId, welcomed }
   const log = [];               // [{ roomId, frame }] every frame a client sent, as parsed
   let down = false;
+  // Browser contexts cut off on their own (cut/mend): the relay is down for
+  // them only, so one manager can work offline while the other carries on.
+  const cutOff = new Set();
   let dialled = 0;
   // While held, catchup replies wait here, to look at a client before it has
   // heard what the room holds.
   let hold = null;
   // { type, code }: the next frame of that type closes its socket instead.
   let drop = null;
+  // While held, every frame a welcomed client sends waits here, unread, and
+  // is read in the order it arrived when let go: two browsers' edits made
+  // "at once" reach the relay in a known order, and each connection's own
+  // frames stay in theirs (PROTOCOL.md §4.5).
+  let writes = null;
 
   function attach(target) {
     return target.routeWebSocket(/\/rooms\/[^/]+\/ws$/, (ws) => {
@@ -35,15 +43,16 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
       const roomId = new URL(ws.url()).pathname.split('/')[2];
       // Down: the socket opens in the page (routing always does) and drops at
       // once with 1006, as a relay that is not there looks to the app.
-      if (down) { ws.close({ code: 1006, reason: 'down' }); return; }
-      const c = { ws, roomId, welcomed: false };
+      if (down || cutOff.has(target)) { ws.close({ code: 1006, reason: 'down' }); return; }
+      const c = { ws, roomId, welcomed: false, target };
       live.add(c);
       ws.onClose(() => live.delete(c));
       ws.onMessage((text) => handle(c, text));
     });
   }
 
-  const send = (c, obj) => c.ws.send(JSON.stringify(obj));
+  // A socket closed meanwhile (a held frame read late) is not written to.
+  const send = (c, obj) => { if (live.has(c)) c.ws.send(JSON.stringify(obj)); };
   const shut = (c, code) => { live.delete(c); c.ws.close({ code, reason: String(code) }); };
   const others = (c) => [...live].filter((o) => o !== c && o.roomId === c.roomId && o.welcomed);
 
@@ -75,6 +84,11 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
       shut(c, ['snapshot', 'op', 'version', 'getVersion', 'catchup', 'presence'].includes(f.type) ? 4401 : 4400);
       return;
     }
+    if (writes) { writes.push(() => welcomed(c, f, room)); return; }
+    welcomed(c, f, room);
+  }
+
+  function welcomed(c, f, room) {
     const body = (v) => typeof v === 'string' && v.length > 0 && B64URL.test(v);
     switch (f.type) {
       case 'snapshot':
@@ -140,7 +154,13 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
     // Every open socket drops with 1006 and every new one is dropped until up().
     down() { down = true; for (const c of [...live]) shut(c, 1006); },
     up() { down = false; },
+    // One browser context offline: its sockets drop with 1006 and its new
+    // ones are dropped until mend(); every other context carries on.
+    cut(target) { cutOff.add(target); for (const c of [...live]) if (c.target === target) shut(c, 1006); },
+    mend(target) { cutOff.delete(target); },
     holdCatchup() { hold = hold || []; },
+    holdWrites() { writes = writes || []; },
+    releaseWrites() { const waiting = writes || []; writes = null; for (const go of waiting) go(); },
     // The next `type` frame any client sends closes its socket with `code`.
     dropNext(type, code = 1006) { drop = { type, code }; },
     releaseCatchup() { const waiting = hold || []; hold = null; for (const reply of waiting) reply(); },

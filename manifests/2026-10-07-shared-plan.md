@@ -158,7 +158,7 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 ## Round 2: Live updates (pack 3)
 
-**Status:** 💭 drafted 2026-10-08 while the owner tests round 1. Building waits for their go.
+**Status:** 🚧 built, reviewed, fixed and tested against the owner's server as 0.16.0; handed over for the owner's Test it yourself. Not merged into `dev`.
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules, `relay/PROTOCOL.md` (§4.3 snapshot rule, op frames), `docs/sync.js`, the Shared plan code in `docs/app.js` (roomPush, roomFrame, catchup, read-only, `planElsewhere`), `save()` at `docs/app.js:366`, the `input` handler at `docs/app.js:2268`, `scripts/sync-ui.mjs` and `scripts/sync-fakerelay.mjs`. Depends on: round 1 merged into `dev`.
 **Runs serial:** one unit, and every item writes `docs/app.js`.
@@ -182,29 +182,137 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 </details>
 
+<details open><summary>Two people at once: what must hold (owner, 2026-10-08)</summary>
+
+Raised by the owner: overwriting each other, and a redraw taking away the spot you are typing in. Every case below is a test in `sync-ui.mjs`, run with two browsers editing together.
+
+| Situation | What happens |
+|---|---|
+| Both edit **different** fields or routes | Both kept. Changes are per field, never whole-plan. |
+| Both edit the **same** field | The last to reach the server wins on both screens. The other value is kept in a quiet mark on the field and a line on the card ("Also changed by the other manager: was X"), one click to put it back. |
+| You are **typing** in a field the other changes | Your box is never rewritten under your cursor. Your text wins when you leave the field, and the other value goes into the mark. |
+| Any incoming change while you work | Focus, caret, selected text, scroll position, an open driver picker, right-click menu or tag menu, and an armed "Sure?" button all stay as they were. Only the rows that changed are redrawn; a full redraw goes through `renderKeepingFocus` (`docs/app.js:2362`), which already keeps focus, selection and typed-but-unsaved text. |
+| The other **removes** a route you are editing | Your edit is not lost silently. The route is gone and the mark says so, with one click to put the route back with your edit. |
+| The other **reorders** or **adds** routes | Your field stays focused, because ids are stable. Two routes added at once are both kept, in the server's order. |
+| An open dialog (template load, a preview) goes **stale** | It says "The plan changed while this was open" and redraws its counts. It never acts on the old numbers. |
+| Both put **one car on two routes** at once | The existing clash warning (amber box and stripe) shows on both screens, a warning not a block, as today. |
+| **Slow** or dropped connection | Edits apply on your screen at once. The pill quietly says "Sending…" until the server has them, then they are sent on reconnect. Nothing is blocked. |
+
+**Round 3 cuts collisions at the source:** seeing that the other person is in Route 7's Car box (outlined, with a name tag) means you rarely type in the same field at once.
+
+</details>
+
 **Items** (one commit each, item gate `check.sh` + `sync.mjs` + `sync-ui.mjs`; the full suite once at the end):
-- [ ] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
-- [ ] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
-- [ ] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
-- [ ] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
-- [ ] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
-- [ ] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
-- [ ] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
-- [ ] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
-- [ ] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
-- [ ] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
+- [x] **Diff and apply:** pure functions in `docs/sync.js`, `diff(prev, next) → ops` and `apply(plan, op) → plan`, covering every list and the meta fields. *Done when:* `sync.mjs` round-trips random edit sequences, and two replicas fed the same ops in relay order end identical.
+- [x] **Send:** `save()` in a room, while caught up and not read-only, batches and seals changes and keeps them pending until acked. *Done when:* a driver typed in one browser appears in the other within a second (fake relay).
+- [x] **Receive:** incoming changes go onto confirmed, pending is replayed on top, and the screen redraws keeping focus. *Done when:* both browsers edit different routes at once and end identical.
+- [x] **Catch up with changes:** catchup and Take apply the snapshot plus its changes, and round 1's "a room with changes is read-only" becomes "apply them" (still read-only for a newer schema). *Done when:* a newcomer's Take gets every edit made since the last snapshot.
+- [x] **Offline and reload:** the base is kept under `carcoord:roomBase`; on reconnect pending is rebuilt, sent and checked for collisions. *Done when:* an edit made with the relay down, then a reload, then reconnecting, reaches the other browser, and a field both changed is flagged.
+- [x] **Remote changes never disturb you:** patch only the rows and cards that changed; keep focus, caret, selection, scroll, open picker, menus and armed buttons; flag open dialogs gone stale. *Done when:* `sync-ui` types continuously in one browser while the other edits the same route, a neighbouring route and the order, and the typing browser loses no keystroke, caret or open menu.
+- [x] **Removed while you edit:** an edit to a route the other removed is kept in a mark with "Put it back". *Done when:* `sync-ui` covers remove-while-typing in both orders.
+- [x] **Collision flags:** a mark on the field and a short list on the Shared plan card, with the kept and lost values and Dismiss. *Done when:* simultaneous edits to one field show the same flag in both browsers.
+- [x] **Replace-everything in a room says so in its existing confirm:** Import, Restore from Backups, Load a share code and Restore a version gain the line "This changes the shared plan for both of you" in the dialog they already show (each still Backups first). *Done when:* sync-ui covers each one, Cancel sends nothing, and no new dialog is added.
+- [x] **Other tabs follow quietly:** a second tab of the same browser in the room becomes one more receiver of the changes, so round 1's blocking "Reload this tab" dialog goes. It stays only as a fallback for a tab that cannot catch up, and even then as the pill, not a dialog. *Done when:* two tabs in one browser edit in turn with no dialog, and both end identical to the other PC.
+- [x] **Compaction:** a snapshot every 200 changes and on Push, never above the applied seq. *Done when:* after 250 changes the relay holds a snapshot and fewer than 200 changes, and a newcomer still gets the full plan.
+- [x] **Announce and cut 0.16.0**, `must: true`. *Done when:* `check.sh` passes, and the note says edits now reach the other person live and that both copies must be updated.
 
 **Decided under "Quiet by default"** (owner, 2026-10-08):
 - **Replace-everything** (Import, Restore from Backups, a share code, Restore a version) changes the plan for both of you. The confirm each already has gains the line "This changes the shared plan for both of you"; there is no extra dialog.
 - **Collisions:** the last change to reach the server wins. It shows as a small mark on the field plus a line in the Shared plan card holding the losing value, with no popup.
 
-**Test it yourself (round 2), outline:** two windows in the room; type in both at once; stop the relay, edit, restart; edit the same driver in both within a second and read the flag.
 
-## Round 3: Who is editing (pack 4)
+**Test it yourself (round 2):** two windows on `http://localhost:5173` in one shared plan (the owner's server, or the `carsync-relay-dev` launch config with create code `dev`). Check that:
+- a driver typed in one appears in the other within a second;
+- edits to different routes at once are both kept;
+- when you type in route 4's driver while the other changes it, your box isn't rewritten, and when you leave it your text is on both screens with the same flag on both Data cards and Put it back;
+- when the other deletes a route you're typing in, the route goes on both and Put it back returns it with your edit;
+- with the relay stopped, edits are kept, and when it's back both reconnect and end identical, with the shared field flagged;
+- a second tab of the same window follows quietly, with no dialog;
+- each replace-everything action (a share code, Backups' Restore, a version's Restore, Import, Open an existing file) carries the line "This changes the shared plan for both of you".
 
-**Goal:** "Kari is here, on the Cars tab"; the field Kari is in is outlined in her colour with a name tag; a soft warning when you click into the same field (never a block); optional typing preview. Each person picks a display name and colour on this PC, sent only inside the encryption.
-*Done when:* two-browser smoke sees focus, tab and leave events within a second, and the relay database holds no presence.
+## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
+
+**Status:** ✅ tested by the owner on PC and tablet (2026-10-09, "working fine"); going to `dev` through a PR, then the owner's hands-on upgrade test before `main`. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+
+### Round 3 runs parallel (owner, 2026-10-09: "assign agents to help speed up work")
+
+Counted under the count rule:
+- **Two units:** pack 4 has 6 items, pack 5 has 7.
+- **Separate files:** pack 4 lives almost entirely in a new file. The only shared file, `docs/app.js`, gets one-line registrations that the scaffold places.
+- **Independent:** neither needs the other's output.
+
+**Where they build:** this session started in an app-made worktree, so builder worktrees are nested *inside* it at `.wt/pack4` and `.wt/pack5` (git-excluded). Each branches from the scaffold commit. The main session merges them.
+
+**Contracts** (fixed by the scaffold commit):
+
+| | Pack 4 · Who is editing | Pack 5 · Offline review |
+|---|---|---|
+| **Owns** | `docs/presence.js` (new), the `/* presence */` region of `docs/style.css`, `scripts/presence-ui.mjs` (new) | all Shared plan code in `docs/app.js` except the scaffold's presence lines, `docs/sync.js`, `scripts/sync.mjs`, `scripts/sync-ui.mjs`, `scripts/sync-fakerelay.mjs`, the `/* offline review */` region of `docs/style.css` |
+| **Exposes** | `Presence.attach(api)`, `Presence.receive(plain)`, `Presence.decorate()`, `Presence.settingsHtml() → string`, `Presence.pillText() → string` (all safe no-ops in the scaffold) | ops gain `at` (ms, sender's clock); `roomReviewHtml() → string` in the card; actions `room-review-send`, `room-review-keep`, `room-review-look`, `room-review-close` |
+| **Uses** | the `api` given at attach: `live() → bool` (connected, caught up, not read-only), `send(plain) → Promise<bool>` (seals as `presence` and sends), `rerender()`; `Store.pref`/`Store.setPref` for `presenceName`/`presenceColor`; `Sync.KINDS` already has `presence` | nothing from pack 4 |
+
+**Presence message** (inside the encryption, never stored): `{schema, who: {id, name, color}, tab, at: {kind, id, field} | null, t, bye?}`. `id` is random per tab. The fake relay already forwards `presence`.
+
+**Scaffold's one-liners in `docs/app.js`:**
+- `roomFrame` opens a `presence` frame and calls `Presence.receive`;
+- `render()` ends with `Presence.decorate()`;
+- `roomCardHtml` holds `${Presence.settingsHtml()}` and `${roomReviewHtml()}`;
+- `renderRoomPill` appends `Presence.pillText()`;
+- the four `room-review-*` action lines;
+- one `Presence.attach({...})` call;
+- `roomSendPresence(plain)`, written in full.
+
+**Claimed:** `package.json`'s test script gains `node scripts/presence-ui.mjs` after `sync-ui`. The version cut (0.17.0) is the main session's, after the merge.
+
+### Pack 4: Who is editing
+
+**Goal (owner, 2026-10-09):** on the Day plan, a line someone else is working on shows it, so you avoid writing on the same row at once.
+- **The row** the other person is in is tinted in their colour, with a small name tag at its start ("Kari"); **the box** they are in is outlined.
+- **Elsewhere:** the rail rows, the Cars, Drivers and Positions tabs and template cards show the same mark; the top bar says "Kari is here · Day plan".
+- **Clicking into a row someone else is in:** a quiet note beside it, "Kari is editing this line". It never blocks, under Quiet by default.
+- **Names:** each person sets a display name and colour on this PC once, on the Shared plan card. They are sent only inside the encryption and never stored by the relay.
+- **Presence** is a small encrypted message when you move to another row or field, plus a heartbeat every ~20 s. It disappears ~45 s after a person goes quiet or offline, and at once when they leave.
+
+*Done when:* `sync-ui` two-browser checks see the row tint, the name tag and the box outline follow focus within a second; the note appears on entering a row the other is in; it clears on leave and on timeout; and the relay database never holds presence.
 `Agents: build 1 serial (medium) · review: none beyond the smoke check (nothing stored)`
+
+### Test it yourself (round 3)
+
+Use two windows (or the PC and the tablet) in one shared plan, with made-up data.
+
+**Who is editing:**
+1. Set a different name and colour in each window on the Data tab's Shared plan card.
+2. In window 1, click into route 7's Car box. Window 2 tints that row in window 1's colour, puts its name at the start and outlines the box. Its bar reads "· Kari is here · Day plan".
+3. In window 2, click into the same row. A quiet note says "Kari is editing this line", and you can still type.
+4. In window 1, go to the Cars tab. Window 2's bar follows ("· Cars").
+5. Close window 1. Window 2 clears it within about 45 s.
+6. Open a second tab of the *same* window. It does not mark you as someone else.
+
+**Offline review:**
+1. Take window 1 offline (DevTools → Network → Offline, or the tablet's airplane mode).
+2. In window 1, change route 3's driver. In window 2, change route 3's round.
+3. Bring window 1 back. The Data card shows "You changed 1 thing offline… The other manager changed that line too…", and nothing reaches window 2 yet.
+4. Look first lists it. Send keeps both values on both screens.
+5. Again, but with Keep them on this PC only. Backups holds "Kept from offline, HH:MM", window 1 shows the shared plan, and nothing is sent.
+6. Again, with window 2 changing route 6 instead. Window 1's change goes up quietly, with no bar.
+
+### Pack 5: Offline work, reviewed before it is sent
+
+**Goal (owner, 2026-10-09):** coming back online after working offline must not quietly overwrite a lot of the other person's work, or have yours overwritten. You see what happened on each side and choose.
+- **Times:** every change carries when it was made (sent inside the encryption), so the app can say "your last change offline: 09:14 · the shared plan's last change: 09:20, by Kari".
+- **On reconnect with offline changes:** a review bar on the Shared plan card and a pill note, never a dialog. It says how many changes you made offline, how many the shared plan got meanwhile, and which lines you both touched. Choices:
+  - **Send my changes:** as today; fields both changed are flagged, with the losing value kept and Put it back.
+  - **Look first:** a list of your offline changes, with the ones that clash marked, each showing your value, theirs and both times.
+  - **Keep them on this PC only:** your offline plan goes into Backups by name, and the screen takes the shared plan.
+- **While you decide:** your offline changes are held, not sent. The other person's live changes keep arriving, and your screen shows the shared plan with your held changes marked.
+
+*Done when:* `sync-ui` covers each choice. Hold sends nothing; Send equals today's merge; Keep puts the offline plan in Backups and the screen takes the room's; the times are right; and nothing is lost in any choice.
+`Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
+
+**Decided by the owner, 2026-10-09:**
+- Clicking into a line someone else is editing gives a **quiet note**, never a lock.
+- The review appears **only on overlap**: the other person changed lines you also changed offline. Otherwise offline changes go up quietly, as now.
+- **All or nothing**, with a Look first list; per-change ticking is left for later if it's missed.
 
 ---
 
@@ -216,6 +324,64 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-09: the server's test copy at `/carsync-test/` was updated to 0.17.0 (9d4d5dc's `docs/`, swapped in whole). It loads in a secure context with no console errors.
+- 2026-10-09: **round 3 built in parallel and handed over as 0.17.0.** Ledgers are in `manifests/archive/2026-10-09-shared-plan-r3-*.ledger.md`.
+  - **Scaffold** f28c7ec. The builders worked in nested worktrees `.wt/pack4` and `.wt/pack5` and are now removed. Separation proved before merging: the only shared file was `docs/style.css`, one hunk in each pack's own region, and pack 5 left the presence lines untouched.
+  - **Pack 4, who is editing** (569f07e…5e4b517): `presence-ui` 124 ok.
+  - **Pack 5, offline review** (15f7e26…ab3f932): `sync` 197 ok, `sync-ui` 544 ok.
+  - **Main session's merge fixes:**
+    - `pillSays` compares only the pill's own words;
+    - one presence id per browser, so the owner's own tabs never mark each other (the owner's call), made lazily in fd14b00 after the suite caught it written ahead of the update archive at boot;
+    - a no-op `Presence` for an old cached `index.html` (9d4d5dc), caught by the upgrade check's mixed files.
+  - **Targeted review of pack 5** (concurrency and live data) found:
+    - **important:** two held tabs could lose an edit;
+    - **low:** Keep did different things in one tab and two; Keep's notice could name a Backup that wasn't written; the status still said changes were sent while held.
+    
+    The owner's "by line, not by field" was also missed. All are fixed with tests that failed first (73da1f5…156ca3a); the fixer's `npm test` exited 0 with `sync-ui` at 589 ok.
+  - **Gates on the final build:**
+    - `npm run upgrade`: `upgrade check passed: 0.14.1 to 0.17.0`;
+    - `screens`: `no console errors, 4 warnings raised and asserted`;
+    - full `npm test` on 9d4d5dc, exit 0: `VERSIONS OK`, `map`, `sync`, `sync-ui`, `presence-ui` checks passed, smoke `all checks passed` (the same 3 groups skipped), breadify `all passed`.
+  - **Against the owner's server** (two Playwright browsers plus the owner's window 1):
+    - presence: the row is marked within 68 ms; the bar reads "Cato is here · Day plan", then "· Cars"; "Cato is editing this line" shows; typing in a marked line works;
+    - offline review: C offline, both change route 4 (C its driver, B its round). Back online, C was held with "You changed 1 thing offline… The other manager changed that line too…"; nothing reached B while held; Send left both screens identical with both values kept;
+    - no app errors.
+- 2026-10-09: **test copy on the owner's server**, for testing on other devices (owner's go):
+  - this build's `docs/` is in `/var/www/carsync-test`, served at `https://portfolio.dblo.net/carsync-test/` by a new nginx `location` (`no-cache`, backup `portfolio.bak-20261009-0033`);
+  - `RELAY_ORIGINS` gains `https://portfolio.dblo.net`;
+  - checked: the page, assets and portfolio return 200, the upgrade from that origin gets 101, a secure context with WebCrypto, and no console errors.
+  - **Remove after testing:** the folder, the block, and the origin.
+- 2026-10-09: **round 2 built and handed over as 0.16.0.** Ledgers: `manifests/archive/2026-10-08-shared-plan-round2*.ledger.md`.
+  - **Build** (8a3cbef…7ff16fc, 77 min for 12 items): `sync.mjs` 159 ok, `sync-ui.mjs` 348 ok, full `npm test` and `screens` green.
+  - **Targeted review** (concurrency + live data, on 7ff16fc) found three blocking problems:
+    - reopening resent stale edits;
+    - an edit to a removed item was lost without a mark;
+    - a tab that had stopped saving could lose edits.
+
+    It also found five lower ones. A test on the owner's server added two more: a held box did not win when left, and the flag was missing on the holding side.
+  - **Fixes** (ad9fad0…5472d0a): all ten had a test that failed first. Nine are fixed; the pagehide flush was not possible because WebCrypto finishes after the page has gone, so a guarantee test covers it instead. Decisions:
+    - a tab that has stopped saving keeps following and sending, with one Backups copy updated in place;
+    - a box you typed in wins when you leave it;
+    - after every snapshot a no-change op follows, so a 0.15.0 copy stays read-only.
+  - **Gates:**
+    - `npm test` exit 0 (`sync` 163 ok, `sync-ui` 410 ok, the 0.15.0 sections from git; smoke and breadify green); `screens` clean.
+    - `npm run upgrade` on a frozen 5472d0a: `upgrade check passed: 0.14.1 to 0.16.0`.
+    - Relay `cargo test` 48/48 (relay unchanged).
+  - **Against the owner's server** (two Playwright browsers plus the owner's window 1): 13/13 on the final run.
+    - A typed driver reached the other browser in 353 ms; the reconnect took 1.3 s.
+    - In one run just before that, the collision flag read empty on one screen. It did not reproduce in 13 tries since (both orders of arrival); it is noted as a possible timing flake in reading.
+  - CI fetches full history so the 0.15.0 test runs there (1a02443).
+- 2026-10-08: **tested against the real server** from a local copy (the owner typed the create code; Claude drove the rest, with window 2 as a separate Playwright profile):
+  - **Create:** Connected through `wss://portfolio.dblo.net/carsync`.
+  - **Join:** the invite is cleared from the address bar, and the offer names 15 routes. Take brought window 1's drivers across, with the old plan in Backups.
+  - **Push and restore:** `Test 1` was listed in window 2. Look first changed nothing; Restore brought window 1's edit across, with Backups first.
+  - **Offline:** stopping the relay showed Offline in both windows, and an edit was still saved. On restart, both reconnected after about 1 s.
+  - **Console:** the only error was Chrome's own failed-handshake line (502) while the relay was down.
+  - The test rooms were wiped from the server afterwards.
+- 2026-10-08: **relay deployed** to the Hetzner box over SSH, on the owner's go:
+  - **Service:** `carsync` running as its own user; `/opt/carsync/.env` has `RELAY_ORIGINS` plus `http://localhost:5173` for testing from a local copy. The create code is left for the owner to set.
+  - **nginx:** the 443 block gains `location /carsync/` (19 lines added, none removed), `conf.d/carsync.conf` is added, `nginx -t` is OK and nginx reloaded. Backup: `portfolio.bak-20261008-0124`.
+  - **Checks from outside:** `/carsync/health` returns `ok`, the portfolio returns 200, and the upgrade gets 101 from the Pages origin, 101 from localhost:5173 and 403 from example.com.
 - 2026-10-08: round 1 took 123 min from the plan commit to handover, 37 commits (`wave-times.sh 2026-10-07T23:00`).
 - 2026-10-08: **pack gate on a frozen copy of c702444:**
   - `npm test` exit 0: `VERSIONS OK`, `map checks passed`, `sync checks passed`, `sync-ui checks passed`; smoke `all checks passed` (3 groups skipped for the stored file handle, as before); breadify `all passed`.

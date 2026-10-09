@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: sync-ui serves the shipped 0.15.0 from its commit to
+          # prove an older copy only reads a room with live edits.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20

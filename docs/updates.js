@@ -46,6 +46,22 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.17.0',
+    must: true,
+    title: 'Shared plan: who is editing, and offline work you choose to send',
+    changed: 'The other manager\'s line shows their name and colour. Offline changes that clash with theirs wait for you: send them, look first, or keep them here.',
+    affects: 'Every tab in a shared plan; set your name on the Data tab. The printed sheet and share codes do not change. Update both copies.',
+    data: 'Nothing changes outside a shared plan. Keep them here puts your offline plan in Backups first. Your name and colour stay in this browser.',
+  },
+  {
+    version: '0.16.0',
+    must: true,
+    title: 'Shared plan: changes reach the other manager live',
+    changed: 'Shared plan changes reach the other manager within a second. If you both change one box, the last counts; the other is kept to restore.',
+    affects: 'Every tab in a shared plan. The printed sheet and share codes do not change. Update both copies: an older one only reads it.',
+    data: 'Nothing changes outside a shared plan. In one, this browser keeps its last copy, which older copies ignore. Replacing your plan changes it for both.',
+  },
+  {
     version: '0.15.0',
     must: true,
     title: 'A shared plan for two managers',
