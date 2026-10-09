@@ -1035,6 +1035,12 @@ const Sheet = (() => {
       grid.appendChild(holder);
     }
     section.appendChild(grid);
+    // One box for the checker's pen once the whole total has been checked
+    // (the owner, 2026-10-09). On the last part only: a total split across
+    // sheets is still one total, checked once.
+    if (part === parts) {
+      append(section, append(element('div', 'bf-total-checked'), tickBox(''), element('span', null, 'Totals checked')));
+    }
     return section;
   }
 

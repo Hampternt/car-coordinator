@@ -750,6 +750,15 @@
   color: var(--note);
 }
 
+.bf-total-checked {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1.6mm;
+  margin-top: 2mm;
+  font: 600 9pt/1.2 Archivo, sans-serif;
+}
+
 .bf-total-dotnote {
   display: flex;
   align-items: center;

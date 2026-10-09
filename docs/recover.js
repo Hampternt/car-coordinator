@@ -50,6 +50,10 @@
   const held = {};
   try {
     for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    // Never the shared plan's secret: whoever holds it can open and change
+    // the shared plan, and a recovery file gets mailed about. The plan itself
+    // is in carcoord:v1 like any other.
+    keys = keys.filter((k) => k !== 'carcoord:pref:room');
     for (const k of keys) held[k] = localStorage.getItem(k);
   } catch (e) {
     list.replaceChildren(el('p', `This browser would not let this page read its storage (${e && e.name ? e.name : 'refused'}). Nothing can be recovered from this page in this browser.`, 'warn'));
@@ -60,6 +64,7 @@
     'carcoord:v1': ['The plan and setup', 'Routes, templates, drivers, day groups, cars, positions and labels: everything the app shows. Import this file on the Data tab to bring it all back.', `car-coordinator-plan-${day}.json`],
     'carcoord:archives': ['Archives', 'Untouched copies taken before each update, and of a save that could not be read.', `car-coordinator-archives-${day}.json`],
     'carcoord:backups': ['Backups', 'The rolling copies taken before anything was cleared or deleted, and once a day.', `car-coordinator-backups-${day}.json`],
+    'carcoord:roomBase': ['The shared plan, as last heard', 'What this browser last heard from the shared plan, kept so changes made offline can be sent later. Your own plan is the one above.', `car-coordinator-shared-base-${day}.json`],
   };
   const order = (k) => (k in WHAT ? Object.keys(WHAT).indexOf(k) : k.startsWith('carcoord:') ? 10 : 20);
   keys = keys.sort((a, b) => order(a) - order(b) || a.localeCompare(b));

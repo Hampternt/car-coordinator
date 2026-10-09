@@ -40,10 +40,13 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 
 ## Sharing
 - ✅ **Share code / link** — the finished day plan encoded into a short code or URL fragment, matched back by registration and name so it works between PCs that never talked. Preview before anything is replaced. No server involved.
+- ✅ **Shared plan, round 1 (0.15.0)** — create a shared plan with the server's create code, send its invite link (and QR), take it on another PC with a preview and Backups first, push named versions, look at them first, restore them, or leave. End-to-end encrypted: the relay on the owner's server holds only what it cannot read. Not in the Windows app yet.
+- ✅ **Shared plan: live updates (0.16.0)** — while both are connected, every edit reaches the other screen within a second, per box. If both change one box, the last to reach the server wins and the other value is kept with Put it back. A box you are typing in is never rewritten under you. A route removed while the other edits it comes back with Put it back. Edits made offline are sent on reconnect. Other tabs follow quietly. Replacing the whole plan says it changes it for both.
+- ✅ **Shared plan: who is editing, and offline work reviewed (0.17.0)** — the other manager's line is tinted in their colour with their name, and a quiet note shows if you enter the same line. The bar says who is here and where. Offline changes that clash with the other's lines wait for you: Send, Look first, or Keep them on this PC only (into Backups).
 
 ## Data
 - ✅ **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white.
-- ✅ **Local only** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls.
+- ✅ **Local unless you join a shared plan** — `localStorage`, plus an optional auto-saved file via the File System Access API. No runtime network calls until this browser creates or joins a shared plan, and even then the server only ever holds what it cannot read.
 - ✅ **Export / import JSON**, with automatic backups before any clear or delete and once per day.
 - ✅ **Update note and Archives** — a note after each update saying what changed and what it did to your data, and an untouched copy of your plan and setup kept from before every update, with a recovery page for when the app won't start.
 - ✅ **Info bubbles instead of the tour** — a small ⓘ beside each part of the app opens a short explanation next to it, and a first-ever open shows one line pointing at them; they replace the first-use tour and its Tour button (0.14.0).
@@ -76,7 +79,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **The substitute marker** — `want substitute: true` or `want substitute: false` in the same quiet type on every order, with only the word **false** in bold.
 - ✅ **Route total** — per bakery, most to least, with a dot per full ten *inside a single order*. The freezer sheet's is flat and in two columns instead.
 - ✅ **Pallet call** in the page note when a route needs more than 16 crates, in the short form when the line is already crowded.
-- ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots.
+- ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots, and a Totals checked box under each route's total.
 - ✅ **Self-hosted faces**, so no printer falls back to one with different metrics and silently re-sizes the page.
 - ✅ **Says so rather than misprints** — an Order ID that is blank or not a whole number, and a substitute answer the file doesn't state plainly (blank, "ja", an error cell), are blocking findings at Check. Continue anyway stays the leader's call, and such an answer then prints as false. Past Check, the layout still refuses an order with no true/false answer or no numeric id: the Print step says why instead of printing.
 
@@ -97,4 +100,5 @@ Raised by you but not scheduled. A record, not a roadmap — nothing reaches
 this list that you did not ask for.
 
 - 💭 **A driver's working hours** — beyond which days, the time they usually start. On screen only, never on the printed sheet.
+- 💭 **Lift cars** — mark a car as a van or a lift car with an icon, and warn when a lift car is parked outside a lift spot (Spot 4, Spot 5, Gate). `manifests/2026-10-09-car-types.md`.
 - 💭 **Plan ahead, saved to a date** — plan tomorrow and submit it as that day's list, then plan two days ahead and submit that, each kept under its own date in a separate saved-days area, with a Plan ahead / Save to date button. Not for the current version.

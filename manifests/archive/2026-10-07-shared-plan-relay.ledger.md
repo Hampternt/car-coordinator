@@ -1,0 +1,54 @@
+# Ledger: shared plan, pack 1 (Relay server)
+
+Unit ledger for `manifests/2026-10-07-shared-plan.md`, pack 1. Builder: pack-implementer, unit mode,
+in the shared worktree (owns `relay/` and this file only). Scaffold ea8f1f4, started from d10d2db.
+
+## Items
+
+- [x] **Crate and config** — `Config::from_lookup` (empty = unset), `start`/`shutdown` (watch signal, graceful serve, waits for live connections), `/health`, SIGTERM in `main`, `Storage::open` with migration 1 (WAL, synchronous FULL, busy_timeout). Gate: `tests/config` 6/6, `tests/http` health + 404 2/2; binary on 127.0.0.1:3019 answered `ok 200`, SIGTERM exit 0; clippy -D warnings clean.
+- [x] **Rooms and auth** — `auth.rs` (token: 43 chars → 32 bytes → sha256, `subtle` compare; create code compared as sha256 of both sides so its length does not leak; a missing room is compared against a dummy hash so both 4401s take the same path), `protocol::parse`, the upgrade checks (404, 403, two `Origin` headers refused), hello/create/join, close-then-drain. Gate: lib unit tests 6/6 (incl. PROTOCOL §1 sha256(token) vector); `tests/http` 5/5; `tests/rooms` 8/11 — the 3 red ones (`create_with_the_right_code_opens_the_room`, `hello_..._welcomed_with_the_rooms_seq`, `unknown_fields_are_ignored`) need op/catchup from items 3-4; clippy clean.
+- [x] **Storage** — SQLite (`carsync.db` in `RELAY_DATA`, `PRAGMA user_version` migrations): `rooms` carries `latest_seq`, the version-id counter and the snapshot; `ops` holds only ops after it; versions pruned to the newest `keep` by id. Gate: lib tests 8/8, incl. new `storage::tests` (a snapshot drops covered ops and the seq stays; a reopened database keeps rooms, token hash, snapshot, ops and versions, ids not reused); clippy clean. The wire-level restart test needs item 4.
+- [x] **WebSocket fan-out** — one bounded outgoing queue per connection (1024 frames) carries acks, replies and others' frames; each write, its ack and its fan-out are queued under the room's lock with no await, so §4.5 order holds. A peer whose queue is full is dropped from the room and closed with 1001 "too far behind" (reconnect + catchup); see Notes. A close's 5 s drain is cut to 1 s once shutdown starts. Gate: `tests/rooms` 11/11, `tests/sync` 6/6 (two-client order, presence never in the files, restart), `tests/http` 5/5; clippy clean.
+- [x] **Limits** — token bucket per connection (every text frame, hello/create included, checked before parsing), body/label 4413 in `parse`, room cap and disk cap (`usage >= cap`) on create, disk cap before every snapshot/op/version, frame cap through axum's `max_message_size`/`max_frame_size`, hello timeout 4408. Scaffold `#![allow(unused_variables, dead_code)]` removed. Gate: `cargo test` all green, 45 = 35 scaffold + 10 unit (`limits` 7/7, `rooms` 11/11, `sync` 6/6, `http` 5/5, `config` 6/6, lib 10/10); five consecutive full runs 45/0; clippy -D warnings clean.
+- [x] **Deploy files** — `relay/deploy/`: `carsync.service` (user `carsync`, `/opt/carsync`, `EnvironmentFile=/opt/carsync/.env`, systemd hardening, `ReadWritePaths=/opt/carsync/data`), `carsync.env.example` (binds `127.0.0.1:3010`), `nginx-carsync-http.conf` (http level, for `/etc/nginx/conf.d/carsync.conf`: `limit_req_zone ... zone=carsync:10m rate=30r/m` and a `map $http_upgrade $carsync_connection`), `nginx-carsync-location.conf` (`location /carsync/` for the 443 server block: `proxy_pass http://127.0.0.1:3010/` strips the prefix, upgrade headers, `proxy_read_timeout 1h`, `limit_req zone=carsync burst=20 nodelay`, `limit_req_status 429`), `nginx-check.conf` (stand-alone harness for `nginx -t`); `relay/README.md` with the owner's steps (glibc check before shipping a local build, else build on the server; `diff -u`; backup + `nginx -t` + reload with automatic restore of both files). Gate: README steps run against the local release build (`cargo build --release --locked`, env file from the example, binary on 127.0.0.1:3019): `/health` → `ok`; upgrade from `https://hampternt.github.io` → 101, from `https://example.com` → 403, bad room → 404; SIGTERM → exit 0. `systemd-analyze verify` reports only the missing `/opt/carsync/carsync-relay` (syntax fine). **`nginx -t` not run:** docker is installed but this user cannot reach either daemon (Desktop socket absent, `/var/run/docker.sock` permission denied, not in group `docker`), no podman, no nginx binary; nothing installed. Snippets checked by reading instead (every directive valid in its context; zone and map only at http level). The one-line container check is in the README, step 1: `docker run --rm -v "$PWD/relay/deploy:/etc/nginx/carsync:ro" nginx:stable nginx -t -c /etc/nginx/carsync/nginx-check.conf`.
+
+## Notes and deviations
+
+- `progress-now.json` lives in this worktree's git dir, which pack 2's builder shares, so the two
+  builders overwrite each other's "now" file. Expected with one shared worktree.
+- The scaffold tests overlap item boundaries (some rooms tests need `op`/`catchup`), so each item
+  is gated on the tests it turns green, named below; the whole suite is green from item 5 on.
+- **Contract questions for the main session** (built as below, nothing in PROTOCOL.md changed):
+  - A connection whose 1024-frame queue fills (it stopped reading) is dropped from its room and
+    closed with `1001` "too far behind", so the client reconnects with backoff and catches up.
+    PROTOCOL §5's table gives 1001 only for "relay shutting down"; a dedicated code, or a line in
+    the table, is the main session's call.
+  - A database or disk-measuring failure closes with `1011` "storage error" (not in the table).
+    The log line names the failing statement, never a value.
+- Behaviour the protocol leaves open, chosen here:
+  - Every `RELAY_*` variable set to an empty value counts as unset (so `RELAY_ORIGINS=` means the
+    default list, matching `RELAY_CREATE_CODE=` meaning creation is disabled).
+  - More than one `Origin` header is refused with 403.
+  - The disk cap is `usage >= cap` checked before the write, so one write may overshoot by up to one
+    body (512 KB).
+  - The relay creates `RELAY_DATA` if it is missing.
+  - The 5 s close drain is cut to 1 s once shutdown starts, so a client that never answers a close
+    cannot hold up a restart.
+  - A missing room is compared against an all-zero hash, so "no room" and "wrong token" take the
+    same path to 4401.
+- Risk flags for the auth review: `relay/src/auth.rs`, the opening in `relay/src/ws.rs`
+  (`room_ws`, `origin_allowed`, `open`, `create`), and the per-room lock in `handle`/`join`.
+
+- Item 6 follow-up: the README's server steps are split into blocks labelled "On this PC" and
+  "On the server", so no server command can run on the PC when pasted top to bottom. The dev
+  example's `RELAY_ORIGINS` now lists `http://localhost:5173`, which `npm run dev` prints, and
+  `127.0.0.1:5173`. The build-on-server path checks for `rustc` 1.85+ and `cc`, and
+  `Cargo.toml` gains `rust-version = "1.85"`.
+
+## Unit gate (2026-10-08)
+
+`cargo test --manifest-path relay/Cargo.toml --no-fail-fast`: 45 passed, 0 failed. That is the 35
+scaffold tests (config 6, http 5, limits 7, rooms 11, sync 6) plus 10 new unit tests in auth,
+protocol, storage and limits. Five consecutive full runs on item 5 were also 45/0.
+`cargo clippy -- -D warnings` (lib + bin) is clean. The `nginx -t` container check is still open:
+see item 6.

@@ -46,6 +46,30 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.17.0',
+    must: true,
+    title: 'Shared plan: who is editing, and offline work you choose to send',
+    changed: 'The other manager\'s line shows their name and colour. Offline changes that clash with theirs wait for you: send them, look first, or keep them here.',
+    affects: 'Every tab in a shared plan; set your name on the Data tab. The printed sheet and share codes do not change. Update both copies.',
+    data: 'Nothing changes outside a shared plan. Keep them here puts your offline plan in Backups first. Your name and colour stay in this browser.',
+  },
+  {
+    version: '0.16.0',
+    must: true,
+    title: 'Shared plan: changes reach the other manager live',
+    changed: 'Shared plan changes reach the other manager within a second. If you both change one box, the last counts; the other is kept to restore.',
+    affects: 'Every tab in a shared plan. The printed sheet and share codes do not change. Update both copies: an older one only reads it.',
+    data: 'Nothing changes outside a shared plan. In one, this browser keeps its last copy, which older copies ignore. Replacing your plan changes it for both.',
+  },
+  {
+    version: '0.15.0',
+    must: true,
+    title: 'A shared plan for two managers',
+    changed: 'The Data tab has a Shared plan card: create one with the server\'s create code, send its invite link, push named versions, look at them first, restore them, or leave.',
+    affects: 'The Data tab, and a Shared plan status in the top bar while this browser is in one. The printed sheet and share codes do not change. Older copies cannot open invite links: update both first.',
+    data: 'Nothing changes unless you create or join a shared plan. Taking one, or restoring a version, replaces the plan and setup; what was on screen goes into Backups first.',
+  },
+  {
     version: '0.14.1',
     must: false,
     title: 'The date, its crew, and plainer templates',
