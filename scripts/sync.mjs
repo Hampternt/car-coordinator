@@ -708,6 +708,98 @@ await block('changeKey: what a change is about', () => {
   same('an order: its list', Sync.changeKey({ op: 'order', kind: 'route', ids: [] }), Sync.changeKey({ op: 'order', kind: 'route', ids: ['r1'] }));
 });
 
+// --- round 3, pack 5: offline work against the room's, before it is sent ---
+const T = (hhmm) => Date.parse(`2026-10-09T${hhmm}:00Z`);
+const setC = (id, field, value, was) => ({ op: 'set', kind: 'route', id, field, value, was });
+await block('overlap: what sending offline work would write over', () => {
+  const base = samplePlan();
+  const route = (id) => base.routes.find((r) => r.id === id);
+  const mine = [{ at: T('09:10'), changes: [setC('r1', 'driver', 'Mine', '')] }, { at: T('09:14'), changes: [setC('r3', 'round', '5', '')] }];
+  const theirs = [{ at: T('09:18'), changes: [setC('r1', 'driver', 'Theirs', '')] }, { at: T('09:20'), changes: [setC('r4', 'driver', 'Elsewhere', '')] }];
+  const o = Sync.overlap(base, mine, theirs);
+  same('one field both changed: one clash, with both values and both times', o.changes.filter((e) => e.clash).map((e) => [e.kind, e.id, e.field, e.value, e.was, e.at, e.clash.type, e.clash.theirs, e.clash.at]),
+    [['route', 'r1', 'driver', 'Mine', '', T('09:10'), 'set', 'Theirs', T('09:18')]]);
+  same('every change of mine is listed, in plan order, with its time', o.changes.map((e) => [e.id, e.field, e.at, !!e.clash]), [['r1', 'driver', T('09:10'), true], ['r3', 'round', T('09:14'), false]]);
+  same('with the item it is about, for its name', o.changes.map((e) => e.item && e.item.name), ['1', '3']);
+  same('the counts and the newest times on each side', [o.clashes, o.mine, o.theirs, o.clashLast], [1, { count: 2, last: T('09:14') }, { count: 2, last: T('09:20') }, T('09:18')]);
+
+  same('both set the same value: no clash, nothing is written over', Sync.overlap(base, [{ at: 1, changes: [setC('r1', 'driver', 'Same', '')] }], [{ at: 2, changes: [setC('r1', 'driver', 'Same', '')] }]).clashes, 0);
+  same('different fields of one route: no clash (both are kept)', Sync.overlap(base, [{ at: 1, changes: [setC('r1', 'driver', 'A', '')] }], [{ at: 2, changes: [setC('r1', 'round', '2', '')] }]).clashes, 0);
+  same('nothing from the room: no clash', Sync.overlap(base, mine, []).clashes, 0);
+
+  const gone = Sync.overlap(base, [{ at: 1, changes: [setC('r2', 'driver', 'On a gone route', '')] }], [{ at: T('09:30'), changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }]);
+  same('the other removed a route I changed: a clash, with when it was removed', gone.changes.map((e) => [e.id, e.field, e.clash && e.clash.type, e.clash && e.clash.at, e.item.name]), [['r2', 'driver', 'removed', T('09:30'), '2']]);
+  const removed = Sync.overlap(base, [{ at: T('09:05'), changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }], [{ at: T('09:31'), changes: [setC('r2', 'driver', 'Kept on it', '')] }]);
+  same('I removed a route the other changed: a clash, with the route as the other has it', removed.changes.map((e) => [e.op, e.id, e.at, e.clash && e.clash.type, e.clash && e.clash.item.driver, e.clash && e.clash.at]), [['remove', 'r2', T('09:05'), 'changed', 'Kept on it', T('09:31')]]);
+  same('both removed it: no clash', Sync.overlap(base, [{ at: 1, changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }], [{ at: 2, changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }]).clashes, 0);
+  const date = Sync.overlap(base, [{ at: 1, changes: [{ op: 'set', kind: 'meta', field: 'date', value: '2026-10-12', was: base.date }] }], [{ at: 2, changes: [{ op: 'set', kind: 'meta', field: 'date', value: '2026-10-13', was: base.date }] }]);
+  same('the date both changed: a clash on the plan itself', date.changes.map((e) => [e.kind, e.id, e.field, e.value, e.clash && e.clash.theirs]), [['meta', null, 'date', '2026-10-12', '2026-10-13']]);
+  const added = Sync.overlap(base, [{ at: T('08:00'), changes: [{ op: 'add', kind: 'route', item: { id: 'rN', name: 'New' }, after: 'r5' }, { op: 'set', kind: 'route', id: 'rN', field: 'driver', value: 'On it' }] }], [{ at: 2, changes: [setC('r1', 'driver', 'X', '')] }]);
+  same('a route I added: listed once, never a clash', added.changes.map((e) => [e.op, e.id, e.item.driver, e.at, e.clash]), [['add', 'rN', 'On it', T('08:00'), null]]);
+
+  const back = Sync.overlap(base, [{ at: T('09:01'), changes: [setC('r1', 'driver', 'Briefly', '')] }, { at: T('09:02'), changes: [setC('r1', 'driver', '', 'Briefly')] }], [{ at: T('09:20'), changes: [setC('r1', 'driver', 'Theirs', '')] }]);
+  same('changed and changed back, while the other changed it: still a clash, since sending it writes over theirs', back.changes.map((e) => [e.id, e.field, e.value, e.was, e.clash && e.clash.theirs]), [['r1', 'driver', '', '', 'Theirs']]);
+
+  const untimed = Sync.overlap(base, [{ at: T('09:10'), changes: [setC('r1', 'driver', 'Mine', '')] }], [{ at: null, changes: [setC('r1', 'driver', 'From 0.16', '')] }]);
+  same('the other\'s op with no time (0.16.0): the clash says unknown', [untimed.clashes, untimed.changes[0].clash.at, untimed.theirs.last, untimed.clashLast], [1, null, null, null]);
+  const timed = Sync.overlap(base, [{ at: T('09:00'), times: { [Sync.fieldKey('route', 'r1', 'driver')]: T('08:45') }, changes: [setC('r1', 'driver', 'Mine', ''), setC('r2', 'driver', 'Too', '')] }], []);
+  same('a batch\'s own times per change win over its at', timed.changes.map((e) => e.at), [T('08:45'), T('09:00')]);
+
+  // The room compacted while this browser was away: its ops start from a
+  // snapshot past the base, which already holds the other's earlier change.
+  const snap = Sync.applyAll(base, [setC('r1', 'driver', 'In the snapshot', '')]);
+  const compacted = Sync.overlap(base, [{ at: T('09:10'), changes: [setC('r1', 'driver', 'Mine', ''), setC('r2', 'driver', 'Mine too', '')] }], [{ at: T('09:40'), changes: [setC('r2', 'driver', 'After it', '')] }], snap);
+  same('compacted past the base: a clash with the snapshot\'s change (no time) and with the ops after it', compacted.changes.map((e) => [e.id, e.clash && e.clash.theirs, e.clash && e.clash.at]), [['r1', 'In the snapshot', null], ['r2', 'After it', T('09:40')]]);
+  same('and the room\'s count is everything since the base', compacted.theirs.count, 2);
+  // An edit of this browser's sent before the connection dropped, sequenced
+  // but not acked: part of the room's plan, never the other's.
+  const ownOp = Sync.overlap(base, [{ at: T('09:12'), changes: [setC('r1', 'driver', 'Then this', 'First this')] }], [{ at: T('09:11'), own: true, changes: [setC('r1', 'driver', 'First this', '')] }]);
+  same('this browser\'s own op, sequenced before the drop: no clash, and not counted as the other\'s', [ownOp.clashes, ownOp.theirs], [0, { count: 0, last: null }]);
+  // A box typed in while the other changed it, rebuilt after a reload: its
+  // was is older than the base. A live collision, flagged as it goes out,
+  // not offline work.
+  const typed = Sync.applyAll(base, [setC('r1', 'driver', 'Theirs, live', '')]);
+  same('an edit whose was is older than the base (a held box, reloaded): no clash', Sync.overlap(typed, [{ at: 1, changes: [setC('r1', 'driver', 'Typed', '')] }], []).clashes, 0);
+  check('overlap never changes what it is given', J(base) === J(samplePlan()));
+});
+
+await block('overlap: its clashes are exactly the flags sending would raise', () => {
+  const keyOf = (f) => (f.type === 'set' || f.field ? Sync.fieldKey(f.kind, f.id, f.field) : Sync.itemKey(f.kind, f.id));
+  let bad = null;
+  let withClashes = 0;
+  for (let seed = 1; seed <= 300 && !bad; seed++) {
+    const rand = rng(seed * 7919);
+    const base = samplePlan();
+    // Each side edits offline from the same base, in batches, as captures do.
+    const side = (tag) => {
+      const R = Sync.replica(0, base);
+      let screen = base;
+      const out = [];
+      for (let i = 0, n = 1 + Math.floor(rand() * 5); i < n; i++) {
+        for (let j = 0, m = 1 + Math.floor(rand() * 3); j < m; j++) screen = mutate(screen, rand, `${tag}${seed}x`);
+        const b = R.capture(screen, { at: 1000 * (i + 1) });
+        if (b) out.push(JSON.parse(J(b)));
+      }
+      return out;
+    };
+    const mine = side('m');
+    const theirs = side('t');
+    const o = Sync.overlap(base, mine, theirs);
+    // Send: the room holds theirs, then mine is sequenced after it.
+    const X = Sync.replica(0, base);
+    let seq = 0;
+    for (const b of theirs) X.take(++seq, b.changes, `t${seq}`, b.at);
+    X.drain();
+    for (const b of mine) X.take(++seq, b.changes, `m${seq}`, b.at);
+    const flagged = [...new Set(X.drain().flags.map(keyOf))].sort();
+    const found = o.changes.filter((e) => e.clash).map((e) => e.key).sort();
+    if (found.length) withClashes++;
+    if (J(flagged) !== J(found)) bad = `seed ${seed}: flags ${J(flagged)} but overlap ${J(found)}`;
+  }
+  check('300 random offline sessions on both sides: overlap finds the very fields and items sending flags', !bad, bad);
+  check('and the sessions were not all clash-free', withClashes > 50, String(withClashes));
+});
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);
