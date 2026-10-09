@@ -70,7 +70,7 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   edge like the tag; a rail row or template card is too narrow for both, so there the note takes
   the tag's place. On a template card it reads "… is editing this template".
 
-- The pill fix styles two elements outside presence's own (`.topbar .sync-pill`, `.topbar .brand`,
+- The pill fix styles three elements outside presence's own (`.topbar .sync-pill`, `.topbar .brand`,
   `.topbar .primary`), from the presence region and only above 1400 px. Without presence words the
   pill is never cut, so the bar is as before.
 
@@ -84,4 +84,21 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   "with no dialog and no Reload this tab in either tab", plus "a note changed there: only its box is
   redrawn here" (render count 1, fixed here by patching the pill in place). Suggested fix in
   `pillSays`: compare `textContent.split(' \u00b7 ')[0]` (the part before presence's words).
+  On the final branch: sync-ui 408 ok, 4 FAIL (the four pill waits above, nothing else). The same
+  tree with only `pillSays` amended to
+  `(document.getElementById('syncStatus')?.textContent || '').split(' \u00b7 ')[0] === \`Shared plan: ${t}\``
+  passes: `sync-ui checks passed`, 401 ok (exported copy, so the 0.15.0 git sections skip).
+- `package.json` already runs `presence-ui.mjs` after `sync-ui` (the scaffold's claim). It takes
+  about 2.5 minutes, most of it two real waits (the 20 s heartbeat and the 45 s timeout).
+- Known and accepted: a reload before its `bye` gets out leaves the old tab's marks for up to 45 s
+  (the pill shows the name once, so it reads right).
+
+## Final gates (end of unit)
+
+- `bash scripts/check.sh`: CHECK OK.
+- `node scripts/presence-ui.mjs`: `presence-ui checks passed`, 124 ok, 0 FAIL.
+- `node scripts/colour-guard.mjs`: `colours: every one is a token`.
+- `node scripts/smoke.mjs`: `all checks passed` (3 groups skipped for the stored file handle, as before).
+- `node scripts/sync-ui.mjs`: 408 ok, 4 FAIL, all `pillSays` exact matches (see above; passes with the
+  one-line amendment).
 

@@ -241,16 +241,16 @@ const Presence = (() => {
 
   // attach(api): keep the app's hooks and start listening. Nothing of the
   // api is called from here: the app is still starting.
-  function attach(given) {
-    api = given;
+  function attach(hooks) {
+    api = hooks;
     listen();
   }
 
   /* ---------- the marks ----------
    A row someone else is in: tinted in their colour, with their name in a tag
    at its start; the box they are in: a ring in their colour. Classes and two
-   data-presence-* attributes only, on the row and its first cell, never on a
-   box (the app finds the focused box again by its data-* attributes after a
+   data-presence-* attributes only, on the row and its first and last cells,
+   never on a box (the app finds the focused box again by its data-* attributes after a
    redraw), and the tag is drawn by CSS (::before), absolutely placed and
    deaf to the pointer: nothing moves, nothing takes a click or the focus. */
   // The rows a place can be in: a route on the Day plan, a driver or car on
