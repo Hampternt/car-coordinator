@@ -30,3 +30,15 @@ passed, 544 ok (3 min 42 s).
 - Fix 3, choice: edits made while held are part of what Keep keeps (in its Backup) and are never sent, in the tab Keep is pressed in and in every tab that follows it (`roomKeepDrop`, shared by both). That matches the bar ("not sent until you choose", "with what you changed since") and the hint, which now ends "and nothing you changed since going offline is sent". A following tab puts its own screen into Backups first under the same label (free when it is the same plan: Store.snapshot skips one identical to the newest), and stays held if that cannot be taken.
 - Fix 3, Send followed in another tab: the follower takes up the answering tab's whole stored queue as sent (held batches and those made while held alike), not only the reviewed oids, so an edit made after the hold and read by a tab opened later is not sent twice. An edit only the follower holds is its own and still goes out (none in practice: a held tab stops when another one edits, fix 2).
 - Fix 4, choice: the notice names the Backup that actually holds the plan (`backupHolding`: the newest entry when it holds exactly the plan on screen, which is what Store.snapshot leaves when it skips an identical one), rather than forcing a second identical entry. store.js's `{replace}` does not bypass the identical-entry skip, so forcing one would need a new store.js option; naming the real one changes nothing outside the Shared plan code.
+
+## Final gates (on a4a5aa4)
+
+- `check.sh`: CHECK OK.
+- `npm test` (once, 12 min 57 s), exit 0: versions OK; map checks passed; sync checks passed (214 ok); sync-ui checks passed (588 ok); presence-ui checks passed; smoke: all checks passed (3 groups skipped for the stored file handle, as before); breadify: all passed.
+- Not run: `npm run upgrade`, `screens`, the relay's `cargo test` (relay/ untouched), the browser smoke check (main session's). No version bump.
+
+## For the concurrency + live-data review
+
+- Fix 2 decides by storage-event order: another tab's plan, then its base, arrive key by key; a held tab judges the plan when the base arrives (or 500 ms after the plan, should none come). A base write skipped by its head check (nothing changed in it) leaves only the timer. The worst wrong call is a held tab stopping when it need not (quiet, its plan in Backups); a missed edit needs the other tab to save a plan at this tab's seq with no base write after it and a second save from this tab over it.
+- Held edits are captured per input event while held (fix 2): more, smaller ops when Send is pressed.
+- Fix 3's Send follow marks the answering tab's whole queue as sent; it relies on that tab's ops arriving to clear them (as round 3 already did for the reviewed batches).
