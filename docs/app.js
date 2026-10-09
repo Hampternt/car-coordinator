@@ -4115,14 +4115,23 @@ async function roomOfferStart(secret) {
    Held for the review (round 3), a tab sends nothing, so an edit made in
    another held tab never reaches this one from the room: this one stops too,
    as one that cannot follow, rather than save its plan over that edit
-   (heldTabEdited). */
+   (heldTabCheck). */
 window.addEventListener('storage', (e) => {
   if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
   let now = null;
   try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
   // The plan this tab last saved, written again: nothing has changed.
   if (now === JSON.stringify(state)) return;
-  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected' && !heldTabEdited(room)) return;
+  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected') {
+    // Held: judged with the base the other tab writes just after its plan.
+    if (roomHeld(room)) heldTabSoon();
+    return;
+  }
+  roomStopSaving();
+});
+// The base another tab wrote beside its plan.
+window.addEventListener('storage', (e) => { if (e.key === BASE_KEY) heldTabCheck(); });
+function roomStopSaving() {
   planElsewhere = true;
   // What this tab held that the other's plan may not: kept in Backups now.
   // A tab following the room keeps sending its edits (roomFlush), but until
@@ -4131,21 +4140,31 @@ window.addEventListener('storage', (e) => {
   const unsent = r.rep && !r.legacy ? r.rep.queue.length > 0 || Sync.diff(r.rep.shadow, state).length > 0 : savedHere;
   if (unsent) roomFrozenBackup(true);
   renderRoom();
-});
+}
 
-/* Whether the plan another tab just saved holds an edit made there while
-   both tabs are held. Both follow the room's changes, so a save that only
-   differs by one of those (one tab has applied it, the other not yet) is
-   not one: the base beside it says which seq that tab's plan is at, written
-   in the same moment as the plan, and the tab behind saves again once it has
-   caught up, and is judged then. A review answered there (gone, or being
-   sent) is not one either: the answer follows (roomReviewFollow). */
-function heldTabEdited(r) {
-  if (!roomHeld(r) || !r.keys || !r.rep) return false;
+/* Held, and another tab saved a plan that is not this one's: whether it
+   holds an edit made there. Both tabs follow the room's changes, so a save
+   that only differs by one of those (one tab has applied it, the other not
+   yet) is not one: the base beside it says which seq that tab's plan is at,
+   and the tab behind saves again once it has caught up, and is judged then.
+   A review answered there (gone, or being sent) is not one either: the
+   answer follows (roomReviewFollow). The base is written just after the
+   plan, and reaches this tab after it, so the plan is judged when its base
+   arrives (and, should none come, a moment later). */
+function heldTabCheck() {
+  const r = room;
+  if (!r || planElsewhere || !roomHeld(r) || !r.keys || !r.rep || !r.caught || !r.conn || r.conn.status !== 'connected') return;
   let b = null;
-  try { b = JSON.parse(localStorage.getItem(BASE_KEY)); } catch { return false; }
-  if (!b || b.room !== r.keys.roomId || !b.review || b.review.state !== 'held' || b.review.id !== r.review.id) return false;
-  return b.seq === r.rep.seq;
+  let now = null;
+  try { b = JSON.parse(localStorage.getItem(BASE_KEY)); now = localStorage.getItem('carcoord:v1'); } catch { return; }
+  if (now === JSON.stringify(state)) return;
+  if (!b || b.room !== r.keys.roomId || !b.review || b.review.state !== 'held' || b.review.id !== r.review.id || b.seq !== r.rep.seq) return;
+  roomStopSaving();
+}
+let heldTabTimer = null;
+function heldTabSoon() {
+  clearTimeout(heldTabTimer);
+  heldTabTimer = setTimeout(() => { heldTabTimer = null; heldTabCheck(); }, 500);
 }
 
 /* A tab another one saved over keeps a copy of its plan in Backups: one entry,

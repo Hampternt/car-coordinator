@@ -2225,6 +2225,15 @@ const stopped = (pg) => pg.evaluate(() => planElsewhere);
   }
   await wait(400);
   same('the other manager\'s changes arriving in both held tabs stop neither', [await stopped(a.page), await stopped(tab2)], [false, false]);
+  // One tab well behind the other on the room's changes: the other's plan,
+  // saved with one more of them, is not an edit made there.
+  await a.page.evaluate(() => { room.frames = room.frames.then(() => new Promise((go) => setTimeout(go, 1500))); });
+  await routeBox(b.page, 11, 'driver').fill('Arrives Late');
+  await b.page.keyboard.press('Tab');
+  await tab2.waitForFunction(() => state.routes[11].driver === 'Arrives Late', null, { timeout: 5000 }).catch(() => {});
+  check('one held tab well behind the other on a change from the room: it waits for it, and stops nothing', await a.page.waitForFunction(() => state.routes[11].driver === 'Arrives Late', null, { timeout: 5000 }).then(() => true, () => false));
+  await wait(400);
+  same('neither tab stopped', [await stopped(a.page), await stopped(tab2)], [false, false]);
   const sent = ops().length;
   await routeBox(tab2, 7, 'driver').fill('Tab Two Held');
   await wait(600);
