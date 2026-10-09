@@ -3875,9 +3875,10 @@ function roomSays() {
   }
   if (status === 'connected' && roomReadOnly()) return { short: 'Update the app', text: 'Update the app to edit the shared plan. It was saved by a newer version of Car Coordinator, so this browser only reads it.', cls: 'warn-status' };
   if (status === 'connected' && room.legacy) return { short: 'Not live', text: 'Connected, but your edits do not reach the shared plan yet: this browser joined it before live updates, and the plan here differs from it. Take the shared plan to edit it together; your plan goes into Backups first.', cls: 'warn-status' };
-  if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
-  // Held for the review (round 3): nothing of this browser's goes out.
+  // Held for the review (round 3): nothing of this browser's goes out, so never
+  // Sending…, even with an edit waiting from before the connection went.
   if (status === 'connected' && roomHeld()) return { short: 'Connected', text: 'Connected to the shared plan. Your offline changes are waiting for your answer on the Shared plan card on the Data tab, and nothing you change is sent until then. The other manager\u2019s changes keep arriving.', cls: 'on' };
+  if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
   if (status === 'connected') return { short: 'Connected', text: room.rep ? 'Connected to the shared plan. Your changes reach the other manager as you make them.' : 'Connected to the shared plan.', cls: 'on' };
   if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
   return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };

@@ -2060,6 +2060,10 @@ const offlineClash = async (a, b, ops) => {
   check('and the bar says Connected all the same', await pillSays(a.page, 'Connected', 1000), await pill(a.page).textContent());
   const heldSays = await pill(a.page).getAttribute('title');
   check('its status says the offline changes wait for an answer, not that changes reach the other as made', /waiting for your answer/.test(heldSays) && !/as you make them/.test(heldSays), heldSays);
+  // An edit was still on its way when the connection went: the queue never
+  // emptied, so it has been waiting since then. Held, it is not being sent.
+  const sendingSays = await a.page.evaluate(() => { const was = room.waitingSince; room.waitingSince = Date.now() - 5000; renderRoomPill(); const p = document.getElementById('syncStatus'); const out = [p.textContent, p.title]; room.waitingSince = was; renderRoomPill(); return out; });
+  check('and never Sending\u2026 while held, even with an edit waiting from before the connection went', /^Shared plan: Connected/.test(sendingSays[0]) && /waiting for your answer/.test(sendingSays[1]), JSON.stringify(sendingSays));
   // The review: a bar on the Shared plan card and a note beside the pill.
   same('beside the pill, a quiet note', await a.page.locator('#syncReview').innerText().catch(() => null), 'Offline changes not sent');
   check('and no dialog', await a.page.evaluate(() => !document.querySelector('dialog[open]')));
