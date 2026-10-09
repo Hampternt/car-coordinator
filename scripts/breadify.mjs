@@ -1936,6 +1936,12 @@ const freshPrint = () => page.evaluate(() => ({
 await page.keyboard.press('Control+p');
 const afterOpen = await freshPrint();
 const freezerLaidOut = afterOpen.laidOut.length;
+// A Totals checked box under each freezer route's total, once per route even
+// when the total runs over two sheets (the owner, 2026-10-09).
+const freezerTotalBoxes = await page.evaluate(() => {
+  const routes = [...new Set(Array.from(document.querySelectorAll('#preview .bf-sheet'), (s) => s.dataset.route))];
+  return routes.map((r) => document.querySelectorAll(`#preview .bf-sheet[data-route="${CSS.escape(r)}"] .bf-total-checked .bf-tick`).length);
+});
 await page.click('#steps [data-step="check"]');
 await page.click('#mode [data-kind="bread"]');
 await page.evaluate(() => {
@@ -1952,6 +1958,8 @@ check('Ctrl+P after opening another file goes to Print and prints that file’s 
   && JSON.stringify(afterOpen.printed) === JSON.stringify(afterOpen.laidOut) && afterOpen.printed.length !== breadLaidOut,
   JSON.stringify({ ...afterOpen, breadLaidOut }));
 check('the freezer day was laid out before its kind was switched', freezerLaidOut > 0, String(freezerLaidOut));
+check('every freezer route has one Totals checked box under its total',
+  freezerTotalBoxes.length > 0 && freezerTotalBoxes.every((n) => n === 1), JSON.stringify(freezerTotalBoxes));
 check('and after switching between bread and freezer on Check, the sheets of the kind chosen',
   afterFlip.onPrint && afterFlip.kind === 'bread' && afterFlip.printed.length > 0
   && JSON.stringify(afterFlip.printed) === JSON.stringify(afterFlip.laidOut) && afterFlip.printed.length !== freezerLaidOut,
