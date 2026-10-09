@@ -2058,6 +2058,8 @@ const offlineClash = async (a, b, ops) => {
   await wait(800);
   same('held: nothing of them reaches the relay', ops().length, sent);
   check('and the bar says Connected all the same', await pillSays(a.page, 'Connected', 1000), await pill(a.page).textContent());
+  const heldSays = await pill(a.page).getAttribute('title');
+  check('its status says the offline changes wait for an answer, not that changes reach the other as made', /waiting for your answer/.test(heldSays) && !/as you make them/.test(heldSays), heldSays);
   // The review: a bar on the Shared plan card and a note beside the pill.
   same('beside the pill, a quiet note', await a.page.locator('#syncReview').innerText().catch(() => null), 'Offline changes not sent');
   check('and no dialog', await a.page.evaluate(() => !document.querySelector('dialog[open]')));
