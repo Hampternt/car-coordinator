@@ -232,7 +232,7 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 
 ## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Status:** 🚧 building: the owner said go on 2026-10-09 and asked for agents to speed it up. Runs parallel (below). Both packs write `docs/app.js`, so they run serial: pack 4 first.
+**Status:** 🚧 built in parallel, merged, reviewed, fixed and tested on the owner's server as 0.17.0; handed over for the owner's Test it yourself. Not merged into `dev`. Both packs write `docs/app.js`, so they run serial: pack 4 first.
 
 ### Round 3 runs parallel (owner, 2026-10-09: "assign agents to help speed up work")
 
@@ -304,6 +304,27 @@ Counted under the count rule:
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-09: **round 3 built in parallel and handed over as 0.17.0.** Ledgers are in `manifests/archive/2026-10-09-shared-plan-r3-*.ledger.md`.
+  - **Scaffold** f28c7ec. The builders worked in nested worktrees `.wt/pack4` and `.wt/pack5` and are now removed. Separation proved before merging: the only shared file was `docs/style.css`, one hunk in each pack's own region, and pack 5 left the presence lines untouched.
+  - **Pack 4, who is editing** (569f07e…5e4b517): `presence-ui` 124 ok.
+  - **Pack 5, offline review** (15f7e26…ab3f932): `sync` 197 ok, `sync-ui` 544 ok.
+  - **Main session's merge fixes:**
+    - `pillSays` compares only the pill's own words;
+    - one presence id per browser, so the owner's own tabs never mark each other (the owner's call), made lazily in fd14b00 after the suite caught it written ahead of the update archive at boot;
+    - a no-op `Presence` for an old cached `index.html` (9d4d5dc), caught by the upgrade check's mixed files.
+  - **Targeted review of pack 5** (concurrency and live data) found:
+    - **important:** two held tabs could lose an edit;
+    - **low:** Keep did different things in one tab and two; Keep's notice could name a Backup that wasn't written; the status still said changes were sent while held.
+    
+    The owner's "by line, not by field" was also missed. All are fixed with tests that failed first (73da1f5…156ca3a); the fixer's `npm test` exited 0 with `sync-ui` at 589 ok.
+  - **Gates on the final build:**
+    - `npm run upgrade`: `upgrade check passed: 0.14.1 to 0.17.0`;
+    - `screens`: `no console errors, 4 warnings raised and asserted`;
+    - full `npm test` on 9d4d5dc: see the next line.
+  - **Against the owner's server** (two Playwright browsers plus the owner's window 1):
+    - presence: the row is marked within 68 ms; the bar reads "Cato is here · Day plan", then "· Cars"; "Cato is editing this line" shows; typing in a marked line works;
+    - offline review: C offline, both change route 4 (C its driver, B its round). Back online, C was held with "You changed 1 thing offline… The other manager changed that line too…"; nothing reached B while held; Send left both screens identical with both values kept;
+    - no app errors.
 - 2026-10-09: **test copy on the owner's server**, for testing on other devices (owner's go):
   - this build's `docs/` is in `/var/www/carsync-test`, served at `https://portfolio.dblo.net/carsync-test/` by a new nginx `location` (`no-cache`, backup `portfolio.bak-20261009-0033`);
   - `RELAY_ORIGINS` gains `https://portfolio.dblo.net`;
