@@ -380,6 +380,67 @@ const layoutOf = (pg) => pg.evaluate(() => [...document.querySelectorAll('#tab-p
   await a.context.close(); await b.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// 5. Elsewhere: the rail, the Drivers, Cars and Positions tabs and the
+// template cards carry the same marks; the bar names the tab.
+const marked = (pg, sel) => pg.evaluate((q) => [...document.querySelectorAll(q)].map((r) => {
+  const start = r.tagName === 'TR' ? r.cells[0] : r;
+  return { tag: start.getAttribute('data-presence-who'), drawn: getComputedStyle(start, '::before').content, colour: [...r.classList].find((c) => c.startsWith('pr-c-')) || null };
+}), sel);
+const ringed = (pg, sel) => pg.evaluate((q) => [...document.querySelectorAll(q)].filter((el) => el.classList.contains('presence-box')).length, sel);
+{
+  const { secret } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'blue' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  const plan = JSON.parse(PLAN);
+  const driver = plan.drivers[2], car = plan.cars[3], pos = plan.positions[1], tpl = plan.templates.find((t) => t.routes.length);
+  const KARI = [{ tag: 'Kari', drawn: '"Kari"', colour: 'pr-c-blue' }];
+  const railBefore = await layoutOf(b.page);
+
+  await tabTo(a.page, 'drivers');
+  await a.page.locator(`#tab-drivers [data-kind="driver"][data-id="${driver.id}"][data-field="note"]`).focus();
+  check('the other on the Drivers tab: the bar says so', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Drivers', 1500), await pillOf(b.page));
+  check('in a driver\'s row there: that driver\'s rail row is marked here', await pageUntil(b.page, (id) => !!document.querySelector(`.rail-row[data-drag="driver"][data-id="${id}"].presence-row`), driver.id, 1000));
+  same('with their name tag and colour', await marked(b.page, '.rail-row.presence-row'), KARI);
+  same('and nothing on the rail moved', await layoutOf(b.page), railBefore);
+  await tabTo(b.page, 'drivers');
+  same('the Drivers tab here: the same row marked', await marked(b.page, '#tab-drivers tbody tr.presence-row'), KARI);
+  same('and the note box ringed', await ringed(b.page, `#tab-drivers [data-id="${driver.id}"][data-field="note"]`), 1);
+
+  await tabTo(a.page, 'cars');
+  await a.page.locator(`#tab-cars [data-kind="car"][data-id="${car.id}"][data-field="reg"]`).focus();
+  check('the Cars tab: the bar says so', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Cars', 1500), await pillOf(b.page));
+  await tabTo(b.page, 'cars');
+  check('the car\'s row on the Cars tab here is marked', await pageUntil(b.page, () => document.querySelectorAll('#tab-cars tbody tr.presence-row').length === 1, null, 1000));
+  same('with their tag', await marked(b.page, '#tab-cars tbody tr.presence-row'), KARI);
+  same('the registration ringed, here and on the rail', [await ringed(b.page, `#tab-cars [data-id="${car.id}"][data-field="reg"]`), await ringed(b.page, `.rail-row [data-id="${car.id}"][data-field="reg"]`)], [1, 1]);
+  same('the driver they left is marked no more', await marked(b.page, '#tab-drivers tbody tr.presence-row, .rail-row[data-drag="driver"].presence-row'), []);
+  await tabTo(b.page, 'plan');
+  same('and on the Day plan\'s rail, the car\'s row', await marked(b.page, `.rail-row[data-drag="car"][data-id="${car.id}"].presence-row`), KARI);
+
+  await tabTo(a.page, 'positions');
+  await a.page.locator(`#tab-positions [data-kind="position"][data-id="${pos.id}"][data-field="name"]`).focus();
+  check('the Positions tab: the bar says so', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Positions', 1500), await pillOf(b.page));
+  await tabTo(b.page, 'positions');
+  check('the position\'s row there is marked', await pageUntil(b.page, () => document.querySelectorAll('#tab-positions tbody tr.presence-row').length === 1, null, 1000));
+  same('with their tag', await marked(b.page, '#tab-positions tbody tr.presence-row'), KARI);
+
+  await tabTo(a.page, 'plan');
+  await tabTo(b.page, 'plan');
+  await a.page.locator(`.tpl-head[data-tpl="${tpl.id}"] [data-act="resave-template"]`).focus();
+  check('a template card the other is on: marked here', await pageUntil(b.page, (id) => !!document.querySelector(`.tpl-head[data-tpl="${id}"].presence-row`), tpl.id, 1000));
+  same('with their tag', await marked(b.page, '.tpl-head.presence-row'), KARI);
+  check('the tag sits inside the card, never above it', await b.page.evaluate((id) => {
+    const h = document.querySelector(`.tpl-head[data-tpl="${id}"]`);
+    return getComputedStyle(h, '::before').transform === 'none';
+  }, tpl.id));
+  await tabTo(a.page, 'preview');
+  check('the Print preview: the bar names it as the tab does', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Print preview', 1500), await pillOf(b.page));
+  check('and no row is marked: they are in none', await pageUntil(b.page, () => !document.querySelector('.presence-row'), null, 1000));
+  same('elsewhere: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
 // Dark mode: the tag, the tint and the ring in the dark values, still seen.
 {
   const { secret } = liveRoom();

@@ -17,7 +17,8 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   Gate: check.sh OK; presence-ui 55 ok, 0 FAIL (bye clears within 1 s; a silenced browser is let go 44-49 s after; offline clears, reconnect restores). `pillText()` built here, as receiving's visible half.
 - [x] **4. Day plan marks**: row tint, name tag, box outline; survive redraws; nothing moves.
   Gate: check.sh OK; colour-guard clean; presence-ui 83 ok, 0 FAIL (marks within 1 s; layout identical to the pixel; typing in a marked row keeps every key and the caret; marks back after a remote redraw; dark values checked).
-- [ ] **5. Elsewhere**: rail rows, Cars/Drivers/Positions rows, template cards; `pillText()`.
+- [x] **5. Elsewhere**: rail rows, Cars/Drivers/Positions rows, template cards; `pillText()`.
+  Gate: check.sh OK; colour-guard clean; presence-ui 104 ok, 0 FAIL (rail, Drivers, Cars, Positions, template card; the bar names Drivers, Cars, Positions, Print preview as the tabs do).
 - [ ] **6. Quiet note**: "Kari is editing this line" beside a row the other is in; never blocks.
 
 ## Decisions

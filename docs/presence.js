@@ -253,7 +253,9 @@ const Presence = (() => {
    box (the app finds the focused box again by its data-* attributes after a
    redraw), and the tag is drawn by CSS (::before), absolutely placed and
    deaf to the pointer: nothing moves, nothing takes a click or the focus. */
-  const ROWS = '#tab-plan tbody tr[data-route]';
+  // The rows a place can be in: a route on the Day plan, a driver or car on
+  // its rail, a row of the Drivers, Cars and Positions tabs, a template card.
+  const ROWS = '#tab-plan tbody tr[data-route], .rail-row, #tab-drivers tbody tr, #tab-cars tbody tr, #tab-positions tbody tr, .tpl-head[data-tpl]';
   const MARKED = '.presence-row, .presence-box, [data-presence-who]';
   const COLOURS = KEYS.map((k) => `pr-c-${k}`);
   function unmark() {
@@ -270,7 +272,10 @@ const Presence = (() => {
   }
   function rowsOf(at, controls) {
     const rows = new Set();
-    if (at.kind === 'route' && at.id) for (const r of document.querySelectorAll(`#tab-plan tbody tr[data-route="${CSS.escape(at.id)}"]`)) rows.add(r);
+    const id = at.id && CSS.escape(at.id);
+    if (id && at.kind === 'route') for (const r of document.querySelectorAll(`#tab-plan tbody tr[data-route="${id}"]`)) rows.add(r);
+    if (id && at.kind === 'template') for (const r of document.querySelectorAll(`.tpl-head[data-tpl="${id}"]`)) rows.add(r);
+    if (id) for (const r of document.querySelectorAll(`.rail-row[data-drag="${CSS.escape(at.kind)}"][data-id="${id}"]`)) rows.add(r);
     for (const el of controls) { const r = el.closest(ROWS); if (r) rows.add(r); }
     return rows;
   }

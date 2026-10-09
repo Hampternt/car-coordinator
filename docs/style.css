@@ -860,6 +860,12 @@ body.show-sheet .sheet {
   font: 600 10px/1.5 var(--body); pointer-events: none;
 }
 .presence-box { box-shadow: 0 0 0 2px var(--pc); }
+/* The same on the rail's rows and a template card. Their tag sits inside the
+   row's top edge rather than across it: the lists and the shelf scroll, and
+   would cut the top one off. */
+.rail-list li.presence-row, .tpl-head.presence-row { background-image: linear-gradient(var(--pc-tint), var(--pc-tint)); }
+.tpl-head.presence-row { position: relative; }
+.rail-row[data-presence-who]::before, .tpl-head[data-presence-who]::before { top: 1px; left: 1px; transform: none; }
 
 
 /* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */
