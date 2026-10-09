@@ -2066,9 +2066,9 @@ const offlineClash = async (a, b, ops) => {
   check('the note opens the Data tab, where the bar is', await a.page.locator('#roomReview').isVisible());
   const [t14, t20] = await a.page.evaluate(([x, y]) => [when(x), when(y)], [clockAt('09:14'), clockAt('09:20')]);
   same('the bar says how much each changed, and when, by each one\'s clock', await a.page.locator('#roomReview .room-review-says').innerText(),
-    `You changed 2 things offline (last ${t14}). The other manager changed one of them too (last ${t20}). The rest of what they changed is on your screen already. Yours are on your screen, marked, and not sent until you choose.`);
+    `You changed 2 things offline (last ${t14}). The other manager changed one of those lines too (last ${t20}). The rest of what they changed is on your screen already. Yours are on your screen, marked, and not sent until you choose.`);
   same('with its three choices', await a.page.locator('#roomReview button').allInnerTexts(), ['Send my changes', 'Look first', 'Keep them on this PC only']);
-  const unknown = await a.page.evaluate(() => { const res = room.review.result; const t = res.clashLast; res.clashLast = null; const html = roomReviewHtml(); res.clashLast = t; return html; });
+  const unknown = await a.page.evaluate(() => { const res = room.review.result; const t = res.lineLast; res.lineLast = null; const html = roomReviewHtml(); res.lineLast = t; return html; });
   check('a time the other\'s op did not carry (0.16.0) reads as unknown', /last time unknown/.test(unknown) && !/NaN|Invalid/.test(unknown), unknown);
   // Look first: the list, inline under the bar.
   const before = [await planOf(a.page), ops().length];
@@ -2294,7 +2294,7 @@ const reviewOids = (pg) => pg.evaluate(() => (room.review ? room.review.oids : [
   await pillSays(a.page, 'Connected', 10000);
   check('back: still held', await a.page.waitForFunction(() => roomHeld() && room.caught, null, { timeout: 5000 }).then(() => true, () => false));
   await a.page.click('#syncReview');
-  check('the review now counts both fields the other changed too', await a.page.waitForFunction(() => /The other manager changed 2 of them too/.test(document.getElementById('roomReview').innerText), null, { timeout: 5000 }).then(() => true, () => false), await a.page.locator('#roomReview').innerText().catch(() => ''));
+  check('the review now counts both fields the other changed too', await a.page.waitForFunction(() => /The other manager changed 2 of those lines too/.test(document.getElementById('roomReview').innerText), null, { timeout: 5000 }).then(() => true, () => false), await a.page.locator('#roomReview').innerText().catch(() => ''));
   await wait(600);
   same('and nothing was sent on the way', ops().length, sent);
   await a.page.click('[data-act="room-review-send"]');
@@ -2408,6 +2408,68 @@ const reviewOids = (pg) => pg.evaluate(() => (room.review ? room.review.oids : [
   check('no hold and no bar', !(await held(a.page)) && (await a.page.locator('#roomReview').count()) === 0);
   check('both end on one plan, with both edits', await converged(a.page, b.page) && JSON.parse(await planOf(a.page)).routes[1].driver === 'Quiet Offline' && JSON.parse(await planOf(a.page)).routes[4].driver === 'Other Line');
   same('no overlap: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// By line, not by field (owner, 2026-10-09): the review appears when the
+// other changed a line changed offline here, even another box on it. Send is
+// still per field: both are kept, and nothing is flagged.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  relay.cut(a.context);
+  await pillSays(a.page, 'Offline');
+  await a.page.clock.setFixedTime(clockAt('09:14'));
+  await routeBox(a.page, 2, 'driver').fill('Line Mine');
+  await wait(500);
+  await b.page.clock.setFixedTime(clockAt('09:20'));
+  await routeBox(b.page, 2, 'round').fill('5');
+  await b.page.keyboard.press('Tab');
+  await until(() => ops().length === 1);
+  const sent = ops().length;
+  relay.mend(a.context);
+  await pillSays(a.page, 'Connected', 10000);
+  check('offline, route 3\'s driver here and its round there: the review appears', await a.page.waitForFunction(() => roomHeld(), null, { timeout: 5000 }).then(() => true, () => false));
+  await wait(600);
+  same('held: nothing sent', ops().length, sent);
+  const [t14, t20] = await a.page.evaluate(([x, y]) => [when(x), when(y)], [clockAt('09:14'), clockAt('09:20')]);
+  await a.page.click('#syncReview');
+  same('the bar counts the line', await a.page.locator('#roomReview .room-review-says').innerText(),
+    `You changed 1 thing offline (last ${t14}). The other manager changed that line too (last ${t20}). Yours are on your screen, marked, and not sent until you choose.`);
+  await a.page.click('[data-act="room-review-look"]');
+  const n3 = created.plan.routes[2].name;
+  same('Look first lists the line, with the field each side changed', await a.page.locator('#roomReview .room-review-list li').allInnerTexts(),
+    [`Both changed: Route ${n3}'s driver: yours “Line Mine” (${t14}). They changed its round to “5” (${t20}).`]);
+  await a.page.click('[data-act="tab"][data-tab="plan"]');
+  same('the box is marked as on a line both changed', await boxClass(a.page, 2, 'driver'), 'room-offline-clash');
+  await a.page.click('[data-act="tab"][data-tab="data"]');
+  await a.page.click('[data-act="room-review-send"]');
+  check('Send: one plan', await converged(a.page, b.page));
+  same('with both changes kept', JSON.parse(await planOf(b.page)).routes[2].driver + '/' + JSON.parse(await planOf(b.page)).routes[2].round, 'Line Mine/5');
+  await wait(500);
+  same('and nothing flagged on either screen (no box both changed)', [await flagsOf(a.page), await flagsOf(b.page)], [[], []]);
+  same('a line both changed: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+// Another line: sent quietly, as before.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  relay.cut(a.context);
+  await pillSays(a.page, 'Offline');
+  await routeBox(a.page, 2, 'driver').fill('Route Three');
+  await wait(500);
+  await routeBox(b.page, 5, 'round').fill('6');
+  await b.page.keyboard.press('Tab');
+  await until(() => ops().length === 1);
+  relay.mend(a.context);
+  await pillSays(a.page, 'Connected', 10000);
+  check('route 3 here, route 6 there: sent quietly', await until(() => ops().length === 2));
+  check('no review', !(await held(a.page)) && (await a.page.locator('#roomReview').count()) === 0);
+  check('one plan, with both', await converged(a.page, b.page) && JSON.parse(await planOf(a.page)).routes[2].driver === 'Route Three' && JSON.parse(await planOf(a.page)).routes[5].round === '6');
+  same('another line: no console errors', [...a.errors, ...b.errors], []);
   for (const x of [a, b]) await x.context.close();
 }
 

@@ -763,6 +763,65 @@ await block('overlap: what sending offline work would write over', () => {
   check('overlap never changes what it is given', J(base) === J(samplePlan()));
 });
 
+// The review asks by line (owner, 2026-10-09: "the other person changed lines
+// you also changed offline"): a route, a car, a driver… both changed anything
+// on, or one removed while the other changed it. Send's merge and its flags
+// stay per field (e.clash).
+await block('overlap: by line, as the owner decided', () => {
+  const base = samplePlan();
+  const route = (id) => base.routes.find((r) => r.id === id);
+  const lineOf = (o) => o.changes.map((e) => [e.id, e.field, e.line && e.line.removed, e.line && e.line.theirs.map((t) => [t.field, t.value, t.at])]);
+  const fields = Sync.overlap(base, [{ at: T('09:14'), changes: [setC('r3', 'driver', 'Mine', '')] }], [{ at: T('09:20'), changes: [setC('r3', 'round', '5', '')] }]);
+  same('different fields of one route: a line both changed, with what the other changed on it and when', lineOf(fields), [['r3', 'driver', false, [['round', '5', T('09:20')]]]]);
+  same('one line clashes, none of its fields (both are kept on Send), and the time is the other\'s', [fields.lines, fields.clashes, fields.lineLast, fields.clashLast], [1, 0, T('09:20'), null]);
+  const two = Sync.overlap(base, [{ at: T('09:14'), changes: [setC('r3', 'driver', 'Mine', ''), setC('r3', 'round', '4', '')] }], [{ at: T('09:20'), changes: [setC('r3', 'round', '5', ''), setC('r3', 'carId', 'c1', '')] }]);
+  same('two changes of mine on one line: one line', [two.lines, two.clashes, two.changes.filter((e) => e.line).length], [1, 1, 2]);
+  same('each marked with every field the other changed on it', two.changes[0].line.theirs.map((t) => t.field).sort(), ['carId', 'round']);
+  same('other routes: no line', Sync.overlap(base, [{ at: 1, changes: [setC('r3', 'driver', 'Mine', '')] }], [{ at: 2, changes: [setC('r5', 'driver', 'Theirs', '')] }]).lines, 0);
+  same('both set the same value, and nothing else on the line: no line', Sync.overlap(base, [{ at: 1, changes: [setC('r1', 'driver', 'Same', '')] }], [{ at: 2, changes: [setC('r1', 'driver', 'Same', '')] }]).lines, 0);
+  const gone = Sync.overlap(base, [{ at: 1, changes: [setC('r2', 'driver', 'On a gone route', '')] }], [{ at: T('09:30'), changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }]);
+  same('the other removed a route I changed: a line, removed', [gone.lines, gone.changes[0].line.removed, gone.lineLast], [1, true, T('09:30')]);
+  const removed = Sync.overlap(base, [{ at: 1, changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }], [{ at: T('09:31'), changes: [setC('r2', 'round', '9', '')] }]);
+  same('I removed a route the other changed: a line, with what they changed', [removed.lines, removed.changes[0].line.theirs.map((t) => [t.field, t.value])], [1, [['round', '9']]]);
+  same('both removed it: no line', Sync.overlap(base, [{ at: 1, changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }], [{ at: 2, changes: [{ op: 'remove', kind: 'route', id: 'r2', was: route('r2') }] }]).lines, 0);
+  const car = Sync.overlap(base, [{ at: 1, changes: [{ op: 'set', kind: 'car', id: 'c1', field: 'note', value: 'Mine', was: '' }] }], [{ at: 2, changes: [{ op: 'set', kind: 'car', id: 'c1', field: 'labelId', value: 'l1', was: '' }] }]);
+  same('a car is a line too', car.lines, 1);
+  same('a route I added: never a line', Sync.overlap(base, [{ at: 1, changes: [{ op: 'add', kind: 'route', item: { id: 'rN', name: 'New' }, after: 'r5' }] }], [{ at: 2, changes: [setC('r1', 'driver', 'X', '')] }]).lines, 0);
+  same('the date both changed: a line', Sync.overlap(base, [{ at: 1, changes: [{ op: 'set', kind: 'meta', field: 'date', value: '2026-10-12', was: base.date }] }], [{ at: 2, changes: [{ op: 'set', kind: 'meta', field: 'date', value: '2026-10-13', was: base.date }] }]).lines, 1);
+  same('this browser\'s own op on the line, sequenced before the drop: no line', Sync.overlap(base, [{ at: 2, changes: [setC('r1', 'driver', 'Then this', '')] }], [{ at: 1, own: true, changes: [setC('r1', 'round', '3', '')] }]).lines, 0);
+  const typed = Sync.applyAll(base, [setC('r1', 'round', 'Theirs, live', '')]);
+  same('the other\'s change from before the base: no line', Sync.overlap(typed, [{ at: 1, changes: [setC('r1', 'driver', 'Typed', '')] }], []).lines, 0);
+  const snap = Sync.applyAll(base, [setC('r1', 'round', 'In the snapshot', '')]);
+  same('compacted past the base: a change only in the snapshot is on the line, with no time', lineOf(Sync.overlap(base, [{ at: 1, changes: [setC('r1', 'driver', 'Mine', '')] }], [], snap)), [['r1', 'driver', false, [['round', 'In the snapshot', null]]]]);
+});
+
+await block('overlap: every field that clashes is on a line that clashes', () => {
+  let bad = null;
+  let fieldOnly = 0;
+  for (let seed = 1; seed <= 300 && !bad; seed++) {
+    const rand = rng(seed * 104729);
+    const base = samplePlan();
+    const side = (tag) => {
+      const R = Sync.replica(0, base);
+      let screen = base;
+      const out = [];
+      for (let i = 0, n = 1 + Math.floor(rand() * 4); i < n; i++) {
+        for (let j = 0, m = 1 + Math.floor(rand() * 3); j < m; j++) screen = mutate(screen, rand, `${tag}${seed}x`);
+        const b = R.capture(screen, { at: 1000 * (i + 1) });
+        if (b) out.push(JSON.parse(J(b)));
+      }
+      return out;
+    };
+    const o = Sync.overlap(base, side('m'), side('t'));
+    const loose = o.changes.find((e) => e.clash && !e.line);
+    if (loose) bad = `seed ${seed}: ${loose.key} clashes, but not its line`;
+    else if (o.lines < (o.clashes ? 1 : 0)) bad = `seed ${seed}: ${o.clashes} clashes but ${o.lines} lines`;
+    if (o.lines && !o.clashes) fieldOnly++;
+  }
+  check('300 random sessions: no field clash off a clashing line', !bad, bad);
+  check('and some lines clash with no field clashing (the owner\'s case)', fieldOnly > 10, String(fieldOnly));
+});
+
 await block('overlap: its clashes are exactly the flags sending would raise', () => {
   const keyOf = (f) => (f.type === 'set' || f.field ? Sync.fieldKey(f.kind, f.id, f.field) : Sync.itemKey(f.kind, f.id));
   let bad = null;

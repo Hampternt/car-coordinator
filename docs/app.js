@@ -2576,11 +2576,11 @@ const roomLive = (r = room) => !!r && !!r.rep && !r.legacy && !roomReadOnly(r);
 /* ---------- round 3, pack 5: offline work reviewed before it is sent ----------
    Edits made offline wait in the queue, made on the room's plan as it was
    when the connection went (the base). When the catchup shows the other
-   manager changed some of the same things meanwhile (Sync.overlap: exactly
-   what sending them would write over), they are held, not sent: the screen
-   shows the shared plan with them on top, marked; the other's changes keep
-   arriving; and a bar on the Shared plan card asks, beside a quiet note by
-   the pill. Never a dialog. Send my changes sends them as any edit (a field
+   manager changed some of the same lines meanwhile (Sync.overlap: a route,
+   a car, a driver… both changed anything on, owner 2026-10-09), they are
+   held, not sent: the screen shows the shared plan with them on top,
+   marked; the other's changes keep arriving; and a bar on the Shared plan
+   card asks, beside a quiet note by the pill. Never a dialog. Send my changes sends them as any edit (a field
    both changed is flagged, with Put it back); Keep them on this PC only puts
    the plan on screen into Backups and takes the shared plan. With no overlap
    they go out quietly, as before. Edits made while held wait behind them.
@@ -2661,7 +2661,8 @@ function roomReviewRaise(r) {
   const cand = r.reviewCand;
   r.reviewCand = null;
   if (!cand || room !== r || !r.rep || r.legacy || roomReadOnly(r)) return;
-  if (!roomReviewWork(r, cand).clashes) return;   // no overlap: sent quietly
+  // By line (owner, 2026-10-09): no line both changed, sent quietly.
+  if (!roomReviewWork(r, cand).lines) return;
   r.review = { ...cand, id: versionNonce().slice(0, 16), state: 'held', started: Date.now(), look: false };
   roomHoldsKeep(r);
   roomMarks();
@@ -2671,14 +2672,14 @@ function roomReviewHtml() {
   const r = room;
   if (!roomHeld(r) || !r.review.result) return '';
   const ro = roomReadOnly(r);
-  const { mine, theirs, clashes, clashLast } = r.review.result;
+  const { mine, lines, myLines, lineLast, elsewhere } = r.review.result;
   const things = (k) => plural(k, 'thing');
   // Edits made since the review was raised wait with the offline ones.
   const since = r.rep.queue.filter((b) => b.changes.length && !r.review.oids.includes(b.oid)).length;
-  const others = theirs.count - clashes;
+  const which = lines === 1 ? (myLines === 1 ? 'that line' : 'one of those lines') : `${lines} of those lines`;
   const says = [
-    `You changed ${things(mine.count)} offline (last ${reviewWhen(mine.last)}). The other manager changed ${clashes === 1 ? 'one of them' : `${clashes} of them`} too (last ${reviewWhen(clashLast)}).`,
-    others > 0 ? 'The rest of what they changed is on your screen already.' : '',
+    `You changed ${things(mine.count)} offline (last ${reviewWhen(mine.last)}). The other manager changed ${which} too (last ${reviewWhen(lineLast)}).`,
+    elsewhere > 0 ? 'The rest of what they changed is on your screen already.' : '',
     `Yours are on your screen, marked, and not sent until you choose${since ? ' (with what you changed since)' : ''}.`,
   ].filter(Boolean).join(' ');
   return `<div class="room-review" id="roomReview">
@@ -2689,35 +2690,53 @@ function roomReviewHtml() {
         <button class="btn" data-act="room-review-look">Look first</button>
         <button class="btn" data-act="room-review-keep">Keep them on this PC only</button>
       </div>
-      <p class="hint">Send my changes: where you both changed something, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
+      <p class="hint">Send my changes: both of your changes are kept, and where you both changed the same box, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
       ${r.review.look ? roomReviewListHtml(r.review.result) : ''}
     </div>`;
 }
-/* Look first: every change made offline, in the plan's order, the ones the
-   other manager changed too marked, each with yours and theirs and both
-   times. In the card, under the bar: nothing opens over the page. */
+/* Look first: every change made offline, in the plan's order, one row per
+   line; a line the other manager changed too is marked, with which fields
+   each side changed, both values and both times. In the card, under the bar:
+   nothing opens over the page. */
 const ORDER_WORDS = { route: 'the routes', car: 'the cars', position: 'the positions', label: 'the statuses', driver: 'the drivers', driverTag: 'the driver tags', driverGroup: 'the day groups', template: 'the templates' };
 function reviewLine(e) {
   const thing = e.kind === 'meta' ? 'The plan' : flagThing({ type: 'removed', kind: e.kind, id: e.id, item: e.item || null });
-  const c = e.clash;
   const at = reviewWhen(e.at);
-  if (e.op === 'order') return { text: `You changed the order of ${ORDER_WORDS[e.kind] || 'a list'} (${at}).` };
-  if (e.op === 'add') return { text: `You added ${thing} (${at}).` };
-  if (e.op === 'remove') {
-    if (!c) return { text: `You removed ${thing} (${at}).` };
-    const fields = Object.keys({ ...(e.item || {}), ...(c.item || {}) }).filter((f) => f !== 'id' && !Sync.equal((e.item || {})[f], (c.item || {})[f])).map((f) => FIELD_WORDS[f] || f);
-    return { text: `You removed ${thing} (${at}).`, theirs: `The other manager changed it${fields.length ? ` (its ${fields.join(', ')})` : ''} (${reviewWhen(c.at)}).` };
+  if (e.op === 'order') return `You changed the order of ${ORDER_WORDS[e.kind] || 'a list'} (${at}).`;
+  if (e.op === 'add') return `You added ${thing} (${at}).`;
+  if (e.op === 'remove') return `You removed ${thing} (${at}).`;
+  return `${thing}'s ${FIELD_WORDS[e.field] || e.field}: yours ${flagValue(e.field, e.value)} (${at}).`;
+}
+// What the other changed on a line, beside this browser's changes to it.
+function reviewTheirs(es) {
+  const ln = es[0].line;
+  if (!ln) return '';
+  if (ln.removed) return `The other manager removed it (${reviewWhen(ln.at)}).`;
+  if (es[0].op === 'remove') {
+    const words = ln.theirs.map((t) => FIELD_WORDS[t.field] || t.field);
+    return `The other manager changed it${words.length ? ` (its ${words.join(', ')})` : ''} (${reviewWhen(ln.at)}).`;
   }
-  const word = FIELD_WORDS[e.field] || e.field;
-  const yours = `${thing}'s ${word}: yours ${flagValue(e.field, e.value)} (${at}).`;
-  if (!c) return { text: yours };
-  if (c.type === 'removed') return { text: yours, theirs: `The other manager removed it (${reviewWhen(c.at)}).` };
-  return { text: yours, theirs: `Theirs ${flagValue(e.field, c.theirs)} (${reviewWhen(c.at)}).` };
+  const mine = new Set(es.filter((e) => e.op === 'set').map((e) => e.field));
+  return ln.theirs.map((t) => (mine.has(t.field)
+    ? `Theirs${es.length > 1 ? ` (${FIELD_WORDS[t.field] || t.field})` : ''} ${flagValue(t.field, t.value)} (${reviewWhen(t.at)}).`
+    : `They changed its ${FIELD_WORDS[t.field] || t.field} to ${flagValue(t.field, t.value)} (${reviewWhen(t.at)}).`)).join(' ');
 }
 function roomReviewListHtml(res) {
-  const rows = res.changes.map((e) => {
-    const line = reviewLine(e);
-    return `<li${e.clash ? ' class="room-review-both"' : ''}>${e.clash ? '<b>Both changed:</b> ' : ''}${esc(line.text)}${line.theirs ? ` <span class="room-review-theirs">${esc(line.theirs)}</span>` : ''}</li>`;
+  // One row per line (a route, a car, the date…), in the plan's order, its
+  // own changes and, where the other changed it too, theirs, field by field.
+  const groups = [];
+  const at = new Map();
+  for (const e of res.changes) {
+    const k = e.op === 'order' || e.op === 'add' ? null : e.kind === 'meta' ? `meta\u0000${e.field}` : `${e.kind}\u0000${e.id}`;
+    if (k !== null && at.has(k)) { at.get(k).push(e); continue; }
+    const g = [e];
+    if (k !== null) at.set(k, g);
+    groups.push(g);
+  }
+  const rows = groups.map((es) => {
+    const both = !!es[0].line;
+    const theirs = reviewTheirs(es);
+    return `<li${both ? ' class="room-review-both"' : ''}>${both ? '<b>Both changed:</b> ' : ''}${esc(es.map(reviewLine).join(' '))}${theirs ? ` <span class="room-review-theirs">${esc(theirs)}</span>` : ''}</li>`;
   }).join('');
   return `<h4>Your offline changes</h4>
       <ul class="room-review-list">${rows}</ul>
@@ -3543,13 +3562,17 @@ function roomMarks() {
     put(h.kind, h.id, h.field, 'room-held', `The other manager changed this to ${flagValue(h.field, there.value)} while you were typing. What you type is kept when you leave the box; the other value is noted on the Data tab.`);
   }
   // Round 3: offline edits held for the review, on screen and not sent yet.
+  // Solid where the other changed the same line (owner, 2026-10-09).
   if (roomHeld(r) && r.review.result) {
     for (const e of r.review.result.changes) {
       if (e.op !== 'set') continue;
       const c = e.clash;
-      put(e.kind, e.id, e.field, c ? 'room-offline-clash' : 'room-offline', c && c.type === 'set'
-        ? `Changed offline to ${flagValue(e.field, e.value)} (${reviewWhen(e.at)}), not sent yet. The other manager changed it to ${flagValue(e.field, c.theirs)} (${reviewWhen(c.at)}). The Shared plan card on the Data tab asks what to do.`
-        : `Changed offline (${reviewWhen(e.at)}), not sent yet. The Shared plan card on the Data tab asks what to do.`);
+      const ln = e.line;
+      const said = c && c.type === 'set'
+        ? ` The other manager changed it to ${flagValue(e.field, c.theirs)} (${reviewWhen(c.at)}).`
+        : ln && ln.removed ? ` The other manager removed it (${reviewWhen(ln.at)}).`
+          : ln ? ` The other manager changed this line too: ${ln.theirs.map((t) => `its ${FIELD_WORDS[t.field] || t.field} to ${flagValue(t.field, t.value)}`).join(', ')} (${reviewWhen(ln.at)}).` : '';
+      put(e.kind, e.id, e.field, ln ? 'room-offline-clash' : 'room-offline', `Changed offline${c && c.type === 'set' ? ` to ${flagValue(e.field, e.value)}` : ''} (${reviewWhen(e.at)}), not sent yet.${said} The Shared plan card on the Data tab asks what to do.`);
     }
   }
 }

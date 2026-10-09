@@ -1,0 +1,24 @@
+# Ledger: shared plan, round 3, fixes for pack 5 (offline review)
+
+Fix ledger for Round 3 / Pack 5 of `manifests/2026-10-07-shared-plan.md`.
+One serial builder in this worktree, on `claude/car-coordinator-encryption-c717c5`
+from fd14b00 (packs 4 and 5 merged). The main session folds this into the
+manifest. Method per finding: a test that fails on the current code, then the
+fix, one commit (test + fix).
+
+Baseline at fd14b00 (2026-10-09): check.sh OK; sync.mjs passed; sync-ui.mjs
+passed, 544 ok (3 min 42 s).
+
+## Findings
+
+- [x] 1. Overlap by line, not field (the owner's decision) — reproduced: sync-ui "offline, route 3's driver here and its round there: the review appears" FAILED on fd14b00 (sent quietly: "held: nothing sent — got 2"); sync.mjs "different fields of one route: a line both changed…" failed (no `line`). Fixed: check.sh OK; sync.mjs passed, 214 ok (17 new); sync-ui passed, 557 ok (13 new): route 3's driver offline against its round there is held, the bar counts the line, Look first lists it with the field each side changed, the box is marked solid, Send keeps both and flags nothing; route 3 against route 6 goes quietly
+- [ ] 2. Two held tabs can lose an edit silently
+- [ ] 3. Keep behaves differently with two tabs
+- [ ] 4. Keep's notice can name a Backup that was not written
+- [ ] 5. Status text while held
+
+## Decisions and deviations
+
+- Fix 1, design: `Sync.overlap` keeps its per-field `clash` (what Send flags, still property-tested against a replica's drain, unchanged) and gains a line layer beside it: each change's `line` ({removed, theirs: [{field, value, at}], at}), `lines`, `lineLast`, `myLines`, `elsewhere`. A line is an item (kind+id) or a meta field; adds and orders are never a line. What the other changed on a line counts where it differs from this browser's end value, or where sending writes over it, so "both set the same value" is still no review. Property test added: every field clash is on a clashing line (300 random sessions, and >10 of them line-only).
+- Fix 1, app: the review is raised on `lines`, the bar counts lines ("The other manager changed that line / one of those lines / N of those lines too (last …)"; "the rest is on your screen" uses `elsewhere`), the solid mark goes on every box of a clashing line (its title says what the other changed on the line), Look first is one row per line ("They changed its round to “5” (09:20)." for another field; "Theirs “…”" for the same field, as before). Send's hint now says both are kept and only a box both changed is listed with Put it back.
+- Fix 1, round-3 test lines changed by design (owner's decision, not weakened): the bar's "changed one of them too" / "2 of them too" became "one of those lines too" / "2 of those lines too"; the time-unknown check nulls `lineLast` (what the bar now reads) instead of `clashLast`. sync.mjs's "different fields of one route: no clash" stays as it was: it is about `clashes`, which is still per field.

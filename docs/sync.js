@@ -604,6 +604,15 @@ const Sync = (() => {
        theirs   {count, last}: the things the other changed since `base`,
                 and the newest time
        clashLast  the newest time among the other's clashing changes
+       By line, which is what the review asks about (owner, 2026-10-09):
+       each change's `line`: null, or what the other changed on its line (an
+                item, or a meta field) since `base`: {removed, theirs:
+                [{field, value, at}], at}. Every change that clashes is on a
+                line; two different fields of one route are a line, not a
+                clash (Send keeps both)
+       lines    how many lines clash; lineLast the newest of the other's
+                times on them; myLines how many lines this browser changed;
+                elsewhere how many things the other changed off them
      Only what the room changed since `base` can clash: an edit whose `was`
      is older than the base (a box typed in while the other changed it,
      rebuilt after a reload) is a live collision, flagged as it goes out. */
@@ -680,12 +689,57 @@ const Sync = (() => {
     }
     let clashLast = null;
     for (const e of changes) if (e.clash) clashLast = later(clashLast, e.clash.at);
+    // By line (owner, 2026-10-09): a route, a car, a driver… both changed
+    // anything on, or one removed while the other changed it; the date is a
+    // line of its own. What the other changed on it counts when it differs
+    // from what this browser has there, or when sending writes over it.
+    const lineKey = (e) => (e.op === 'order' || e.op === 'add' ? null : e.kind === 'meta' ? fieldKey('meta', null, e.field) : itemKey(e.kind, e.id));
+    const lineInfo = new Map();
+    const lineOf = (e) => {
+      const lk = lineKey(e);
+      if (lk === null) return null;
+      if (lineInfo.has(lk)) return lineInfo.get(lk);
+      let info = null;
+      if (e.kind === 'meta') {
+        const k = fieldKey('meta', null, e.field);
+        if (touched.has(k) && (hits.has(k) || !equal(theirEnd[e.field], myEnd[e.field]))) {
+          const at = theirTimes.by.get(k) ?? null;
+          info = { removed: false, theirs: [{ field: e.field, value: clone(theirEnd[e.field]), at }], at };
+        }
+      } else if (touchedItem(e.kind, e.id)) {
+        const t = itemIn(theirEnd, e.kind, e.id);
+        const m = itemIn(myEnd, e.kind, e.id);
+        const head = fieldKey(e.kind, e.id, '');
+        const hit = [...hits.keys()].some((k) => k === itemKey(e.kind, e.id) || k.startsWith(head));
+        if (!t) {
+          if (m || hit) { const at = theirTimes.by.get(itemKey(e.kind, e.id)) ?? null; info = { removed: true, theirs: [], at }; }
+        } else {
+          const fields = [...touched].filter((k) => k.startsWith(head)).map((k) => k.slice(head.length))
+            .filter((f) => !m || hits.has(fieldKey(e.kind, e.id, f)) || !equal(t[f], m[f]));
+          if (fields.length || hit) {
+            const theirs = fields.map((f) => ({ field: f, value: clone(t[f]), at: theirTimes.by.get(fieldKey(e.kind, e.id, f)) ?? null }));
+            info = { removed: false, theirs, at: theirs.reduce((x, y) => later(x, y.at), null) };
+          }
+        }
+      }
+      lineInfo.set(lk, info);
+      return info;
+    };
+    for (const e of changes) e.line = lineOf(e);
+    const clashing = new Set(changes.filter((e) => e.line).map(lineKey));
+    let lineLast = null;
+    for (const lk of clashing) lineLast = later(lineLast, lineInfo.get(lk).at);
+    const onLine = (k) => [...clashing].some((lk) => k === lk || k.startsWith(`${lk}\u0000`));
     return {
       changes,
       clashes: changes.filter((e) => e.clash).length,
+      lines: clashing.size,
       mine: { count: changes.length, last: myTimes.last },
       theirs: { count: touched.size, last: theirTimes.last },
       clashLast,
+      lineLast,
+      myLines: new Set(changes.map(lineKey).filter((k) => k !== null)).size,
+      elsewhere: [...touched].filter((k) => !onLine(k)).length,
     };
   }
 
