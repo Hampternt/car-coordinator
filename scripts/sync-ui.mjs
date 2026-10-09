@@ -2201,6 +2201,56 @@ const reviewOids = (pg) => pg.evaluate(() => (room.review ? room.review.oids : [
   for (const x of [a, b]) await x.context.close();
 }
 
+// Two held tabs, an edit in each. A held tab sends nothing, so the other
+// tab never hears its edit from the room: the tab whose plan another saved
+// over stops saving (round 2's stopped tab, its plan in Backups) rather than
+// writing its own over the edit. The other manager's changes arriving in
+// both stop neither.
+const stopped = (pg) => pg.evaluate(() => planElsewhere);
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, for two held tabs', await offlineClash(a, b, ops));
+  const tab2 = await a.context.newPage();
+  const tabErrors = [];
+  tab2.on('pageerror', (e) => tabErrors.push(String(e)));
+  await tab2.goto(base, { waitUntil: 'networkidle' });
+  check('the second tab is held too', await tab2.waitForFunction(() => roomHeld() && room.caught, null, { timeout: 5000 }).then(() => true, () => false));
+  for (const [i, name] of [[6, 'Arrives One'], [9, 'Arrives Two'], [10, 'Arrives Three']]) {
+    await routeBox(b.page, i, 'driver').fill(name);
+    await b.page.keyboard.press('Tab');
+    await a.page.waitForFunction((n) => state.routes.some((r) => r.driver === n), name, { timeout: 5000 }).catch(() => {});
+    await tab2.waitForFunction((n) => state.routes.some((r) => r.driver === n), name, { timeout: 5000 }).catch(() => {});
+  }
+  await wait(400);
+  same('the other manager\'s changes arriving in both held tabs stop neither', [await stopped(a.page), await stopped(tab2)], [false, false]);
+  const sent = ops().length;
+  await routeBox(tab2, 7, 'driver').fill('Tab Two Held');
+  await wait(600);
+  await routeBox(a.page, 8, 'driver').fill('Tab One Held');
+  await wait(2000);
+  await tab2.close();
+  await wait(300);
+  const kept = await a.page.evaluate(() => ({ plan: JSON.parse(localStorage.getItem('carcoord:v1')), backups: Store.backups().map((x) => JSON.parse(x.json)) }));
+  check('the second tab closed: its edit is in the plan kept here', kept.plan.routes[7].driver === 'Tab Two Held', kept.plan.routes[7].driver);
+  check('and the edit in the other tab is in Backups', kept.backups.some((p) => p.routes[8].driver === 'Tab One Held'));
+  check('an edit in one held tab stops the other', await stopped(a.page) && await pillSays(a.page, 'Reload this tab', 1000), await pill(a.page).textContent().catch(() => ''));
+  check('and the stopped tab cannot answer the review: Send and Keep are off', await a.page.evaluate(() => { renderRoom(); const s = document.querySelector('[data-act="room-review-send"]'); const k = document.querySelector('[data-act="room-review-keep"]'); return !!s && s.disabled && !!k && k.disabled; }));
+  await a.page.evaluate(() => roomReviewSend());
+  await wait(800);
+  same('nothing was sent', ops().length, sent);
+  const tab3 = await a.context.newPage();
+  tab3.on('pageerror', (e) => tabErrors.push(String(e)));
+  await tab3.goto(base, { waitUntil: 'networkidle' });
+  check('a tab opened then is held, with the second tab\'s edit on screen', await tab3.waitForFunction(() => roomHeld() && room.caught && state.routes[7].driver === 'Tab Two Held', null, { timeout: 5000 }).then(() => true, () => false));
+  await tab3.click('[data-act="tab"][data-tab="data"]');
+  await tab3.click('[data-act="room-review-send"]');
+  check('and Send there sends it', await b.page.waitForFunction(() => state.routes[7].driver === 'Tab Two Held', null, { timeout: 5000 }).then(() => true, () => false));
+  same('two held tabs: no console errors', [...a.errors, ...b.errors, ...tabErrors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
 // Two tabs open when the connection goes: the one the offline edits are made
 // in holds them; the other stopped saving when they were saved over it
 // (round 2), shows no review and sends nothing. The review appears in one

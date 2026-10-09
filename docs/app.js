@@ -2684,11 +2684,12 @@ function roomReviewHtml() {
   ].filter(Boolean).join(' ');
   return `<div class="room-review" id="roomReview">
       <p class="room-review-says">${esc(says)}</p>
-      ${ro ? '<p class="status warn-status">Update the app to send them: the shared plan was saved by a newer version of Car Coordinator. Keeping them on this PC still works.</p>' : ''}
+      ${ro && !planElsewhere ? '<p class="status warn-status">Update the app to send them: the shared plan was saved by a newer version of Car Coordinator. Keeping them on this PC still works.</p>' : ''}
+      ${planElsewhere ? '<p class="status warn-status">Reload this tab to answer: another tab of this browser changed the plan, and holds the review now.</p>' : ''}
       <div class="bar">
-        <button class="btn primary-ish" data-act="room-review-send"${ro ? ' disabled' : ''}>Send my changes</button>
+        <button class="btn primary-ish" data-act="room-review-send"${ro || planElsewhere ? ' disabled' : ''}>Send my changes</button>
         <button class="btn" data-act="room-review-look">Look first</button>
-        <button class="btn" data-act="room-review-keep">Keep them on this PC only</button>
+        <button class="btn" data-act="room-review-keep"${planElsewhere ? ' disabled' : ''}>Keep them on this PC only</button>
       </div>
       <p class="hint">Send my changes: both of your changes are kept, and where you both changed the same box, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
       ${r.review.look ? roomReviewListHtml(r.review.result) : ''}
@@ -2745,7 +2746,9 @@ function roomReviewListHtml(res) {
 // Send my changes: what was held goes out as any edit does.
 async function roomReviewSend() {
   const r = room;
-  if (!roomHeld(r) || roomReadOnly(r)) return;
+  // A tab that stopped saving answers nothing: its plan is in Backups, and
+  // the tab that saved over it holds the review.
+  if (!roomHeld(r) || roomReadOnly(r) || planElsewhere) return;
   r.review.state = 'sending';
   r.review.look = false;
   roomHoldsKeep(r);
@@ -2761,7 +2764,7 @@ async function roomReviewSend() {
    open) stays on top, as it would after any change from the room. */
 async function roomReviewKeep() {
   const r = room;
-  if (!roomHeld(r)) return;
+  if (!roomHeld(r) || planElsewhere) return;
   roomCapture(r);
   const mine = r.review.result ? r.review.result.mine.last : null;
   const label = `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
@@ -3288,6 +3291,11 @@ function roomStamp(r, batch) {
 function roomEdited() {
   const r = room;
   if (!roomLive(r) || r.flushTimer) return;
+  // Held for the review: nothing goes out, and the edit is kept beside the
+  // base at once, in the same moment as the plan it is in, so another held
+  // tab of this browser always reads the two together (see the storage
+  // listener on carcoord:v1).
+  if (roomHeld(r)) { roomFlush(r); return; }
   r.flushTimer = setTimeout(() => { r.flushTimer = null; roomFlush(r); }, ROOM_BATCH_MS);
 }
 
@@ -4103,14 +4111,18 @@ async function roomOfferStart(secret) {
    following live) would save its stale plan over the other tab's, so it
    stops: it saves and pushes nothing until reloaded, and the pill says so.
    No dialog (owner, 2026-10-08). planElsewhere is declared beside save(),
-   which it stops. */
+   which it stops.
+   Held for the review (round 3), a tab sends nothing, so an edit made in
+   another held tab never reaches this one from the room: this one stops too,
+   as one that cannot follow, rather than save its plan over that edit
+   (heldTabEdited). */
 window.addEventListener('storage', (e) => {
   if (!room || planElsewhere || (e.key !== null && e.key !== 'carcoord:v1')) return;
   let now = null;
   try { now = localStorage.getItem('carcoord:v1'); } catch { return; }
   // The plan this tab last saved, written again: nothing has changed.
   if (now === JSON.stringify(state)) return;
-  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected') return;
+  if (roomLive(room) && room.caught && room.conn && room.conn.status === 'connected' && !heldTabEdited(room)) return;
   planElsewhere = true;
   // What this tab held that the other's plan may not: kept in Backups now.
   // A tab following the room keeps sending its edits (roomFlush), but until
@@ -4120,6 +4132,21 @@ window.addEventListener('storage', (e) => {
   if (unsent) roomFrozenBackup(true);
   renderRoom();
 });
+
+/* Whether the plan another tab just saved holds an edit made there while
+   both tabs are held. Both follow the room's changes, so a save that only
+   differs by one of those (one tab has applied it, the other not yet) is
+   not one: the base beside it says which seq that tab's plan is at, written
+   in the same moment as the plan, and the tab behind saves again once it has
+   caught up, and is judged then. A review answered there (gone, or being
+   sent) is not one either: the answer follows (roomReviewFollow). */
+function heldTabEdited(r) {
+  if (!roomHeld(r) || !r.keys || !r.rep) return false;
+  let b = null;
+  try { b = JSON.parse(localStorage.getItem(BASE_KEY)); } catch { return false; }
+  if (!b || b.room !== r.keys.roomId || !b.review || b.review.state !== 'held' || b.review.id !== r.review.id) return false;
+  return b.seq === r.rep.seq;
+}
 
 /* A tab another one saved over keeps a copy of its plan in Backups: one entry,
    brought up to date a moment after each change it could not save (and as the
