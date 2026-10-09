@@ -276,6 +276,26 @@ Counted under the count rule:
 *Done when:* `sync-ui` two-browser checks see the row tint, the name tag and the box outline follow focus within a second; the note appears on entering a row the other is in; it clears on leave and on timeout; and the relay database never holds presence.
 `Agents: build 1 serial (medium) · review: none beyond the smoke check (nothing stored)`
 
+### Test it yourself (round 3)
+
+Use two windows (or the PC and the tablet) in one shared plan, with made-up data.
+
+**Who is editing:**
+1. Set a different name and colour in each window on the Data tab's Shared plan card.
+2. In window 1, click into route 7's Car box. Window 2 tints that row in window 1's colour, puts its name at the start and outlines the box. Its bar reads "· Kari is here · Day plan".
+3. In window 2, click into the same row. A quiet note says "Kari is editing this line", and you can still type.
+4. In window 1, go to the Cars tab. Window 2's bar follows ("· Cars").
+5. Close window 1. Window 2 clears it within about 45 s.
+6. Open a second tab of the *same* window. It does not mark you as someone else.
+
+**Offline review:**
+1. Take window 1 offline (DevTools → Network → Offline, or the tablet's airplane mode).
+2. In window 1, change route 3's driver. In window 2, change route 3's round.
+3. Bring window 1 back. The Data card shows "You changed 1 thing offline… The other manager changed that line too…", and nothing reaches window 2 yet.
+4. Look first lists it. Send keeps both values on both screens.
+5. Again, but with Keep them on this PC only. Backups holds "Kept from offline, HH:MM", window 1 shows the shared plan, and nothing is sent.
+6. Again, with window 2 changing route 6 instead. Window 1's change goes up quietly, with no bar.
+
 ### Pack 5: Offline work, reviewed before it is sent
 
 **Goal (owner, 2026-10-09):** coming back online after working offline must not quietly overwrite a lot of the other person's work, or have yours overwritten. You see what happened on each side and choose.
@@ -320,7 +340,7 @@ Counted under the count rule:
   - **Gates on the final build:**
     - `npm run upgrade`: `upgrade check passed: 0.14.1 to 0.17.0`;
     - `screens`: `no console errors, 4 warnings raised and asserted`;
-    - full `npm test` on 9d4d5dc: see the next line.
+    - full `npm test` on 9d4d5dc, exit 0: `VERSIONS OK`, `map`, `sync`, `sync-ui`, `presence-ui` checks passed, smoke `all checks passed` (the same 3 groups skipped), breadify `all passed`.
   - **Against the owner's server** (two Playwright browsers plus the owner's window 1):
     - presence: the row is marked within 68 ms; the bar reads "Cato is here · Day plan", then "· Cars"; "Cato is editing this line" shows; typing in a marked line works;
     - offline review: C offline, both change route 4 (C its driver, B its round). Back online, C was held with "You changed 1 thing offline… The other manager changed that line too…"; nothing reached B while held; Send left both screens identical with both values kept;
