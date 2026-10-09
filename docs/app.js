@@ -2637,13 +2637,15 @@ const labelNonce = (label) => (label && typeof label.nonce === 'string' ? label.
    `holds` are the fields held while typed in (roomHold), and those let go
    with what was typed whose batch the room has not confirmed yet: what each
    was before the room changed it. A reload rebuilds those edits with that as
-   their `was`, so the collision is still flagged on both screens. */
+   their `was`, so the collision is still flagged on both screens.
+   `times` (round 3): when each edit made offline was made, [key, ms] by
+   Sync.changeKey, so a reload before reconnecting still says when. */
 const BASE_KEY = 'carcoord:roomBase';
-const baseHead = (roomId, seq, holds) => `{"room":${JSON.stringify(roomId)},"seq":${seq},"holds":${JSON.stringify(holds)},`;
+const baseHead = (roomId, seq, extras) => `{"room":${JSON.stringify(roomId)},"seq":${seq},"holds":${JSON.stringify(extras.holds)},"times":${JSON.stringify(extras.times)},`;
 function roomBaseWrite(r) {
   // A tab another one saved over writes nothing beside that tab's plan.
   if (!r || !r.rep || !r.keys || r.legacy || roomReadOnly(r) || planElsewhere) return;
-  const head = baseHead(r.keys.roomId, r.rep.seq, roomHoldsOf(r));
+  const head = baseHead(r.keys.roomId, r.rep.seq, roomExtrasOf(r));
   try {
     const now = localStorage.getItem(BASE_KEY);
     if (now && now.startsWith(head)) return;
@@ -2660,7 +2662,8 @@ function roomBaseRead(roomId) {
     const b = JSON.parse(localStorage.getItem(BASE_KEY));
     if (b && b.room === roomId && Number.isInteger(b.seq) && b.seq >= 0 && b.plan && typeof b.plan === 'object' && !Array.isArray(b.plan)) {
       const holds = (Array.isArray(b.holds) ? b.holds : []).filter((h) => h && typeof h.key === 'string' && typeof h.kind === 'string' && typeof h.field === 'string');
-      return { seq: b.seq, plan: b.plan, holds };
+      const times = (Array.isArray(b.times) ? b.times : []).filter((x) => Array.isArray(x) && typeof x[0] === 'string' && Number.isFinite(x[1]));
+      return { seq: b.seq, plan: b.plan, holds, times };
     }
   } catch { /* none kept, or unreadable: none */ }
   return null;
@@ -2668,16 +2671,18 @@ function roomBaseRead(roomId) {
 // The holds to keep: those held now, and those let go with typing whose
 // batch is still waiting for the room.
 const roomHoldsOf = (r) => [...r.holds.values(), ...r.heldOut.values()].map((h) => ({ key: h.key, kind: h.kind, id: h.id, field: h.field, base: h.base, out: !!h.out, typed: !!h.typed }));
-// The holds changed: kept beside the base as it is stored, its seq and plan
-// left as they are (they belong to the plan stored with them).
+// Everything kept beside the base's seq and plan.
+const roomExtrasOf = (r) => ({ holds: roomHoldsOf(r), times: [...r.times] });
+// The holds or times changed: kept beside the base as it is stored, its seq
+// and plan left as they are (they belong to the plan stored with them).
 function roomHoldsKeep(r) {
   if (!r || !r.keys || planElsewhere) return;
   try {
     const b = JSON.parse(localStorage.getItem(BASE_KEY));
     if (!b || b.room !== r.keys.roomId || !Number.isInteger(b.seq)) return;
-    const holds = roomHoldsOf(r);
-    if (JSON.stringify(b.holds || []) === JSON.stringify(holds)) return;
-    localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, holds)}"plan":${JSON.stringify(b.plan)}}`);
+    const extras = roomExtrasOf(r);
+    if (JSON.stringify(b.holds || []) === JSON.stringify(extras.holds) && JSON.stringify(b.times || []) === JSON.stringify(extras.times)) return;
+    localStorage.setItem(BASE_KEY, `${baseHead(b.room, b.seq, extras)}"plan":${JSON.stringify(b.plan)}}`);
   } catch (e) { console.warn('shared plan: its base could not be kept', e); roomBaseForget(); }
 }
 /* Opening with holds kept: one held when the page went whose box was not
@@ -2725,12 +2730,24 @@ async function roomStart(secret, base = null) {
     // heldOut: holds let go with typing, until the room confirms their batch;
     // wasKept: holds kept from before a reload, for the first capture.
     heldOut: new Map(), wasKept: new Map(),
+    // times: Sync.changeKey -> when it was made (ms), for edits taken while
+    // not sending (offline, or catching up); timesKept: those kept from
+    // before a reload, for the first capture, which rebuilds those edits.
+    times: new Map(), timesKept: null,
   };
   room = r;
   try { r.keys = await Sync.deriveKeys(secret); } catch { if (room === r) room = null; return; }
   if (room !== r) return;   // left, or another room taken, while deriving
   if (r.rep) roomBaseWrite(r);
-  else { const kept = roomBaseRead(r.keys.roomId); if (kept) { r.rep = Sync.replica(kept.seq, kept.plan); roomHoldsBack(r, kept); } }
+  else {
+    const kept = roomBaseRead(r.keys.roomId);
+    if (kept) {
+      r.rep = Sync.replica(kept.seq, kept.plan);
+      r.times = new Map(kept.times);
+      r.timesKept = new Map(kept.times);
+      roomHoldsBack(r, kept);
+    }
+  }
   r.conn = Sync.connect({ keys: r.keys });
   r.conn.on('status', (status) => {
     // Catch up on every (re)connect: the version list, the room's schema, and
@@ -2780,7 +2797,12 @@ const openOr = async (r, kind, body, fallback = null) => {
 };
 
 // What a sequenced op's plaintext must hold for this build to apply it.
+// An op's `at` (round 3) is not needed: 0.16.0 checked only these two, so it
+// applies a 0.17 op as before and ignores the time, and an op from 0.16.0,
+// which has none, is applied here with its time unknown.
 const opUsable = (plain) => !!plain && opSchema(plain) <= Store.SCHEMA && Array.isArray(plain.changes);
+// When an op was made, by its sender's clock: null when it does not say.
+const opTime = (plain) => (plain && Number.isFinite(plain.at) && plain.at > 0 ? plain.at : null);
 
 // The room's plan from a catchup: its snapshot with every op after it, as a
 // replica at the room's seq. null when it cannot be built here: no snapshot,
@@ -2790,7 +2812,7 @@ function roomPlanOf(f, snap, ops) {
   const rep = Sync.replica(f.snapshot.seq, snap.plan);
   for (const o of ops) {
     if (!opUsable(o.plain)) return null;
-    rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null);
+    rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null, opTime(o.plain));
   }
   try { rep.drain(); } catch { return null; }
   return Number.isInteger(f.seq) && rep.seq < f.seq ? null : rep;
@@ -2833,7 +2855,7 @@ async function roomFrame(r, f) {
     const a = r.acks.shift();
     if (!a || room !== r) return;
     if (a.kind === 'op') {
-      if (r.rep && Number.isInteger(f.seq)) roomApply(r, () => r.rep.take(f.seq, a.batch.changes, a.batch.oid));
+      if (r.rep && Number.isInteger(f.seq)) roomApply(r, () => r.rep.take(f.seq, a.batch.changes, a.batch.oid, a.batch.at));
     } else if (a.kind === 'snapshot') {
       if (Number.isInteger(f.seq)) r.snapSeq = Math.max(r.snapSeq, f.seq);
     } else if (a.kind === 'version' && Number.isInteger(f.id)) {
@@ -2865,7 +2887,7 @@ async function roomFrame(r, f) {
       renderRoom();
       return;
     }
-    const take = () => r.rep.take(f.seq, plain.changes, typeof plain.oid === 'string' ? plain.oid : null);
+    const take = () => r.rep.take(f.seq, plain.changes, typeof plain.oid === 'string' ? plain.oid : null, opTime(plain));
     if (r.caught) roomApply(r, take); else take();
   } else if (f.type === 'presence' && typeof f.body === 'string') {
     // Round 3, pack 4: who is editing. Never stored; docs/presence.js reads it.
@@ -2906,7 +2928,7 @@ function roomCatchUp(r, f, snap, ops) {
     if (snap && snap.plan && typeof snap.plan === 'object' && snapSeq > r.rep.seq) r.rep.reset(snapSeq, snap.plan);
     for (const o of ops) {
       if (!opUsable(o.plain)) { r.ahead = true; return; }
-      r.rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null);
+      r.rep.take(o.seq, o.plain.changes, typeof o.plain.oid === 'string' ? o.plain.oid : null, opTime(o.plain));
     }
   });
   // An op missing (its snapshot unreadable, say): it cannot keep up.
@@ -2950,6 +2972,7 @@ function roomCapture(r, was = null) {
   const skip = (c) => c.op === 'set' && ((c.kind === 'meta' && c.field === 'date' && movedDate)
     || (r.holds.has(Sync.fieldKey(c.kind, c.id, c.field)) && !(was && was.has(Sync.fieldKey(c.kind, c.id, c.field)))));
   const batch = r.rep.capture(state, { skip, was });
+  if (batch) roomStamp(r, batch);
   if (batch && kept.size) {
     for (const c of batch.changes) {
       const h = c.op === 'set' ? kept.get(Sync.fieldKey(c.kind, c.id, c.field)) : null;
@@ -2958,6 +2981,26 @@ function roomCapture(r, was = null) {
   }
   if (kept.size) roomHoldsKeep(r);
   return batch;
+}
+
+/* When each edit was made. A batch taken while sending is sent within a
+   moment, and its `at` says when. One taken while not sending (offline, or
+   before the catchup is read) waits, so its time is also kept per edit
+   (r.times, beside the base), and the first batch after a reload, which
+   rebuilds the edits made before it, takes the times kept then: the review
+   of offline work says when each was made, not when the connection came back. */
+function roomStamp(r, batch) {
+  const sending = r.caught && r.conn && r.conn.status === 'connected';
+  const kept = r.timesKept;
+  r.timesKept = null;
+  let last = 0;
+  for (const c of batch.changes) {
+    const k = Sync.changeKey(c);
+    const t = kept && kept.has(k) ? kept.get(k) : batch.at;
+    last = Math.max(last, t);
+    if (!sending || kept) r.times.set(k, t);
+  }
+  if (kept && last) batch.at = last;
 }
 
 // An edit on screen: sent after a short gather.
@@ -2970,7 +3013,13 @@ function roomEdited() {
 // Seal and send every batch not sent yet, in order. Only while connected and
 // caught up; what cannot go now stays queued for the next connection.
 function roomFlush(r) {
-  if (room !== r || !roomLive(r) || !r.caught || !r.conn || r.conn.status !== 'connected') return;
+  if (room !== r || !roomLive(r)) return;
+  if (!r.caught || !r.conn || r.conn.status !== 'connected') {
+    // Not sending yet: the edits are taken now all the same, so each keeps
+    // when it was made, and wait in the queue for the connection.
+    if (roomCapture(r)) roomHoldsKeep(r);
+    return;
+  }
   roomCapture(r);
   if (!r.rep.queue.length) return;
   if (!r.waitingSince) { r.waitingSince = Date.now(); setTimeout(() => { if (room === r) renderRoomPill(); }, 1100); }
@@ -2980,7 +3029,7 @@ function roomFlush(r) {
       if (room !== r || r.epoch !== epoch) return;
       b.sent = true;
       let body = null;
-      try { body = await Sync.seal(r.keys, 'op', { schema: Store.SCHEMA, oid: b.oid, changes: b.changes }); } catch (e) { console.warn('shared plan: an edit could not be sealed', e); }
+      try { body = await Sync.seal(r.keys, 'op', { schema: Store.SCHEMA, oid: b.oid, at: b.at, changes: b.changes }); } catch (e) { console.warn('shared plan: an edit could not be sealed', e); }
       if (room !== r || r.epoch !== epoch || !body || roomReadOnly(r)) { b.sent = false; return; }
       // Over the relay's limit it would close the connection for good. This
       // browser stops following instead (as one with no record of the room:
@@ -3035,7 +3084,7 @@ async function roomCompact(r) {
    It travels as any batch does, so a dropped connection sends it again. */
 function roomMarkSnapshot(r) {
   if (!r || !r.rep) return;
-  r.rep.queue.push({ oid: versionNonce().slice(0, 16), changes: [], sent: false });
+  r.rep.queue.push({ oid: versionNonce().slice(0, 16), changes: [], sent: false, at: Date.now() });
   roomFlush(r);
 }
 
@@ -3057,7 +3106,7 @@ function roomApply(r, mutate) {
     renderRoom();
     return;
   }
-  if (!r.rep.queue.length) r.waitingSince = null;
+  if (!r.rep.queue.length) { r.waitingSince = null; r.times.clear(); }
   // A hold let go with typing is confirmed with its batch.
   const outs = r.heldOut.size;
   for (const [key, h] of [...r.heldOut]) if (!r.rep.queue.some((b) => b.oid === h.oid)) r.heldOut.delete(key);

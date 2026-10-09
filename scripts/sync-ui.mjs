@@ -1924,6 +1924,87 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
 }
 
 // ---------------------------------------------------------------------------
+// Round 3, pack 5: offline work reviewed before it is sent.
+// Times: every op says when it was made, by its sender's clock. An edit made
+// offline keeps its own time, through a reload, and goes out with it.
+const clockAt = (hhmm) => new Date(`2026-10-09T${hhmm}:00`).getTime();
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  const t0 = Date.now();
+  await routeBox(a.page, 0, 'driver').fill('Timed Tina');
+  await until(() => ops().length === 1);
+  const first = ops()[0];
+  check('an op carries when it was made, by the sender\'s clock', Number.isFinite(first.at) && first.at >= t0 - 1000 && first.at <= Date.now(), String(first.at));
+
+  relay.cut(a.context);
+  check('one browser cut off: it says Offline', await pillSays(a.page, 'Offline'));
+  check('and the other is still Connected', await pillSays(b.page, 'Connected', 1000));
+  await a.page.clock.setFixedTime(clockAt('09:14'));
+  await routeBox(a.page, 1, 'driver').fill('Offline Oda');
+  await wait(700);
+  await a.page.clock.setFixedTime(clockAt('10:30'));
+  await a.page.reload({ waitUntil: 'networkidle' });
+  check('reloaded, still offline, the edit is on screen', (await routeBox(a.page, 1, 'driver').inputValue()) === 'Offline Oda');
+  same('nothing reached the relay', ops().length, 1);
+  relay.mend(a.context);
+  check('back: Connected', await pillSays(a.page, 'Connected', 10000));
+  check('the edit goes out (no clash, so quietly)', await until(() => ops().length === 2));
+  same('with the time it was made offline, not the reconnect\'s', ops()[1].at, clockAt('09:14'));
+  check('and reaches the other browser', await b.page.waitForFunction(() => state.routes[1].driver === 'Offline Oda', null, { timeout: 5000 }).then(() => true, () => false));
+  same('times: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// The copy shipped as 0.16.0 checks only an op's schema and its changes, so
+// it follows a room whose ops carry a time, and its own ops, which carry
+// none, are applied here. Served from git, as it was handed over.
+{
+  const SHIPPED = 'fce442f';   // round 2's review fixes, 0.16.0
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  let dir = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'cc-0.16.0-'));
+    execSync(`git -C "${repo}" archive ${SHIPPED} docs | tar -x -C "${dir}"`, { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { if (dir) await rm(dir, { recursive: true, force: true }); dir = null; }
+  if (!dir) {
+    console.log(`  skip  0.16.0 in a room whose ops carry times: commit ${SHIPPED} is not in this clone; run it in a full clone`);
+  } else {
+    const old = await startServer(0, join(dir, 'docs'));
+    const { secret, ops } = liveRoom();
+    const a = await live(SEED, secret);
+    const context = await browser.newContext();
+    await relay.attach(context);
+    const page = await context.newPage();
+    await page.addInitScript((seed) => {
+      if (location.protocol === 'about:' || sessionStorage.getItem('seeded')) return;
+      sessionStorage.setItem('seeded', '1'); localStorage.clear(); for (const [key, v] of Object.entries(seed)) localStorage.setItem(key, v);
+    }, { ...inRoom(SEED, secret), 'carcoord:pref:seenUpdate': '0.16.0' });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(old.base, { waitUntil: 'networkidle' });
+    same('the old copy is really 0.16.0', await page.evaluate(() => APP_VERSION), '0.16.0');
+    check('0.16.0 in the room: Connected', await pillSays(page, 'Connected'), await pill(page).textContent().catch(() => 'no pill'));
+    await routeBox(a.page, 2, 'driver').fill('Timed For Old');
+    await until(() => ops().length === 1);
+    check('this build\'s op carries a time', Number.isFinite(ops()[0].at));
+    check('0.16.0 applies it', await page.waitForFunction(() => state.routes[2].driver === 'Timed For Old', null, { timeout: 5000 }).then(() => true, () => false));
+    check('and still follows the room, not read-only', await pillSays(page, 'Connected', 1000) && await page.evaluate(() => roomLive()));
+    await routeBox(page, 3, 'driver').fill('Untimed From Old');
+    await until(() => ops().length === 2);
+    check('0.16.0\'s own op carries no time', !('at' in ops()[1]));
+    check('and this build applies it', await a.page.waitForFunction(() => state.routes[3].driver === 'Untimed From Old', null, { timeout: 5000 }).then(() => true, () => false));
+    check('both end on one plan', await converged(a.page, page));
+    same('0.16.0: no page errors', [...errors, ...a.errors], []);
+    await context.close();
+    await a.context.close();
+    await old.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Leave: the key is forgotten, the plan stays, and the network goes quiet,
 // in this tab, in another tab of the same browser, and after a reload.
 {

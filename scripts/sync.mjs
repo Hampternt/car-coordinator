@@ -672,6 +672,42 @@ await block('replica: an edit to an item gone with no record of its removal', ()
   same('its own edit coming back still carries the item, to put back', fb2.map((f) => [f.type, f.id, f.item && f.item.driver]), [['removed', 'r2', 'Mine']]);
 });
 
+// --- round 3, pack 5: when each change was made ---
+await block('times: a batch says when it was made, and an op carries it', () => {
+  const base = samplePlan();
+  const R = Sync.replica(0, base);
+  const t0 = Date.now();
+  const screen = JSON.parse(J(base)); screen.routes[0].driver = 'Anna';
+  const b1 = R.capture(screen);
+  check('a batch is stamped with the time it was taken, by default', Number.isFinite(b1.at) && b1.at >= t0 && b1.at <= Date.now(), String(b1.at));
+  screen.routes[1].driver = 'Bob';
+  const b2 = R.capture(screen, { at: 1760000000000 });
+  same('or with the time it is given', b2.at, 1760000000000);
+  // Sequenced: the op's own time comes back with it, and a flag it raises
+  // carries it.
+  R.take(1, b1.changes, b1.oid, b1.at);
+  R.take(2, [{ op: 'set', kind: 'route', id: 'r2', field: 'driver', value: 'Other', was: '' }], 'theirs', 1760000300000);
+  R.take(3, [{ op: 'set', kind: 'route', id: 'r3', field: 'driver', value: 'Old', was: '' }], null);
+  const res = R.drain();
+  same('drain says which ops it applied, whose, and when they were made', res.ops.map((o) => [o.seq, o.own, o.at]), [[1, true, b1.at], [2, false, 1760000300000], [3, false, null]]);
+  same('with their changes', res.ops[2].changes.map((c) => c.value), ['Old']);
+  same('the queue keeps the batch not yet sequenced, with its time', R.queue.map((b) => b.at), [1760000000000]);
+  R.take(4, b2.changes, b2.oid, b2.at);
+  same('an op whose was it never saw: the flag carries the op\'s time', R.drain().flags.map((f) => [f.type, f.kept, f.lost, f.opAt]), [['set', 'Bob', 'Other', 1760000000000]]);
+  const Q = Sync.replica(0, base);
+  Q.take(1, [{ op: 'set', kind: 'route', id: 'r1', field: 'driver', value: 'X', was: 'nope' }], null, 'not a time');
+  const q = Q.drain();
+  same('an op with no time (0.16.0 and before): at null, and its flag says no time', [q.ops[0].at, 'opAt' in q.flags[0]], [null, false]);
+});
+
+await block('changeKey: what a change is about', () => {
+  same('a set: its field', Sync.changeKey({ op: 'set', kind: 'route', id: 'r1', field: 'driver', value: 'x' }), Sync.fieldKey('route', 'r1', 'driver'));
+  same('a meta set: the field', Sync.changeKey({ op: 'set', kind: 'meta', field: 'date', value: 'x' }), Sync.fieldKey('meta', null, 'date'));
+  same('an add and a remove of one item: the same key', Sync.changeKey({ op: 'add', kind: 'car', item: { id: 'c9' }, after: null }), Sync.changeKey({ op: 'remove', kind: 'car', id: 'c9' }));
+  check('an item\'s key is none of its fields\'', Sync.itemKey('car', 'c9') !== Sync.fieldKey('car', 'c9', '') && !Sync.fieldKey('car', 'c9', 'reg').startsWith(`${Sync.itemKey('car', 'c9')}\u0001`));
+  same('an order: its list', Sync.changeKey({ op: 'order', kind: 'route', ids: [] }), Sync.changeKey({ op: 'order', kind: 'route', ids: ['r1'] }));
+});
+
 // --- one name at the top level, and none that clash with the app's ---
 {
   const declared = [...source.matchAll(/^(?:const|let|var|function|class) ([A-Za-z_$][\w$]*)/gm)].map((x) => x[1]);
