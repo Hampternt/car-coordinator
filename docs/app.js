@@ -2730,6 +2730,7 @@ async function roomReviewSend() {
   r.review.state = 'sending';
   r.review.look = false;
   roomHoldsKeep(r);
+  roomReviewTell(r, 'send');
   roomFlush(r);
   note('info', 'Sending your offline changes. Where you both changed something, yours is kept, and theirs is on the Shared plan card with Put it back.');
   renderKeepingFocus();
@@ -2747,6 +2748,7 @@ async function roomReviewKeep() {
   const label = `Kept from offline, ${Number.isFinite(mine) ? when(mine) : when(Date.now())}`;
   if (!Store.snapshot(state, label)) { render(); return; }   // the warning says why
   const local = Sync.diff(r.rep.shadow, state);
+  const id = r.review.id;
   // A no-change op queued after a snapshot is not an edit: it still goes.
   r.rep.queue = r.rep.queue.filter((b) => !b.changes.length);
   r.rep.replay();
@@ -2756,9 +2758,69 @@ async function roomReviewKeep() {
   r.wasKept = new Map();
   roomShow(r, Sync.applyAll(r.rep.shadow, local));
   roomHoldsKeep(r);
+  roomReviewTell(r, 'keep', id);
   note('info', `Kept your offline changes on this PC only. The plan as it was on your screen is in Backups, as \u201c${label}\u201d; the screen shows the shared plan.`);
   renderKeepingFocus();
 }
+/* Other tabs of this browser. The hold is kept beside the base, so a tab
+   opened while held (or reloaded) reads it and is held too, with the same
+   edits: one review, answered once. The tab that answers says so under
+   carcoord:roomReviewAnswer, written and removed at once (the room's id and
+   the review's, never the secret), and every other held tab of the browser
+   follows. A tab that stopped saving (another tab saved over it, round 2)
+   neither tells nor follows: what it holds is its own, and its plan is in
+   Backups already. A tab following the room live never needs to take a hold
+   up: while it is live, every change it gets from the room is saved over the
+   offline tab's plan, which stops that tab saving first. */
+const REVIEW_ANSWER = 'carcoord:roomReviewAnswer';
+function roomReviewTell(r, choice, id = r.review && r.review.id) {
+  if (!r.keys || !id || planElsewhere) return;
+  try {
+    localStorage.setItem(REVIEW_ANSWER, JSON.stringify({ room: r.keys.roomId, id, choice }));
+    localStorage.removeItem(REVIEW_ANSWER);
+  } catch { /* storage refused: each tab answers for itself */ }
+}
+/* Answered in another tab. Send there: it sends the held edits, so this tab
+   takes up its record of them (kept beside the base just before it said so)
+   as sent, and keeps them on screen until the room has them, sending nothing
+   itself. Keep there: it took the Backup, so they are dropped here and the
+   screen takes the shared plan. Either way, edits made here while held were
+   this tab's own, and go out as usual. */
+function roomReviewFollow(r, choice) {
+  const rv = r.review;
+  if (!roomHeld(r)) return;
+  roomCapture(r);
+  const local = Sync.diff(r.rep.shadow, state);
+  let kept = null;
+  if (choice === 'send') {
+    try { kept = roomReviewRead(JSON.parse(localStorage.getItem(BASE_KEY)).review); } catch { kept = null; }
+    if (kept && kept.state !== 'sending') kept = null;
+  }
+  r.rep.queue = r.rep.queue.filter((b) => !rv.oids.includes(b.oid));
+  if (kept) {
+    const have = new Set(r.rep.queue.map((b) => b.oid));
+    const theirs = kept.batches.filter((b) => kept.oids.includes(b.oid) && !have.has(b.oid))
+      .map((b) => ({ oid: b.oid, changes: b.changes, at: Number.isFinite(b.at) ? b.at : Date.now(), sent: true }));
+    r.rep.queue = [...theirs, ...r.rep.queue];
+    r.review = { id: kept.id, state: 'sending', base: kept.base, baseSeq: kept.baseSeq, from: kept.from, oids: kept.oids, theirs: kept.theirs, started: kept.started, look: false };
+  } else {
+    r.review = null;
+    r.times.clear();
+  }
+  r.rep.replay();
+  roomShow(r, Sync.applyAll(r.rep.shadow, local));
+  roomHoldsKeep(r);
+  roomFlush(r);
+  renderKeepingFocus();
+}
+window.addEventListener('storage', (e) => {
+  const r = room;
+  if (e.key !== REVIEW_ANSWER || !e.newValue || !r || !r.keys || !r.rep || planElsewhere || !roomHeld(r)) return;
+  let x = null;
+  try { x = JSON.parse(e.newValue); } catch { return; }
+  if (x && x.room === r.keys.roomId && ['send', 'keep'].includes(x.choice)) roomReviewFollow(r, x.choice);
+});
+
 function roomReviewLook() {
   if (!roomHeld()) return;
   room.review.look = true;
@@ -3924,7 +3986,7 @@ function roomCardHtml() {
     ${roomVersionsHtml()}
     <h4>Leave</h4>
     <p class="hint">Stops sharing on this PC and forgets the invite link here. Your plan stays on screen as it is; the shared plan stays on the server for the other manager.</p>
-    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}`;
+    ${actBtn('room-leave', '', '', armed === 'room-leave' ? 'Sure?' : 'Leave the shared plan', armed === 'room-leave' ? 'armed' : '')}${roomHeld() && armed === 'room-leave' ? ' <span class="hint">Your offline changes stay on this PC, in your plan, and are not sent.</span>' : ''}`;
 }
 
 // Push, and the versions pushed so far, newest first.

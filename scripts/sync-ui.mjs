@@ -2168,6 +2168,153 @@ const offlineClash = async (a, b, ops) => {
   for (const x of [a, b]) await x.context.close();
 }
 
+// Edge cases. A second tab opened while held reads the hold and is held
+// too: one review for the browser, answered once. Send there; the first
+// follows and sends nothing twice.
+const reviewOids = (pg) => pg.evaluate(() => (room.review ? room.review.oids : []));
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, for a second tab', await offlineClash(a, b, ops));
+  const oids = await reviewOids(a.page);
+  const tab2 = await a.context.newPage();
+  const tabErrors = [];
+  tab2.on('pageerror', (e) => tabErrors.push(String(e)));
+  await tab2.goto(base, { waitUntil: 'networkidle' });
+  await pillSays(tab2, 'Connected');
+  check('a second tab opened while held is held too, the edits on its screen', await tab2.waitForFunction(() => roomHeld() && room.caught && state.routes[2].driver === 'Mine Offline', null, { timeout: 5000 }).then(() => true, () => false));
+  same('the same review, not a second one', await tab2.evaluate(() => room.review.id), await a.page.evaluate(() => room.review.id));
+  const sent = ops().length;
+  await wait(600);
+  same('opening it sent nothing', ops().length, sent);
+  await tab2.click('[data-act="tab"][data-tab="data"]');
+  await tab2.click('[data-act="room-review-send"]');
+  check('Send in the second tab: the first tab follows, its bar gone', await a.page.waitForFunction(() => !roomHeld() && !document.getElementById('roomReview'), null, { timeout: 5000 }).then(() => true, () => false));
+  check('three screens, one plan', await converged(a.page, b.page) && await converged(tab2, b.page));
+  await wait(800);
+  same('the held edits went out once, from one tab', ops().slice(sent).map((o) => o.oid).sort(), [...oids].sort());
+  const flag = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept: 'Mine Offline', lost: 'Theirs Live' }];
+  check('flagged alike on all three', await until(async () => JSON.stringify([await flagsOf(a.page), await flagsOf(tab2), await flagsOf(b.page)]) === JSON.stringify([flag, flag, flag])), JSON.stringify([await flagsOf(a.page), await flagsOf(tab2), await flagsOf(b.page)]));
+  same('a second tab: no console errors', [...a.errors, ...b.errors, ...tabErrors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// Two tabs open when the connection goes: the one the offline edits are made
+// in holds them; the other stopped saving when they were saved over it
+// (round 2), shows no review and sends nothing. The review appears in one
+// tab, once. Keep there: one Backup, nothing sent, and both tabs end on the
+// shared plan.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  const tab2 = await a.context.newPage();
+  await tab2.goto(base, { waitUntil: 'networkidle' });
+  await pillSays(tab2, 'Connected');
+  await tab2.waitForFunction(() => roomLive() && room.caught, null, { timeout: 5000 }).catch(() => {});
+  check('held, with a second tab open all along', await offlineClash(a, b, ops));
+  const sent = ops().length;
+  check('the other tab stopped saving when the edits were saved over it', await pillSays(tab2, 'Reload this tab'), await pill(tab2).textContent().catch(() => ''));
+  await wait(600);
+  check('and shows no review: it appears in one tab only', !(await held(tab2)) && (await tab2.locator('#syncReview').count()) === 0);
+  same('neither tab sent the held edits', ops().length, sent);
+  const backups = () => a.page.evaluate(() => Store.backups().filter((x) => /^Kept from offline/.test(x.label)).length);
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-review-keep"]');
+  check('Keep in the first: all three screens show the shared plan', await converged(a.page, b.page) && await converged(tab2, b.page) && JSON.parse(await planOf(tab2)).routes[2].driver === 'Theirs Live');
+  await wait(800);
+  same('one Backup taken, nothing sent', [await backups(), ops().length], [1, sent]);
+  check('and the second tab still shows no review', !(await held(tab2)) && (await tab2.locator('#syncReview').count()) === 0);
+  same('two tabs offline together: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// Leaving while held: nothing is sent, and the held edits stay in the plan
+// on this PC. The armed Leave says so.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, then Leave', await offlineClash(a, b, ops));
+  const sent = ops().length;
+  await a.page.click('#syncReview');
+  await a.page.click('[data-act="room-leave"]');
+  check('the armed Leave says the offline changes stay here, unsent', /Your offline changes stay on this PC, in your plan, and are not sent\./.test(await a.page.locator('#roomCard').innerText()));
+  await a.page.click('[data-act="room-leave"]');
+  await wait(800);
+  same('left while held: nothing sent', ops().length, sent);
+  check('the held edits stay in the plan here', await a.page.evaluate(() => { const v = JSON.parse(localStorage.getItem('carcoord:v1')); return v.routes[2].driver === 'Mine Offline' && v.routes[3].round === '4'; }));
+  check('no base, no hold kept, no bar or note', await a.page.evaluate(() => localStorage.getItem('carcoord:roomBase') === null && !document.getElementById('roomReview') && !document.getElementById('syncReview')));
+  same('leaving while held: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// The room turns read-only (a newer build's op) while held: Send waits for
+// an update, Keep still works, and nothing is sent.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, then read-only', await offlineClash(a, b, ops));
+  const sent = ops().length;
+  await b.page.evaluate((body) => room.conn.send({ type: 'op', body }), seal(secret, 'op', { schema: 99, oid: 'f'.repeat(16), changes: [] }));
+  check('a newer build\'s op: Update the app', await pillSays(a.page, 'Update the app'));
+  await a.page.click('#syncReview');
+  check('the bar stays, saying to update to send', /Update the app to send them/.test(await a.page.locator('#roomReview').innerText()));
+  check('Send is disabled', await a.page.locator('[data-act="room-review-send"]').isDisabled());
+  await a.page.evaluate(() => roomReviewSend());
+  await a.page.click('[data-act="room-review-keep"]');
+  check('Keep still works: the plan is in Backups', await a.page.evaluate(() => /^Kept from offline/.test(Store.backups()[0].label) && JSON.parse(Store.backups()[0].json).routes[2].driver === 'Mine Offline'));
+  check('and the screen has the shared plan as this browser could read it', (await routeBox(a.page, 2, 'driver').inputValue().catch(() => null)) === 'Theirs Live' || JSON.parse(await planOf(a.page)).routes[2].driver === 'Theirs Live');
+  await wait(800);
+  same('read-only while held: nothing sent but the newer op', ops().length, sent + 1);
+  same('read-only while held: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
+// Offline again while held: the hold stays; back, what the other did
+// meanwhile is added to the review, and Send flags every field both changed.
+{
+  const { secret, ops } = liveRoom();
+  const a = await live(SEED, secret);
+  const b = await live(SEED, secret);
+  check('held, then offline again', await offlineClash(a, b, ops));
+  relay.cut(a.context);
+  await pillSays(a.page, 'Offline');
+  check('offline again: still held, the note still there', await held(a.page) && (await a.page.locator('#syncReview').count()) === 1);
+  const was = ops().length;
+  await routeBox(b.page, 3, 'round').fill('7');
+  // Left at once, so the box is not held when A's change to it arrives.
+  await b.page.keyboard.press('Tab');
+  await until(() => ops().length === was + 1);
+  const sent = ops().length;
+  relay.mend(a.context);
+  await pillSays(a.page, 'Connected', 10000);
+  check('back: still held', await a.page.waitForFunction(() => roomHeld() && room.caught, null, { timeout: 5000 }).then(() => true, () => false));
+  await a.page.click('#syncReview');
+  check('the review now counts both fields the other changed too', await a.page.waitForFunction(() => /The other manager changed 2 of them too/.test(document.getElementById('roomReview').innerText), null, { timeout: 5000 }).then(() => true, () => false), await a.page.locator('#roomReview').innerText().catch(() => ''));
+  await wait(600);
+  same('and nothing was sent on the way', ops().length, sent);
+  await a.page.click('[data-act="room-review-send"]');
+  const diffOf = async () => {
+    const [x, y] = [JSON.parse(await planOf(a.page)), JSON.parse(await planOf(b.page))];
+    const out = [];
+    for (const key of Object.keys({ ...x, ...y })) {
+      if (JSON.stringify(x[key]) === JSON.stringify(y[key])) continue;
+      if (Array.isArray(x[key]) && Array.isArray(y[key])) x[key].forEach((it, i) => { for (const f of Object.keys({ ...it, ...y[key][i] })) if (JSON.stringify(it[f]) !== JSON.stringify((y[key][i] || {})[f])) out.push([key, it.id, f, it[f], (y[key][i] || {})[f]]); });
+      else out.push([key, x[key], y[key]]);
+    }
+    return JSON.stringify(out);
+  };
+  check('Send: one plan', await converged(a.page, b.page), await diffOf());
+  const flags = [{ type: 'set', kind: 'route', id: 'rt-03', field: 'driver', kept: 'Mine Offline', lost: 'Theirs Live' }, { type: 'set', kind: 'route', id: 'rt-04', field: 'round', kept: '4', lost: '7' }];
+  const sorted = async (pg) => (await flagsOf(pg)).sort((x, y) => x.id.localeCompare(y.id));
+  check('both fields flagged alike on both screens', await until(async () => JSON.stringify([await sorted(a.page), await sorted(b.page)]) === JSON.stringify([flags, flags])), JSON.stringify([await sorted(a.page), await sorted(b.page)]));
+  same('offline again while held: no console errors', [...a.errors, ...b.errors], []);
+  for (const x of [a, b]) await x.context.close();
+}
+
 // No overlap: the offline edits go out quietly, as before. No bar.
 {
   const { secret, ops } = liveRoom();
