@@ -77,22 +77,103 @@ const Presence = (() => {
     </div>`;
   }
 
-  // The name or colour changed: the other screen hears it with the next move.
-  function settingsChanged() {}
+  /* ---------- sending: where this browser is ---------- */
+  const SEND_GAP = 250;        // at most four a second, however fast the focus moves
+  const HEARTBEAT = 20000;     // said again while nothing moves, so the other keeps it
+  let lastSent = null;         // what the last message said, to send only a change
+  let lastSendAt = 0;
+  let sendTimer = null;
+  let forced = false;
+  let lastTab = null;
+  let lastAt = null;
+  let wasLive = false;
+
+  const isLive = () => { try { return !!api && !!api.live(); } catch { return false; } };
+  const currentTab = () => document.querySelector('.tabs [data-act="tab"].active')?.dataset.tab || null;
+  // Where the focus is, as the plan names it: the box (kind, id and field),
+  // or the row or card it is in. A row's own grid, tag menu or right-click
+  // menu is still that row. Anything else (the Data tab's cards, a dialog,
+  // the bar) is nowhere in particular.
+  function whereAt() {
+    const el = document.activeElement;
+    if (!el || el === document.body) return null;
+    if (el.closest('#picker, #tagMenu, #ctxMenu, #ctxSub')) return lastAt;
+    if (!el.closest('section.tab')) return null;
+    const box = el.closest('[data-kind]');
+    const d = box ? box.dataset : {};
+    if (d.kind && d.kind !== 'meta' && d.id) return { kind: d.kind, id: d.id, field: d.field || null };
+    if (d.kind === 'meta' && d.field) return { kind: 'meta', id: null, field: d.field };
+    const row = el.closest('tr[data-route]');
+    if (row) return { kind: 'route', id: row.dataset.route, field: null };
+    const rail = el.closest('.rail-row[data-drag][data-id]');
+    if (rail) return { kind: rail.dataset.drag, id: rail.dataset.id, field: null };
+    const tpl = el.closest('.tpl-head[data-tpl]');
+    if (tpl) return { kind: 'template', id: tpl.dataset.tpl, field: null };
+    return null;
+  }
+  const message = (extra = {}) => ({
+    schema: typeof Store !== 'undefined' ? Store.SCHEMA : 0,
+    who: { id: myId, name: myName(), color: myColour() },
+    tab: currentTab(),
+    at: whereAt(),
+    t: Date.now(),
+    ...extra,
+  });
+  const saying = (m) => JSON.stringify([m.who.name, m.who.color, m.tab, m.at]);
+
+  // A move, a tab, a name: sent once the focus has settled (a redraw takes it
+  // away and puts it back within the same task), never more often than
+  // SEND_GAP, and always the last one. Only what changed is sent, unless
+  // `force` (joining, the heartbeat, someone new to answer).
+  function queue(force = false) {
+    if (!isLive()) return;
+    if (force) forced = true;
+    if (sendTimer) return;
+    sendTimer = setTimeout(flush, Math.max(0, lastSendAt + SEND_GAP - Date.now()));
+  }
+  function flush() {
+    sendTimer = null;
+    if (!isLive()) { forced = false; return; }
+    const m = message();
+    const says = saying(m);
+    lastAt = m.at;
+    if (!forced && says === lastSent) return;
+    forced = false;
+    lastSent = says;
+    lastSendAt = Date.now();
+    // Not sent (the connection went meanwhile): the next move says it again.
+    Promise.resolve(api.send(m)).then((ok) => { if (!ok && lastSent === says) lastSent = null; }, () => { if (lastSent === says) lastSent = null; });
+  }
+
+  // Once a second: joining (or back online) says where this browser is at
+  // once, and the heartbeat keeps saying it.
+  function tick() {
+    const live = isLive();
+    if (live && !wasLive) queue(true);
+    if (!live && wasLive) lastSent = null;
+    wasLive = live;
+    if (live && Date.now() - lastSendAt >= HEARTBEAT) queue(true);
+  }
 
   function listen() {
     document.addEventListener('input', (e) => {
       const el = e.target;
       if (!el || !el.dataset || el.dataset.presenceSet !== 'name') return;
       Store.setPref('presenceName', el.value.slice(0, NAME_MAX) || null);
-      settingsChanged();
+      queue();
     });
     document.addEventListener('change', (e) => {
       const el = e.target;
       if (!el || !el.dataset || el.dataset.presenceSet !== 'color' || !KEYS.includes(el.value)) return;
       Store.setPref('presenceColor', el.value);
-      settingsChanged();
+      queue();
     });
+    document.addEventListener('focusin', () => queue());
+    document.addEventListener('focusout', () => queue());
+    // Leaving: said at once, as far as the page lets it (the lock may finish
+    // after the page has gone; then the other screen lets go after a while).
+    window.addEventListener('pagehide', () => { if (isLive()) { try { api.send(message({ at: null, bye: true })); } catch { /* gone */ } } });
+    setInterval(tick, 1000);
   }
 
   // attach(api): keep the app's hooks and start listening. Nothing of the
@@ -106,8 +187,11 @@ const Presence = (() => {
   function receive(plain) { void plain; }
 
   // decorate(): put the row tints, name tags, box outlines and the quiet note
-  // back after a redraw.
-  function decorate() {}
+  // back after a redraw. A redraw is also how the app changes tab.
+  function decorate() {
+    const t = currentTab();
+    if (t !== lastTab) { lastTab = t; queue(); }
+  }
 
   // pillText(): who else is here, for the top bar beside the Shared plan pill.
   function pillText() { return ''; }

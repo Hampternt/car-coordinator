@@ -160,11 +160,124 @@ const presenceOf = (secret, k) => relay.sent('presence', k.roomId).map((f) => un
   await a.context.close(); await b.context.close();
 }
 
-// No room: nothing of this on the card, and nothing on any tab.
+// ---------------------------------------------------------------------------
+// 2. Sending: where this browser is, when it moves, and nothing more.
+const row = (pg, i) => pg.locator('#tab-plan tbody tr').nth(i);
+const atOf = (pg) => pg.evaluate(() => { const d = document.activeElement?.dataset || {}; return d.kind ? { kind: d.kind, id: d.id || null, field: d.field || null } : null; });
+const sameAt = (m, at) => JSON.stringify(m.at) === JSON.stringify(at);
 {
-  const p = await profile({ items: { ...SEED } });
+  const { secret, k } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  const fromA = () => presenceOf(secret, k).filter((m) => m.who.name === 'Kari');
+  check('joining says where this browser is, at once', await until(() => fromA().length >= 1, 3000));
+  const first = fromA()[0] || {};
+  check('in the contract\'s shape: schema, who, tab, at, t', first.schema === SCHEMA && /^[0-9a-f]{16}$/.test(first.who?.id) && first.who.name === 'Kari' && first.who.color === 'teal'
+    && first.tab === 'plan' && first.at === null && Number.isFinite(first.t) && !('bye' in first), JSON.stringify(first));
+  check('the relay was sent a presence body it cannot read', relay.sent('presence', k.roomId).every((f) => typeof f.body === 'string' && !/Kari|route/.test(f.body)));
+
+  const rid = await a.page.evaluate(() => state.routes[2].id);
+  let t0 = Date.now();
+  await row(a.page, 2).locator('[data-field="driver"]').focus();
+  check('focus into a driver box says so within a second', await until(() => fromA().some((m) => sameAt(m, { kind: 'route', id: rid, field: 'driver' })), 1000), String(Date.now() - t0));
+  await row(a.page, 2).locator('[data-field="carId"]').focus();
+  check('and into the car box of that row', await until(() => fromA().some((m) => sameAt(m, { kind: 'route', id: rid, field: 'carId' })), 1000));
+  let n = fromA().length;
+  await row(a.page, 2).locator('[data-field="driver"]').focus();
+  await wait(400);
+  n = fromA().length;
+  await a.page.keyboard.type('Testy Tester', { delay: 20 });
+  await wait(600);
+  same('typing in the box sends nothing more: the place has not changed', fromA().length, n);
+
+  const did = await a.page.evaluate(() => state.drivers[0].id);
+  await a.page.locator(`.rail-row[data-id="${did}"] .rail-name`).focus();
+  check('a rail row: the driver, by id', await until(() => fromA().some((m) => sameAt(m, { kind: 'driver', id: did, field: 'name' })), 1000));
+  const tid = await a.page.evaluate(() => state.templates.find((t) => t.routes.length)?.id || null);
+  if (tid) {
+    await a.page.locator(`.tpl-head[data-tpl="${tid}"] [data-act="resave-template"]`).focus();
+    check('a template card: the template, by id', await until(() => fromA().some((m) => m.at && m.at.kind === 'template' && m.at.id === tid), 1000));
+  }
+  await a.page.locator('#date').focus();
+  check('the Date box: meta, with no id', await until(() => fromA().some((m) => sameAt(m, { kind: 'meta', id: null, field: 'date' })), 1000));
+  await a.page.evaluate(() => document.activeElement.blur());
+  check('focus gone from the plan: at is null', await until(() => { const l = fromA().at(-1); return l && l.at === null; }, 1000));
+  await tabTo(a.page, 'cars');
+  check('a tab change says the tab', await until(() => { const l = fromA().at(-1); return l && l.tab === 'cars'; }, 1000));
+  const cid = await a.page.evaluate(() => state.cars[1].id);
+  await a.page.locator(`#tab-cars [data-kind="car"][data-id="${cid}"][data-field="note"]`).focus();
+  check('the Cars tab: the car\'s box', await until(() => fromA().some((m) => m.tab === 'cars' && sameAt(m, { kind: 'car', id: cid, field: 'note' })), 1000));
+
+  // Moving fast: at most four a second, and the last place always goes.
+  await tabTo(a.page, 'plan');
+  await row(a.page, 0).locator('[data-field="name"]').focus();
+  await wait(600);
+  const before = fromA().length;
+  t0 = Date.now();
+  for (let i = 0; i < 40; i++) await a.page.keyboard.press('Tab');
+  const spent = Date.now() - t0;
+  const lastPlace = await atOf(a.page);
+  await wait(700);
+  const burst = fromA().length - before;
+  check('forty moves in a row send at most about four a second', burst <= Math.ceil(spent / 250) + 2, `${burst} in ${spent} ms`);
+  check('and the last place is the last one sent', sameAt(fromA().at(-1), lastPlace), JSON.stringify([fromA().at(-1)?.at, lastPlace]));
+
+  // A redraw (the other's edit) puts the focus back: nothing is said again,
+  // and the two do not set each other off.
+  await row(a.page, 4).locator('[data-field="driver"]').focus();
+  await wait(500);
+  await row(b.page, 6).locator('[data-field="carId"]').selectOption({ index: 3 });
+  await row(b.page, 6).locator('[data-field="round"]').focus();
+  await wait(800);
+  const settled = presenceOf(secret, k).length;
+  await wait(2500);
+  same('after the other\'s edit redraws this screen: no presence goes back and forth', presenceOf(secret, k).length - settled, 0);
+  same('sending: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
+// ---------------------------------------------------------------------------
+// Quiet for a while: the heartbeat keeps saying where this browser is.
+{
+  const { secret, k } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  const fromA = () => presenceOf(secret, k).filter((m) => m.who.name === 'Kari');
+  await row(a.page, 3).locator('[data-field="driver"]').focus();
+  await wait(1000);
+  const quietFrom = fromA().length;
+  const rid = await a.page.evaluate(() => state.routes[3].id);
+  await wait(21500);
+  const beats = fromA().slice(quietFrom);
+  check('nothing moving for 21 s: the heartbeat says it again', beats.length >= 1 && beats.every((m) => sameAt(m, { kind: 'route', id: rid, field: 'driver' })), JSON.stringify(beats.map((m) => m.at)));
+  check('and only about every 20 s', beats.length <= 2, String(beats.length));
+  await a.context.close(); await b.context.close();
+}
+
+// A browser that only reads the room (a newer build's) says nothing either.
+{
+  const secret = newSecret();
+  const k = keysOf(secret);
+  relay.makeRoom(k.roomId, k.token, { snapshot: { seq: 0, body: seal(secret, 'snapshot', { schema: SCHEMA + 1, plan: JSON.parse(PLAN) }) } });
+  const p = await profile({ items: { ...SEED, 'carcoord:pref:room': secret, 'carcoord:pref:presenceName': 'Kari' } });
+  check('a newer build\'s room: this one only reads it', await pageUntil(p.page, () => /^Shared plan: Update the app/.test(document.getElementById('syncStatus')?.textContent || ''), null, 5000));
+  await row(p.page, 1).locator('[data-field="driver"]').focus();
+  await tabTo(p.page, 'cars');
+  await wait(1500);
+  same('a read-only room: no presence sent', relay.sent('presence', k.roomId).length, 0);
+  await p.context.close();
+}
+
+// No room: nothing of this on the card, nothing sent, nothing drawn.
+{
+  const p = await profile({ items: { ...SEED, 'carcoord:pref:presenceName': 'Kari' } });
+  await row(p.page, 1).locator('[data-field="driver"]').focus();
+  for (const t of ['drivers', 'cars', 'positions', 'data', 'plan']) await tabTo(p.page, t);
   await tabTo(p.page, 'data');
   check('no room: no name and colour on the card', (await p.page.locator('#presenceName').count()) === 0);
+  await wait(1500);
+  same('no room: no WebSocket is ever made', await p.page.evaluate(() => window.__sockets), 0);
+  same('no room: no request leaves the app\'s own server', p.requests, []);
   same('no room: no console errors', p.errors, []);
   await p.context.close();
 }

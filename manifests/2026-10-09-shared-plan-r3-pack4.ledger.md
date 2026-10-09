@@ -11,7 +11,8 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
 
 - [x] **1. Name and colour** on the Shared plan card, per browser (`presenceName`, `presenceColor`).
   Gate: check.sh OK; presence-ui 16 ok, 0 FAIL; colour-guard clean.
-- [ ] **2. Sending** on focus and tab change, heartbeat ~20 s, `bye` on pagehide, at most ~4/s.
+- [x] **2. Sending** on focus and tab change, heartbeat ~20 s, `bye` on pagehide, at most ~4/s.
+  Gate: check.sh OK; presence-ui 38 ok, 0 FAIL (40 Tabs in a row stay within 4/s; no ping-pong after a remote redraw).
 - [ ] **3. Receiving**: by `who.id`, own id ignored, dropped after ~45 s or on `bye`, cleared when not live.
 - [ ] **4. Day plan marks**: row tint, name tag, box outline; survive redraws; nothing moves.
 - [ ] **5. Elsewhere**: rail rows, Cars/Drivers/Positions rows, template cards; `pillText()`.
@@ -29,6 +30,14 @@ Item gate: `bash scripts/check.sh` + `node scripts/presence-ui.mjs`.
   the colour the other screen sees, and it stays the same across reloads.
 - The name is kept as typed (a card redraw mid-word must not drop a trailing space) and tidied
   (spaces folded, trimmed, 24 characters) only when shown or sent.
+
+- Tab changes are seen in `decorate()` (every tab switch is a render), not by a click listener:
+  `attach` runs before the app's own click handler is registered, and tabs also change through
+  `show-data` and the right-click menu's Go to.
+- Focus in a row's grid, tag menu or right-click menu keeps the row's place; anywhere outside the
+  tab sections (the bar, dialogs) is `at: null`.
+- `bye` on pagehide is best effort only: sealing is async and usually finishes after the page has
+  gone (round 2's ledger). The receive side is tested with a `bye` sent from a live page.
 
 ## Deviations and notes for the merge
 
