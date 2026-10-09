@@ -232,7 +232,37 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 
 ## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Status:** 💭 drafted 2026-10-09 from the owner's requests while they test round 2 on PC and tablet; decisions made (below). Building waits for their go, after round 2's test. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+**Status:** 🚧 building: the owner said go on 2026-10-09 and asked for agents to speed it up. Runs parallel (below). Both packs write `docs/app.js`, so they run serial: pack 4 first.
+
+### Round 3 runs parallel (owner, 2026-10-09: "assign agents to help speed up work")
+
+Counted under the count rule:
+- **Two units:** pack 4 has 6 items, pack 5 has 7.
+- **Separate files:** pack 4 lives almost entirely in a new file. The only shared file, `docs/app.js`, gets one-line registrations that the scaffold places.
+- **Independent:** neither needs the other's output.
+
+**Where they build:** this session started in an app-made worktree, so builder worktrees are nested *inside* it at `.wt/pack4` and `.wt/pack5` (git-excluded). Each branches from the scaffold commit. The main session merges them.
+
+**Contracts** (fixed by the scaffold commit):
+
+| | Pack 4 · Who is editing | Pack 5 · Offline review |
+|---|---|---|
+| **Owns** | `docs/presence.js` (new), the `/* presence */` region of `docs/style.css`, `scripts/presence-ui.mjs` (new) | all Shared plan code in `docs/app.js` except the scaffold's presence lines, `docs/sync.js`, `scripts/sync.mjs`, `scripts/sync-ui.mjs`, `scripts/sync-fakerelay.mjs`, the `/* offline review */` region of `docs/style.css` |
+| **Exposes** | `Presence.attach(api)`, `Presence.receive(plain)`, `Presence.decorate()`, `Presence.settingsHtml() → string`, `Presence.pillText() → string` (all safe no-ops in the scaffold) | ops gain `at` (ms, sender's clock); `roomReviewHtml() → string` in the card; actions `room-review-send`, `room-review-keep`, `room-review-look`, `room-review-close` |
+| **Uses** | the `api` given at attach: `live() → bool` (connected, caught up, not read-only), `send(plain) → Promise<bool>` (seals as `presence` and sends), `rerender()`; `Store.pref`/`Store.setPref` for `presenceName`/`presenceColor`; `Sync.KINDS` already has `presence` | nothing from pack 4 |
+
+**Presence message** (inside the encryption, never stored): `{schema, who: {id, name, color}, tab, at: {kind, id, field} | null, t, bye?}`. `id` is random per tab. The fake relay already forwards `presence`.
+
+**Scaffold's one-liners in `docs/app.js`:**
+- `roomFrame` opens a `presence` frame and calls `Presence.receive`;
+- `render()` ends with `Presence.decorate()`;
+- `roomCardHtml` holds `${Presence.settingsHtml()}` and `${roomReviewHtml()}`;
+- `renderRoomPill` appends `Presence.pillText()`;
+- the four `room-review-*` action lines;
+- one `Presence.attach({...})` call;
+- `roomSendPresence(plain)`, written in full.
+
+**Claimed:** `package.json`'s test script gains `node scripts/presence-ui.mjs` after `sync-ui`. The version cut (0.17.0) is the main session's, after the merge.
 
 ### Pack 4: Who is editing
 
