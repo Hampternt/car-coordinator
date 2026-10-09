@@ -284,6 +284,125 @@ const silence = (pg) => pg.evaluate(() => {
   await a.context.close(); await b.context.close();
 }
 
+// ---------------------------------------------------------------------------
+// 4. Day plan marks: the other's row tinted with their name tag, their box
+// ringed; following their focus within a second; back after every redraw;
+// nothing moving or stopping for the person working.
+const marksOf = (pg) => pg.evaluate(() => ({
+  rows: [...document.querySelectorAll('#tab-plan tbody tr.presence-row')].map((r) => ({
+    id: r.dataset.route,
+    colour: [...r.classList].find((c) => c.startsWith('pr-c-')) || null,
+    tag: r.cells[0].getAttribute('data-presence-who'),
+    drawn: getComputedStyle(r.cells[0], '::before').content,
+  })),
+  boxes: [...document.querySelectorAll('#tab-plan .presence-box')].map((b) => `${b.closest('tr')?.dataset.route}:${b.dataset.field}`),
+}));
+const markedAt = (pg, id, field, ms = 1000) => pageUntil(pg, ([i, f]) => {
+  const r = document.querySelector(`#tab-plan tbody tr[data-route="${i}"]`);
+  return !!r && r.classList.contains('presence-row') && !!r.querySelector(`.presence-box[data-field="${f}"]`)
+    && document.querySelectorAll('#tab-plan tbody tr.presence-row').length === 1;
+}, [id, field], ms);
+// Where every row and box of the plan is, to the pixel.
+const layoutOf = (pg) => pg.evaluate(() => [...document.querySelectorAll('#tab-plan tbody tr, #tab-plan tbody input, #tab-plan tbody select, .rail-row')]
+  .map((el) => { const b = el.getBoundingClientRect(); return [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 10) / 10).join(','); }).join(';') + `|${scrollX},${scrollY}`);
+{
+  const { secret } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' });
+  await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan');
+  const ids = await a.page.evaluate(() => state.routes.map((r) => r.id));
+  const layoutBefore = await layoutOf(b.page);
+  let t0 = Date.now();
+  await row(a.page, 3).locator('[data-field="driver"]').focus();
+  const first = await markedAt(b.page, ids[3], 'driver');
+  const took = Date.now() - t0;
+  check('the other\'s row and box are marked within a second of their focus', first && took < 1000, `${first} in ${took} ms`);
+  const m = await marksOf(b.page);
+  same('the row: tinted in their colour, with their name tag at its start', m.rows, [{ id: ids[3], colour: 'pr-c-teal', tag: 'Kari', drawn: '"Kari"' }]);
+  same('the box: ringed', m.boxes, [`${ids[3]}:driver`]);
+  check('the tint is painted over the row', await b.page.evaluate((i) => /gradient/.test(getComputedStyle(document.querySelector(`tr[data-route="${i}"] td`)).backgroundImage), ids[3]));
+  same('nothing on the page moved for the one looking', await layoutOf(b.page), layoutBefore);
+  same('and the tag takes no click', await b.page.evaluate((i) => getComputedStyle(document.querySelector(`tr[data-route="${i}"] td`), '::before').pointerEvents, ids[3]), 'none');
+  check('nobody marks their own place', (await marksOf(a.page)).rows.length === 0);
+
+  // Coming, going, changing tab and moving: only the marks and the bar's
+  // words change here, never a redraw of the page.
+  await b.page.evaluate(() => { window.__renders = 0; const real = render; window.render = (...x) => { window.__renders++; return real(...x); }; });
+  await tabTo(a.page, 'cars');
+  check('the other changes tab: the bar says so', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Cars', 1000), await pillOf(b.page));
+  await tabTo(a.page, 'plan');
+  await row(a.page, 4).locator('[data-field="driver"]').focus();
+  await markedAt(b.page, ids[4], 'driver');
+  same('and nothing of the page here was redrawn for it', await b.page.evaluate(() => window.__renders), 0);
+  check('the bar after: back on the Day plan', await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan', 1000), await pillOf(b.page));
+
+  t0 = Date.now();
+  await row(a.page, 5).locator('[data-field="carId"]').focus();
+  check('moving to another row\'s car box: the marks follow within a second', await markedAt(b.page, ids[5], 'carId') && Date.now() - t0 < 1000, JSON.stringify(await marksOf(b.page)));
+
+  // Typing in the row the other is in, while they move about: every key
+  // lands, the focus and the caret stay.
+  await row(b.page, 5).locator('[data-field="round"]').click();
+  await b.page.keyboard.press('End');
+  const typed = 'Nine3';
+  for (const [i, ch] of [...typed].entries()) {
+    await b.page.keyboard.type(ch);
+    if (i % 2 === 0) await row(a.page, i % 4 === 0 ? 5 : 6).locator(`[data-field="${i % 4 === 0 ? 'driver' : 'round'}"]`).focus();
+    await wait(120);
+  }
+  await row(a.page, 5).locator('[data-field="driver"]').focus();
+  await wait(500);
+  const now = await b.page.evaluate(() => { const el = document.activeElement; return { route: el.closest('tr')?.dataset.route, field: el.dataset.field, value: el.value, caret: el.selectionStart }; });
+  const wasRound = JSON.parse(PLAN).routes[5].round || '';
+  same('typing in a marked row: never blocked or interrupted', now, { route: ids[5], field: 'round', value: wasRound + typed, caret: (wasRound + typed).length });
+  check('and it is still marked as theirs', await markedAt(b.page, ids[5], 'driver'));
+
+  // A redraw of the whole plan (the other's edit to a car): the marks are
+  // drawn again on the new rows.
+  await b.page.evaluate(() => { for (const r of document.querySelectorAll('#tab-plan tbody tr')) r.__old = true; });
+  await row(a.page, 7).locator('[data-field="carId"]').selectOption({ index: 4 });
+  await row(a.page, 7).locator('[data-field="carId"]').focus();
+  const redrawn = await pageUntil(b.page, () => !document.querySelector('#tab-plan tbody tr').__old, null, 3000);
+  check('a remote edit redraws the plan, and the marks are back on the new rows', redrawn && await markedAt(b.page, ids[7], 'carId', 1500), JSON.stringify(await marksOf(b.page)));
+  same('and the focus of the one working stays where it was', await b.page.evaluate(() => [document.activeElement.closest('tr')?.dataset.route, document.activeElement.dataset.field]), [ids[5], 'round']);
+  await b.page.evaluate(() => document.activeElement.blur());
+
+  // Leaving: focus gone from the plan, or on another tab with no item.
+  await a.page.evaluate(() => document.activeElement.blur());
+  check('the other leaves the box: the marks go within a second', await pageUntil(b.page, () => !document.querySelector('.presence-row, .presence-box, [data-presence-who]'), null, 1000));
+  await row(a.page, 2).locator('[data-field="name"]').focus();
+  await markedAt(b.page, ids[2], 'name');
+  relay.down();
+  check('offline: the marks go', await pageUntil(b.page, () => !document.querySelector('.presence-row, .presence-box, [data-presence-who]'), null, 3000));
+  relay.up();
+  check('back online: they are back', await markedAt(b.page, ids[2], 'name', 12000));
+  same('marks: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
+// Dark mode: the tag, the tint and the ring in the dark values, still seen.
+{
+  const { secret } = liveRoom();
+  const a = await live(secret, { name: 'Kari', color: 'teal' });
+  const b = await live(secret, { name: 'Ola', color: 'violet' }, { colorScheme: 'dark' });
+  const ids = await a.page.evaluate(() => state.routes.map((r) => r.id));
+  await row(a.page, 1).locator('[data-field="driver"]').focus();
+  check('dark: the marks are drawn', await markedAt(b.page, ids[1], 'driver', 2000));
+  const look = await b.page.evaluate((i) => {
+    const td = document.querySelector(`tr[data-route="${i}"] td`);
+    const tag = getComputedStyle(td, '::before');
+    return { page: getComputedStyle(document.body).backgroundColor, tag: tag.backgroundColor, text: tag.color, tint: getComputedStyle(td).backgroundImage, ring: getComputedStyle(document.querySelector(`tr[data-route="${i}"] [data-field="driver"]`)).boxShadow };
+  }, ids[1]);
+  same('dark: the page is dark', look.page, 'rgb(18, 20, 22)');
+  same('dark: the tag is the light teal, with dark text on it', [look.tag, look.text], ['rgb(77, 182, 172)', 'rgb(18, 20, 22)']);
+  check('dark: the tint is the dark one', look.tint.includes('rgba(77, 182, 172, 0.22)'), look.tint);
+  check('dark: the ring is the light teal', look.ring.includes('rgb(77, 182, 172)'), look.ring);
+  const light = await a.page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--presence-teal').trim());
+  same('light: the same key is the darker teal', light, '#00796b');
+  same('dark: no console errors', [...a.errors, ...b.errors], []);
+  await a.context.close(); await b.context.close();
+}
+
 // Quiet for a while: the heartbeat keeps saying where a browser is, and one
 // gone quiet without a goodbye is let go after about 45 s.
 {
@@ -293,6 +412,7 @@ const silence = (pg) => pg.evaluate(() => {
   const fromA = () => presenceOf(secret, k).filter((m) => m.who.name === 'Kari');
   check('both see each other', await pillIs(a.page, 'Shared plan: Connected \u00b7 Ola is here \u00b7 Day plan') && await pillIs(b.page, 'Shared plan: Connected \u00b7 Kari is here \u00b7 Day plan'));
   await row(a.page, 3).locator('[data-field="driver"]').focus();
+  await row(b.page, 1).locator('[data-field="driver"]').focus();
   await wait(1000);
   await silence(b.page);
   const quietFrom = fromA().length;
@@ -303,11 +423,13 @@ const silence = (pg) => pg.evaluate(() => {
   check('nothing moving for 21 s: the heartbeat says it again', beats.length >= 1 && beats.every((m) => sameAt(m, { kind: 'route', id: rid, field: 'driver' })), JSON.stringify(beats.map((m) => m.at)));
   check('and only about every 20 s', beats.length <= 2, String(beats.length));
   check('the other, quiet for 21 s, is still here', (await pillOf(a.page)).includes('Ola is here'));
+  check('and their row still marked', (await marksOf(a.page)).rows.length === 1);
   check('the one still talking is kept for as long as it talks', (await pillOf(b.page)).includes('Kari is here'));
   const gone = await pillIs(a.page, 'Shared plan: Connected', 30000);
   const after = Math.round((Date.now() - silentAt) / 1000);
   check('quiet with no goodbye: let go after about 45 s', gone && after >= 44 && after <= 49, `${gone} after ${after} s`);
-  check('while the one still talking stays', (await pillOf(b.page)).includes('Kari is here'));
+  check('and their marks go with them', (await marksOf(a.page)).rows.length === 0 && (await marksOf(a.page)).boxes.length === 0);
+  check('while the one still talking stays', (await pillOf(b.page)).includes('Kari is here') && (await marksOf(b.page)).rows.length === 1);
   await a.context.close(); await b.context.close();
 }
 

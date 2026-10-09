@@ -157,12 +157,28 @@ const Presence = (() => {
     return { kind, id: kind === 'meta' ? null : str(at.id, 200), field: str(at.field, 60) };
   }
 
-  // After who is here changed: the marks again, and the whole screen only
-  // when the bar's words change (someone came, went or changed tab), so the
-  // heartbeat and a move within a tab redraw nothing.
-  function redraw(pillWas) {
+  // After who is here changed: the marks again, and the bar's words. The
+  // words are put into the pill as the app left it (its text, then ' · ' and
+  // what pillText() last gave it), never by redrawing the screen: someone
+  // coming, going or changing tab must not redraw the page of the one
+  // working. A pill not as left (it cannot be, short of a change to the app)
+  // is the app's to draw again.
+  let given = '';
+  function patchPill() {
+    const now = words();
+    if (now === given) return;
+    const pill = document.getElementById('syncStatus');
+    const tail = given ? ` \u00b7 ${given}` : '';
+    if (!pill) { given = now; return; }
+    if (tail && !pill.textContent.endsWith(tail)) { api.rerender(); return; }
+    const base = tail ? pill.textContent.slice(0, -tail.length) : pill.textContent;
+    pill.textContent = now ? `${base} \u00b7 ${now}` : base;
+    given = now;
+  }
+  function redraw() {
     if (!api) return;
-    if (pillText() !== pillWas) api.rerender(); else decorate();
+    decorate();
+    patchPill();
   }
 
   function receive(plain) {
@@ -170,8 +186,7 @@ const Presence = (() => {
       const who = plain && typeof plain === 'object' ? plain.who : null;
       const id = who && str(who.id, 64);
       if (!id || id === myId || !isLive()) return;
-      const was = pillText();
-      if (plain.bye === true) { if (others.delete(id)) redraw(was); return; }
+      if (plain.bye === true) { if (others.delete(id)) redraw(); return; }
       const fresh = !others.has(id);
       const tab = str(plain.tab, 40);
       others.set(id, {
@@ -183,7 +198,7 @@ const Presence = (() => {
       });
       // Someone new hears where this browser is now, not in 20 s.
       if (fresh) queue(true);
-      redraw(was);
+      redraw();
     } catch { /* a message this build cannot read is nobody */ }
   }
 
@@ -197,11 +212,10 @@ const Presence = (() => {
     wasLive = live;
     if (live && Date.now() - lastSendAt >= HEARTBEAT) queue(true);
     if (!others.size) return;
-    const was = pillText(true);
     const now = Date.now();
     let gone = false;
     for (const [id, p] of others) if (!live || now - p.heard > FORGET) { others.delete(id); gone = true; }
-    if (gone) redraw(was);
+    if (gone) redraw();
   }
 
   function listen() {
@@ -232,20 +246,77 @@ const Presence = (() => {
     listen();
   }
 
+  /* ---------- the marks ----------
+   A row someone else is in: tinted in their colour, with their name in a tag
+   at its start; the box they are in: a ring in their colour. Classes and two
+   data-presence-* attributes only, on the row and its first cell, never on a
+   box (the app finds the focused box again by its data-* attributes after a
+   redraw), and the tag is drawn by CSS (::before), absolutely placed and
+   deaf to the pointer: nothing moves, nothing takes a click or the focus. */
+  const ROWS = '#tab-plan tbody tr[data-route]';
+  const MARKED = '.presence-row, .presence-box, [data-presence-who]';
+  const COLOURS = KEYS.map((k) => `pr-c-${k}`);
+  function unmark() {
+    for (const el of document.querySelectorAll(MARKED)) {
+      el.classList.remove('presence-row', 'presence-box', ...COLOURS);
+      el.removeAttribute('data-presence-who');
+    }
+  }
+  // Every control of the place's item on screen, whatever its box.
+  function controlsOf(at) {
+    if (at.kind === 'meta') return at.field ? [...document.querySelectorAll(`section.tab [data-kind="meta"][data-field="${CSS.escape(at.field)}"]`)] : [];
+    if (!at.id) return [];
+    return [...document.querySelectorAll(`section.tab [data-kind="${CSS.escape(at.kind)}"][data-id="${CSS.escape(at.id)}"]`)];
+  }
+  function rowsOf(at, controls) {
+    const rows = new Set();
+    if (at.kind === 'route' && at.id) for (const r of document.querySelectorAll(`#tab-plan tbody tr[data-route="${CSS.escape(at.id)}"]`)) rows.add(r);
+    for (const el of controls) { const r = el.closest(ROWS); if (r) rows.add(r); }
+    return rows;
+  }
+  // The start of a row, where its name tag goes.
+  const startOf = (r) => (r.tagName === 'TR' ? r.cells[0] : r);
+
   // decorate(): put the row tints, name tags, box outlines and the quiet note
   // back after a redraw. A redraw is also how the app changes tab.
   function decorate() {
     const t = currentTab();
     if (t !== lastTab) { lastTab = t; queue(); }
+    unmark();
+    if (!others.size || !isLive()) return;
+    // Who is in each row, the one heard from last first: their colour.
+    const inRow = new Map();
+    const people = [...others.values()].sort((x, y) => y.heard - x.heard);
+    for (const p of people) {
+      if (!p.at) continue;
+      const controls = controlsOf(p.at);
+      for (const r of rowsOf(p.at, controls)) {
+        if (!inRow.has(r)) inRow.set(r, []);
+        if (!inRow.get(r).some((q) => q.name === p.name)) inRow.get(r).push(p);
+      }
+      if (!p.at.field) continue;
+      for (const el of controls) {
+        if (el.dataset.field !== p.at.field || el.classList.contains('presence-box')) continue;
+        el.classList.add('presence-box', `pr-c-${p.color}`);
+      }
+    }
+    for (const [r, ps] of inRow) {
+      r.classList.add('presence-row', `pr-c-${ps[0].color}`);
+      const start = startOf(r);
+      if (start) start.setAttribute('data-presence-who', ps.map((p) => p.name).join(', '));
+    }
   }
 
   // pillText(): who else is here, for the top bar beside the Shared plan
   // pill: 'Kari is here · Day plan'. One name once, however many tabs it has
   // open (or a tab reloaded before its goodbye got out); the tab is the one
-  // heard from last. '' when nobody, or when not live. `asWas` reads it
-  // whether live or not, to see if the bar has to change.
-  function pillText(asWas = false) {
-    if (!others.size || (!asWas && !isLive())) return '';
+  // heard from last. '' when nobody, or when not live.
+  function pillText() {
+    given = words();
+    return given;
+  }
+  function words() {
+    if (!others.size || !isLive()) return '';
     const byName = new Map();
     for (const p of others.values()) {
       const had = byName.get(p.name);

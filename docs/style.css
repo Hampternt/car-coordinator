@@ -846,5 +846,20 @@ body.show-sheet .sheet {
 .presence-colour { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .presence-swatch { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); border: 1px solid var(--dot-edge); }
 
+/* Someone else's place: their row tinted over whatever it already shows (a
+   marked row stays pink under it), their name in a tag at the row's start,
+   and a ring round their box. All painted over the page, never in its flow:
+   nothing moves for the person working, and nothing takes a click. */
+.grid tr.presence-row > td { background-image: linear-gradient(var(--pc-tint), var(--pc-tint)); }
+.grid tr.presence-row > td:first-child { position: relative; }
+[data-presence-who]::before {
+  content: attr(data-presence-who);
+  position: absolute; z-index: 3; left: 2px; top: 0; transform: translateY(-50%);
+  max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 5px; border-radius: 3px; background: var(--pc); color: var(--presence-on);
+  font: 600 10px/1.5 var(--body); pointer-events: none;
+}
+.presence-box { box-shadow: 0 0 0 2px var(--pc); }
+
 
 /* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */
