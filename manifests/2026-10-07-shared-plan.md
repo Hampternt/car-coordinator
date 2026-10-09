@@ -246,6 +246,11 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-09: **test copy on the owner's server**, for testing on other devices (owner's go):
+  - this build's `docs/` is in `/var/www/carsync-test`, served at `https://portfolio.dblo.net/carsync-test/` by a new nginx `location` (`no-cache`, backup `portfolio.bak-20261009-0033`);
+  - `RELAY_ORIGINS` gains `https://portfolio.dblo.net`;
+  - checked: the page, assets and portfolio return 200, the upgrade from that origin gets 101, a secure context with WebCrypto, and no console errors.
+  - **Remove after testing:** the folder, the block, and the origin.
 - 2026-10-09: **round 2 built and handed over as 0.16.0.** Ledgers: `manifests/archive/2026-10-08-shared-plan-round2*.ledger.md`.
   - **Build** (8a3cbef…7ff16fc, 77 min for 12 items): `sync.mjs` 159 ok, `sync-ui.mjs` 348 ok, full `npm test` and `screens` green.
   - **Targeted review** (concurrency + live data, on 7ff16fc) found three blocking problems:
