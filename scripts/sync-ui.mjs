@@ -119,7 +119,7 @@ async function profile({ items = {}, routed = true } = {}) {
 }
 const pill = (pg) => pg.locator('#syncStatus');
 const pillSays = async (pg, text, ms = 5000) => {
-  try { await pg.waitForFunction((t) => document.getElementById('syncStatus')?.textContent === `Shared plan: ${t}`, text, { timeout: ms }); return true; } catch { return false; }
+  try { await pg.waitForFunction((t) => (document.getElementById('syncStatus')?.textContent || '').split(' \u00b7 ')[0] === `Shared plan: ${t}`, text, { timeout: ms }); return true; } catch { return false; }
 };
 const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview'];
 

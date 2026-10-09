@@ -10,7 +10,8 @@
 
    The message (sealed as kind `presence` by the app, see roomSendPresence):
      { schema, who: { id, name, color }, tab, at: { kind, id, field } | null, t, bye? }
-   `who.id` is random per tab, so two tabs of one browser are two people here.
+   `who.id` is random per browser and kept, so a manager's own tabs are one person
+   and never mark each other.
    `color` is a key of PALETTE below, never a colour value: the colours
    themselves are tokens in style.css's presence region, with dark values.
 
@@ -32,7 +33,17 @@ const Presence = (() => {
   const KEYS = PALETTE.map(([k]) => k);
   const NAME_MAX = 24;
   const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
-  const myId = randomId();
+  // One id per browser, not per tab (the owner's call, 2026-10-09): the
+  // manager's own second tab is not someone else, so it neither marks rows
+  // nor names itself in the bar. Kept with the browser's other preferences;
+  // a browser that refuses storage keeps one for as long as the page is open.
+  const myId = (() => {
+    const kept = typeof Store !== 'undefined' ? Store.pref('presenceId') : null;
+    if (typeof kept === 'string' && /^[0-9a-f]{16}$/.test(kept)) return kept;
+    const id = randomId();
+    if (typeof Store !== 'undefined') Store.setPref('presenceId', id);
+    return id;
+  })();
   const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const cleanName = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
   // The colour of someone whose key this build does not know (a newer
