@@ -2879,6 +2879,13 @@ function roomReviewClose() {
   renderRoom();
 }
 
+/* An index.html cached from before 0.17.0 loads this app.js without
+   presence.js: everything about who is editing then quietly does nothing,
+   rather than the page failing to draw (the upgrade check's mixed files). */
+if (typeof Presence === 'undefined') {
+  window.Presence = Object.freeze({ attach() {}, receive() {}, decorate() {}, settingsHtml: () => '', pillText: () => '' });
+}
+
 /* ---------- round 3, pack 4: who is editing ----------
    The app's half of docs/presence.js: seal a presence message and send it.
    Never queued and never stored: one that cannot go now is simply dropped,
