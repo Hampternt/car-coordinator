@@ -796,5 +796,55 @@ body.show-sheet .sheet {
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 /* presence — round 3, pack 4: who is editing (docs/presence.js). Pack 4 writes only here. */
+/* Each person's colour, by the key presence.js sends: a fill the name tag
+   sits on (its text --presence-on), and a see-through tint for their row.
+   Lighter on dark, where the tag's text turns dark. The two dark lists are
+   the same, token for token. */
+:root {
+  --presence-on: #fff;
+  --presence-teal: #00796b;    --presence-teal-tint: rgba(0, 121, 107, .16);
+  --presence-violet: #7b1fa2;  --presence-violet-tint: rgba(123, 31, 162, .14);
+  --presence-blue: #1565c0;    --presence-blue-tint: rgba(21, 101, 192, .14);
+  --presence-green: #2e7d32;   --presence-green-tint: rgba(46, 125, 50, .15);
+  --presence-indigo: #3949ab;  --presence-indigo-tint: rgba(57, 73, 171, .15);
+  --presence-brown: #795548;   --presence-brown-tint: rgba(121, 85, 72, .17);
+}
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --presence-on: #121416;
+    --presence-teal: #4db6ac;    --presence-teal-tint: rgba(77, 182, 172, .22);
+    --presence-violet: #ce93d8;  --presence-violet-tint: rgba(206, 147, 216, .2);
+    --presence-blue: #64b5f6;    --presence-blue-tint: rgba(100, 181, 246, .2);
+    --presence-green: #81c784;   --presence-green-tint: rgba(129, 199, 132, .2);
+    --presence-indigo: #9fa8da;  --presence-indigo-tint: rgba(159, 168, 218, .22);
+    --presence-brown: #bcaaa4;   --presence-brown-tint: rgba(188, 170, 164, .22);
+  }
+}
+@media screen {
+  :root[data-theme="dark"] {
+    --presence-on: #121416;
+    --presence-teal: #4db6ac;    --presence-teal-tint: rgba(77, 182, 172, .22);
+    --presence-violet: #ce93d8;  --presence-violet-tint: rgba(206, 147, 216, .2);
+    --presence-blue: #64b5f6;    --presence-blue-tint: rgba(100, 181, 246, .2);
+    --presence-green: #81c784;   --presence-green-tint: rgba(129, 199, 132, .2);
+    --presence-indigo: #9fa8da;  --presence-indigo-tint: rgba(159, 168, 218, .22);
+    --presence-brown: #bcaaa4;   --presence-brown-tint: rgba(188, 170, 164, .22);
+  }
+}
+.pr-c-teal { --pc: var(--presence-teal); --pc-tint: var(--presence-teal-tint); }
+.pr-c-violet { --pc: var(--presence-violet); --pc-tint: var(--presence-violet-tint); }
+.pr-c-blue { --pc: var(--presence-blue); --pc-tint: var(--presence-blue-tint); }
+.pr-c-green { --pc: var(--presence-green); --pc-tint: var(--presence-green-tint); }
+.pr-c-indigo { --pc: var(--presence-indigo); --pc-tint: var(--presence-indigo-tint); }
+.pr-c-brown { --pc: var(--presence-brown); --pc-tint: var(--presence-brown-tint); }
+
+/* The Shared plan card: your name and colour. */
+.presence-me { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.presence-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.presence-name input { width: 12em; padding: 4px 6px; border: 1px solid var(--line); background: var(--field); font-weight: 400; }
+.presence-colours { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.presence-colour { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.presence-swatch { width: 14px; height: 14px; border-radius: 50%; background: var(--pc); border: 1px solid var(--dot-edge); }
+
 
 /* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */
