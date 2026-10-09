@@ -230,11 +230,39 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 - a second tab of the same window follows quietly, with no dialog;
 - each replace-everything action (a share code, Backups' Restore, a version's Restore, Import, Open an existing file) carries the line "This changes the shared plan for both of you".
 
-## Round 3: Who is editing (pack 4)
+## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Goal:** "Kari is here, on the Cars tab"; the field Kari is in is outlined in her colour with a name tag; a soft warning when you click into the same field (never a block); optional typing preview. Each person picks a display name and colour on this PC, sent only inside the encryption.
-*Done when:* two-browser smoke sees focus, tab and leave events within a second, and the relay database holds no presence.
+**Status:** 💭 drafted 2026-10-09 from the owner's requests while they test round 2 on PC and tablet. Building waits for their go and the decisions below. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+
+### Pack 4: Who is editing
+
+**Goal (owner, 2026-10-09):** on the Day plan, a line someone else is working on shows it, so you avoid writing on the same row at once.
+- **The row** the other person is in is tinted in their colour, with a small name tag at its start ("Kari"); **the box** they are in is outlined.
+- **Elsewhere:** the rail rows, the Cars, Drivers and Positions tabs and template cards show the same mark; the top bar says "Kari is here · Day plan".
+- **Clicking into a row someone else is in:** a quiet note beside it, "Kari is editing this line". It never blocks, under Quiet by default.
+- **Names:** each person sets a display name and colour on this PC once, on the Shared plan card. They are sent only inside the encryption and never stored by the relay.
+- **Presence** is a small encrypted message when you move to another row or field, plus a heartbeat every ~20 s. It disappears ~45 s after a person goes quiet or offline, and at once when they leave.
+
+*Done when:* `sync-ui` two-browser checks see the row tint, the name tag and the box outline follow focus within a second; the note appears on entering a row the other is in; it clears on leave and on timeout; and the relay database never holds presence.
 `Agents: build 1 serial (medium) · review: none beyond the smoke check (nothing stored)`
+
+### Pack 5: Offline work, reviewed before it is sent
+
+**Goal (owner, 2026-10-09):** coming back online after working offline must not quietly overwrite a lot of the other person's work, or have yours overwritten. You see what happened on each side and choose.
+- **Times:** every change carries when it was made (sent inside the encryption), so the app can say "your last change offline: 09:14 · the shared plan's last change: 09:20, by Kari".
+- **On reconnect with offline changes:** a review bar on the Shared plan card and a pill note, never a dialog. It says how many changes you made offline, how many the shared plan got meanwhile, and which lines you both touched. Choices:
+  - **Send my changes:** as today; fields both changed are flagged, with the losing value kept and Put it back.
+  - **Look first:** a list of your offline changes, with the ones that clash marked, each showing your value, theirs and both times.
+  - **Keep them on this PC only:** your offline plan goes into Backups by name, and the screen takes the shared plan.
+- **While you decide:** your offline changes are held, not sent. The other person's live changes keep arriving, and your screen shows the shared plan with your held changes marked.
+
+*Done when:* `sync-ui` covers each choice. Hold sends nothing; Send equals today's merge; Keep puts the offline plan in Backups and the screen takes the room's; the times are right; and nothing is lost in any choice.
+`Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
+
+**Decisions for the owner before building** (asked 2026-10-09):
+- Clicking into a line someone else is editing: a quiet note (recommended), or lock the line for the second person?
+- When the review appears: only when the other person changed lines you also changed offline (recommended), whenever you have offline changes and the shared plan changed meanwhile, or every time?
+- Choosing per change: all-or-nothing with a list to look at first (recommended for now), or tick each change to send or keep?
 
 ---
 
