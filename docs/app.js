@@ -2690,7 +2690,38 @@ function roomReviewHtml() {
         <button class="btn" data-act="room-review-keep">Keep them on this PC only</button>
       </div>
       <p class="hint">Send my changes: where you both changed something, yours is kept and theirs is listed below with Put it back. Keep them on this PC only: the plan on your screen goes into Backups, and the screen takes the shared plan.</p>
+      ${r.review.look ? roomReviewListHtml(r.review.result) : ''}
     </div>`;
+}
+/* Look first: every change made offline, in the plan's order, the ones the
+   other manager changed too marked, each with yours and theirs and both
+   times. In the card, under the bar: nothing opens over the page. */
+const ORDER_WORDS = { route: 'the routes', car: 'the cars', position: 'the positions', label: 'the statuses', driver: 'the drivers', driverTag: 'the driver tags', driverGroup: 'the day groups', template: 'the templates' };
+function reviewLine(e) {
+  const thing = e.kind === 'meta' ? 'The plan' : flagThing({ type: 'removed', kind: e.kind, id: e.id, item: e.item || null });
+  const c = e.clash;
+  const at = reviewWhen(e.at);
+  if (e.op === 'order') return { text: `You changed the order of ${ORDER_WORDS[e.kind] || 'a list'} (${at}).` };
+  if (e.op === 'add') return { text: `You added ${thing} (${at}).` };
+  if (e.op === 'remove') {
+    if (!c) return { text: `You removed ${thing} (${at}).` };
+    const fields = Object.keys({ ...(e.item || {}), ...(c.item || {}) }).filter((f) => f !== 'id' && !Sync.equal((e.item || {})[f], (c.item || {})[f])).map((f) => FIELD_WORDS[f] || f);
+    return { text: `You removed ${thing} (${at}).`, theirs: `The other manager changed it${fields.length ? ` (its ${fields.join(', ')})` : ''} (${reviewWhen(c.at)}).` };
+  }
+  const word = FIELD_WORDS[e.field] || e.field;
+  const yours = `${thing}'s ${word}: yours ${flagValue(e.field, e.value)} (${at}).`;
+  if (!c) return { text: yours };
+  if (c.type === 'removed') return { text: yours, theirs: `The other manager removed it (${reviewWhen(c.at)}).` };
+  return { text: yours, theirs: `Theirs ${flagValue(e.field, c.theirs)} (${reviewWhen(c.at)}).` };
+}
+function roomReviewListHtml(res) {
+  const rows = res.changes.map((e) => {
+    const line = reviewLine(e);
+    return `<li${e.clash ? ' class="room-review-both"' : ''}>${e.clash ? '<b>Both changed:</b> ' : ''}${esc(line.text)}${line.theirs ? ` <span class="room-review-theirs">${esc(line.theirs)}</span>` : ''}</li>`;
+  }).join('');
+  return `<h4>Your offline changes</h4>
+      <ul class="room-review-list">${rows}</ul>
+      <button class="btn" data-act="room-review-close">Close</button>`;
 }
 // Send my changes: what was held goes out as any edit does.
 async function roomReviewSend() {
@@ -2703,8 +2734,16 @@ async function roomReviewSend() {
   renderKeepingFocus();
 }
 async function roomReviewKeep() {}
-function roomReviewLook() {}
-function roomReviewClose() {}
+function roomReviewLook() {
+  if (!roomHeld()) return;
+  room.review.look = true;
+  renderRoom();
+}
+function roomReviewClose() {
+  if (!room || !room.review) return;
+  room.review.look = false;
+  renderRoom();
+}
 
 /* ---------- round 3, pack 4: who is editing ----------
    The app's half of docs/presence.js: seal a presence message and send it.

@@ -2069,6 +2069,29 @@ const offlineClash = async (a, b, ops) => {
   same('with its three choices', await a.page.locator('#roomReview button').allInnerTexts(), ['Send my changes', 'Look first', 'Keep them on this PC only']);
   const unknown = await a.page.evaluate(() => { const res = room.review.result; const t = res.clashLast; res.clashLast = null; const html = roomReviewHtml(); res.clashLast = t; return html; });
   check('a time the other\'s op did not carry (0.16.0) reads as unknown', /last time unknown/.test(unknown) && !/NaN|Invalid/.test(unknown), unknown);
+  // Look first: the list, inline under the bar.
+  const before = [await planOf(a.page), ops().length];
+  await a.page.click('[data-act="room-review-look"]');
+  const [n3, n4] = [created.plan.routes[2].name, created.plan.routes[3].name];
+  same('Look first lists every offline change, the clash marked, with yours, theirs and both times', await a.page.locator('#roomReview .room-review-list li').allInnerTexts(), [
+    `Both changed: Route ${n3}'s driver: yours \u201cMine Offline\u201d (${t14}). Theirs \u201cTheirs Live\u201d (${t20}).`,
+    `Route ${n4}'s round: yours \u201c4\u201d (${t14}).`,
+  ]);
+  same('only the clash is marked as both changed', await a.page.locator('#roomReview .room-review-list li.room-review-both').count(), 1);
+  check('in the card, with no dialog', await a.page.evaluate(() => !document.querySelector('dialog[open]')));
+  const markup = await a.page.evaluate(() => {
+    room.review.result.changes[0].value = '<img src="x" id="injected">';
+    renderRoom();
+    const out = { img: !!document.querySelector('#roomReview #injected'), text: document.getElementById('roomReview').innerText.includes('<img src="x" id="injected">') };
+    roomReviewWork(room, room.review);
+    renderRoom();
+    return out;
+  });
+  same('what it lists is shown as text, never as markup', markup, { img: false, text: true });
+  await a.page.click('[data-act="room-review-close"]');
+  same('Close puts the list away', await a.page.locator('#roomReview .room-review-list').count(), 0);
+  same('Look first and Close change nothing and send nothing', [await planOf(a.page), ops().length], before);
+  check('and the hold stands', await held(a.page));
   await a.page.click('[data-act="tab"][data-tab="plan"]');
   const onA = JSON.parse(await planOf(a.page));
   same('the screen shows the shared plan, with the held edits on top', [onA.routes[5].driver, onA.routes[2].driver, onA.routes[3].round], ['Theirs Elsewhere', 'Mine Offline', '4']);
