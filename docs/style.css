@@ -794,3 +794,7 @@ body.show-sheet .sheet {
 }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* presence — round 3, pack 4: who is editing (docs/presence.js). Pack 4 writes only here. */
+
+/* offline review — round 3, pack 5: offline work reviewed before it is sent. Pack 5 writes only here. */

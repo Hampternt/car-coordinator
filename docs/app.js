@@ -2275,6 +2275,7 @@ function render() {
   placeInfoBubble();
   drawTplPeek();
   roomMarks();
+  Presence.decorate();   // round 3, pack 4: who is editing (docs/presence.js)
 }
 
 /* ---------- events ---------- */
@@ -2572,6 +2573,35 @@ const roomReadOnly = (r = room) => !!r && (r.schema > Store.SCHEMA || r.ahead);
 // write to it.
 const roomLive = (r = room) => !!r && !!r.rep && !r.legacy && !roomReadOnly(r);
 
+/* ---------- round 3, pack 5: offline work reviewed before it is sent ----------
+   SCAFFOLD stubs, filled in by pack 5 (manifests/2026-10-07-shared-plan.md).
+   roomReviewHtml() is the review bar on the Shared plan card ('' when there is
+   nothing to review); the four actions are Send my changes, Keep them on this
+   PC only, Look first, and closing Look first. */
+function roomReviewHtml() { return ''; }
+async function roomReviewSend() {}
+async function roomReviewKeep() {}
+function roomReviewLook() {}
+function roomReviewClose() {}
+
+/* ---------- round 3, pack 4: who is editing ----------
+   The app's half of docs/presence.js: seal a presence message and send it.
+   Never queued and never stored: one that cannot go now is simply dropped,
+   and the next move or heartbeat says the same again. */
+async function roomSendPresence(plain) {
+  const r = room;
+  if (!r || !r.conn || r.conn.status !== 'connected' || !r.caught) return false;
+  let body;
+  try { body = await Sync.seal(r.keys, 'presence', plain); } catch { return false; }
+  if (room !== r || r.conn.status !== 'connected') return false;
+  return !!r.conn.send({ type: 'presence', body });
+}
+Presence.attach({
+  live: () => roomLive() && !!room.caught && !!room.conn && room.conn.status === 'connected',
+  send: roomSendPresence,
+  rerender: () => renderKeepingFocus(),
+});
+
 // Whether a catchup shows ops past its snapshot: any op in it, or a room seq
 // past its snapshot's.
 const opsAhead = (f) => {
@@ -2837,6 +2867,10 @@ async function roomFrame(r, f) {
     }
     const take = () => r.rep.take(f.seq, plain.changes, typeof plain.oid === 'string' ? plain.oid : null);
     if (r.caught) roomApply(r, take); else take();
+  } else if (f.type === 'presence' && typeof f.body === 'string') {
+    // Round 3, pack 4: who is editing. Never stored; docs/presence.js reads it.
+    const plain = await openOr(r, 'presence', f.body);
+    if (plain && room === r) Presence.receive(plain);
   } else if (f.type === 'version' && typeof f.body !== 'string') {
     // Pushed from the other browser: its name, and nothing else yet.
     const label = await openOr(r, 'label', f.label);
@@ -3480,6 +3514,8 @@ function renderRoomPill() {
   pill.className = `sync-pill ${says.cls}`;
   pill.title = says.text;
   pill.textContent = `Shared plan: ${says.short}`;
+  const here = Presence.pillText();   // round 3, pack 4: 'Kari is here · Day plan'
+  if (here) pill.textContent += ` \u00b7 ${here}`;
   // Changes made by both at once, to look at on the Data tab: a count beside
   // the pill, never a popup.
   roomFlagsPrune(room);
@@ -3593,7 +3629,9 @@ function roomCardHtml() {
   const qr = inviteQr(link);
   return `${head}
     <p class="status ${says.cls}" id="roomStatus">${esc(says.text)}</p>
+    ${roomReviewHtml()}
     ${roomFlagsHtml()}
+    ${Presence.settingsHtml()}
     ${room.legacy ? '<button class="btn primary-ish" data-act="room-retake">Take the shared plan\u2026</button>' : ''}
     <h4>Invite link</h4>
     <p class="hint">Whoever has this link can open and change the shared plan. Send it only to the other manager.</p>
@@ -3848,6 +3886,11 @@ async function roomAction(act, b, fromKeyboard = false) {
     case 'room-putback': roomPutBack(Number(b.dataset.id)); return;
     case 'room-dismiss': if (room) { room.flags = room.flags.filter((x) => x.n !== Number(b.dataset.id)); roomMarks(); renderKeepingFocus(); } return;
     case 'room-notnow': roomOfferEnd(); return;
+    // Round 3, pack 5: offline work reviewed before it is sent.
+    case 'room-review-send': await roomReviewSend(); return;
+    case 'room-review-keep': await roomReviewKeep(); return;
+    case 'room-review-look': roomReviewLook(); return;
+    case 'room-review-close': roomReviewClose(); return;
     case 'room-create': await roomCreate(); return;
     case 'room-push': await roomPush(); return;
     case 'room-leave': {
