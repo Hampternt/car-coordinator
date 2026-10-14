@@ -16,6 +16,12 @@ const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const B64URL = /^[A-Za-z0-9_-]+$/;
 const sha256 = (token) => nodeCrypto.createHash('sha256').update(Buffer.from(token, 'base64url')).digest('hex');
 const isUint = (v) => Number.isInteger(v) && v >= 0 && v < 2 ** 53;
+// The long-poll fallback's addresses (PROTOCOL.md §9).
+export const POLL = /\/rooms\/[A-Za-z0-9_-]{22}\/poll\/(open|recv|send|close)$/;
+// Chrome logs every failed request to the console, as it logs a failed
+// WebSocket. A console listener passes these over: a fallback finding no relay
+// is the relay being down, not the app going wrong.
+export const pollNoise = (m) => /^Failed to load resource/.test(m.text()) && POLL.test(m.location().url);
 
 export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } = {}) {
   const rooms = new Map();      // roomId -> { hash, seq, snapshot, ops, versions, nextId }
@@ -37,7 +43,11 @@ export function fakeRelay({ createCode = 'test-create-code', maxVersions = 50 } 
   // frames stay in theirs (PROTOCOL.md §4.5).
   let writes = null;
 
-  function attach(target) {
+  async function attach(target) {
+    // It speaks the WebSocket only. The app's long-poll fallback (§9), tried
+    // whenever a socket drops before welcome, finds nothing there, as it would
+    // find a relay that is down; scripts/sync-relay.mjs tests it on the real one.
+    await target.route(POLL, (route) => route.abort('connectionrefused'));
     return target.routeWebSocket(/\/rooms\/[^/]+\/ws$/, (ws) => {
       dialled++;
       const roomId = new URL(ws.url()).pathname.split('/')[2];

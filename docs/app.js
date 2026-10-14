@@ -3886,7 +3886,9 @@ function roomSays() {
   // Sending…, even with an edit waiting from before the connection went.
   if (status === 'connected' && roomHeld()) return { short: 'Connected', text: 'Connected to the shared plan. Your offline changes are waiting for your answer on the Shared plan card on the Data tab, and nothing you change is sent until then. The other manager\u2019s changes keep arriving.', cls: 'on' };
   if (status === 'connected' && room.rep && room.rep.queue.length && room.waitingSince && Date.now() - room.waitingSince > 1000) return { short: 'Sending\u2026', text: 'Sending your latest changes to the shared plan\u2026', cls: 'off' };
-  if (status === 'connected') return { short: 'Connected', text: room.rep ? 'Connected to the shared plan. Your changes reach the other manager as you make them.' : 'Connected to the shared plan.', cls: 'on' };
+  // On the long-poll fallback (sync.js): said, so a slow network is explained.
+  const slower = room.conn && room.conn.transport === 'poll' ? ' This network blocks the usual connection, so this browser uses plain web requests instead: the same, a little slower.' : '';
+  if (status === 'connected') return { short: 'Connected', text: (room.rep ? 'Connected to the shared plan. Your changes reach the other manager as you make them.' : 'Connected to the shared plan.') + slower, cls: 'on' };
   if (status === 'offline') return { short: 'Offline', text: 'Offline, working locally. Everything you change is saved on this PC as usual, and this browser keeps trying to reach the shared plan.', cls: 'warn-status' };
   return { short: 'Connecting', text: 'Connecting to the shared plan…', cls: 'off' };
 }
