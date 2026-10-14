@@ -1949,7 +1949,10 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
 // Round 3, pack 5: offline work reviewed before it is sent.
 // Times: every op says when it was made, by its sender's clock. An edit made
 // offline keeps its own time, through a reload, and goes out with it.
-const clockAt = (hhmm) => new Date(`2026-10-09T${hhmm}:00`).getTime();
+// Today, at that time: a clock on another day makes the app take that day's
+// Start of day backup, which the checks below do not expect.
+const today = ((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)(new Date());
+const clockAt = (hhmm) => new Date(`${today}T${hhmm}:00`).getTime();
 {
   const { secret, ops } = liveRoom();
   const a = await live(SEED, secret);
