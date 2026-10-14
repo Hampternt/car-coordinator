@@ -25,6 +25,9 @@ fn default_limits_are_the_protocols() {
     assert_eq!(l.max_disk_bytes, 2_147_483_648);
     assert_eq!(l.max_versions, 50);
     assert_eq!(l.hello_timeout, Duration::from_secs(10));
+    assert_eq!(l.poll_wait, Duration::from_secs(20));
+    assert_eq!(l.poll_idle, Duration::from_secs(30));
+    assert!(l.poll_idle > l.poll_wait);
 }
 
 #[test]

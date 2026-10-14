@@ -81,7 +81,9 @@ lacks them. The relay never decrypts anything.
   tests: `ws://127.0.0.1:<port>`). nginx strips `/carsync`, so the relay serves:
 - `GET /health` → `200`, body `ok`.
 - `GET /rooms/{roomId}/ws` → WebSocket upgrade.
-- Anything else → `404`.
+- `POST /rooms/{roomId}/poll/{open,recv,send,close}` → the same connection
+  over plain requests, for networks that block WebSockets (§9).
+- Anything else → `404` (`405` for a known path with the wrong method).
 
 Before the upgrade the relay refuses, with a plain HTTP status and no upgrade:
 - `{roomId}` not matching `^[A-Za-z0-9_-]{22}$` → `404`.
@@ -271,3 +273,46 @@ secret is well-formed, and ignores a secret that is not 43 base64url chars.
 
 The secret is kept per browser under `carcoord:pref:room`, never in
 `carcoord:v1`, so Export, Backups, Archives and `recover.html` never hold it.
+
+## 9. Long-poll fallback
+
+Some networks' proxies pass ordinary HTTPS requests but refuse, hold, or strip
+a WebSocket. For them the relay carries **the same connection** over plain
+POSTs: the same frames (§4), close codes, limits and rate limit (§5), ordering
+(§4.5) and fan-out, with WebSocket and long-poll clients in one room alike. Only
+the carrying differs.
+
+Address: the relay's base with `https://` for `wss://` (`http://` for `ws://`),
+e.g. `https://portfolio.dblo.net/carsync/rooms/{roomId}/poll/open`.
+
+Every request is a `POST` with a text body, which a browser sends across
+origins without a CORS preflight. Before anything else each is checked as an
+upgrade is (§3): `{roomId}` malformed → `404`, `Origin` not allowed → `403`.
+Every other answer carries `Access-Control-Allow-Origin` echoing the request's
+`Origin` (none when it had none), `Vary: Origin` and `Cache-Control: no-store`.
+The session id travels in the body, never in the path, so access logs never
+hold it.
+
+| Path | Body | Answer |
+|---|---|---|
+| `/poll/open` | the opening frame (`hello` or `create`) | `200`, body a new session id: 16 random bytes, base64url (22 chars). The frame is then handled exactly as a WebSocket's first frame; its answers (`created`, `welcome`, or a close) come by `recv`. |
+| `/poll/recv` | the session id | Waits up to 20 s (`Limits::poll_wait`) for frames, then `200` with every frame waiting, one JSON object per line (`\n` after each), or an empty body if none came. An answer stops adding frames past 1 MiB, always carrying at least one. A last line `{"type":"close","code":N}` means the relay closed the connection with code `N`; the session is then gone. `404`: no such session (never opened, closed, or expired). |
+| `/poll/send` | the session id, `\n`, then frames, one per line | `204` once queued, in order; each line is one text frame as on a WebSocket and costs a rate token. A line over the frame limit closes `1009`. `404`: no such session. Body limit: twice the frame limit. |
+| `/poll/close` | the session id | `204`, whether or not it was open: the client is leaving, as a WebSocket close. |
+
+- A client keeps one `recv` open at a time and opens the next when one is
+  answered, and sends one `send` at a time, so its frames keep their order.
+- A session with no `recv` open for 30 s (`Limits::poll_idle`) is gone, as a
+  dropped TCP connection is: the relay takes it out of its room.
+- A `close` line has the WebSocket's close code; a connection that ended with
+  no close (the session expired) is answered `1006`.
+- The relay sends no pings here: a `recv` answering within 20 s is what keeps
+  proxies from closing an idle request.
+
+The app (`docs/sync.js`, `connect()`) dials the WebSocket first. If it ends
+before `welcome` for any reason but a refusal (§5's codes that would fail the
+same way again), or no `welcome` comes within 8 s, it dials the same room over
+long-poll at once, before saying offline. Once long-poll has been welcomed, that
+connection redials long-poll first until the page is reloaded. Any failed
+request ends a long-poll connection as a dropped socket ends (`1006`), and the
+client reconnects and catches up as ever (§5).

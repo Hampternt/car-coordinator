@@ -9,6 +9,7 @@
 pub mod auth;
 pub mod config;
 pub mod limits;
+pub mod poll;
 pub mod protocol;
 pub mod storage;
 pub mod ws;
@@ -16,7 +17,8 @@ pub mod ws;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::routing::get;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{get, post};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -43,7 +45,8 @@ pub async fn start(config: Config) -> Result<Relay, StartError> {
     let addr = listener.local_addr()?;
     let (stop, shutdown) = watch::channel(false);
     let rooms = Arc::new(ws::Rooms::default());
-    let state = AppState { config: Arc::new(config), storage, rooms: rooms.clone(), shutdown: shutdown.clone() };
+    let polls = Arc::new(poll::Polls::default());
+    let state = AppState { config: Arc::new(config), storage, rooms: rooms.clone(), polls, shutdown: shutdown.clone() };
 
     let mut signal = shutdown;
     let app = router(state);
@@ -77,14 +80,25 @@ pub struct AppState {
     pub config: std::sync::Arc<Config>,
     pub storage: std::sync::Arc<storage::Storage>,
     pub rooms: std::sync::Arc<ws::Rooms>,
+    /// Open long-poll sessions (PROTOCOL.md §9).
+    pub polls: std::sync::Arc<poll::Polls>,
     /// Turns true once on shutdown; every connection then closes with 1001.
     pub shutdown: watch::Receiver<bool>,
 }
 
-/// `GET /health` and `GET /rooms/{roomId}/ws`; everything else 404.
+/// `GET /health`, `GET /rooms/{roomId}/ws` and the long-poll fallback's
+/// `POST /rooms/{roomId}/poll/{open,recv,send,close}`; everything else 404.
 pub fn router(state: AppState) -> axum::Router {
+    // One `send` carries a batch of frames, but never more than one frame past
+    // the client's batch size; twice the frame limit leaves room for both.
+    let body_limit = DefaultBodyLimit::max(2 * state.config.limits.max_frame);
     axum::Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/rooms/{room}/ws", get(ws::room_ws))
+        .route("/rooms/{room}/poll/open", post(poll::open))
+        .route("/rooms/{room}/poll/recv", post(poll::recv))
+        .route("/rooms/{room}/poll/send", post(poll::send))
+        .route("/rooms/{room}/poll/close", post(poll::close))
+        .layer(body_limit)
         .with_state(state)
 }

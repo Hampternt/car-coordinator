@@ -40,6 +40,10 @@ pub struct Limits {
     pub max_versions: usize,
     /// From upgrade to the first frame.
     pub hello_timeout: Duration,
+    /// How long a long-poll `recv` waits for a frame (PROTOCOL.md §9).
+    pub poll_wait: Duration,
+    /// A long-poll session with no `recv` open for this long is gone.
+    pub poll_idle: Duration,
 }
 
 impl Default for Limits {
@@ -54,6 +58,8 @@ impl Default for Limits {
             max_disk_bytes: 2 * 1024 * 1024 * 1024,
             max_versions: 50,
             hello_timeout: Duration::from_secs(10),
+            poll_wait: Duration::from_secs(20),
+            poll_idle: Duration::from_secs(30),
         }
     }
 }
