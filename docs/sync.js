@@ -90,6 +90,12 @@ const Sync = (() => {
   //   `${relayUrl()}/rooms/${roomId}/ws`
   function roomUrl(roomId) { return `${relayUrl()}/rooms/${roomId}/ws`; }
 
+  // pollUrl(roomId) -> string
+  //   The same room's long-poll address (PROTOCOL.md §9): roomUrl with
+  //   https:// for wss:// (http:// for ws://) and /poll for /ws.
+  function pollUrl(roomId) { return toPoll(roomUrl(roomId)); }
+  const toPoll = (wsUrl) => wsUrl.replace(/^ws/i, 'http').replace(/\/ws$/, '/poll');
+
   /* ---------- keys ---------- */
 
   // newSecret() -> string
@@ -168,14 +174,152 @@ const Sync = (() => {
     return SECRET.test(m[1]) ? m[1] : null;
   }
 
+  /* ---------- the long-poll fallback (PROTOCOL.md §9) ----------
+     Some networks' proxies let ordinary web requests through but not a
+     WebSocket. A PollSocket carries the same frames over plain POSTs, in a
+     WebSocket's shape (onopen, onmessage, onclose, onerror, send, close), so
+     connect() treats the two alike. Any request that fails ends it as a
+     dropped socket ends, 1006, and connect() reconnects and catches up as it
+     always does. */
+  const POLL = Object.freeze({
+    batch: 256 * 1024,  // characters per send; a bigger frame goes alone
+    gap: 200,           // ms between sends, so a proxy sees few requests
+    recvWait: 35000,    // the relay answers a recv within 20 s
+    sendWait: 20000,
+    grace: 1500,        // a failed send waits this long for recv to bring the close code
+  });
+  const SESSION = /^[A-Za-z0-9_-]{22}$/;
+
+  // pollSocket(fetch) -> class PollSocket
+  //   new PollSocket(url), `url` the room's poll address (pollUrl). The first
+  //   send() opens the session with the opening frame; later ones queue and
+  //   go out in order, one request at a time.
+  function pollSocket(fetchFn) {
+    return class PollSocket {
+      constructor(url) {
+        this.url = url;
+        this.onopen = this.onmessage = this.onclose = this.onerror = null;
+        this.id = null;
+        this.opening = false;
+        this.ended = false;
+        this.queue = [];
+        this.posting = false;
+        this.lastSend = 0;
+        this.gapTimer = null;
+        this.failTimer = null;
+        // Nothing to wait for: the session opens with the first frame.
+        setTimeout(() => { if (!this.ended && this.onopen) this.onopen({}); }, 0);
+      }
+
+      async post(what, body, wait) {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), wait);
+        try {
+          const res = await fetchFn(`${this.url}/${what}`, { method: 'POST', body, cache: 'no-store', signal: ctl.signal });
+          if (!res.ok) throw new Error(`poll ${what}: ${res.status}`);
+          return await res.text();
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      send(text) {
+        if (this.ended) return;
+        if (this.id === null && !this.opening) {
+          this.opening = true;
+          this.post('open', text, POLL.sendWait).then((id) => {
+            id = id.trim();
+            if (!SESSION.test(id)) throw new TypeError('not a session id');
+            this.id = id;
+            if (this.ended) { this.bye(); return; }
+            this.listen();
+            this.pump();
+          }).catch(() => this.end(1006));
+          return;
+        }
+        this.queue.push(text);
+        this.pump();
+      }
+
+      pump() {
+        if (this.ended || this.posting || this.id === null || !this.queue.length) return;
+        const gap = this.lastSend + POLL.gap - Date.now();
+        if (gap > 0) {
+          if (!this.gapTimer) this.gapTimer = setTimeout(() => { this.gapTimer = null; this.pump(); }, gap);
+          return;
+        }
+        let n = 0, size = 0;
+        while (n < this.queue.length && (n === 0 || size + this.queue[n].length < POLL.batch)) size += this.queue[n++].length + 1;
+        const batch = this.queue.splice(0, n);
+        this.posting = true;
+        this.lastSend = Date.now();
+        this.post('send', `${this.id}\n${batch.join('\n')}`, POLL.sendWait).then(() => {
+          this.posting = false;
+          this.pump();
+        }, () => {
+          // The frames may or may not have reached the relay, so this
+          // connection cannot go on. A close the relay sent first (a refusal's
+          // code) is on its way to recv: give it the chance to arrive.
+          if (!this.failTimer) this.failTimer = setTimeout(() => this.end(1006), POLL.grace);
+        });
+      }
+
+      async listen() {
+        while (!this.ended) {
+          let text;
+          try { text = await this.post('recv', this.id, POLL.recvWait); } catch { this.end(1006); return; }
+          for (const line of text.split('\n')) {
+            if (this.ended) return;
+            if (!line) continue;
+            let f = null;
+            try { f = JSON.parse(line); } catch { /* not ours to judge: passed on as a socket would */ }
+            if (f && f.type === 'close') { this.end(Number.isInteger(f.code) ? f.code : 1006, true); return; }
+            if (this.onmessage) this.onmessage({ data: line });
+          }
+        }
+      }
+
+      // The session is over: closed by the relay (`said`), or lost.
+      end(code, said = false) {
+        if (this.ended) return;
+        this.ended = true;
+        clearTimeout(this.gapTimer);
+        clearTimeout(this.failTimer);
+        // Lost on this side only, perhaps: tell the relay, so it does not keep
+        // a seat in the room for us until it notices.
+        if (!said) this.bye();
+        if (this.onclose) this.onclose({ code });
+      }
+
+      close() {
+        if (this.ended) return;
+        this.ended = true;
+        clearTimeout(this.gapTimer);
+        clearTimeout(this.failTimer);
+        this.bye();
+      }
+
+      bye() {
+        if (this.id === null) return;
+        try {
+          fetchFn(`${this.url}/close`, { method: 'POST', body: this.id, keepalive: true }).catch(() => {});
+        } catch { /* the page is going anyway */ }
+      }
+    };
+  }
+
   /* ---------- connection ---------- */
 
-  // connect({keys, create, url, WebSocket}) -> Connection
+  // connect({keys, create, url, WebSocket, Poll}) -> Connection
   //   keys       from deriveKeys
   //   create     {createCode} to make the room (first frame `create`), or
   //              absent to join it (`hello`)
   //   url        defaults to roomUrl(keys.roomId)
   //   WebSocket  defaults to the browser's; tests pass their own
+  //   Poll       the long-poll fallback, a constructor in the WebSocket's
+  //              shape; defaults to a PollSocket over the browser's fetch,
+  //              unless a WebSocket was passed. null: no fallback
+  //   pollUrl    defaults to url with https:// and /poll (pollUrl())
   //
   // Connection
   //   .status        'connecting' | 'connected' | 'offline' | 'refused' | 'closed'
@@ -197,12 +341,25 @@ const Sync = (() => {
   //   which tests shorten. Any other close code reconnects, as a network
   //   error does (1011, a storage error on the relay, among them): only the
   //   codes that would fail the same way again stop it.
+  //
+  //   The fallback: a WebSocket that ends before welcome, for any reason
+  //   but a refusal, or has not been welcomed within opts.wsWait (8 s), is
+  //   tried again at once over Poll, before anything says offline: a
+  //   proxy may refuse the upgrade, hold it open, or pass no frames. Once a
+  //   PollSocket is welcomed, this connection dials Poll first from then on.
+  //   .transport says which carries it: 'ws' or 'poll' once welcomed, else
+  //   null.
   const REFUSED = new Set([CLOSE.BAD_FRAME, CLOSE.NOT_ALLOWED, CLOSE.WRONG_CREATE_CODE, CLOSE.ROOM_EXISTS, CLOSE.TOO_LARGE]);
   function connect(opts) {
     const { keys } = opts;
     let create = opts.create || null;
     const url = opts.url || roomUrl(keys.roomId);
     const WS = opts.WebSocket || globalThis.WebSocket;
+    const Poll = opts.Poll !== undefined ? opts.Poll
+      : opts.WebSocket || typeof globalThis.fetch !== 'function' ? null
+        : pollSocket((...args) => globalThis.fetch(...args));
+    const pollAt = opts.pollUrl || toPoll(url);
+    const wsWait = opts.wsWait || 8000;
     const first = (opts.retry && opts.retry.first) || 1000;
     const max = (opts.retry && opts.retry.max) || 30000;
     const listeners = { status: new Set(), frame: new Set() };
@@ -212,6 +369,10 @@ const Sync = (() => {
     let attempt = 0;
     let retryTimer = null;
     let errorTimer = null;
+    let wsTimer = null;
+    // This dial is a PollSocket; one has been welcomed, so dial it first.
+    let polling = false;
+    let pollWorks = false;
 
     const emit = (type, ...args) => {
       for (const fn of [...listeners[type]]) {
@@ -224,12 +385,14 @@ const Sync = (() => {
       emit('status', status, code);
     };
 
-    function dial() {
+    function dial(viaPoll = pollWorks) {
       retryTimer = null;
       welcomed = false;
+      polling = !!(viaPoll && Poll);
       let sock = null;
-      try { sock = new WS(url); } catch { ws = {}; lost(ws, 1006); return; }
+      try { sock = polling ? new Poll(pollAt) : new WS(url); } catch { ws = {}; lost(ws, 1006); return; }
       ws = sock;
+      if (!polling && Poll) wsTimer = setTimeout(() => lost(sock, 1006), wsWait);
       sock.onopen = () => {
         if (ws !== sock) return;
         sock.send(JSON.stringify(create ? { type: 'create', token: keys.token, createCode: create.createCode } : { type: 'hello', token: keys.token }));
@@ -245,6 +408,9 @@ const Sync = (() => {
           else if (frame.type === 'welcome') {
             welcomed = true;
             attempt = 0;
+            clearTimeout(wsTimer);
+            if (polling) pollWorks = true;
+            conn.transport = polling ? 'poll' : 'ws';
             conn.seq = Number.isInteger(frame.seq) ? frame.seq : 0;
             setStatus('connected');
           }
@@ -265,12 +431,18 @@ const Sync = (() => {
       if (ws !== sock) return;
       ws = null;
       clearTimeout(errorTimer);
+      clearTimeout(wsTimer);
       if (sock && typeof sock.close === 'function') {
         sock.onopen = sock.onmessage = sock.onclose = sock.onerror = null;
         try { sock.close(); } catch { /* already gone */ }
       }
       if (stopped) return;
       if (REFUSED.has(code)) { stopped = true; setStatus('refused', code); return; }
+      // A WebSocket that never reached welcome may be one this network does
+      // not carry: the same again over plain requests, before calling it
+      // offline.
+      if (!polling && Poll && !welcomed) { dial(true); return; }
+      conn.transport = null;
       setStatus('offline', code);
       // A listener may have given up on it just now.
       if (stopped) return;
@@ -285,6 +457,7 @@ const Sync = (() => {
       status: 'connecting',
       seq: 0,
       closeCode: null,
+      transport: null,
       on(type, fn) {
         listeners[type].add(fn);
         return () => listeners[type].delete(fn);
@@ -298,6 +471,7 @@ const Sync = (() => {
         stopped = true;
         clearTimeout(retryTimer);
         clearTimeout(errorTimer);
+        clearTimeout(wsTimer);
         const sock = ws;
         ws = null;
         if (sock && typeof sock.close === 'function') {
@@ -893,7 +1067,7 @@ const Sync = (() => {
 
   return {
     RELAY, RELAY_PREF, ROOM_PREF, KINDS, INFO, CLOSE,
-    relayUrl, roomUrl, newSecret, deriveKeys, seal, open, inviteLink, readInvite, connect,
+    relayUrl, roomUrl, pollUrl, pollSocket, newSecret, deriveKeys, seal, open, inviteLink, readInvite, connect,
     joinPreview,
     LISTS, equal, diff, apply, applyAll, collision, check, replica, fieldKey, itemKey, changeKey,
     overlap,

@@ -46,6 +46,14 @@
    need it. */
 const UPDATES = [
   {
+    version: '0.18.0',
+    must: false,
+    title: 'Shared plan on networks that block it',
+    changed: 'On a work network that blocks the shared plan\'s usual connection, it now connects through plain web requests instead. The Data tab says when.',
+    affects: 'Only a shared plan. The printed sheet and share codes are unchanged. It needs the shared plan\'s server updated too; until then, nothing changes.',
+    data: 'Nothing in your saved plan changes.',
+  },
+  {
     version: '0.17.0',
     must: true,
     title: 'Shared plan: who is editing, and offline work you choose to send',
