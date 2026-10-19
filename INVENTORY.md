@@ -80,7 +80,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **The substitute marker** — `want substitute: true` or `want substitute: false` in the same quiet type on every order, with only the word **false** in bold.
 - ✅ **Route total** — per bakery, most to least, with a dot per full ten *inside a single order*. The freezer sheet's is flat and in two columns instead.
 - ✅ **Pallet call** in the page note when a route needs more than 16 crates, in the short form when the line is already crowded.
-- ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots, and a Totals checked box under each route's total.
+- ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots, and a C box on every line of each route's total, ticked once that product's whole amount is counted.
 - ✅ **Self-hosted faces**, so no printer falls back to one with different metrics and silently re-sizes the page.
 - ✅ **Says so rather than misprints** — an Order ID that is blank or not a whole number, and a substitute answer the file doesn't state plainly (blank, "ja", an error cell), are blocking findings at Check. Continue anyway stays the leader's call, and such an answer then prints as false. Past Check, the layout still refuses an order with no true/false answer or no numeric id: the Print step says why instead of printing.
 
