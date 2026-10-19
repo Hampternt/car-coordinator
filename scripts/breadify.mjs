@@ -1936,11 +1936,27 @@ const freshPrint = () => page.evaluate(() => ({
 await page.keyboard.press('Control+p');
 const afterOpen = await freshPrint();
 const freezerLaidOut = afterOpen.laidOut.length;
-// A Totals checked box under each freezer route's total, once per route even
-// when the total runs over two sheets (the owner, 2026-10-09).
+// A C box on every line of each freezer route's total, in place of the one
+// Totals checked box under it (the owner, 2026-10-20). Per route, across every
+// sheet its total runs over: the boxes, the lines, and the type count the
+// total's meta line states, which is taken from the whole route — so a split
+// that doubles or drops a line shows.
 const freezerTotalBoxes = await page.evaluate(() => {
   const routes = [...new Set(Array.from(document.querySelectorAll('#preview .bf-sheet'), (s) => s.dataset.route))];
-  return routes.map((r) => document.querySelectorAll(`#preview .bf-sheet[data-route="${CSS.escape(r)}"] .bf-total-checked .bf-tick`).length);
+  return {
+    routes: routes.map((r) => {
+      const sheets = `#preview .bf-sheet[data-route="${CSS.escape(r)}"]`;
+      const rows = Array.from(document.querySelectorAll(`${sheets} .bf-total-row`));
+      return {
+        route: r,
+        types: parseInt(document.querySelector(`${sheets} .bf-total-meta`).textContent, 10),
+        rows: rows.length,
+        boxed: rows.filter((row) => row.firstElementChild.matches('.bf-tick') && row.firstElementChild.textContent === 'C'
+          && row.querySelectorAll('.bf-tick').length === 1).length,
+      };
+    }),
+    oldBoxes: document.querySelectorAll('#preview .bf-total-checked').length,
+  };
 });
 await page.click('#steps [data-step="check"]');
 await page.click('#mode [data-kind="bread"]');
@@ -1949,6 +1965,11 @@ await page.evaluate(() => {
 });
 await page.keyboard.press('Control+p');
 const afterFlip = await freshPrint();
+// The bread total keeps its lines as they were: ten-dots, no box.
+const breadTotalBoxes = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#preview .bf-total-row').length,
+  boxes: document.querySelectorAll('#preview .bf-total-row .bf-tick').length,
+}));
 await page.evaluate(() => {
   window.print = window.realPrint;
 });
@@ -1958,8 +1979,14 @@ check('Ctrl+P after opening another file goes to Print and prints that file’s 
   && JSON.stringify(afterOpen.printed) === JSON.stringify(afterOpen.laidOut) && afterOpen.printed.length !== breadLaidOut,
   JSON.stringify({ ...afterOpen, breadLaidOut }));
 check('the freezer day was laid out before its kind was switched', freezerLaidOut > 0, String(freezerLaidOut));
-check('every freezer route has one Totals checked box under its total',
-  freezerTotalBoxes.length > 0 && freezerTotalBoxes.every((n) => n === 1), JSON.stringify(freezerTotalBoxes));
+check('every line of every freezer route total starts with one C box, each line printed once',
+  freezerTotalBoxes.routes.length > 0
+  && freezerTotalBoxes.routes.every((r) => r.types > 0 && r.rows === r.types && r.boxed === r.rows),
+  JSON.stringify(freezerTotalBoxes.routes.filter((r) => !(r.types > 0 && r.rows === r.types && r.boxed === r.rows))));
+check('and no Totals checked box is left under a freezer total', freezerTotalBoxes.oldBoxes === 0,
+  String(freezerTotalBoxes.oldBoxes));
+check('the bread total’s lines have no box', breadTotalBoxes.rows > 0 && breadTotalBoxes.boxes === 0,
+  JSON.stringify(breadTotalBoxes));
 check('and after switching between bread and freezer on Check, the sheets of the kind chosen',
   afterFlip.onPrint && afterFlip.kind === 'bread' && afterFlip.printed.length > 0
   && JSON.stringify(afterFlip.printed) === JSON.stringify(afterFlip.laidOut) && afterFlip.printed.length !== freezerLaidOut,
