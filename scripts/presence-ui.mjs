@@ -14,7 +14,7 @@ import { chromium } from 'playwright';
 import nodeCrypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { startServer } from './serve.mjs';
-import { fakeRelay } from './sync-fakerelay.mjs';
+import { fakeRelay, pollNoise } from './sync-fakerelay.mjs';
 
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const server = await startServer();
@@ -85,7 +85,7 @@ async function profile({ items = {}, colorScheme = 'light' } = {}) {
   }, items);
   const errors = [];
   const requests = [];
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('console', (m) => m.type() === 'error' && !pollNoise(m) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('request', (r) => { if (!r.url().startsWith(base) && !r.url().startsWith('data:')) requests.push(r.url()); });
   await page.goto(base, { waitUntil: 'networkidle' });

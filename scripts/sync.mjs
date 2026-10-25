@@ -215,7 +215,7 @@ await block('readInvite', () => {
     frame(obj) { this.onmessage && this.onmessage({ data: JSON.stringify(obj) }); }
     drop(code) { this.onclose && this.onclose({ code }); }
   }
-  const timed = vm.createContext({ crypto: globalThis.crypto, TextEncoder, TextDecoder, atob, btoa, location, history, localStorage, console, setTimeout, clearTimeout });
+  const timed = vm.createContext({ crypto: globalThis.crypto, TextEncoder, TextDecoder, atob, btoa, location, history, localStorage, console, setTimeout, clearTimeout, AbortController });
   vm.runInContext(source, timed, { filename: 'docs/sync.js' });
   const S = vm.runInContext('Sync', timed);
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -321,6 +321,201 @@ await block('readInvite', () => {
     const c = S.connect({ keys, WebSocket: Throws, retry });
     same('a WebSocket that throws means offline, not a crash', c.status, 'offline');
     c.close();
+  });
+
+  // --- the long-poll fallback (PROTOCOL.md §9) ---
+  // FakePoll is a second FakeSocket kind, so each dial says which it was.
+  const polls = [];
+  class FakePoll extends FakeSocket {
+    constructor(url) { super(url); sockets.pop(); polls.push(this); }
+  }
+  const fresh = () => { sockets.length = 0; polls.length = 0; };
+
+  await block('pollUrl', () => {
+    stored.clear();
+    same('the default relay\'s room, over https', S.pollUrl(VECTOR.roomId), `https://portfolio.dblo.net/carsync/rooms/${VECTOR.roomId}/poll`);
+    stored.set('carcoord:pref:relay', 'ws://127.0.0.1:3010');
+    same('a ws:// relay polls over http://', S.pollUrl('x'), 'http://127.0.0.1:3010/rooms/x/poll');
+    stored.clear();
+  });
+
+  await block('connect: falls back to long-poll', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    fresh();
+    const seen = [];
+    const c = S.connect({ keys, WebSocket: FakeSocket, Poll: FakePoll, url: 'wss://relay.test/carsync/rooms/r/ws', retry });
+    c.on('status', (st, code) => seen.push(code ? `${st}:${code}` : st));
+    sockets[0].open();
+    sockets[0].drop(1006);
+    same('a WebSocket lost before welcome is tried again over long-poll at once', polls.map((p) => p.url), ['https://relay.test/carsync/rooms/r/poll']);
+    same('without saying offline first', [c.status, seen], ['connecting', []]);
+    polls[0].open();
+    same('the same hello', polls[0].sent, [{ type: 'hello', token: VECTOR.token }]);
+    polls[0].frame({ type: 'welcome', seq: 3 });
+    same('welcome over it is connected, and says how', [c.status, c.transport, c.seq], ['connected', 'poll', 3]);
+    check('frames go over it', c.send({ type: 'catchup', since: 3 }) === true && polls[0].sent.length === 2);
+    polls[0].drop(1006);
+    same('lost after welcome is offline, as a socket is', [c.status, c.transport], ['offline', null]);
+    await wait(80);
+    same('and it redials long-poll first, now it knows the network', [sockets.length, polls.length], [1, 2]);
+    c.close();
+    same('close() closes it', polls[1].closed, 1000);
+  });
+
+  await block('connect: a WebSocket the network holds open', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    fresh();
+    const c = S.connect({ keys, WebSocket: FakeSocket, Poll: FakePoll, wsWait: 60, retry });
+    sockets[0].open();
+    await wait(30);
+    same('not yet', polls.length, 0);
+    await wait(80);
+    same('unwelcomed after wsWait: long-poll', [polls.length, sockets[0].closed !== null], [1, true]);
+    c.close();
+  });
+
+  await block('connect: what the fallback leaves alone', async () => {
+    const keys = await S.deriveKeys(VECTOR.secret);
+    fresh();
+    const r = S.connect({ keys, WebSocket: FakeSocket, Poll: FakePoll, retry });
+    sockets[0].open();
+    sockets[0].drop(4401);
+    same('a refusal is a refusal on any transport', [r.status, polls.length], ['refused', 0]);
+
+    fresh();
+    const w = S.connect({ keys, WebSocket: FakeSocket, Poll: FakePoll, retry });
+    sockets[0].open();
+    sockets[0].frame({ type: 'welcome', seq: 0 });
+    same('a welcomed WebSocket', w.transport, 'ws');
+    sockets[0].drop(1006);
+    await wait(80);
+    same('lost later redials a WebSocket, not long-poll', [sockets.length, polls.length], [2, 0]);
+    w.close();
+
+    fresh();
+    const d = S.connect({ keys, WebSocket: FakeSocket, Poll: FakePoll, retry });
+    sockets[0].drop(1006);
+    polls[0].drop(1006);
+    same('both lost before welcome: offline', d.status, 'offline');
+    await wait(80);
+    same('and the redial tries the WebSocket first again', [sockets.length, polls.length], [2, 1]);
+    d.close();
+
+    fresh();
+    const n = S.connect({ keys, WebSocket: FakeSocket, retry });
+    sockets[0].drop(1006);
+    same('a WebSocket passed with no Poll has no fallback', [n.status, polls.length], ['offline', 0]);
+    n.close();
+  });
+
+  // PollSocket itself, on a fetch the test answers.
+  await block('PollSocket', async () => {
+    const calls = [];
+    const fetchFake = (url, init) => new Promise((resolve, reject) => {
+      calls.push({ what: url.split('/').pop(), body: init.body, keepalive: !!init.keepalive, resolve, reject, signal: init.signal });
+    });
+    const answer = (call, status, text = '') => call.resolve({ ok: status >= 200 && status < 300, status, text: async () => text });
+    const nextCall = async (what) => {
+      for (let i = 0; i < 50; i++) {
+        const c = calls.find((x) => x.what === what && !x.taken);
+        if (c) { c.taken = true; return c; }
+        await wait(10);
+      }
+      throw new Error(`no ${what} request`);
+    };
+    const PollSocket = S.pollSocket(fetchFake);
+    const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
+
+    const p = new PollSocket('https://relay.test/rooms/r/poll');
+    const got = [];
+    let closed = null;
+    p.onmessage = (e) => got.push(JSON.parse(e.data).type);
+    p.onclose = (e) => { closed = e.code; };
+    let opened = false;
+    p.onopen = () => { opened = true; };
+    await wait(5);
+    check('it opens at once: the session starts with the first frame', opened);
+    p.send('{"type":"hello"}');
+    const open = await nextCall('open');
+    same('open carries the opening frame', open.body, '{"type":"hello"}');
+    p.send('{"type":"op","n":1}');
+    p.send('{"type":"op","n":2}');
+    check('nothing more goes out before the session id', !calls.some((c) => c.what === 'send'));
+    answer(open, 200, ID);
+    const recv = await nextCall('recv');
+    same('recv names the session in its body', recv.body, ID);
+    const send = await nextCall('send');
+    same('queued frames go in one send, in order, after the id', send.body, `${ID}\n{"type":"op","n":1}\n{"type":"op","n":2}`);
+    p.send('{"type":"op","n":3}');
+    await wait(20);
+    same('one send at a time', calls.filter((c) => c.what === 'send').length, 1);
+    answer(send, 204);
+    const send2 = await nextCall('send');
+    same('the next follows once it is answered', send2.body, `${ID}\n{"type":"op","n":3}`);
+    answer(send2, 204);
+    answer(recv, 200, '{"type":"welcome","seq":0}\n{"type":"ack","seq":1}\n');
+    const recv2 = await nextCall('recv');
+    same('every line reaches onmessage, and it polls again', [got, recv2.body], [['welcome', 'ack'], ID]);
+    answer(recv2, 200, '{"type":"ack","seq":2}\n{"type":"close","code":4401}\n');
+    await wait(10);
+    same('a close line ends it with its code', [got, closed], [['welcome', 'ack', 'ack'], 4401]);
+    await wait(30);
+    check('and asks nothing more of the relay', !calls.some((c) => !c.taken));
+
+    const q = new PollSocket('https://relay.test/rooms/r/poll');
+    let qClosed = null;
+    q.onclose = (e) => { qClosed = e.code; };
+    q.send('{"type":"hello"}');
+    answer(await nextCall('open'), 200, ID);
+    (await nextCall('recv')).reject(new TypeError('Failed to fetch'));
+    await wait(10);
+    same('a failed recv is a dropped socket', qClosed, 1006);
+    const bye = await nextCall('close');
+    same('and it tells the relay it left', [bye.body, bye.keepalive], [ID, true]);
+
+    const s = new PollSocket('https://relay.test/rooms/r/poll');
+    let sClosed = null;
+    s.onclose = (e) => { sClosed = e.code; };
+    s.send('{"type":"hello"}');
+    answer(await nextCall('open'), 200, ID);
+    const sRecv = await nextCall('recv');
+    s.send('{"type":"op"}');
+    answer(await nextCall('send'), 404);
+    await wait(30);
+    same('a failed send waits for recv', sClosed, null);
+    answer(sRecv, 200, '{"type":"close","code":4413}\n');
+    await wait(10);
+    same('which brings the relay\'s code', sClosed, 4413);
+
+    const t = new PollSocket('https://relay.test/rooms/r/poll');
+    let tClosed = null;
+    t.onclose = (e) => { tClosed = e.code; };
+    t.send('{"type":"hello"}');
+    answer(await nextCall('open'), 200, ID);
+    await nextCall('recv');
+    t.send('{"type":"op"}');
+    answer(await nextCall('send'), 502);
+    await wait(1600);
+    same('or, if none comes, is a dropped socket', tClosed, 1006);
+
+    const u = new PollSocket('https://relay.test/rooms/r/poll');
+    let uClosed = null;
+    u.onclose = (e) => { uClosed = e.code; };
+    u.send('{"type":"hello"}');
+    answer(await nextCall('open'), 200, '<html>a proxy\'s page</html>');
+    await wait(10);
+    same('an open answered with anything but a session id is a dropped socket', uClosed, 1006);
+
+    const v = new PollSocket('https://relay.test/rooms/r/poll');
+    v.onclose = () => { throw new Error('close() must not report a close'); };
+    v.send('{"type":"hello"}');
+    answer(await nextCall('open'), 200, ID);
+    const vRecv = await nextCall('recv');
+    v.close();
+    const vBye = await nextCall('close');
+    same('close() tells the relay', vBye.body, ID);
+    answer(vRecv, 200, '{"type":"close","code":1006}\n');
+    await wait(10);
   });
 }
 

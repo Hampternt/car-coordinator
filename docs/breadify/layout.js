@@ -886,10 +886,17 @@ const Sheet = (() => {
     return dots;
   }
 
-  function totalRow(line, withDots) {
+  /**
+   * One line of a route total. The bread total's lines carry ten-dots; the
+   * freezer total's carry a C box at the left instead, where the stop lines
+   * have theirs, for the checker to tick once that product's whole amount is
+   * counted (the owner, 2026-10-20).
+   */
+  function totalRow(line, withDots, withTick = false) {
     const row = element('div', 'bf-total-row');
     append(
       row,
+      withTick ? tickBox('C') : null,
       element('span', 'bf-total-qty', line.units),
       productName('bf-total-product', line.product),
       withDots ? tenDots(line.fullTens) : null,
@@ -1031,16 +1038,12 @@ const Sheet = (() => {
     grid.style.setProperty('--cols', 2);
     for (const part of [lines.slice(0, half), lines.slice(half)]) {
       const holder = element('div', 'bf-total-col');
-      for (const line of part) holder.appendChild(totalRow(line, false));
+      // A C box on every line rather than one "Totals checked" box under the
+      // whole total (the owner, 2026-10-20: one box per product counted).
+      for (const line of part) holder.appendChild(totalRow(line, false, true));
       grid.appendChild(holder);
     }
     section.appendChild(grid);
-    // One box for the checker's pen once the whole total has been checked
-    // (the owner, 2026-10-09). On the last part only: a total split across
-    // sheets is still one total, checked once.
-    if (part === parts) {
-      append(section, append(element('div', 'bf-total-checked'), tickBox(''), element('span', null, 'Totals checked')));
-    }
     return section;
   }
 

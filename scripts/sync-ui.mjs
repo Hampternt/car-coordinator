@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
-import { fakeRelay } from './sync-fakerelay.mjs';
+import { fakeRelay, pollNoise } from './sync-fakerelay.mjs';
 
 // This build's version, so the seeded profiles have seen its update note.
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -110,7 +110,7 @@ async function profile({ items = {}, routed = true } = {}) {
   const errors = [];
   const sockets = [];
   const requests = [];
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('console', (m) => m.type() === 'error' && !pollNoise(m) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('websocket', (ws) => sockets.push(ws.url()));
   page.on('request', (r) => { if (!r.url().startsWith(base) && !r.url().startsWith('data:')) requests.push(r.url()); });
@@ -179,10 +179,13 @@ const TABS = ['plan', 'drivers', 'cars', 'positions', 'labels', 'data', 'preview
   const p = await profile({ routed: false, items: { 'carcoord:v1': DEV, 'carcoord:pref:seenUpdate': VERSION, 'carcoord:pref:infoHint': 'done', 'carcoord:pref:relay': `ws://127.0.0.1:${port}`, 'carcoord:pref:room': secret } });
   check('unreachable: the bar says Offline', await pillSays(p.page, 'Offline'), await pill(p.page).textContent().catch(() => 'no pill'));
   check('the socket was really made, so the policy lets ws://127.0.0.1 through', p.sockets.length >= 1, JSON.stringify(p.sockets));
+  check('and the long-poll fallback was tried after it, through the same policy', p.requests.some((u) => u === `http://127.0.0.1:${port}/rooms/${keysOf(secret).roomId}/poll/open`), JSON.stringify(p.requests));
   const box = p.page.locator('#tab-plan tbody tr').first().locator('[data-field="driver"]');
   await box.fill('Nowhere Nilsen');
   check('editing still works', await p.page.evaluate(() => JSON.parse(localStorage.getItem('carcoord:v1')).routes[0].driver === 'Nowhere Nilsen'));
-  // Chrome logs every failed socket as an error; that is the only one allowed.
+  // Chrome logs every failed socket as an error; that is the only one allowed
+  // (the fallback's failed requests are passed over in profile()). A request
+  // the policy refused would say so here.
   const other = p.errors.filter((e) => !/WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rooms\/[A-Za-z0-9_-]{22}\/ws' failed/.test(e));
   same('unreachable: nothing broke the policy, and no other console errors', other, []);
   await p.context.close();
@@ -1946,7 +1949,10 @@ const opsAfter = (ops, seq) => ops().filter((o) => o.seq > seq);
 // Round 3, pack 5: offline work reviewed before it is sent.
 // Times: every op says when it was made, by its sender's clock. An edit made
 // offline keeps its own time, through a reload, and goes out with it.
-const clockAt = (hhmm) => new Date(`2026-10-09T${hhmm}:00`).getTime();
+// Today, at that time: a clock on another day makes the app take that day's
+// Start of day backup, which the checks below do not expect.
+const today = ((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)(new Date());
+const clockAt = (hhmm) => new Date(`${today}T${hhmm}:00`).getTime();
 {
   const { secret, ops } = liveRoom();
   const a = await live(SEED, secret);

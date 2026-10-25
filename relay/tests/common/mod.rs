@@ -195,6 +195,110 @@ pub async fn http_get(addr: SocketAddr, path: &str) -> (u16, String) {
     (status, body)
 }
 
+/// An HTTP answer: status, headers (names lower-cased) and body.
+pub struct Answer {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+}
+
+impl Answer {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
+    }
+}
+
+/// A plain HTTP POST with a text body, as a browser's `fetch` of a string
+/// sends it: no preflight, `Origin` when `origin` is given.
+pub async fn http_post(addr: SocketAddr, path: &str, origin: Option<&str>, body: &str) -> Answer {
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\n{origin}Content-Type: text/plain;charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    tokio::time::timeout(WAIT, stream.read_to_end(&mut raw)).await.expect("http timed out").unwrap();
+    let text = String::from_utf8_lossy(&raw).to_string();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+    let mut lines = head.split("\r\n");
+    let status = lines.next().and_then(|l| l.split(' ').nth(1)).and_then(|s| s.parse().ok()).expect("a status line");
+    let headers = lines
+        .filter_map(|l| l.split_once(':'))
+        .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    Answer { status, headers, body: body.to_string() }
+}
+
+/// A client on the long-poll fallback (PROTOCOL.md §9), from the allowed
+/// test origin.
+pub struct Poller {
+    pub addr: SocketAddr,
+    pub room: String,
+    pub id: String,
+    /// Frames from the last `recv` not handed out yet.
+    pending: std::collections::VecDeque<Value>,
+}
+
+impl Poller {
+    /// `open` with `first` as the opening frame; asserts it is accepted.
+    pub async fn open(addr: SocketAddr, room: &str, first: Value) -> Poller {
+        let a = http_post(addr, &format!("/rooms/{room}/poll/open"), Some(ORIGIN), &first.to_string()).await;
+        assert_eq!(a.status, 200, "open: {}", a.body);
+        assert_eq!(a.body.len(), 22, "a session id is 16 bytes of base64url");
+        Poller { addr, room: room.to_string(), id: a.body, pending: Default::default() }
+    }
+
+    pub fn path(&self, what: &str) -> String {
+        format!("/rooms/{}/poll/{what}", self.room)
+    }
+
+    /// One `recv`: every line of its answer, parsed.
+    pub async fn poll(&self) -> Answer {
+        http_post(self.addr, &self.path("recv"), Some(ORIGIN), &self.id).await
+    }
+
+    /// The next frame, polling as often as it takes. A close comes back as
+    /// `{"type":"close","code":N}`, as it is on the wire.
+    pub async fn recv(&mut self) -> Value {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while self.pending.is_empty() {
+            assert!(tokio::time::Instant::now() < deadline, "no frame within the wait");
+            let a = self.poll().await;
+            assert_eq!(a.status, 200, "recv: {}", a.body);
+            for line in a.body.lines() {
+                self.pending.push_back(serde_json::from_str(line).expect("one JSON object per line"));
+            }
+        }
+        self.pending.pop_front().unwrap()
+    }
+
+    /// Reads until the session closes, and returns the code.
+    pub async fn expect_close(&mut self) -> u64 {
+        loop {
+            let f = self.recv().await;
+            if f["type"] == "close" {
+                return f["code"].as_u64().expect("a close carries its code");
+            }
+        }
+    }
+
+    /// One `send` with these frames, one per line; returns its status.
+    pub async fn send_lines(&self, lines: &[String]) -> u16 {
+        let body = format!("{}\n{}", self.id, lines.join("\n"));
+        http_post(self.addr, &self.path("send"), Some(ORIGIN), &body).await.status
+    }
+
+    pub async fn send(&self, frame: Value) {
+        assert_eq!(self.send_lines(&[frame.to_string()]).await, 204);
+    }
+
+    pub async fn close(&self) -> u16 {
+        http_post(self.addr, &self.path("close"), Some(ORIGIN), &self.id).await.status
+    }
+}
+
 /// Every regular file directly in `dir`, read whole.
 pub fn files_in(dir: &Path) -> Vec<(String, Vec<u8>)> {
     std::fs::read_dir(dir)

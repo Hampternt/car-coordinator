@@ -10,6 +10,10 @@ It runs on the Hetzner cx23 that serves `portfolio.dblo.net`, as its own
 `carsync` user on `127.0.0.1:3010`, behind the existing nginx server block at
 `location /carsync/`. That needs no new DNS record and no new certificate.
 
+The app reaches it over a WebSocket, or, on a network whose proxy blocks
+WebSockets, over plain HTTPS requests to the same relay (the long-poll fallback,
+PROTOCOL.md §9). The app picks on its own; both kinds of client share a room.
+
 **The owner runs the server steps below.** Nothing here is applied
 automatically, and Claude does not touch the server without asking.
 
@@ -43,8 +47,8 @@ The files are in [`deploy/`](deploy/):
 |---|---|
 | `carsync.service` | `/etc/systemd/system/carsync.service` |
 | `carsync.env.example` | `/opt/carsync/.env`, filled in, mode 600 |
-| `nginx-carsync-http.conf` | `/etc/nginx/conf.d/carsync.conf` (http level: the `limit_req` zone and the upgrade `map`) |
-| `nginx-carsync-location.conf` | inside the `listen 443` server block of `/etc/nginx/sites-available/portfolio` |
+| `nginx-carsync-http.conf` | `/etc/nginx/conf.d/carsync.conf` (http level: the two `limit_req` zones and the upgrade `map`) |
+| `nginx-carsync-location.conf` | inside the `listen 443` server block of `/etc/nginx/sites-available/portfolio` (three locations: the WebSocket's, and two for the long-poll fallback) |
 | `nginx-check.conf` | nowhere; it checks the two snippets locally (step 1) |
 
 `ssh hetzner` below stands for however you log in to the server. Every block
@@ -140,7 +144,7 @@ On the server:
 ```bash
 # a. Neither name may exist yet (a duplicate zone or map fails `nginx -t`), and
 #    conf.d must be included inside `http`. Ubuntu's stock nginx.conf does both.
-grep -rn 'zone=carsync\|carsync_connection' /etc/nginx/        # expect nothing
+grep -rn 'zone=carsync\|carsync_connection' /etc/nginx/        # expect nothing (zone=carsync_poll included)
 grep -n 'conf.d' /etc/nginx/nginx.conf                         # include /etc/nginx/conf.d/*.conf;
 
 # b. The site file with the location added. Put the contents of
@@ -179,6 +183,17 @@ for ORIGIN in https://hampternt.github.io https://example.com; do
 done
 # → https://hampternt.github.io 101   (curl then waits; --max-time ends it)
 # → https://example.com 403
+
+# The long-poll fallback: a session opens (200, a 22-character id) from the
+# app's origin, and is refused (403) from another. The id is a throwaway: a
+# made-up token, so the session closes at once with 4401.
+for ORIGIN in https://hampternt.github.io https://example.com; do
+  curl -s -w " $ORIGIN %{http_code}\n" -H "Origin: $ORIGIN" \
+    --data '{"type":"hello","token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}' \
+    https://portfolio.dblo.net/carsync/rooms/AAAAAAAAAAAAAAAAAAAAAA/poll/open
+done
+# → <22 characters> https://hampternt.github.io 200
+# → https://example.com 403
 ```
 
 Logs: `journalctl -u carsync`. The relay never logs tokens or bodies.
@@ -193,7 +208,49 @@ ssh hetzner 'sudo install -o root -g root -m 755 /tmp/carsync-relay /opt/carsync
 ```
 
 A restart closes every connection with 1001; the app reconnects and catches up
-on its own. The database (`/opt/carsync/data/carsync.db`) moves forward on its
+on its own.
+
+### Updating to the long-poll fallback (0.18.0, once)
+
+The relay from 0.18.0 on also answers the long-poll fallback's paths. nginx needs
+the new zone and the new location before they reach it: without them the
+fallback's requests hit `location /carsync/`, whose rate (30 a minute, meant for
+reconnects) and 1 MB body cap would cut a polling client off. Do this once, then
+update the binary as above.
+
+On this PC:
+
+```bash
+scp relay/deploy/nginx-carsync-http.conf relay/deploy/nginx-carsync-location.conf hetzner:/tmp/
+```
+
+On the server:
+
+```bash
+# a. The http-level file is replaced whole: it gains the `carsync_poll` zone.
+diff -u /etc/nginx/conf.d/carsync.conf /tmp/nginx-carsync-http.conf  # only the new zone
+
+# b. The site file gains the two new locations from /tmp/nginx-carsync-location.conf
+#    (both starting `location ~ "^/carsync(/rooms/`), right under the
+#    existing `location /carsync/ { … }`, which is unchanged.
+cp /etc/nginx/sites-available/portfolio /tmp/portfolio.new
+nano /tmp/portfolio.new
+diff -u /etc/nginx/sites-available/portfolio /tmp/portfolio.new  # only the two new locations
+
+# c. Apply both with backups, and restore both if the test fails.
+STAMP=$(date +%Y%m%d-%H%M)
+sudo cp /etc/nginx/sites-available/portfolio /etc/nginx/sites-available/portfolio.bak-$STAMP
+sudo cp /etc/nginx/conf.d/carsync.conf /etc/nginx/carsync.conf.bak-$STAMP
+sudo cp /tmp/nginx-carsync-http.conf /etc/nginx/conf.d/carsync.conf
+sudo cp /tmp/portfolio.new /etc/nginx/sites-available/portfolio
+{ sudo nginx -t && sudo systemctl reload nginx; } \
+  || { sudo cp /etc/nginx/sites-available/portfolio.bak-$STAMP /etc/nginx/sites-available/portfolio;
+       sudo cp /etc/nginx/carsync.conf.bak-$STAMP /etc/nginx/conf.d/carsync.conf; echo 'restored; nothing changed'; }
+```
+
+Then update the binary (above) and run the long-poll check in step 4. Until
+both are done, the app's fallback finds nothing and a blocked network stays
+Offline, exactly as before. The database (`/opt/carsync/data/carsync.db`) moves forward on its
 own when a new version needs a new schema, and never back. Before an update
 that changes the schema, copy the data directory while the service is stopped.
 

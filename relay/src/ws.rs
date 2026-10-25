@@ -1,4 +1,6 @@
-//! The WebSocket handler and per-room fan-out. PROTOCOL.md §3-4.
+//! The WebSocket handler, per-room fan-out, and the connection both
+//! transports share: a WebSocket, or the long-poll fallback (`poll.rs`).
+//! PROTOCOL.md §3-4.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -21,11 +23,11 @@ use crate::protocol::{self, ClientFrame, ServerFrame, close};
 /// Frames queued for one connection before it counts as too far behind.
 const QUEUE: usize = 1024;
 /// How long a close waits for the client's close reply (PROTOCOL.md §5).
-const CLOSE_WAIT: Duration = Duration::from_secs(5);
+pub(crate) const CLOSE_WAIT: Duration = Duration::from_secs(5);
 /// The same wait on shutdown, kept short so a restart is quick.
-const SHUTDOWN_CLOSE_WAIT: Duration = Duration::from_secs(1);
+pub(crate) const SHUTDOWN_CLOSE_WAIT: Duration = Duration::from_secs(1);
 /// A send that takes longer than this means the client has stopped reading.
-const SEND_WAIT: Duration = Duration::from_secs(30);
+pub(crate) const SEND_WAIT: Duration = Duration::from_secs(30);
 /// PROTOCOL.md §6.
 const PING_EVERY: Duration = Duration::from_secs(30);
 
@@ -146,13 +148,13 @@ pub async fn room_ws(
     let max_frame = state.config.limits.max_frame;
     upgrade.max_message_size(max_frame).max_frame_size(max_frame).on_upgrade(move |socket| async move {
         let _live = live;
-        connection(socket, state, room).await;
+        connection(Socket::Ws(socket), state, room).await;
     })
 }
 
 /// No `Origin` is allowed (PROTOCOL.md §3); one must match an entry byte for
 /// byte; more than one is refused.
-fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
+pub(crate) fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     let mut origins = headers.get_all(header::ORIGIN).iter();
     match (origins.next(), origins.next()) {
         (None, _) => true,
@@ -161,14 +163,31 @@ fn origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     }
 }
 
-enum Incoming {
+/// One end of a client's connection: the same frames and close codes over
+/// either transport. One per connection, so the WebSocket's size is no cost.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum Socket {
+    Ws(WebSocket),
+    Poll(crate::poll::Side),
+}
+
+pub(crate) enum Incoming {
     Text(Utf8Bytes),
     Binary,
+    /// A long-poll frame over `Limits::max_frame`. On a WebSocket the library
+    /// refuses one itself.
+    TooBig,
     /// The client closed, or the connection broke.
     Gone,
 }
 
-async fn next_frame(socket: &mut WebSocket) -> Incoming {
+const TOO_BIG: Refusal = (1009, "frame too big");
+
+async fn next_frame(socket: &mut Socket) -> Incoming {
+    let socket = match socket {
+        Socket::Ws(socket) => socket,
+        Socket::Poll(side) => return side.recv().await,
+    };
     loop {
         match socket.recv().await {
             Some(Ok(Message::Text(text))) => return Incoming::Text(text),
@@ -181,7 +200,7 @@ async fn next_frame(socket: &mut WebSocket) -> Incoming {
 
 /// Resolves once the relay is shutting down; never, if its `Relay` was dropped
 /// without `shutdown`.
-async fn stopping(shutdown: &mut watch::Receiver<bool>) {
+pub(crate) async fn stopping(shutdown: &mut watch::Receiver<bool>) {
     if shutdown.wait_for(|stopping| *stopping).await.is_err() {
         std::future::pending::<()>().await;
     }
@@ -191,9 +210,14 @@ async fn stopping(shutdown: &mut watch::Receiver<bool>) {
 /// reply or `CLOSE_WAIT`, so the close is not lost to a TCP reset (PROTOCOL.md
 /// §5). Once the relay is shutting down the wait is cut to
 /// `SHUTDOWN_CLOSE_WAIT`, so a client that never replies cannot hold it up.
-async fn close(mut socket: WebSocket, (code, reason): Refusal, mut shutdown: watch::Receiver<bool>) {
+/// A long-poll connection waits the same way for its close to be fetched.
+async fn close(socket: Socket, (code, reason): Refusal, mut shutdown: watch::Receiver<bool>) {
+    let mut socket = match socket {
+        Socket::Ws(socket) => socket,
+        Socket::Poll(side) => return side.close(code, shutdown).await,
+    };
     let frame = CloseFrame { code, reason: Utf8Bytes::from_static(reason) };
-    if !send(&mut socket, Message::Close(Some(frame))).await {
+    if !send_ws(&mut socket, Message::Close(Some(frame))).await {
         return;
     }
     let drain = async {
@@ -239,7 +263,7 @@ struct Joined {
     outbox: mpsc::Receiver<Message>,
 }
 
-async fn connection(mut socket: WebSocket, state: AppState, room_id: String) {
+pub(crate) async fn connection(mut socket: Socket, state: AppState, room_id: String) {
     let limits = state.config.limits.clone();
     let mut shutdown = state.shutdown.clone();
 
@@ -254,6 +278,7 @@ async fn connection(mut socket: WebSocket, state: AppState, room_id: String) {
         Err(_) => return close(socket, (close::HELLO_TIMEOUT, "no hello in time"), shutdown).await,
         Ok(Incoming::Gone) => return,
         Ok(Incoming::Binary) => return close(socket, (close::BAD_FRAME, "binary frame"), shutdown).await,
+        Ok(Incoming::TooBig) => return close(socket, TOO_BIG, shutdown).await,
         Ok(Incoming::Text(text)) => text,
     };
     // Every text frame costs a token, the opening one included.
@@ -269,7 +294,7 @@ async fn connection(mut socket: WebSocket, state: AppState, room_id: String) {
 }
 
 /// Handles the opening frame: `hello` or `create`, then joins the room.
-async fn open(state: &AppState, room_id: &str, text: &str, socket: &mut WebSocket) -> Result<Joined, Refusal> {
+async fn open(state: &AppState, room_id: &str, text: &str, socket: &mut Socket) -> Result<Joined, Refusal> {
     let frame = protocol::parse(text, &state.config.limits).map_err(|code| (code, "bad frame"))?;
     match frame {
         ClientFrame::Hello { token } => {
@@ -287,7 +312,9 @@ async fn open(state: &AppState, room_id: &str, text: &str, socket: &mut WebSocke
                 return Err((close::WRONG_CREATE_CODE, "wrong create code"));
             }
             create(state, room_id, &hash)?;
-            socket.send(encode(&ServerFrame::Created)).await.map_err(|_| (close::GOING_AWAY, "gone"))?;
+            if !send(socket, encode(&ServerFrame::Created)).await {
+                return Err((close::GOING_AWAY, "gone"));
+            }
         }
         _ => return Err((close::NOT_ALLOWED, "hello first")),
     }
@@ -346,14 +373,21 @@ fn leave(state: &AppState, joined: &Joined) {
     }
 }
 
-async fn send(socket: &mut WebSocket, message: Message) -> bool {
+async fn send(socket: &mut Socket, message: Message) -> bool {
+    match socket {
+        Socket::Ws(socket) => send_ws(socket, message).await,
+        Socket::Poll(side) => side.send(message).await,
+    }
+}
+
+async fn send_ws(socket: &mut WebSocket, message: Message) -> bool {
     matches!(tokio::time::timeout(SEND_WAIT, socket.send(message)).await, Ok(Ok(())))
 }
 
 /// After `welcome`: forwards the queue to the socket and handles frames,
 /// until either side closes.
 async fn serve(
-    mut socket: WebSocket,
+    mut socket: Socket,
     state: &AppState,
     mut joined: Joined,
     mut rate: RateLimiter,
@@ -377,6 +411,7 @@ async fn serve(
             incoming = next_frame(&mut socket) => match incoming {
                 Incoming::Gone => return leave(state, &joined),
                 Incoming::Binary => break (close::BAD_FRAME, "binary frame"),
+                Incoming::TooBig => break TOO_BIG,
                 Incoming::Text(text) => {
                     if !rate.allow(std::time::Instant::now()) {
                         break RATE_LIMITED;
