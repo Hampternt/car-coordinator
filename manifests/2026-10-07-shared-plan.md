@@ -1,6 +1,6 @@
 # Container: Shared plan
 
-**Status:** 🚧 ROUND 1 (packs 1 and 2) built, reviewed and gated as 0.15.0. Merged into `dev` on the owner's go (2026-10-08) through a PR; round 2 is drafted. Packs 3 and 4 drafted in outline.
+**Status:** ✅ shipped. Rounds 1–3 went to `main` as 0.15.0–0.17.0 (#20, 2026-10-09); the long-poll fallback for networks that block WebSockets went as 0.18.0 (#23, 2026-10-25), with the relay and nginx on the server updated the same day.
 **Date:** 2026-10-07
 **Branch:** round 1 builds on `claude/car-coordinator-encryption-c717c5` (cut from `dev` at bd379ee) and goes back to `dev` through one PR. Later rounds cut from `dev` and comes back to `dev` through a PR. `main` only after the owner has tested the combined update on `dev` and said go.
 **Scope:** Car Coordinator only. Breadify is untouched and nothing of it is synced.
@@ -158,7 +158,7 @@ Made-up data only: `scripts/fixtures/dev-data.json` (the repo's invented fleet) 
 
 ## Round 2: Live updates (pack 3)
 
-**Status:** 🚧 built, reviewed, fixed and tested against the owner's server as 0.16.0; handed over for the owner's Test it yourself. Not merged into `dev`.
+**Status:** ✅ shipped as 0.16.0 (#19 into `dev`, #20 into `main`, 2026-10-09).
 `Agents: build 1 serial (medium) · review: concurrency + live-data lens (high) · verify 3 (high)`
 `Agent brief:` this manifest's Safety rules, `relay/PROTOCOL.md` (§4.3 snapshot rule, op frames), `docs/sync.js`, the Shared plan code in `docs/app.js` (roomPush, roomFrame, catchup, read-only, `planElsewhere`), `save()` at `docs/app.js:366`, the `input` handler at `docs/app.js:2268`, `scripts/sync-ui.mjs` and `scripts/sync-fakerelay.mjs`. Depends on: round 1 merged into `dev`.
 **Runs serial:** one unit, and every item writes `docs/app.js`.
@@ -232,7 +232,7 @@ Raised by the owner: overwriting each other, and a redraw taking away the spot y
 
 ## Round 3: Who is editing (pack 4) and offline work reviewed before it is sent (pack 5)
 
-**Status:** ✅ tested by the owner on PC and tablet (2026-10-09, "working fine"); going to `dev` through a PR, then the owner's hands-on upgrade test before `main`. Both packs write `docs/app.js`, so they run serial: pack 4 first.
+**Status:** ✅ tested by the owner on PC and tablet (2026-10-09, "working fine") and shipped as 0.17.0 (#19 into `dev`, #20 into `main`, 2026-10-09). Both packs write `docs/app.js`, so they run serial: pack 4 first.
 
 ### Round 3 runs parallel (owner, 2026-10-09: "assign agents to help speed up work")
 
@@ -324,6 +324,7 @@ Use two windows (or the PC and the tablet) in one shared plan, with made-up data
 ## Ledger
 
 - 2026-10-07: drafted after the design talk (options A/B, invite link, Hetzner).
+- 2026-10-25: **0.18.0 (long-poll fallback) live.** The relay was rebuilt on the server from `dev` @ fbeb90b (`cargo test` all passed) and nginx gained the `carsync_poll` zone and the two `/poll/` locations, per `relay/README.md`, "Updating to the long-poll fallback". Backups of the old binary, data, `.env` and both nginx files were taken first, and both existing rooms came through. README step 4 from outside: health `ok`, portfolio 200, WebSocket 101 from Pages and 403 from another origin, `poll/open` 200 from Pages and 403 from another origin. The owner merged #23 into `main` the same day. Not yet tried from the work network itself. The `/carsync-test/` copy is no longer on the server, and the relay's `RELAY_ORIGINS` is back to Pages and the Windows app only.
 - 2026-10-09: the server's test copy at `/carsync-test/` was updated to 0.17.0 (9d4d5dc's `docs/`, swapped in whole). It loads in a secure context with no console errors.
 - 2026-10-09: **round 3 built in parallel and handed over as 0.17.0.** Ledgers are in `manifests/archive/2026-10-09-shared-plan-r3-*.ledger.md`.
   - **Scaffold** f28c7ec. The builders worked in nested worktrees `.wt/pack4` and `.wt/pack5` and are now removed. Separation proved before merging: the only shared file was `docs/style.css`, one hunk in each pack's own region, and pack 5 left the presence lines untouched.
