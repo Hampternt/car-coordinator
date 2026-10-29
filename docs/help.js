@@ -62,6 +62,8 @@ const HELP = {
     text: 'Follow the computer, Light or Dark, for this browser only. The printed sheet looks the same whichever you pick.' },
   'data-share': { title: 'Sending the list',
     text: 'Copy the day plan turns the list into a code to paste into a chat or an email; nothing is uploaded, the code is the list. The other PC pastes it under Load a list someone sent you and sees what it holds before anything changes.' },
+  'data-shared': { title: 'Shared plan',
+    text: 'One plan two managers work on from any PC. Each change reaches the other as you make it; if you both change one box at once, the last one counts and the other is kept in a mark to put back. It is locked on this PC before it is sent, and only the invite link opens it, so keep the link private. Leave stops sharing; your plan stays here.' },
   'data-copy': { title: 'Your own copy',
     text: 'Export a copy saves everything as one file you can keep, email or put on a stick. Import a copy puts a file like that back, after a backup of what is on screen.' },
   'data-news': { title: 'What\'s new',

@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/serve.mjs", "5173"],
       "port": 5173
+    },
+    {
+      "name": "carsync-relay-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "RELAY_DATA=/tmp/carsync-dev RELAY_CREATE_CODE=dev RELAY_ORIGINS=https://hampternt.github.io,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173 exec cargo run --manifest-path relay/Cargo.toml"],
+      "port": 3010
     }
   ]
 }

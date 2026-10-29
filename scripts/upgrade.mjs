@@ -38,6 +38,8 @@ const oldVersion = JSON.parse(await readFile(join(oldRoot, 'package.json'), 'utf
 // From 0.3.0 on, the old build has its own release notes and Archives, so a
 // browser holding its cached files is not a blank slate for this build.
 const OLD_HAS_NOTES = existsSync(join(OLD_DOCS, 'updates.js'));
+// From 0.13.0 on, the old store.js adds the weekday templates itself.
+const OLD_HAS_WEEKDAY = (await readFile(join(OLD_DOCS, 'store.js'), 'utf8')).includes('tpl-weekday');
 const NEW = JSON.parse(await readFile(join(HERE, 'package.json'), 'utf8')).version;
 const NEW_SCHEMA = Number((await readFile(join(NEW_DOCS, 'store.js'), 'utf8')).match(/const SCHEMA = (\d+);/)[1]);
 const devPlan = await readFile(join(HERE, 'scripts', 'fixtures', 'dev-data.json'), 'utf8');
@@ -163,9 +165,14 @@ async function open(profile, docs) {
   const errors = [];
   page.on('console', (m) => m.type() === 'error' && errors.push(`${m.text()}${m.location()?.url ? ` (${m.location().url})` : ''}`));
   page.on('pageerror', (e) => errors.push(String(e)));
+  // Anything that leaves this page's own address. A profile that never joined
+  // a shared plan must make none (the shared plan's "no room, no network").
+  const outside = [];
+  page.on('request', (r) => { const u = r.url(); if (!u.startsWith(base) && !/^(data|blob):/.test(u)) outside.push(u); });
+  page.on('websocket', (ws) => outside.push(ws.url()));
   await page.goto(base, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300);   // start() awaits the save file's handle
-  return { context, page, errors, base };
+  return { context, page, errors, base, outside };
 }
 
 // Which build is on screen: the old one must not be this one, and this one
@@ -258,6 +265,7 @@ async function expectKeptAndNoted(label, profile, before, extra = async () => {}
   }
   await extra(now, note);
   check(`${label}: no console errors`, !now.errors.length, now.errors.join(' | '));
+  check(`${label}: no network call and no WebSocket beyond the page's own address`, !now.outside.length, now.outside.join(' | '));
   await now.page.reload({ waitUntil: 'networkidle' });
   await now.page.waitForTimeout(300);
   check(`${label}: a reload shows no note`, (await noteOn(now.page)).count === 0);
@@ -396,9 +404,9 @@ const scenarios = {
         check('mixed files: an old store.js means no Driver tags section, and no driver tags in memory', section === 0
           && await now.page.evaluate(() => state.driverTags === undefined && state.drivers.every((d) => !('tagId' in d))), `${section} section parts`);
       }
-      // An old store.js adds no weekday templates, and the shelf shows the
-      // plan's own.
-      check('mixed files: an old store.js means the plan\'s own templates only', await now.page.evaluate(() => state.weekdayTemplates === undefined
+      // An old store.js from before 0.13.0 adds no weekday templates, and the
+      // shelf shows the plan's own.
+      if (!OLD_HAS_WEEKDAY) check('mixed files: an old store.js means the plan\'s own templates only', await now.page.evaluate(() => state.weekdayTemplates === undefined
         && !state.templates.some((t) => /^tpl-weekday-\d$/.test(t.id))
         && document.querySelectorAll('#planTemplates .tpl').length === state.templates.length));
       check('mixed files: no console errors', !now.errors.length, now.errors.join(' | '));

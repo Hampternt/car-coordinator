@@ -3247,7 +3247,7 @@ await dt.reload({ waitUntil: 'networkidle' });
 await dt.click('[data-act="tab"][data-tab="data"]');
 same('What\'s new and Archives sit above Backups, which is still the last card',
   (await dt.locator('#tab-data .card h3').allInnerTexts()).map((s) => s.replace(/\s*ⓘ$/, '')),
-  ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
+  ['Auto-save to a file', 'This browser', 'Send this list to another PC', 'Load a list someone sent you', 'Shared plan', 'Your own copy', 'What\'s new', 'Archives', 'Backups']);
 check('This browser links to the recovery page', (await dt.locator('#tab-data .card', { hasText: 'This browser' }).locator('a[href="recover.html"]').count()) === 1);
 check('and the tab\'s one table is Backups\'', await dt.evaluate(() =>
   document.querySelectorAll('#tab-data table').length === 1 && !!document.querySelector('#tab-data .card:last-child table')));
