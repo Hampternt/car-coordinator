@@ -499,6 +499,7 @@
         tick.onchange = () => {
           if (tick.checked) state.selected.add(route.nickname);
           else state.selected.delete(route.nickname);
+          syncBulk();
           later();
         };
 
@@ -517,8 +518,30 @@
         return row;
       }),
     );
+    syncBulk();
     rebuild();
     scalePreview();
+  }
+
+  /**
+   * Tick all / Untick all (the owner, 2026-11-14): printing a handful of
+   * routes no longer means unticking the other dozen one by one. One press
+   * is one change of ticks, so it goes through later() like a click does —
+   * once — and keeps what that gives: the pause, the flush before printing,
+   * and an untick laying out nothing.
+   */
+  function tickEvery(on) {
+    state.selected = new Set(on ? state.routes.map((route) => route.nickname) : []);
+    for (const tick of $('routes').querySelectorAll('input[type="checkbox"]')) tick.checked = on;
+    syncBulk();
+    later();
+  }
+
+  /** Each bulk button is greyed out when pressing it would change nothing. */
+  function syncBulk() {
+    const ticked = state.routes.filter((route) => state.selected.has(route.nickname)).length;
+    $('tickAll').disabled = ticked === state.routes.length;
+    $('untickAll').disabled = ticked === 0;
   }
 
   /** A tick changed: the preview follows after the pause, once for a run of clicks. */
@@ -699,6 +722,9 @@
       go('print');
     }
     flush();
+    // Untick all and straight to Print leaves nothing to print, and the
+    // flush has only just greyed the button out; no empty dialog.
+    if (built.length === 0) return;
     if (held()) {
       // Held: the warning says why, and its button is the way on. Ctrl+P on
       // another step goes to the Print step first, where the warning is.
@@ -718,14 +744,20 @@
   window.addEventListener('beforeprint', () => {
     flush();
     if (!held() && built.length === 0) {
-      // A print from the browser's menu with nothing laid out (off the Print
-      // step): one page saying where the sheets are, not a blank one.
+      // A print from the browser's menu with nothing laid out: one page
+      // saying why, not a blank one. Off the Print step, where the sheets
+      // are; on it, nothing is ticked, which Untick all (the owner,
+      // 2026-11-14) makes one click away, so the page says that instead of
+      // sending the reader to the step they are on (review, 2026-11-14).
+      const onPrint = state.step === 'print';
       const note = document.createElement('div');
       note.className = 'held-print';
       const head = document.createElement('h1');
-      head.textContent = 'Nothing laid out to print';
+      head.textContent = onPrint ? 'Nothing to print: no route is ticked' : 'Nothing laid out to print';
       const how = document.createElement('p');
-      how.textContent = 'Open the Print step in Breadify, then print from there.';
+      how.textContent = onPrint
+        ? 'Tick the routes to print on the Print step in Breadify, then print.'
+        : 'Open the Print step in Breadify, then print from there.';
       note.append(head, how);
       $('sheets').replaceChildren(note);
       return;
@@ -820,6 +852,8 @@
     }
 
     $('print').onclick = printNow;
+    $('tickAll').onclick = () => tickEvery(true);
+    $('untickAll').onclick = () => tickEvery(false);
     $('printAnyway').onclick = () => {
       // Released for the routes the warning named when it was pressed, and
       // no others: a route ticked in the pause before, short too, is named

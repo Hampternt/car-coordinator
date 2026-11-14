@@ -695,6 +695,48 @@ input[type='number'] {
 
 /* ── 04 Print ────────────────────────────────────────────────────────── */
 
+/* "Routes" with Tick all / Untick all beside it (the owner, 2026-11-14).
+ * Quiet and outlined, in the page's neutral colours: Print stays the step's
+ * one primary action. The heading is still the first child of what holds
+ * it, so `.pane h2:first-child` still takes its top margin away. */
+.routes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.routes-head h2 {
+  margin-bottom: 8px;
+}
+
+.bulk {
+  display: flex;
+  gap: 6px;
+}
+
+.bulk button {
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--body);
+  font: 500 13px/1 'Space Grotesk', sans-serif;
+  cursor: pointer;
+}
+
+.bulk button:hover:not(:disabled) {
+  color: var(--strong);
+  background: var(--raised);
+}
+
+.bulk button:disabled {
+  color: var(--faint);
+  border-color: var(--border);
+  cursor: default;
+}
+
 .routes {
   display: flex;
   flex-direction: column;
