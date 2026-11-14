@@ -872,6 +872,40 @@
   overflow-wrap: break-word;
 }
 
+/* The bread total's name and its list of orders share one cell, which takes
+ * the flexible width the name had on its own; the name inside it is set
+ * exactly as before. Freezer totals print no cell and no list.
+ *
+ * The one space set in the cell itself is the one between the name and the
+ * list, so the cell's word spacing widens that gap alone: a margin would have
+ * indented a list that wraps to a line of its own, and a space vanishes there,
+ * gap and all. The name and the list set their own spacing back. */
+.bf-total-cell {
+  flex: 1;
+  min-width: 0;
+  font: 400 9.2pt/1.2 'Space Grotesk', sans-serif;
+  overflow-wrap: break-word;
+  word-spacing: 1.2mm;
+}
+
+.bf-total-cell > .bf-total-product,
+.bf-total-cell > .bf-total-orders {
+  word-spacing: normal;
+}
+
+/* Each order of the bread on the route, by quantity, in stop order (the
+ * owner, 2026-11-14, issue #26): `27  Grovbrød  12, 10, 5`. Set at the bread
+ * name's 9.2 pt — the total row's own size for what is read after its
+ * figure, not a new smaller one; the 11 pt floor is the pick line's body
+ * (D4), and the total's 11 pt figure stays the loudest thing on the row. In
+ * black, the ink of the row, in the mono the quantities are set in, so the
+ * figures line up as figures and cannot be read as part of the name. */
+.bf-total-orders {
+  font: 500 9.2pt/1.2 'IBM Plex Mono', monospace;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+}
+
 /* One dot per full ten *inside a single order* — how many trays can be
  * pulled whole. An order of 11 and an order of 9 make one, not two. */
 .bf-total-dots {

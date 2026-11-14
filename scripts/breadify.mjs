@@ -997,8 +997,11 @@ notesHold(
   'the bread day',
   await page.evaluate(() => readNotes(Array.from(document.querySelectorAll('#preview .bf-sheet')))),
 );
-// The owner accepted 28 (2026-09-29); the Notes lines must not move it.
-check('the bread day still prints on 28 sheets', sheets.length === 28, `${sheets.length} sheets`);
+// The owner accepted 28 (2026-09-29); the Notes lines must not move it. Each
+// order on the route total (the owner, 2026-11-14, issue #26) moved it once,
+// to 29: the lists make route 7's total a little taller, and it no longer
+// fits under route 7's stops on one sheet, so it closes the route on a second.
+check('the bread day still prints on 29 sheets', sheets.length === 29, `${sheets.length} sheets`);
 
 const breadMarkers = await markerReport();
 same('every bread marker reads true or false in the one look', breadMarkers.odd, []);
@@ -2017,6 +2020,183 @@ check('and after switching between bread and freezer on Check, the sheets of the
   await page.evaluate(() => localStorage.removeItem('breadify:attention:v1'));
 }
 
+// ── Each order on the route total (the owner, 2026-11-14, issue #26) ──────
+// After each bread's total, every separate order of that bread on the route,
+// by quantity only, in stop order: `27  Grovbrød  12, 10, 5`. One order is
+// one entry, whatever its lines; two orders are never merged, not even one
+// customer's in one department. The entries always add up to the total.
+// The expected lists here are built from the orders' own lines, not taken
+// from routeTotal(), so a sum in the wrong place shows.
+{
+  const fromLines = (route, productId) =>
+    route.orders
+      .map((order) => order.lines.filter((l) => l.product.id === productId))
+      .filter((lines) => lines.length > 0)
+      .map((lines) => lines.reduce((sum, l) => sum + l.quantity, 0));
+
+  const model = await page.evaluate(async ([bytes, fromLinesSource]) => {
+    const fromLines = eval(fromLinesSource);
+    const book = await Xlsx.open(new Uint8Array(bytes).buffer);
+    const routes = Model.group(Model.fold(Model.readRows(await book.sheet('Data'))));
+    const wrong = [];
+    let lines = 0;
+    for (const route of routes) {
+      for (const line of Model.routeTotal(route).columns.flatMap((c) => c.lines)) {
+        lines += 1;
+        const want = fromLines(route, line.product.id);
+        const sum = line.orders.reduce((n, q) => n + q, 0);
+        if (JSON.stringify(line.orders) !== JSON.stringify(want) || sum !== line.units) {
+          wrong.push(`${route.nickname}: ${line.product.name} ${line.units} = ${line.orders} (want ${want})`);
+        }
+      }
+    }
+    const route1 = Model.routeTotal(routes.find((r) => r.nickname === '1')).columns.flatMap((c) => c.lines);
+    const named = (prefix) => {
+      const line = route1.find((l) => l.product.name.startsWith(prefix));
+      return [line.units, line.orders];
+    };
+    return {
+      lines,
+      wrong: wrong.slice(0, 5),
+      barnehage: named('Barnehagebrødet - Oppskåret 750g'),
+      ryfylke: named('Ryfylkebrød'),
+    };
+  }, [breadBytes, fromLines.toString()]);
+  check(
+    'every bread line on every route lists its orders in stop order, adding up to its total',
+    model.lines > 100 && model.wrong.length === 0,
+    `${model.lines} lines; ${JSON.stringify(model.wrong)}`,
+  );
+  same('route 1: Barnehagebrødet - Oppskåret 750g is 37, as 10, 3, 5, 6, 6, 7', model.barnehage,
+    [37, [10, 3, 5, 6, 6, 7]]);
+  // Three of the four are Customer 011's orders under three departments.
+  same('route 1: Ryfylkebrød is 14, as 3, 4, 6, 1', model.ryfylke, [14, [3, 4, 6, 1]]);
+
+  // One customer at one stop: two orders of Grovbrød in Kantine, one in SFO,
+  // and one more in SFO with Grovbrød on two lines.
+  const made = await page.evaluate(() => {
+    const row = (excelRow, orderId, department, productId, quantity) => ({
+      excelRow, orderId, orderIdExact: orderId, quantity, quantityExact: quantity, productId,
+      productName: productId === 10 ? 'Grovbrød' : 'Loff',
+      supplierSku: `SB-${productId}`, position: null, supplier: 'Sandnes Bakeri', customer: 'Hinna skole',
+      department, deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: '3',
+      routeOrdering: 1, acceptAlternatives: true, acceptAlternativesExact: true,
+      region: 'Stavanger',
+    });
+    const rows = [
+      row(2, 601, 'Kantine', 10, 4),
+      row(3, 602, 'Kantine', 10, 3),
+      row(4, 603, 'SFO', 10, 5),
+      row(5, 604, 'SFO', 10, 2),
+      row(6, 604, 'SFO', 11, 1),
+      row(7, 604, 'SFO', 10, 6),
+    ];
+    const [route] = Model.group(Model.fold(rows));
+    const want = { 601: 4, 602: 3, 603: 5, 604: 8 };
+    const grov = Model.routeTotal(route).columns[0].lines.find((l) => l.product.id === 10);
+    const block = Sheet.routeTotalBlock(route);
+    const printed = Array.from(block.querySelectorAll('.bf-total-row'), (row) => [
+      row.querySelector('.bf-total-qty').textContent,
+      row.querySelector('.bf-total-cell > .bf-total-product').textContent,
+      row.querySelector('.bf-total-cell > .bf-total-orders').textContent,
+    ]);
+    return {
+      stops: route.stops.length,
+      grov: [grov.units, grov.orders],
+      want: route.orders.map((o) => want[o.id]),
+      printed,
+    };
+  });
+  check('one customer’s four orders are one stop', made.stops === 1, String(made.stops));
+  same(
+    'each order is its own entry, same department or not, and one order’s two lines are one',
+    made.grov,
+    [20, made.want],
+  );
+  same('and the bread total prints them after the name, a single order included', made.printed, [
+    ['20', 'Grovbrød', made.want.join(', ')],
+    ['1', 'Loff', '1'],
+  ]);
+
+  // The printed day: every bread total line carries its list, the list adds
+  // up to the figure before it, wraps inside its own column, and is set in
+  // black at the size of the name beside it. The page holds the freezer file
+  // read as bread by now, so the bread file is opened again.
+  await page.setInputFiles('#file', `scripts/fixtures/${BREAD}`);
+  await page.waitForSelector('#step-check:not([hidden])', { timeout: 20000 });
+  await page.waitForFunction(() => document.getElementById('mode').dataset.kind === 'bread');
+  await page.click('#advance');
+  await page.waitForSelector('#step-configure:not([hidden])');
+  await page.click('#advance');
+  await page.waitForSelector('#step-print:not([hidden])');
+  await page.waitForFunction(() => document.querySelectorAll('#preview .bf-sheet').length > 0, {
+    timeout: 30000,
+  });
+  const printed = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#preview .bf-total-row'));
+    const wrong = [];
+    let escaping = 0;
+    const looks = new Set();
+    for (const row of rows) {
+      const list = row.querySelector('.bf-total-cell > .bf-total-orders');
+      const qty = Number(row.querySelector('.bf-total-qty').textContent);
+      const name = row.querySelector('.bf-total-product').textContent;
+      if (!list) {
+        wrong.push(`${name}: no list`);
+        continue;
+      }
+      const sum = list.textContent.split(', ').reduce((n, q) => n + Number(q), 0);
+      if (sum !== qty) wrong.push(`${name}: ${qty} ≠ ${list.textContent}`);
+      const col = row.closest('.bf-total-col').getBoundingClientRect();
+      for (const rect of list.getClientRects()) {
+        if (rect.left < col.left - 0.5 || rect.right > col.right + 0.5) escaping += 1;
+      }
+      const style = getComputedStyle(list);
+      const nameSize = getComputedStyle(row.querySelector('.bf-total-product')).fontSize;
+      looks.add(`${style.color} ${style.fontSize === nameSize ? 'name size' : style.fontSize}`);
+    }
+    const read = (route) =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll(`#preview .bf-sheet[data-route="${route}"] .bf-total-row`), (row) => [
+          row.querySelector('.bf-total-product').textContent,
+          [row.querySelector('.bf-total-qty').textContent, row.querySelector('.bf-total-orders').textContent],
+        ]),
+      );
+    const r14 = read('14')['Ryfylkebrød Sandnes Oppdelt Bakeri'];
+    const r14list = Array.from(document.querySelectorAll('#preview .bf-sheet[data-route="14"] .bf-total-row'))
+      .find((row) => row.querySelector('.bf-total-product').textContent.startsWith('Ryfylkebrød'))
+      .querySelector('.bf-total-orders');
+    return {
+      routes: new Set(Array.from(document.querySelectorAll('#preview .bf-sheet'), (s) => s.dataset.route)).size,
+      rows: rows.length,
+      wrong: wrong.slice(0, 5),
+      escaping,
+      looks: Array.from(looks),
+      route1: read('1'),
+      r14: [r14[0], r14[1].split(', ').length],
+      banner: !document.getElementById('shortfall').hidden,
+      sheets: document.querySelectorAll('#preview .bf-sheet').length,
+    };
+  });
+  check(
+    'every printed bread total line lists its orders, and they add up to its figure',
+    printed.routes === 16 && printed.rows === model.lines && printed.wrong.length === 0,
+    `${printed.routes} routes, ${printed.rows} of ${model.lines} lines; ${JSON.stringify(printed.wrong)}`,
+  );
+  same('route 1 prints Barnehagebrødet as 37 then 10, 3, 5, 6, 6, 7',
+    printed.route1['Barnehagebrødet - Oppskåret 750g'], ['37', '10, 3, 5, 6, 6, 7']);
+  same('and Ryfylkebrød as 14 then 3, 4, 6, 1',
+    printed.route1['Ryfylkebrød Sandnes Oppdelt Bakeri'], ['14', '3, 4, 6, 1']);
+  same('route 14’s Ryfylkebrød prints all nine of its orders', printed.r14, ['34', 9]);
+  check('every list wraps inside its own column', printed.escaping === 0, String(printed.escaping));
+  same('every list is black, at the size of the bread name', printed.looks, ['rgb(0, 0, 0) name size']);
+  check(
+    'and the pages still carry every bread: no banner, 29 sheets',
+    !printed.banner && printed.sheets === 29,
+    JSON.stringify({ banner: printed.banner, sheets: printed.sheets }),
+  );
+}
+
 // ── The freezer list ───────────────────────────────────────────────────────
 
 const freezerBytes = Array.from(await readFile(`scripts/fixtures/${FREEZER}`));
@@ -2150,6 +2330,20 @@ check(
 // F4: a checker counts nothing into crates, and F9 drops the tray dots too.
 check('a freezer sheet draws no crate glyphs', freezer.crates === 0, String(freezer.crates));
 check('a freezer total has no tray dots', freezer.tens === 0, String(freezer.tens));
+// Each order on the route total is the bread total's alone (the owner,
+// 2026-11-14, issue #26): every freezer total line is still its C box, its
+// figure and its name, and nothing else.
+same(
+  'a freezer total line is still C, figure, name, with no list of orders',
+  await page.evaluate(() => {
+    const shapes = new Set();
+    for (const row of document.querySelectorAll('#preview .bf-total-row')) {
+      shapes.add(Array.from(row.children, (n) => n.className).join(' | '));
+    }
+    return [Array.from(shapes), document.querySelectorAll('#preview .bf-total-orders, #preview .bf-total-cell').length];
+  }),
+  [['bf-tick | bf-total-qty | bf-total-product'], 0],
+);
 // F8: every check line carries the dotted field for the checker's pen.
 check(
   'every check line has a note field',

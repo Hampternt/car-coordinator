@@ -891,17 +891,39 @@ const Sheet = (() => {
    * freezer total's carry a C box at the left instead, where the stop lines
    * have theirs, for the checker to tick once that product's whole amount is
    * counted (the owner, 2026-10-20).
+   *
+   * The bread total's lines also list every order of that bread on the route,
+   * by quantity, after the name: `27  Grovbrød  12, 10, 5` (the owner,
+   * 2026-11-14, issue #26). Every bread, even one with a single order, so the
+   * rule is the same on every line. Name and list share one cell and wrap
+   * together inside the column; the measured split of a too-tall total takes
+   * any height that adds.
    */
   function totalRow(line, withDots, withTick = false) {
     const row = element('div', 'bf-total-row');
+    const name = productName('bf-total-product', line.product);
     append(
       row,
       withTick ? tickBox('C') : null,
       element('span', 'bf-total-qty', line.units),
-      productName('bf-total-product', line.product),
+      withDots ? totalCell(name, line.orders) : name,
       withDots ? tenDots(line.fullTens) : null,
     );
     return row;
+  }
+
+  /**
+   * The bread name, then `12, 10, 5`: each order's quantity, in stop order,
+   * never merged. The space between them is a real one, so a line can break
+   * there rather than only inside the name or the list.
+   */
+  function totalCell(name, orders) {
+    return append(
+      element('span', 'bf-total-cell'),
+      name,
+      document.createTextNode(' '),
+      element('span', 'bf-total-orders', orders.join(', ')),
+    );
   }
 
   /**
