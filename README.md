@@ -37,7 +37,7 @@ The printed page also leaves room to write, at the owner's request: a dotted fie
 
 The freezer sample prints on 21 sheets, the figure `docs/freezer-list.md` states, but for a different reason. The merged blocks would fit route 13's Customer 012 on one sheet, but the D box narrows every freezer line, so more names wrap and that block moves whole onto a second sheet.
 
-The bread sample prints on 28 sheets, not 26. Route 13's Customer 037 is one block kept whole, and route 14's Customer 012 is one block cut into two page-sized parts. A block never starts partway down a page to fill it, so the sheet before each is left short. That is the chosen behaviour: the owner decided on 2026-09-29 that 28 sheets is fine and blocks stay whole.
+The bread sample prints on 28 sheets, not 26. Route 13's Customer 037 is one block kept whole, and route 14's Customer 012 is one block cut into two page-sized parts. A block never starts partway down a page to fill it, so the sheet before each is left short. That is the chosen behaviour: the owner decided on 2026-09-29 that 28 sheets is fine and blocks stay whole. Since 2026-11-14 it prints on 29: each bread on a route total lists every order of it, and route 7's taller total moves onto a second sheet.
 
 ## Features
 - **ⓘ on every tab**: a small ⓘ beside each part of the app opens a short note next to it saying what that part is and how to use it. A first-ever open shows one line pointing at them, until its ✕ is pressed.

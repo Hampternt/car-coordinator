@@ -43,7 +43,7 @@ State key: ✅ shipped · 🚧 in flight · 💭 considered
 - ✅ **Shared plan, round 1 (0.15.0)** — create a shared plan with the server's create code, send its invite link (and QR), take it on another PC with a preview and Backups first, push named versions, look at them first, restore them, or leave. End-to-end encrypted: the relay on the owner's server holds only what it cannot read. Not in the Windows app yet.
 - ✅ **Shared plan: live updates (0.16.0)** — while both are connected, every edit reaches the other screen within a second, per box. If both change one box, the last to reach the server wins and the other value is kept with Put it back. A box you are typing in is never rewritten under you. A route removed while the other edits it comes back with Put it back. Edits made offline are sent on reconnect. Other tabs follow quietly. Replacing the whole plan says it changes it for both.
 - ✅ **Shared plan: who is editing, and offline work reviewed (0.17.0)** — the other manager's line is tinted in their colour with their name, and a quiet note shows if you enter the same line. The bar says who is here and where. Offline changes that clash with the other's lines wait for you: Send, Look first, or Keep them on this PC only (into Backups).
-- 🚧 **Shared plan on networks that block it (0.18.0)** — when a work network's proxy blocks the shared plan's live connection, the app reaches the same relay through plain web requests instead, on its own, and the Data tab says so. Both kinds of PC share one plan. Needs the relay and its nginx updated once (`relay/README.md`, "Updating to the long-poll fallback").
+- ✅ **Shared plan on networks that block it (0.18.0)** — when a work network's proxy blocks the shared plan's live connection, the app reaches the same relay through plain web requests instead, on its own, and the Data tab says so. Both kinds of PC share one plan.
 
 ## Data
 - ✅ **Dark mode** — the screen follows the computer's light or dark setting, with a Colours switch on the Data tab for this browser; the printed sheet stays black on white.
@@ -78,7 +78,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **Breads sorted within each order** — Sandnes Bakeri first, then Bakehuset, then any other supplier A to Z by its code; within a supplier, A to Z by bread name in the Norwegian alphabet. Never across orders. The Rust app keeps the file's order.
 - ✅ **Crate glyphs** from the per-bread size modifiers, compressing to `×N` rather than wrapping onto a second row of squares.
 - ✅ **The substitute marker** — `want substitute: true` or `want substitute: false` in the same quiet type on every order, with only the word **false** in bold.
-- ✅ **Route total** — per bakery, most to least, with a dot per full ten *inside a single order*. The freezer sheet's is flat and in two columns instead.
+- ✅ **Route total** — per bakery, most to least, each bread followed by every order of it by quantity (stop order, never merged, an order's lines summed), with a dot per full ten *inside a single order*. The freezer sheet's is flat and in two columns instead.
 - ✅ **Pallet call** in the page note when a route needs more than 16 crates, in the short form when the line is already crowded.
 - ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots, and a C box on every line of each route's total, ticked once that product's whole amount is counted.
 - ✅ **Self-hosted faces**, so no printer falls back to one with different metrics and silently re-sizes the page.
@@ -86,7 +86,7 @@ stays where it is and stays the source of truth for the printed page.
 
 ## Printing
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
-- ✅ **Route selection** — all ticked, untick any you don't want; the preview and the sheet count follow.
+- ✅ **Route selection** — all ticked, untick any you don't want, or Tick all / Untick all in one click (each greyed out when it would change nothing); the preview and the sheet count follow.
 - ✅ **Pay attention marks** — a tick per bread on Configure, remembered on this PC; a marked bread prints with a warning triangle and in bold wherever it appears.
 - ✅ **Faster ticks, and no bread left off quietly** — a route untick lays out only what changed; a text quantity prints as written (20 characters at most) and counts as the number it starts with; a new file, or leaving the Print step, clears the old sheets, so nothing stale prints; a red warning holds Print when a ticked route's pages do not carry every line the file gives it, until Print anyway.
 - ✅ **Crate rules remembered** — capacities and per-bread sizes, because those are facts about the warehouse. Nothing else about today's print is kept.

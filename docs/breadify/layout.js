@@ -891,17 +891,39 @@ const Sheet = (() => {
    * freezer total's carry a C box at the left instead, where the stop lines
    * have theirs, for the checker to tick once that product's whole amount is
    * counted (the owner, 2026-10-20).
+   *
+   * The bread total's lines also list every order of that bread on the route,
+   * by quantity, after the name: `27  Grovbrød  12, 10, 5` (the owner,
+   * 2026-11-14, issue #26). Every bread, even one with a single order, so the
+   * rule is the same on every line. Name and list share one cell and wrap
+   * together inside the column; the measured split of a too-tall total takes
+   * any height that adds.
    */
   function totalRow(line, withDots, withTick = false) {
     const row = element('div', 'bf-total-row');
+    const name = productName('bf-total-product', line.product);
     append(
       row,
       withTick ? tickBox('C') : null,
       element('span', 'bf-total-qty', line.units),
-      productName('bf-total-product', line.product),
+      withDots ? totalCell(name, line.orders) : name,
       withDots ? tenDots(line.fullTens) : null,
     );
     return row;
+  }
+
+  /**
+   * The bread name, then `12, 10, 5`: each order's quantity, in stop order,
+   * never merged. The space between them is a real one, so a line can break
+   * there rather than only inside the name or the list.
+   */
+  function totalCell(name, orders) {
+    return append(
+      element('span', 'bf-total-cell'),
+      name,
+      document.createTextNode(' '),
+      element('span', 'bf-total-orders', orders.join(', ')),
+    );
   }
 
   /**
@@ -1054,6 +1076,17 @@ const Sheet = (() => {
    * the ones that fit and send the rest off the bottom of the paper — the same
    * failure as an over-long stop, in the one block that is supposed to be the
    * receiving check for the whole route.
+   *
+   * Each part is filled on its own measure, as many lines as fit from where
+   * the last one stopped. It used to measure only the first part and give
+   * every later one the same number of lines, which held while every total
+   * line was one line tall. Since each bread lists its orders (the owner,
+   * 2026-11-14, issue #26) a line is one, two or three lines tall, and a
+   * later part of taller lines ran off the bottom of the paper without a
+   * word. A line's height only grows a part, so the most that fit is found
+   * by halving. The trial tag says `of ${count}`, the most parts there can
+   * be, so the real tag is never wider. A single line that cannot fit on a
+   * part alone still prints, marked over.
    */
   function totalPieces(route, settings, measure, limit) {
     const bread = settings.kind === Model.BREAD;
@@ -1070,23 +1103,28 @@ const Sheet = (() => {
       return [{ node: whole, height, keepWithNext: false, over: height > limit }];
     }
 
-    let fits = count;
-    while (fits > 1) {
-      if (measure.height(cut(0, fits, 1, 2)) <= limit) break;
-      fits = Math.floor(fits / 2);
-    }
-    for (let more = fits + 1; more <= count; more += 1) {
-      if (measure.height(cut(0, more, 1, 2)) > limit) break;
-      fits = more;
+    const ranges = [];
+    for (let from = 0; from < count; ) {
+      const part = ranges.length + 1;
+      const fitsTo = (to) => measure.height(cut(from, to, part, count)) <= limit;
+      // `low` fits, or is the one line that has to go on this part anyway;
+      // `high` is the first end known not to fit.
+      let low = from + 1;
+      let high = count + 1;
+      while (high - low > 1) {
+        const middle = Math.floor((low + high) / 2);
+        if (fitsTo(middle)) low = middle;
+        else high = middle;
+      }
+      ranges.push([from, low]);
+      from = low;
     }
 
-    const parts = Math.ceil(count / fits);
-    const pieces = [];
-    for (let index = 0; index < parts; index += 1) {
-      const node = cut(index * fits, (index + 1) * fits, index + 1, parts);
-      pieces.push({ node, height: measure.height(node), keepWithNext: false });
-    }
-    return pieces;
+    return ranges.map(([from, to], index) => {
+      const node = cut(from, to, index + 1, ranges.length);
+      const height = measure.height(node);
+      return { node, height, keepWithNext: false, over: height > limit };
+    });
   }
 
   // ── Page furniture ─────────────────────────────────────────────────────
