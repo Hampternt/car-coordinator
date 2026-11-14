@@ -1,6 +1,6 @@
 # Plan: Breadify — tick all / untick all, and each order on the route total
 
-**Status:** approved 2026-11-14 ("begin implementing"); building.
+**Status:** built 2026-11-14, full gate green; waiting on the owner's test before merging into `dev`.
 
 Issues: [#27](https://github.com/Hampternt/car-coordinator/issues/27) (tick all / untick all) and [#26](https://github.com/Hampternt/car-coordinator/issues/26) (each order's quantity on the route total). Mockup of #26: [Route Total Occurrences](https://claude.ai/artifact/SAvhTXmTsXd5Gyqx3eBd8d).
 
@@ -23,7 +23,7 @@ Issues: [#27](https://github.com/Hampternt/car-coordinator/issues/27) (tick all 
 
 The issue left these open; the owner said "begin implementing", so each takes the mockup's default (the first option on its switch). Each is a small change to revisit after the hands-on test.
 
-- **Line order stays as today: total, bread, then the orders, then the ten-dots.** Not chosen: bread first, as the issue wrote it, which moves every total's column.
+- **Line order stays as today: total, bread, then the orders, then the ten-dots** (the owner, 2026-11-14, asked during the build). Not chosen: bread first, as the issue wrote it, which moves every total's column.
 - **The orders print in stop order** (the route's printing order, which is `route.orders`). Not chosen: largest first.
 - **Ten-dots are kept.** Not chosen: dropping them now that a `10` or `15` shows in the list.
 - **A bread with one order still prints its one entry,** so the rule is the same on every line. Not chosen: total only.
@@ -75,4 +75,22 @@ The issue left these open; the owner said "begin implementing", so each takes th
 
 ## Built
 
-_Written at handover._
+Two builders in parallel (one per part), each branch reviewed adversarially and its findings fixed, then merged here.
+
+**Tick all / Untick all** — `docs/breadify/app.js` (`tickEvery()`, `syncBulk()`), `index.html` (the `Routes` row and hint), `style.css` (`.routes-head`, `.bulk button`); checks in a new "Tick all / Untick all" section of `scripts/breadify.mjs`.
+
+**Each order on the route total** — `model.js` `routeTotal()` keeps `orders: [...]` per line (one entry per order, stop order, an order's lines summed); `layout.js` `totalRow()` prints the list after the name on bread rows only; `sheet.css` `.bf-total-cell` / `.bf-total-orders`, mono, 9.2 pt like the bread name, black. Checks in a new "Each order on the route total" section.
+
+**Done differently from the plan, and why:**
+- `printNow()` returns when nothing is laid out, so Print straight after Untick all opens no empty dialog (Print stays enabled until the pending update runs). Ctrl+P with nothing ticked now opens no dialog either.
+- Review fix: printing from the browser's own menu on the Print step with nothing ticked says "no route is ticked" instead of "Open the Print step".
+- Review fix: `totalPieces()` now measures every part of a split route total, not only the first. Rows are now uneven in height, so a later part could have spilled off the page with nothing saying so.
+- Review fix: ten-dots count each order's summed entry, not each line, so the dots always match the printed list (5 + 6 on two lines of one order is `11` with a dot).
+- The bread sample prints on **29 sheets, not 28**: route 7's total no longer fits under its stops and moves whole onto a second sheet. README updated. Neither sample raises the red "pages do not carry every bread" warning; the freezer sample is still 21 sheets, its totals byte-identical.
+- No version cut: Breadify changes cut none (see Decisions).
+
+**Gates** (frozen copy of 3009b41):
+- Quick: `CHECK OK — every shipped script parses and the versions agree.`
+- `npm test`: `map checks passed` · `sync checks passed` · `sync-relay checks passed` · `sync-ui checks passed` · `presence-ui checks passed` · `all checks passed` (car) · `all passed` (Breadify) · `npm test exit 0`.
+- `npm run screens`: `no console errors, 4 warnings raised and asserted` · exit 0.
+- Smoke load in Chrome: both fixtures' Print step loads with no console errors or warnings; bread 29 sheets, freezer 21; `Tick all` disabled on entry.
