@@ -1858,10 +1858,15 @@ const bulk = await page.evaluate(async () => {
     document.getElementById('print').click();
     const printNone = { printed, printDisabled: document.getElementById('print').disabled };
     await pause(400);
+    // The browser's own menu after Untick all cannot be stopped: its page
+    // says no route is ticked, not "open the Print step" (review, 2026-11-14).
+    window.dispatchEvent(new Event('beforeprint'));
+    const menuNone = Array.from(document.querySelectorAll('#sheets .held-print > *'), (part) => part.textContent);
+    window.dispatchEvent(new Event('afterprint'));
 
     tickAll.click();
     await pause(400);
-    return { opened, atOnce, unticked, idle, single, back, reentered, laidOnce, printOne, printAll, printNone,
+    return { opened, atOnce, unticked, idle, single, back, reentered, laidOnce, printOne, printAll, printNone, menuNone,
              after: preview.querySelectorAll('.bf-sheet').length, end: buttons() };
   } finally {
     Sheet.day = real;
@@ -1918,6 +1923,8 @@ check('Print right after Untick all and one tick prints just that route',
   JSON.stringify(bulk.printOne.printed) === JSON.stringify(bulk.printOne.want), JSON.stringify(bulk.printOne));
 same('Print right after Tick all prints every route', bulk.printAll, { printed: 16 });
 same('Print right after Untick all opens no dialog, and Print greys out', bulk.printNone, { printed: null, printDisabled: true });
+same('the browser’s menu after Untick all prints a page saying no route is ticked', bulk.menuNone,
+  ['Nothing to print: no route is ticked', 'Tick the routes to print on the Print step in Breadify, then print.']);
 check('every route is ticked again afterwards', bulk.after === sheets.length && bulk.end.tickAll && !bulk.end.untickAll,
   `${bulk.after} sheets`);
 

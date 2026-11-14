@@ -744,14 +744,20 @@
   window.addEventListener('beforeprint', () => {
     flush();
     if (!held() && built.length === 0) {
-      // A print from the browser's menu with nothing laid out (off the Print
-      // step): one page saying where the sheets are, not a blank one.
+      // A print from the browser's menu with nothing laid out: one page
+      // saying why, not a blank one. Off the Print step, where the sheets
+      // are; on it, nothing is ticked, which Untick all (the owner,
+      // 2026-11-14) makes one click away, so the page says that instead of
+      // sending the reader to the step they are on (review, 2026-11-14).
+      const onPrint = state.step === 'print';
       const note = document.createElement('div');
       note.className = 'held-print';
       const head = document.createElement('h1');
-      head.textContent = 'Nothing laid out to print';
+      head.textContent = onPrint ? 'Nothing to print: no route is ticked' : 'Nothing laid out to print';
       const how = document.createElement('p');
-      how.textContent = 'Open the Print step in Breadify, then print from there.';
+      how.textContent = onPrint
+        ? 'Tick the routes to print on the Print step in Breadify, then print.'
+        : 'Open the Print step in Breadify, then print from there.';
       note.append(head, how);
       $('sheets').replaceChildren(note);
       return;
