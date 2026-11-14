@@ -1734,6 +1734,193 @@ same('Print right after an untick waits for the update', ticking.button, { waite
 same('and so does Ctrl+P, which the page takes over', ticking.keyboard, { waited: true, routes: 15, taken: true });
 check('every route is ticked again afterwards', ticking.after === sheets.length, String(ticking.after));
 
+// ── Tick all / Untick all (the owner, 2026-11-14) ──────────────────────────
+// Printing a handful of routes used to mean unticking the other dozen one by
+// one. Two buttons now tick or untick every route; each is greyed out when it
+// would change nothing. A press is one change of ticks: one update after the
+// pause, an untick laying nothing out, and Print waiting for it.
+const bulk = await page.evaluate(async () => {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const preview = document.getElementById('preview');
+  const tickAll = document.getElementById('tickAll');
+  const untickAll = document.getElementById('untickAll');
+  const ticks = () => Array.from(document.querySelectorAll('#routes input[type="checkbox"]'));
+  const enter = () => document.querySelector('#steps [data-step="print"]').click();
+  const shown = () => [...new Set(Array.from(preview.querySelectorAll('.bf-sheet'), (s) => s.dataset.route))];
+  const nameOf = (tick) => tick.closest('.route').querySelector('.route-name').textContent.replace('Route ', '');
+  const snapshot = () =>
+    Array.from(preview.querySelectorAll('.bf-sheet'), (sheet) => {
+      const copy = sheet.cloneNode(true);
+      copy.removeAttribute('style'); // the preview's zoom, not the sheet
+      return copy.outerHTML;
+    });
+  const buttons = () => ({ tickAll: tickAll.disabled, untickAll: untickAll.disabled });
+  const sameAs = (a, b) => a.length === b.length && a.every((html, index) => html === b[index]);
+
+  const real = Sheet.day;
+  const realPrint = window.print;
+  let layouts = [];
+  Sheet.day = (routes, ...rest) => {
+    layouts.push(routes.length);
+    return real(routes, ...rest);
+  };
+  let updates = 0;
+  const watch = new MutationObserver(() => {
+    updates += 1;
+  });
+  watch.observe(preview, { childList: true });
+  let printed = null;
+  window.print = () => {
+    window.dispatchEvent(new Event('beforeprint'));
+    printed = [...new Set(Array.from(document.querySelectorAll('#sheets .bf-sheet'), (s) => s.dataset.route))];
+    window.dispatchEvent(new Event('afterprint'));
+  };
+
+  try {
+    enter();
+    const fresh = snapshot();
+    const opened = { routes: ticks().length, ticked: ticks().filter((t) => t.checked).length, ...buttons() };
+
+    // Untick all: one update, nothing laid out, an empty day.
+    await pause(0);
+    layouts = [];
+    updates = 0;
+    untickAll.click();
+    const atOnce = { summary: document.getElementById('printSummary').textContent, ...buttons() };
+    await pause(400);
+    const unticked = {
+      layouts: [...layouts],
+      updates,
+      routes: shown().length,
+      ticked: ticks().filter((t) => t.checked).length,
+      summary: document.getElementById('printSummary').textContent,
+      printDisabled: document.getElementById('print').disabled,
+      leftOut: document.getElementById('leftOut').textContent.startsWith(
+        `Left out on purpose: ${ticks().map(nameOf).join(', ')} — `,
+      ),
+      ...buttons(),
+    };
+
+    // A greyed-out button does nothing.
+    layouts = [];
+    updates = 0;
+    untickAll.click();
+    await pause(400);
+    const idle = { layouts: [...layouts], updates, pending: document.getElementById('printSummary').textContent };
+
+    // Then one tick: exactly that route.
+    const one = ticks()[4];
+    one.click();
+    await pause(400);
+    const single = { routes: shown(), want: nameOf(one), ...buttons() };
+
+    // Tick all: the full day back, sheet for sheet as opening the step makes
+    // it, and nothing laid out again (the step already has every route).
+    layouts = [];
+    updates = 0;
+    tickAll.click();
+    await pause(400);
+    const back = {
+      layouts: [...layouts],
+      updates,
+      same: sameAs(snapshot(), fresh),
+      ticked: ticks().filter((t) => t.checked).length,
+      ...buttons(),
+    };
+
+    // Untick all, then the step entered afresh with nothing laid out: Tick
+    // all lays the whole day out in one go, once.
+    untickAll.click();
+    await pause(400);
+    layouts = [];
+    enter();
+    const reentered = { layouts: [...layouts], ticked: ticks().filter((t) => t.checked).length, ...buttons() };
+    await pause(0);
+    layouts = [];
+    updates = 0;
+    tickAll.click();
+    await pause(400);
+    const laidOnce = { layouts: [...layouts], updates, same: sameAs(snapshot(), fresh) };
+
+    // Print straight after a bulk button prints what is ticked.
+    untickAll.click();
+    ticks()[4].click();
+    document.getElementById('print').click();
+    const printOne = { printed, want: [nameOf(ticks()[4])] };
+    await pause(400);
+    printed = null;
+    tickAll.click();
+    document.getElementById('print').click();
+    const printAll = { printed: printed ? printed.length : 0 };
+    await pause(400);
+    printed = null;
+    untickAll.click();
+    document.getElementById('print').click();
+    const printNone = { printed, printDisabled: document.getElementById('print').disabled };
+    await pause(400);
+
+    tickAll.click();
+    await pause(400);
+    return { opened, atOnce, unticked, idle, single, back, reentered, laidOnce, printOne, printAll, printNone,
+             after: preview.querySelectorAll('.bf-sheet').length, end: buttons() };
+  } finally {
+    Sheet.day = real;
+    window.print = realPrint;
+    watch.disconnect();
+  }
+});
+same('the bread day has 16 routes, all ticked, and only Untick all can change that', bulk.opened, {
+  routes: 16,
+  ticked: 16,
+  tickAll: true,
+  untickAll: false,
+});
+same('Untick all says the preview is updating, and greys itself out at once', bulk.atOnce, {
+  summary: 'Updating preview…',
+  tickAll: false,
+  untickAll: true,
+});
+same('and empties the day in one update, laying nothing out', bulk.unticked, {
+  layouts: [],
+  updates: 1,
+  routes: 0,
+  ticked: 0,
+  summary: '0 routes · 0 sheets of A4.',
+  printDisabled: true,
+  leftOut: true,
+  tickAll: false,
+  untickAll: true,
+});
+same('a greyed-out Untick all does nothing', bulk.idle, { layouts: [], updates: 0, pending: '0 routes · 0 sheets of A4.' });
+check('one tick after it leaves exactly that route, with both buttons free',
+  JSON.stringify(bulk.single.routes) === JSON.stringify([bulk.single.want]) && !bulk.single.tickAll && !bulk.single.untickAll,
+  JSON.stringify(bulk.single));
+same('Tick all brings the day back sheet for sheet, in one update, laying nothing out again', bulk.back, {
+  layouts: [],
+  updates: 1,
+  same: true,
+  ticked: 16,
+  tickAll: true,
+  untickAll: false,
+});
+same('entering the step with nothing ticked keeps it so, and lays nothing out', bulk.reentered, {
+  layouts: [],
+  ticked: 0,
+  tickAll: false,
+  untickAll: true,
+});
+same('Tick all from there lays the whole day out once, the same as opening the step', bulk.laidOnce, {
+  layouts: [16],
+  updates: 1,
+  same: true,
+});
+check('Print right after Untick all and one tick prints just that route',
+  JSON.stringify(bulk.printOne.printed) === JSON.stringify(bulk.printOne.want), JSON.stringify(bulk.printOne));
+same('Print right after Tick all prints every route', bulk.printAll, { printed: 16 });
+same('Print right after Untick all opens no dialog, and Print greys out', bulk.printNone, { printed: null, printDisabled: true });
+check('every route is ticked again afterwards', bulk.after === sheets.length && bulk.end.tickAll && !bulk.end.untickAll,
+  `${bulk.after} sheets`);
+
 // ── A severe warning when the pages miss a bread (the owner, 2026-10-01) ──
 // "can it give a severe warning if the list does not print all the bread?"
 // After the preview is built, each ticked route's lines are compared with the

@@ -128,8 +128,14 @@
   <section class="step" id="step-print" hidden>
     <div class="panes">
       <div class="pane">
-        <h2>Routes</h2>
-        <p class="hint">All routes are ticked; untick any you don't want.</p>
+        <div class="routes-head">
+          <h2>Routes</h2>
+          <div class="bulk">
+            <button type="button" id="tickAll">Tick all</button>
+            <button type="button" id="untickAll">Untick all</button>
+          </div>
+        </div>
+        <p class="hint">All routes start ticked. Untick any you don't want, or untick all and tick the few you do.</p>
         <div class="routes" id="routes"></div>
       </div>
       <div class="pane">
