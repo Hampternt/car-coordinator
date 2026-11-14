@@ -78,6 +78,7 @@ stays where it is and stays the source of truth for the printed page.
 - ✅ **Breads sorted within each order** — Sandnes Bakeri first, then Bakehuset, then any other supplier A to Z by its code; within a supplier, A to Z by bread name in the Norwegian alphabet. Never across orders. The Rust app keeps the file's order.
 - ✅ **Crate glyphs** from the per-bread size modifiers, compressing to `×N` rather than wrapping onto a second row of squares.
 - ✅ **The substitute marker** — `want substitute: true` or `want substitute: false` in the same quiet type on every order, with only the word **false** in bold.
+- 🚧 **Each order on the bread route total** — after each bread's total, every order of it by quantity, in stop order, never merged. See `manifests/2026-11-14-breadify-print-tweaks.md`.
 - ✅ **Route total** — per bakery, most to least, with a dot per full ten *inside a single order*. The freezer sheet's is flat and in two columns instead.
 - ✅ **Pallet call** in the page note when a route needs more than 16 crates, in the short form when the line is already crowded.
 - ✅ **The freezer check list** — `C Checked · M Missing`, a dotted note field for the checker's pen, no crates and no tray dots, and a C box on every line of each route's total, ticked once that product's whole amount is counted.
@@ -87,6 +88,7 @@ stays where it is and stays the source of truth for the printed page.
 ## Printing
 - ✅ **Browser print dialog** — pick the printer there, or "Microsoft Print to PDF" for a file. The step says to print at 100 %, actual size.
 - ✅ **Route selection** — all ticked, untick any you don't want; the preview and the sheet count follow.
+- 🚧 **Tick all / Untick all** on the Print step's routes. See `manifests/2026-11-14-breadify-print-tweaks.md`.
 - ✅ **Pay attention marks** — a tick per bread on Configure, remembered on this PC; a marked bread prints with a warning triangle and in bold wherever it appears.
 - ✅ **Faster ticks, and no bread left off quietly** — a route untick lays out only what changed; a text quantity prints as written (20 characters at most) and counts as the number it starts with; a new file, or leaving the Print step, clears the old sheets, so nothing stale prints; a red warning holds Print when a ticked route's pages do not carry every line the file gives it, until Print anyway.
 - ✅ **Crate rules remembered** — capacities and per-bread sizes, because those are facts about the warehouse. Nothing else about today's print is kept.
