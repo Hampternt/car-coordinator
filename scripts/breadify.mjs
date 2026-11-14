@@ -2144,8 +2144,8 @@ check('and after switching between bread and freezer on Check, the sheets of the
     ]);
   });
   same('an order of 5 and 6 on two lines is one order of 11 with its ten-dot; 9 and 9 get none', tens, [
-    ['Grovbrød', '11', 1],
     ['Loff', '9, 9', 0],
+    ['Grovbrød', '11', 1],
   ]);
 
   // A total too tall for one sheet, whose later lines are taller than its
