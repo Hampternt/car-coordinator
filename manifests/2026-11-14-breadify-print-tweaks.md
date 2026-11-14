@@ -1,6 +1,6 @@
 # Plan: Breadify — tick all / untick all, and each order on the route total
 
-**Status:** built 2026-11-14, full gate green; waiting on the owner's test before merging into `dev`.
+**Status:** ✅ merged into `dev` 2026-11-14, after the owner tested it by hand. Waiting, with the rest of `dev`, on the release to `main`.
 
 Issues: [#27](https://github.com/Hampternt/car-coordinator/issues/27) (tick all / untick all) and [#26](https://github.com/Hampternt/car-coordinator/issues/26) (each order's quantity on the route total). Mockup of #26: [Route Total Occurrences](https://claude.ai/artifact/SAvhTXmTsXd5Gyqx3eBd8d).
 
