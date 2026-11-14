@@ -2118,6 +2118,36 @@ check('and after switching between bread and freezer on Check, the sheets of the
     ['1', 'Loff', '1'],
   ]);
 
+  // The ten-dots count the same entries the list prints: one order with
+  // Grovbrød on two lines of 5 and 6 reads `11`, so it is a full ten and
+  // gets its dot; two orders of 9 and 9 are not, and get none.
+  const tens = await page.evaluate(() => {
+    const row = (excelRow, orderId, productId, quantity) => ({
+      excelRow, orderId, orderIdExact: orderId, quantity, quantityExact: quantity, productId,
+      productName: productId === 10 ? 'Grovbrød' : 'Loff',
+      supplierSku: `SB-${productId}`, position: null, supplier: 'Sandnes Bakeri', customer: 'Hinna skole',
+      department: null, deliveryStreet: 'Hinnavegen 1', comment: null, routeNickname: '3',
+      routeOrdering: 1, acceptAlternatives: true, acceptAlternativesExact: true,
+      region: 'Stavanger',
+    });
+    const [route] = Model.group(Model.fold([
+      row(2, 701, 10, 5),
+      row(3, 701, 10, 6),
+      row(4, 702, 11, 9),
+      row(5, 703, 11, 9),
+    ]));
+    const block = Sheet.routeTotalBlock(route);
+    return Array.from(block.querySelectorAll('.bf-total-row'), (r) => [
+      r.querySelector('.bf-total-product').textContent,
+      r.querySelector('.bf-total-orders').textContent,
+      r.querySelectorAll('.bf-dot').length,
+    ]);
+  });
+  same('an order of 5 and 6 on two lines is one order of 11 with its ten-dot; 9 and 9 get none', tens, [
+    ['Grovbrød', '11', 1],
+    ['Loff', '9, 9', 0],
+  ]);
+
   // The printed day: every bread total line carries its list, the list adds
   // up to the figure before it, wraps inside its own column, and is set in
   // black at the size of the name beside it. The page holds the freezer file

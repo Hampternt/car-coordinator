@@ -823,12 +823,19 @@ const Model = (() => {
           byProduct.set(line.product.id, entry);
         }
         entry.units += line.quantity;
-        // Full tens *inside a single order* — how many trays can be pulled
-        // whole. An order of 11 and an order of 9 make one, not two.
-        entry.fullTens += Math.floor(line.quantity / 10);
         inOrder.set(line.product.id, (inOrder.get(line.product.id) || 0) + line.quantity);
       }
-      for (const [id, quantity] of inOrder) byProduct.get(id).orders.push(quantity);
+      for (const [id, quantity] of inOrder) {
+        const entry = byProduct.get(id);
+        entry.orders.push(quantity);
+        // Full tens *inside a single order* — how many trays can be pulled
+        // whole. An order of 11 and an order of 9 make one, not two. Counted
+        // on the order's own entry, not per line: once the list prints each
+        // order (2026-11-14), an order of 5 and 6 on two lines reads as one
+        // order of 11, and a missing dot beside it would contradict the dot
+        // note on the same block.
+        entry.fullTens += Math.floor(quantity / 10);
+      }
     }
 
     const bySupplier = new Map();
