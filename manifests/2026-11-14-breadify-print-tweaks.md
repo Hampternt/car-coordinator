@@ -1,6 +1,6 @@
 # Plan: Breadify — tick all / untick all, and each order on the route total
 
-**Status:** ✅ merged into `dev` 2026-11-14, after the owner tested it by hand. Waiting, with the rest of `dev`, on the release to `main`.
+**Status:** ✅ shipped. Merged into `dev` 2026-11-14 (#28) after the owner tested it by hand, and released to `main` the same day (#29, 2e4d31c; full `npm test` 2562 ok, CI `test` passed). No version cut.
 
 Issues: [#27](https://github.com/Hampternt/car-coordinator/issues/27) (tick all / untick all) and [#26](https://github.com/Hampternt/car-coordinator/issues/26) (each order's quantity on the route total). Mockup of #26: [Route Total Occurrences](https://claude.ai/artifact/SAvhTXmTsXd5Gyqx3eBd8d).
 
