@@ -803,20 +803,38 @@ const Model = (() => {
    *
    * The receiving check against what the bakeries delivered that morning,
    * rather than picking work — so no tick boxes.
+   *
+   * Each line also keeps what every separate order on the route asks of that
+   * bread, in stop order: `orders: [12, 10, 5]` for a total of 27 (the owner,
+   * 2026-11-14, issue #26). One order is one entry — the same bread on two
+   * lines of one order sums into it — and two orders are never merged, not
+   * even one customer's in the same department. The entries are the counted
+   * quantities, so they always add up to `units`. Only the bread total prints
+   * them; the freezer's flatTotal() carries them and leaves them unread.
    */
   function routeTotal(route) {
     const byProduct = new Map();
     for (const order of route.orders) {
+      const inOrder = new Map();
       for (const line of order.lines) {
         let entry = byProduct.get(line.product.id);
         if (!entry) {
-          entry = { product: line.product, units: 0, fullTens: 0 };
+          entry = { product: line.product, units: 0, fullTens: 0, orders: [] };
           byProduct.set(line.product.id, entry);
         }
         entry.units += line.quantity;
+        inOrder.set(line.product.id, (inOrder.get(line.product.id) || 0) + line.quantity);
+      }
+      for (const [id, quantity] of inOrder) {
+        const entry = byProduct.get(id);
+        entry.orders.push(quantity);
         // Full tens *inside a single order* — how many trays can be pulled
-        // whole. An order of 11 and an order of 9 make one, not two.
-        entry.fullTens += Math.floor(line.quantity / 10);
+        // whole. An order of 11 and an order of 9 make one, not two. Counted
+        // on the order's own entry, not per line: once the list prints each
+        // order (2026-11-14), an order of 5 and 6 on two lines reads as one
+        // order of 11, and a missing dot beside it would contradict the dot
+        // note on the same block.
+        entry.fullTens += Math.floor(quantity / 10);
       }
     }
 
