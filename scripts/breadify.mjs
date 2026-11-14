@@ -2148,6 +2148,65 @@ check('and after switching between bread and freezer on Check, the sheets of the
     ['Loff', '9, 9', 0],
   ]);
 
+  // A total too tall for one sheet, whose later lines are taller than its
+  // first: 45 breads in one order sort first and print one line tall, then
+  // 35 breads each ordered once by ten stops wrap their lists. Every part is
+  // measured on its own, so no total line runs under the footer.
+  const tall = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const rows = [];
+    let excelRow = 2;
+    const row = (orderId, customer, productId, name, quantity) => ({
+      excelRow: excelRow++, orderId, orderIdExact: orderId, quantity, quantityExact: quantity, productId,
+      productName: name, supplierSku: `SB-${productId}`, position: null, supplier: 'Sandnes Bakeri',
+      customer, department: null, deliveryStreet: `Gate ${customer}`, comment: null, routeNickname: '1',
+      routeOrdering: orderId, acceptAlternatives: true, acceptAlternativesExact: true, region: 'Stavanger',
+    });
+    for (let i = 0; i < 45; i += 1) rows.push(row(1, 'Kafé 01', 1000 + i, `Brød ${i}`, 500 - i));
+    for (let o = 0; o < 10; o += 1) {
+      for (let i = 0; i < 35; i += 1) rows.push(row(2 + o, `Skole ${o}`, 2000 + i, `Rundstykke ${i}`, 1));
+    }
+    const [route] = Model.group(Model.fold(rows));
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-10000px;top:0';
+    document.body.append(host);
+    try {
+      const sheets = Sheet.paginate(
+        route,
+        { kind: Model.BREAD, showOrderId: true, crates: Model.defaultCrateRules() },
+        { dates: null, source: 'test', routeStops: route.stops.length, routeLines: rows.length },
+        { host },
+      );
+      for (const sheet of sheets) host.append(sheet);
+      let printed = 0;
+      let under = 0;
+      const tags = [];
+      for (const sheet of sheets) {
+        const floor = Math.min(
+          sheet.getBoundingClientRect().bottom,
+          sheet.querySelector('.bf-footer').getBoundingClientRect().top,
+        );
+        for (const total of sheet.querySelectorAll('.bf-total')) {
+          const tag = total.querySelector('.bf-block-part');
+          tags.push(tag ? tag.textContent : 'whole');
+          for (const line of total.querySelectorAll('.bf-total-row')) {
+            printed += 1;
+            if (line.getBoundingClientRect().bottom > floor + 0.5) under += 1;
+          }
+        }
+      }
+      return { printed, under, tags };
+    } finally {
+      host.remove();
+    }
+  });
+  check(
+    'a split total whose later lines wrap prints every line above the footer, on every part',
+    tall.printed === 80 && tall.under === 0 && tall.tags.length > 1 &&
+      tall.tags.every((tag, i) => tag === `part ${i + 1} of ${tall.tags.length}`),
+    JSON.stringify(tall),
+  );
+
   // The printed day: every bread total line carries its list, the list adds
   // up to the figure before it, wraps inside its own column, and is set in
   // black at the size of the name beside it. The page holds the freezer file

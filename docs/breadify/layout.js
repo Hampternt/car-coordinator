@@ -1076,6 +1076,17 @@ const Sheet = (() => {
    * the ones that fit and send the rest off the bottom of the paper — the same
    * failure as an over-long stop, in the one block that is supposed to be the
    * receiving check for the whole route.
+   *
+   * Each part is filled on its own measure, as many lines as fit from where
+   * the last one stopped. It used to measure only the first part and give
+   * every later one the same number of lines, which held while every total
+   * line was one line tall. Since each bread lists its orders (the owner,
+   * 2026-11-14, issue #26) a line is one, two or three lines tall, and a
+   * later part of taller lines ran off the bottom of the paper without a
+   * word. A line's height only grows a part, so the most that fit is found
+   * by halving. The trial tag says `of ${count}`, the most parts there can
+   * be, so the real tag is never wider. A single line that cannot fit on a
+   * part alone still prints, marked over.
    */
   function totalPieces(route, settings, measure, limit) {
     const bread = settings.kind === Model.BREAD;
@@ -1092,23 +1103,28 @@ const Sheet = (() => {
       return [{ node: whole, height, keepWithNext: false, over: height > limit }];
     }
 
-    let fits = count;
-    while (fits > 1) {
-      if (measure.height(cut(0, fits, 1, 2)) <= limit) break;
-      fits = Math.floor(fits / 2);
-    }
-    for (let more = fits + 1; more <= count; more += 1) {
-      if (measure.height(cut(0, more, 1, 2)) > limit) break;
-      fits = more;
+    const ranges = [];
+    for (let from = 0; from < count; ) {
+      const part = ranges.length + 1;
+      const fitsTo = (to) => measure.height(cut(from, to, part, count)) <= limit;
+      // `low` fits, or is the one line that has to go on this part anyway;
+      // `high` is the first end known not to fit.
+      let low = from + 1;
+      let high = count + 1;
+      while (high - low > 1) {
+        const middle = Math.floor((low + high) / 2);
+        if (fitsTo(middle)) low = middle;
+        else high = middle;
+      }
+      ranges.push([from, low]);
+      from = low;
     }
 
-    const parts = Math.ceil(count / fits);
-    const pieces = [];
-    for (let index = 0; index < parts; index += 1) {
-      const node = cut(index * fits, (index + 1) * fits, index + 1, parts);
-      pieces.push({ node, height: measure.height(node), keepWithNext: false });
-    }
-    return pieces;
+    return ranges.map(([from, to], index) => {
+      const node = cut(from, to, index + 1, ranges.length);
+      const height = measure.height(node);
+      return { node, height, keepWithNext: false, over: height > limit };
+    });
   }
 
   // ── Page furniture ─────────────────────────────────────────────────────
